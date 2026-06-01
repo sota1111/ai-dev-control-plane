@@ -49,9 +49,25 @@ echo "Start: ${TIMESTAMP}"
 echo "Log: ${LOG_FILE}"
 echo ""
 
-# stream-json イベントから assistant のテキストとツール呼び出しをリアルタイム抽出
+# stream-json イベントから assistant のテキスト、ツール呼び出し、
+# Gemini/Codex の出力（tool_result）をリアルタイム抽出
 _STREAM_FILTER='
 import sys, json
+
+WORKER_MARKERS = ("== Gemini CLI", "== Codex CLI")
+
+def emit_worker_result(content):
+    """tool_result の中身が Gemini/Codex 出力なら表示する"""
+    if isinstance(content, str):
+        if content.startswith(WORKER_MARKERS):
+            print(content, end="" if content.endswith("\n") else "\n", flush=True)
+    elif isinstance(content, list):
+        for c in content:
+            if isinstance(c, dict) and c.get("type") == "text":
+                txt = c.get("text", "")
+                if txt.startswith(WORKER_MARKERS):
+                    print(txt, end="" if txt.endswith("\n") else "\n", flush=True)
+
 for line in sys.stdin:
     line = line.strip()
     if not line:
@@ -76,6 +92,10 @@ for line in sys.stdin:
                         print(f"[{name}] {str(d)[:120]}", flush=True)
                     else:
                         print(f"[{name}]", flush=True)
+        elif t == "user":
+            for blk in ev.get("message", {}).get("content", []):
+                if blk.get("type") == "tool_result":
+                    emit_worker_result(blk.get("content", ""))
         elif t == "result" and ev.get("is_error"):
             print("ERROR: " + ev.get("result", ""), flush=True)
     except Exception:

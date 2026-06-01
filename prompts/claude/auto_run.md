@@ -100,12 +100,30 @@ If ALL pass:
 - Post PR link as comment on parent Issue
 - Update parent Issue status to `In Review`
 
-If ANY fail:
+Then immediately merge the PR:
+
+```bash
+gh pr merge <PR_NUMBER> --merge --delete-branch
+```
+
+After merge:
+
+- Pull latest main: `git -C <repo-path> pull origin main`
+- Update parent Issue status to `Done`
+- Post Completion Report comment on parent Issue (summary, changed files, verification results)
+
+If ANY quality check fails:
 
 - Identify failing item
 - Create or reopen a [DEBUG] child Issue
 - Re-run the fix cycle
 - If 3 consecutive failures, set parent Issue to `Blocked` with explanation
+
+If merge has conflicts:
+
+1. `git merge --abort`
+2. Attempt `git rebase main` on the feature branch
+3. If unresolvable, set parent Issue to `Blocked` with conflict details
 
 ---
 
@@ -113,7 +131,7 @@ If ANY fail:
 
 Terminate when ANY of the following is true:
 
-- All child Issues are Done and PR is created (or parent is set to In Review)
+- All child Issues are Done, PR is merged, and parent Issue is set to `Done`
 - A blocking condition cannot be resolved (parent set to Blocked with explanation)
 - No actionable issues remain in Linear
 - Continuing further will not produce new results
