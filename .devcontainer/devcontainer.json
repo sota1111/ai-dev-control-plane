@@ -26,5 +26,5 @@
       }
     }
   },
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.codex /home/vscode/.gemini || true && node --version && npm --version && claude --version || true && codex --version || true && gemini --version || true"
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.codex /home/vscode/.gemini || true && node --version && npm --version && claude --version || true && codex --version || true && gemini --version || true && az --version || true"
 }
