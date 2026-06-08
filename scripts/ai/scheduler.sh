@@ -114,6 +114,52 @@ _parse_session_reset_epoch() {
   echo "$target"
 }
 
+# AIセッション制限時にLinearへ通知（Codex経由）
+_notify_via_codex() {
+  local next_run_epoch="$1"
+  if [ -z "${LINEAR_API_KEY:-}" ]; then
+    log "Linear API key not set, skipping usage limit notification"
+    return 0
+  fi
+
+  local next_run_jst
+  next_run_jst=$(date -u -d "@$((next_run_epoch + 32400))" '+%Y-%m-%d %H:%M')
+  local comment_body="usage-limit: Next auto run: ${next_run_jst} JST"
+
+  log "Notifying usage limit via Codex: ${comment_body}"
+
+  local prompt
+  prompt="You are a Linear notification agent. Your only task is to post a usage-limit notification to Linear.
+
+Environment: LINEAR_API_KEY is set in the environment.
+Linear GraphQL API endpoint: https://api.linear.app/graphql
+Authorization header: use the value of LINEAR_API_KEY directly (no 'Bearer' prefix needed).
+
+Steps to complete:
+1. Fetch all issues in 'unstarted' or 'started' state (first: 50).
+   Query: { issues(filter: { state: { type: { in: [\"unstarted\",\"started\"] } } }, first: 50) { nodes { id labelIds } } }
+
+2. Ensure the label 'usage-limit' exists. Fetch all labels first:
+   { issueLabels(first: 50) { nodes { id name } } }
+   If not found, get the first team ID and create the label:
+   mutation { issueLabelCreate(input: { name: \"usage-limit\", color: \"#FF6B6B\", teamId: \"<team_id>\" }) { issueLabel { id } } }
+
+3. For each active issue, post the comment:
+   mutation { commentCreate(input: { issueId: \"<id>\", body: \"${comment_body}\" }) { success } }
+
+4. For each active issue, update labels by APPENDING the usage-limit label (do not drop existing labels):
+   mutation { issueUpdate(id: \"<id>\", input: { labelIds: [<existing_label_ids_plus_usage_limit_id>] }) { success } }
+
+Use curl or Python to make the API calls. Complete all steps and exit 0 on success."
+
+  if timeout 120 codex --sandbox danger-full-access exec "${prompt}" >> "$SCHEDULER_LOG" 2>&1; then
+    log "Usage limit notification sent via Codex"
+  else
+    log "Codex notification failed, falling back to direct API"
+    _notify_usage_limit_to_linear "$next_run_epoch"
+  fi
+}
+
 # AIセッション制限時にLinearへ通知（コメント投稿とラベル付与）
 _notify_usage_limit_to_linear() {
   local next_run_epoch="$1"
@@ -350,7 +396,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
             _reset_disp=$(date -u -d "@$((_session_wait - 600))" '+%H:%M UTC')
             _wait_min=$(( (_session_wait - $(date -u +%s) + 59) / 60 ))
             log "Session limit detected (reset: ${_reset_disp}). Waiting until 10 min after reset (~${_wait_min} min)..."
-            _notify_usage_limit_to_linear "$_session_wait"
+            _notify_via_codex "$_session_wait"
             while true; do
               _now_e=$(date -u +%s)
               _rem=$((_session_wait - _now_e))
@@ -405,7 +451,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
           _reset_disp=$(date -u -d "@$((_session_wait - 600))" '+%H:%M UTC')
           _wait_min=$(( (_session_wait - $(date -u +%s) + 59) / 60 ))
           log "Session limit detected (reset: ${_reset_disp}). Waiting until 10 min after reset (~${_wait_min} min)..."
-          _notify_usage_limit_to_linear "$_session_wait"
+          _notify_via_codex "$_session_wait"
           while true; do
             _now_e=$(date -u +%s)
             _rem=$((_session_wait - _now_e))
