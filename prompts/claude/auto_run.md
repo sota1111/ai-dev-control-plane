@@ -21,19 +21,56 @@ In Progress → Todo → Backlog
 
 ## Parent Issue Detection and Child Issue Decomposition
 
-When you find an issue that has NO sub-issues and contains a high-level requirement (parent Issue), decompose it:
+When you find an issue that has NO sub-issues and contains a high-level requirement (parent Issue):
 
-1. Read the parent Issue description and all comments
-2. Identify acceptance criteria
-3. Decompose into 2–7 actionable child Issues
-4. Use `mcp__linear-server__create_issue` to register each child Issue with:
+### Step 1: Judge whether decomposition is necessary
+
+Read the parent Issue description and all comments, then decide:
+
+**Decompose into child Issues when:**
+- Multiple independent features or domains are involved
+- Work types are clearly separated (implementation, testing, docs, config)
+- Work volume is large; one auto-run session is unlikely to complete it
+- Tasks have sequential dependencies
+- Separate Gemini/Codex delegation units would be clearer
+- Acceptance criteria map to multiple independent deliverables
+
+**Do NOT decompose (handle parent Issue directly) when:**
+- Small README or documentation edits
+- Simple config file additions (e.g., `.env.example`)
+- Minor changes limited to 1–2 files
+- Implementation approach is clear and acceptance criteria can be met in one PR
+- Creating child Issues adds more overhead than value
+- Investigations, wording fixes, or single bug fixes with clear fix location
+
+Post your judgment as a Linear comment on the parent Issue:
+
+```
+分解判断: 必要 / 不要
+理由: <one-line reason>
+```
+
+### Step 2a: If decomposition IS needed
+
+1. Decompose into child Issues (minimum necessary, typically 2–5; maximum 7 with clear justification)
+2. Use `mcp__linear-server__save_issue` to register each child Issue with:
    - parentId: the parent Issue ID
    - Title format: `[IMPLEMENT] <parent-id> - <task name>` or `[DEBUG] <parent-id> - <verification>`
    - Description: Goal, Scope, Acceptance Criteria, Dependencies
    - Status: Todo
    - Priority: inherit from parent
-5. Post a summary comment on the parent Issue listing all created child Issues
-6. Create local tracking file: `docs/ai/linear/<PARENT_ISSUE_ID>.md`
+3. Post a summary comment on the parent Issue listing all created child Issues
+4. Create local tracking file: `docs/ai/linear/<PARENT_ISSUE_ID>.md`
+5. Execute child Issues in order: [PLAN] → [IMPLEMENT] → [DEBUG]
+
+### Step 2b: If decomposition is NOT needed
+
+1. Mark the parent Issue as `In Progress`
+2. Post a progress comment including the decomposition judgment
+3. Write Gemini or Codex instruction as appropriate for the task type
+4. Run the worker
+5. Commit, run quality gate, create PR, merge
+6. Mark parent Issue as `Done` and post Completion Report
 
 ---
 
