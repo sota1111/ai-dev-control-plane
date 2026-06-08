@@ -390,9 +390,10 @@ If verification cannot be performed, Claude Code must state that clearly in the 
 
 ### Purpose
 
-Claude Code decomposes parent Issues into actionable child Issues and registers them in Linear.
+Claude Code judges whether to decompose parent Issues into child Issues, and handles all decomposition and registration when needed.
 The developer creates only the parent Issue (e.g., "LC-100 宅配ボックス画面作成").
-Claude Code handles all task decomposition and child Issue creation.
+Linear Issues are NOT always decomposed — decompose only when complexity, independence, verification unit, or PR split necessity warrants it.
+Small tasks should be completed as-is within the parent Issue.
 
 ### Trigger
 
@@ -400,8 +401,39 @@ When Claude Code encounters a parent Issue (no sub-issues, contains a high-level
 
 1. Read and understand the parent Issue description and comments
 2. Identify acceptance criteria from the parent Issue
-3. Decompose into implementable child Issues (typically 2–7 per parent)
-4. Register each child Issue in Linear as a sub-issue of the parent
+3. **Judge whether decomposition into child Issues is necessary** (see decomposition criteria below)
+4. If decomposition IS needed: create child Issues (minimum necessary, typically 2–5; up to 7 with clear justification) and register them in Linear as sub-issues of the parent
+5. If decomposition is NOT needed: process the parent Issue directly as the work unit
+
+### Decomposition Judgment
+
+Claude Code must explicitly judge at the start of each Issue and post the judgment in the Linear comment:
+
+```
+分解判断: 必要 / 不要
+理由: <one-line reason>
+```
+
+### When to Decompose (child Issues recommended)
+
+- Multiple independent features or domains are involved
+- Work types are clearly separated (implementation, testing, docs, config)
+- Progress and responsibility are hard to track in a single Issue
+- Multiple PRs would be safer
+- Work volume is large; one auto-run session cannot complete it
+- Tasks have sequential dependencies
+- Separate Gemini/Codex delegation units would be clearer
+- Acceptance criteria map to multiple independent deliverables
+
+### When NOT to Decompose (handle parent Issue directly)
+
+- Small README or documentation edits
+- Simple config file additions (e.g., `.env.example`)
+- Minor changes limited to 1–2 files
+- Implementation approach is clear and acceptance criteria can be met in one PR
+- Creating child Issues adds more overhead than value
+- Investigations, wording fixes, comment edits, minor refactoring
+- Single bug fix with clear reproduction conditions and fix location
 
 ### Child Issue Naming Convention
 
