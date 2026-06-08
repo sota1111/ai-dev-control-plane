@@ -67,6 +67,12 @@ gemini
 codex
 ```
 
+#### codex MCP認証（Linear）
+
+```
+codex mcp login linear
+```
+
 #### GitHub CLI 認証
 
 ```
