@@ -88,17 +88,22 @@ linear_has_updates() {
 # セッションリミットのリセット時刻を解析し、リセット+10分後の epoch 秒を返す
 # 引数: run_auto.sh の出力テキスト
 # 例: "You've hit your session limit · resets 3:30pm (UTC)"
+# 例: "You've hit your session limit · resets 6pm (UTC)"
 _parse_session_reset_epoch() {
   local output="$1"
   local reset_str
-  reset_str=$(echo "$output" | grep -oP '(?<=resets )[0-9]+:[0-9]+(am|pm)?(?= \(UTC\))' | head -1) || true
+  reset_str=$(echo "$output" | grep -oiP "(?<=resets )[0-9]+(:[0-9]+)?(am|pm)?(?= \(UTC\))" | head -1) || true
   [ -z "$reset_str" ] && return 1
 
-  local hour min ampm=''
+  local hour min=0 ampm=''
   if [[ "$reset_str" =~ ^([0-9]+):([0-9]+)(am|pm)$ ]]; then
     hour="${BASH_REMATCH[1]}"; min="${BASH_REMATCH[2]}"; ampm="${BASH_REMATCH[3]}"
   elif [[ "$reset_str" =~ ^([0-9]+):([0-9]+)$ ]]; then
     hour="${BASH_REMATCH[1]}"; min="${BASH_REMATCH[2]}"
+  elif [[ "$reset_str" =~ ^([0-9]+)(am|pm)$ ]]; then
+    hour="${BASH_REMATCH[1]}"; ampm="${BASH_REMATCH[2]}"
+  elif [[ "$reset_str" =~ ^([0-9]+)$ ]]; then
+    hour="${BASH_REMATCH[1]}"
   else
     return 1
   fi
@@ -250,6 +255,79 @@ _notify_usage_limit_to_linear() {
   return 0
 }
 
+# タスク完了時にLinearのusage-limitラベルを除去する
+_remove_usage_limit_label() {
+  if [ -z "${LINEAR_API_KEY:-}" ]; then
+    log "Linear API key not set, skipping usage-limit label removal"
+    return 0
+  fi
+
+  # 1. usage-limit ラベルの ID を取得
+  local query_labels='{"query":"{ issueLabels(first: 50) { nodes { id name } } }"}'
+  local resp_labels
+  resp_labels=$(curl -sf -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: ${LINEAR_API_KEY}" \
+    --data "$query_labels" \
+    "$LINEAR_API_URL" 2>/dev/null) || true
+
+  local label_id
+  label_id=$(echo "$resp_labels" | jq -r '.data.issueLabels.nodes[] | select(.name == "usage-limit") | .id' 2>/dev/null | head -1) || true
+
+  if [ -z "$label_id" ] || [ "$label_id" == "null" ]; then
+    log "Label 'usage-limit' not found, nothing to remove"
+    return 0
+  fi
+
+  # 2. usage-limit ラベルを持つ Issue を取得
+  local query_issues
+  query_issues=$(printf '{"query":"{ issues(filter: { labels: { id: { eq: \"%s\" } } }, first: 50) { nodes { id labelIds } } }"}' "$label_id")
+  local resp_issues
+  resp_issues=$(curl -sf -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: ${LINEAR_API_KEY}" \
+    --data "$query_issues" \
+    "$LINEAR_API_URL" 2>/dev/null) || true
+
+  local issue_count
+  issue_count=$(echo "$resp_issues" | jq '.data.issues.nodes | length' 2>/dev/null) || true
+
+  if [ -z "$issue_count" ] || [ "$issue_count" -eq 0 ]; then
+    log "No issues with 'usage-limit' label found"
+    return 0
+  fi
+
+  log "Removing 'usage-limit' label from ${issue_count} issue(s)..."
+
+  # 3. 各 Issue からusage-limitラベルを除去（他のラベルは保持）
+  local issues_json
+  issues_json=$(echo "$resp_issues" | jq -c '.data.issues.nodes[]' 2>/dev/null) || true
+
+  while IFS= read -r issue_json; do
+    local issue_id
+    issue_id=$(echo "$issue_json" | jq -r '.id' 2>/dev/null) || true
+    [ -z "$issue_id" ] || [ "$issue_id" == "null" ] && continue
+
+    # 既存ラベルIDからusage-limitを除いたリストを作る
+    local new_label_ids
+    new_label_ids=$(echo "$issue_json" | jq -r --arg lid "$label_id" '[.labelIds[] | select(. != $lid)] | @json' 2>/dev/null) || true
+    [ -z "$new_label_ids" ] && new_label_ids='[]'
+
+    local mutation_update
+    mutation_update=$(printf '{"query":"mutation { issueUpdate(id: \\"%s\\", input: { labelIds: %s }) { success } }"}' "$issue_id" "$new_label_ids")
+    curl -sf -X POST \
+      -H "Content-Type: application/json" \
+      -H "Authorization: ${LINEAR_API_KEY}" \
+      --data "$mutation_update" \
+      "$LINEAR_API_URL" >/dev/null 2>&1 || true
+
+    log "Removed 'usage-limit' label from issue: ${issue_id}"
+  done <<< "$issues_json"
+
+  log "Usage-limit label removal completed"
+  return 0
+}
+
 # --- stop ---
 if [[ "${1:-}" == "stop" ]]; then
   if [ -f "$PID_FILE" ]; then
@@ -389,6 +467,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
         cat "$_tmp_log" >> "$SCHEDULER_LOG"
         if [ "$_run_exit" -eq 0 ]; then
           log "--- Run completed successfully ---"
+          _remove_usage_limit_label
         else
           log "--- Run failed (exit: ${_run_exit}) ---"
           _session_wait=$(_parse_session_reset_epoch "$(cat "$_tmp_log")") || _session_wait=""
@@ -416,6 +495,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
             rm -f "$_tmp_log2"
             if [ "$_run_exit" -eq 0 ]; then
               log "--- Run completed successfully ---"
+              _remove_usage_limit_label
             else
               log "--- Run failed (exit: ${_run_exit}) ---"
             fi
@@ -444,6 +524,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
       cat "$_tmp_log" >> "$SCHEDULER_LOG"
       if [ "$_run_exit" -eq 0 ]; then
         log "--- Run completed successfully ---"
+        _remove_usage_limit_label
       else
         log "--- Run failed (exit: ${_run_exit}) ---"
         _session_wait=$(_parse_session_reset_epoch "$(cat "$_tmp_log")") || _session_wait=""
@@ -471,6 +552,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
           rm -f "$_tmp_log2"
           if [ "$_run_exit" -eq 0 ]; then
             log "--- Run completed successfully ---"
+            _remove_usage_limit_label
           else
             log "--- Run failed (exit: ${_run_exit}) ---"
           fi

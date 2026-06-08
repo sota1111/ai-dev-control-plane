@@ -227,7 +227,7 @@ When implementing changes for any target project (e.g., booking-monitor), follow
    - Always specify the working directory at the top of worker instructions.
    - All file reads and writes by workers must target this path.
    - Set `TARGET_REPO=/workspaces/<project-name>` before running `scripts/ai/run_gemini.sh` or `scripts/ai/run_codex.sh`.
-   - Do NOT use host OS paths like `/home/ubuntu/dev/2026/workspace/...` — Gemini CLI and Codex CLI cannot access these.
+   - Do NOT use host OS workspace paths — Gemini CLI and Codex CLI cannot access these.
 
 3. **Commit and push changes from the cloned repo at `/workspaces/<project-name>`**.
    - Feature branches are created in that repo clone, not in `/workspaces/ai-dev-control-plane`.
