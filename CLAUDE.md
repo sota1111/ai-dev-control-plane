@@ -151,6 +151,26 @@ Before reporting results to the human, Claude Code must:
 
 ---
 
+## Development Environment
+
+### Working Directory for Target Projects
+
+When implementing changes for any target project (e.g., booking-monitor), follow these rules:
+
+1. **Clone target repos to `/home/ubuntu/dev/2026/workspace/<project-name>`** before starting work.
+   - This path is a bind mount — changes are visible on the host machine at `~/dev/2026/workspace/<project-name>`.
+   - If the repo already exists at that path, run `git pull origin main` to update it.
+   - Example: `git clone https://github.com/sota1111/<project>.git /home/ubuntu/dev/2026/workspace/<project>`
+
+2. **Instruct Gemini and Codex workers to operate in `/home/ubuntu/dev/2026/workspace/<project-name>`**.
+   - Always specify the working directory at the top of worker instructions.
+   - All file reads and writes by workers must target this path.
+
+3. **Commit and push changes from the cloned repo at `/home/ubuntu/dev/2026/workspace/<project-name>`**.
+   - Feature branches are created in that repo clone, not in `/workspaces/ai-dev-control-plane`.
+
+---
+
 ## Human Response Policy
 
 - Always reply in the same language the human used
