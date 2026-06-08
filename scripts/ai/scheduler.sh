@@ -114,6 +114,96 @@ _parse_session_reset_epoch() {
   echo "$target"
 }
 
+# AIセッション制限時にLinearへ通知（コメント投稿とラベル付与）
+_notify_usage_limit_to_linear() {
+  local next_run_epoch="$1"
+  if [ -z "${LINEAR_API_KEY:-}" ]; then
+    log "Linear API key not set, skipping usage limit notification"
+    return 0
+  fi
+
+  local next_run_jst
+  next_run_jst=$(date -u -d "@$((next_run_epoch + 32400))" '+%Y-%m-%d %H:%M')
+  local comment_body="usage-limit: Next auto run: ${next_run_jst} JST"
+
+  # 1. usage-limit ラベルの ID を取得（なければ作成）
+  local query_labels='{"query":"{ issueLabels(first: 50) { nodes { id name } } }"}'
+  local resp_labels
+  resp_labels=$(curl -sf -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: ${LINEAR_API_KEY}" \
+    --data "$query_labels" \
+    "$LINEAR_API_URL" 2>/dev/null) || true
+  
+  local label_id
+  label_id=$(echo "$resp_labels" | jq -r '.data.issueLabels.nodes[] | select(.name == "usage-limit") | .id' 2>/dev/null | head -1) || true
+
+  if [ -z "$label_id" ] || [ "$label_id" == "null" ]; then
+    log "Label 'usage-limit' not found, creating..."
+    local query_team='{"query":"{ teams(first: 1) { nodes { id } } }"}'
+    local resp_team
+    resp_team=$(curl -sf -X POST \
+      -H "Content-Type: application/json" \
+      -H "Authorization: ${LINEAR_API_KEY}" \
+      --data "$query_team" \
+      "$LINEAR_API_URL" 2>/dev/null) || true
+    local team_id
+    team_id=$(echo "$resp_team" | jq -r '.data.teams.nodes[0].id' 2>/dev/null) || true
+    
+    if [ -n "$team_id" ] && [ "$team_id" != "null" ]; then
+      local mutation_label
+      mutation_label=$(printf '{"query":"mutation { issueLabelCreate(input: { name: \\"usage-limit\\", color: \\"#FF6B6B\\", teamId: \\"%s\\" }) { issueLabel { id } } }"}' "$team_id")
+      local resp_label_create
+      resp_label_create=$(curl -sf -X POST \
+        -H "Content-Type: application/json" \
+        -H "Authorization: ${LINEAR_API_KEY}" \
+        --data "$mutation_label" \
+        "$LINEAR_API_URL" 2>/dev/null) || true
+      label_id=$(echo "$resp_label_create" | jq -r '.data.issueLabelCreate.issueLabel.id' 2>/dev/null) || true
+    fi
+  fi
+
+  # 2. アクティブな Issue を取得して通知
+  local query_issues='{"query":"{ issues(filter: { state: { type: { in: [\"unstarted\",\"started\"] } } }, first: 50) { nodes { id } } }"}'
+  local resp_issues
+  resp_issues=$(curl -sf -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: ${LINEAR_API_KEY}" \
+    --data "$query_issues" \
+    "$LINEAR_API_URL" 2>/dev/null) || true
+  
+  local issue_ids
+  issue_ids=$(echo "$resp_issues" | jq -r '.data.issues.nodes[].id' 2>/dev/null) || true
+
+  for issue_id in $issue_ids; do
+    [ -z "$issue_id" ] || [ "$issue_id" == "null" ] && continue
+    log "Notifying usage limit for issue: ${issue_id}"
+    
+    # a. コメント投稿
+    local mutation_comment
+    mutation_comment=$(printf '{"query":"mutation { commentCreate(input: { issueId: \\"%s\\", body: \\"%s\\" }) { success } }"}' "$issue_id" "$comment_body")
+    curl -sf -X POST \
+      -H "Content-Type: application/json" \
+      -H "Authorization: ${LINEAR_API_KEY}" \
+      --data "$mutation_comment" \
+      "$LINEAR_API_URL" >/dev/null 2>&1 || true
+
+    # b. ラベル付与
+    if [ -n "$label_id" ] && [ "$label_id" != "null" ]; then
+      local mutation_update
+      mutation_update=$(printf '{"query":"mutation { issueUpdate(id: \\"%s\\", input: { labelIds: [\\"%s\\"] }) { success } }"}' "$issue_id" "$label_id")
+      curl -sf -X POST \
+        -H "Content-Type: application/json" \
+        -H "Authorization: ${LINEAR_API_KEY}" \
+        --data "$mutation_update" \
+        "$LINEAR_API_URL" >/dev/null 2>&1 || true
+    fi
+  done
+
+  log "Usage limit notification process completed"
+  return 0
+}
+
 # --- stop ---
 if [[ "${1:-}" == "stop" ]]; then
   if [ -f "$PID_FILE" ]; then
@@ -260,6 +350,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
             _reset_disp=$(date -u -d "@$((_session_wait - 600))" '+%H:%M UTC')
             _wait_min=$(( (_session_wait - $(date -u +%s) + 59) / 60 ))
             log "Session limit detected (reset: ${_reset_disp}). Waiting until 10 min after reset (~${_wait_min} min)..."
+            _notify_usage_limit_to_linear "$_session_wait"
             while true; do
               _now_e=$(date -u +%s)
               _rem=$((_session_wait - _now_e))
@@ -314,6 +405,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
           _reset_disp=$(date -u -d "@$((_session_wait - 600))" '+%H:%M UTC')
           _wait_min=$(( (_session_wait - $(date -u +%s) + 59) / 60 ))
           log "Session limit detected (reset: ${_reset_disp}). Waiting until 10 min after reset (~${_wait_min} min)..."
+          _notify_usage_limit_to_linear "$_session_wait"
           while true; do
             _now_e=$(date -u +%s)
             _rem=$((_session_wait - _now_e))
