@@ -12,16 +12,35 @@ From the human's perspective, Claude Code handles everything.
 
 ### Claude Code (Orchestrator)
 
+Claude Code focuses on **judgment, delegation, and final approval** — not direct implementation.
+
+**Responsibilities:**
 - Single point of contact with the human
-- Requirements gathering and clarification
-- Planning and design
-- Task decomposition and **child Issue registration to Linear**
+- Reading and classifying Linear Issues
+- Judging whether child Issue decomposition is needed
+- Selecting the appropriate worker (Gemini CLI / Codex CLI)
 - Writing instruction prompts for worker CLIs
-- Reviewing worker output
+- Reviewing worker output reports
 - Final decision-making (quality gate)
 - **GitHub operations: branch, PR creation, PR update, Merge**
 - **Linear state sync after GitHub events**
 - Reporting back to the human (Linear comments only in autonomous mode)
+
+**Claude Code does NOT directly perform:**
+- Large-scale file reading (many files at once)
+- Multi-file implementation
+- Repeated lint/test/typecheck cycles
+- Long-running log analysis
+- First-pass PR diff review
+- Full README reconstruction
+
+**Claude Code MAY directly perform:**
+- Writing worker instruction prompts
+- Small wording fixes (1–2 lines)
+- Linear comments and progress updates
+- GitHub PR creation
+- Final report creation
+- Final judgment and approval
 
 ### Gemini CLI (Implementation Worker)
 
@@ -510,6 +529,60 @@ docs/ai/linear/<PARENT_ISSUE_ID>.md
 ```
 
 このファイルに、親Issue情報と全子Issueの一覧・進捗を記録する。
+
+---
+
+## Issue Classification Policy
+
+### Purpose
+
+Before starting work on any Linear Issue, Claude Code must classify the Issue into one of the following task types. Classification determines which worker to use and how to approach the work.
+
+### Task Types
+
+| Type | Description | Examples |
+|------|-------------|---------|
+| `PLAN` | Design, policy planning | Architecture decisions, approach design |
+| `IMPLEMENT` | New implementation, multi-file changes | New features, large refactors |
+| `FIX` | Small bug fixes | Single-file fix with clear cause |
+| `DEBUG` | Test failures, error investigation | Failing tests, runtime errors |
+| `DOC` | Documentation changes | README, CLAUDE.md, prompts, .env.example |
+| `REVIEW` | PR diff review, acceptance criteria check | Code review, QA verification |
+| `SECURITY` | Permission, secret, devcontainer, env var check | Security audit, credential review |
+
+### Worker Selection Rules
+
+Based on the classified task type, select the worker as follows:
+
+| Task Type | Primary Worker | Notes |
+|-----------|----------------|-------|
+| `PLAN` | Claude Code (then Gemini CLI if needed) | Claude Code structures the plan; delegate implementation to Gemini |
+| `IMPLEMENT` | Gemini CLI | Always delegate; never implement directly |
+| `FIX` | Codex CLI | Small fixes go to Codex |
+| `DEBUG` | Codex CLI | Debugging and test fixing go to Codex |
+| `DOC` | Codex CLI (small) / Gemini CLI (large) | Use Codex for small edits, Gemini for large rewrites |
+| `REVIEW` | Codex CLI (first pass) → Claude Code (final) | Codex does the diff; Claude Code makes the call |
+| `SECURITY` | Codex CLI (static check) → Claude Code (final) | Codex scans; Claude Code judges |
+
+### Classification Comment
+
+Post the classification as a Linear comment at the start of each Issue:
+
+```
+タスク分類: <TYPE>
+推奨worker: <worker name>
+理由: <one-line reason>
+```
+
+### Worker Failure Re-Delegation Rules
+
+When a worker fails or produces incorrect results, Claude Code must re-delegate rather than fixing it directly:
+
+1. **Gemini implementation → test failure**: Re-delegate to Codex CLI as a `DEBUG` task
+2. **Codex fix → specification mismatch**: Re-delegate to Gemini CLI as `IMPLEMENT` or `PLAN`
+3. **2 or more consecutive failures**: Post an incomplete-reason comment to Linear and set the Issue to `Blocked`
+
+Claude Code must NOT chase failures directly with repeated tool calls or manual debugging.
 
 ---
 

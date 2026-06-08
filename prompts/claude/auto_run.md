@@ -19,6 +19,41 @@ In Progress → Todo → Backlog
 
 ---
 
+## Issue Classification
+
+Before starting work on any Issue, classify it and post the classification as a Linear comment:
+
+```
+タスク分類: PLAN | IMPLEMENT | FIX | DEBUG | DOC | REVIEW | SECURITY
+推奨worker: gemini | codex | claude-code
+理由: <one-line reason>
+```
+
+**Task types:**
+- `PLAN`: Design, policy planning
+- `IMPLEMENT`: New implementation, multi-file changes
+- `FIX`: Small bug fixes (1–2 files, clear cause)
+- `DEBUG`: Test failures, error investigation
+- `DOC`: Documentation only (README, CLAUDE.md, prompts, .env.example)
+- `REVIEW`: PR diff review, acceptance criteria check
+- `SECURITY`: Permission, secret, devcontainer, env var check
+
+**Worker selection:**
+- `PLAN` → Claude Code plans; delegate to Gemini CLI if needed
+- `IMPLEMENT` → Gemini CLI
+- `FIX` → Codex CLI
+- `DEBUG` → Codex CLI
+- `DOC` → Codex CLI (small edit) or Gemini CLI (large rewrite)
+- `REVIEW` → Codex CLI first pass, then Claude Code final judgment
+- `SECURITY` → Codex CLI static check, then Claude Code final judgment
+
+**Worker failure re-delegation:**
+- Gemini implementation → test failure: re-delegate to Codex CLI as `DEBUG`
+- Codex fix → specification mismatch: re-delegate to Gemini CLI as `IMPLEMENT` or `PLAN`
+- 2+ consecutive failures: set Issue to `Blocked`, post reason to Linear
+
+---
+
 ## Parent Issue Detection and Child Issue Decomposition
 
 When you find an issue that has NO sub-issues and contains a high-level requirement (parent Issue):
