@@ -88,17 +88,22 @@ linear_has_updates() {
 # セッションリミットのリセット時刻を解析し、リセット+10分後の epoch 秒を返す
 # 引数: run_auto.sh の出力テキスト
 # 例: "You've hit your session limit · resets 3:30pm (UTC)"
+# 例: "You've hit your session limit · resets 6pm (UTC)"
 _parse_session_reset_epoch() {
   local output="$1"
   local reset_str
-  reset_str=$(echo "$output" | grep -oP '(?<=resets )[0-9]+:[0-9]+(am|pm)?(?= \(UTC\))' | head -1) || true
+  reset_str=$(echo "$output" | grep -oiP "(?<=resets )[0-9]+(:[0-9]+)?(am|pm)?(?= \(UTC\))" | head -1) || true
   [ -z "$reset_str" ] && return 1
 
-  local hour min ampm=''
+  local hour min=0 ampm=''
   if [[ "$reset_str" =~ ^([0-9]+):([0-9]+)(am|pm)$ ]]; then
     hour="${BASH_REMATCH[1]}"; min="${BASH_REMATCH[2]}"; ampm="${BASH_REMATCH[3]}"
   elif [[ "$reset_str" =~ ^([0-9]+):([0-9]+)$ ]]; then
     hour="${BASH_REMATCH[1]}"; min="${BASH_REMATCH[2]}"
+  elif [[ "$reset_str" =~ ^([0-9]+)(am|pm)$ ]]; then
+    hour="${BASH_REMATCH[1]}"; ampm="${BASH_REMATCH[2]}"
+  elif [[ "$reset_str" =~ ^([0-9]+)$ ]]; then
+    hour="${BASH_REMATCH[1]}"
   else
     return 1
   fi
