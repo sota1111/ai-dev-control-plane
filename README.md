@@ -22,10 +22,10 @@ cp .env .env.local  # 任意。.env を直接編集してもよい
 
 `.env` を開き、最低限以下を記入する：
 
-| 変数 | 説明 | 取得先 |
-|---|---|---|
-| `LINEAR_API_KEY` | Linear Personal API Token | Linear > Settings > API > Personal API keys |
-| `ANTHROPIC_API_KEY` | Anthropic API キー | console.anthropic.com/settings/keys |
+| 変数                | 説明                      | 取得先                                      |
+| ------------------- | ------------------------- | ------------------------------------------- |
+| `LINEAR_API_KEY`    | Linear Personal API Token | Linear > Settings > API > Personal API keys |
+| `ANTHROPIC_API_KEY` | Anthropic API キー        | console.anthropic.com/settings/keys         |
 
 ## 動作モード
 
@@ -39,6 +39,40 @@ Todo / Backlog / In Progress の Issue が更新されたときだけ Claude を
 `LINEAR_API_KEY` が未設定の場合、`INTERVAL` 秒ごとに無条件で Claude を実行する。
 
 ## コマンド
+
+### 起動前準備
+
+#### linear認証
+
+```
+claude
+/mcp
+linearを選択
+```
+
+#### gemini認証
+
+```
+gemini
+```
+
+#### codex認証
+
+```
+codex
+```
+
+#### GitHub CLI 認証
+
+```
+gh auth login
+```
+
+#### azure 認証
+
+```
+az login --use-device-code
+```
 
 ### 起動（ログをリアルタイム表示）
 
@@ -59,6 +93,7 @@ bash scripts/ai/scheduler.sh status
 ```
 
 出力例：
+
 ```
 Scheduler is running (PID: 12345)
 Log: docs/ai/auto_logs/scheduler.log
@@ -74,11 +109,11 @@ bash scripts/ai/scheduler.sh stop
 
 ## 環境変数リファレンス
 
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `LINEAR_API_KEY` | なし | Linear Personal API Token。設定するとポーリングモードが有効になる |
-| `CHECK_INTERVAL` | `60` | Linear ポーリング間隔（秒） |
-| `INTERVAL` | `3600` | フォールバック実行間隔（秒） |
+| 変数             | デフォルト | 説明                                                              |
+| ---------------- | ---------- | ----------------------------------------------------------------- |
+| `LINEAR_API_KEY` | なし       | Linear Personal API Token。設定するとポーリングモードが有効になる |
+| `CHECK_INTERVAL` | `60`       | Linear ポーリング間隔（秒）                                       |
+| `INTERVAL`       | `3600`     | フォールバック実行間隔（秒）                                      |
 
 ## ログ
 
