@@ -104,7 +104,28 @@ Follow these instructions from Claude Code exactly.
 - Do not ask questions — make your best judgment
 
 ## Output
-Write your implementation summary to docs/ai/50_worker_gemini_report.md
+Write your implementation report to `docs/ai/50_worker_gemini_report.md` using this format:
+
+# Worker Report
+
+## Summary
+<what was implemented>
+
+## Changed Files
+- `path/to/file` — brief description of change
+
+## Commands Run
+<any shell commands executed>
+
+## Acceptance Criteria
+- [x] criterion met
+- [ ] criterion not met (explain)
+
+## Risks
+<any risks, edge cases, or notes for Claude Code>
+
+## Next Action
+READY_FOR_REVIEW | NEEDS_DEBUG | NEEDS_USER_INPUT | BLOCKED
 ```
 
 ### Codex CLI instruction template (`prompts/codex/debug.md`)
@@ -130,7 +151,28 @@ Follow these instructions from Claude Code exactly.
 4. Do not refactor or change scope
 
 ## Output
-Write your debug summary to docs/ai/60_worker_codex_report.md
+Write your debug report to `docs/ai/60_worker_codex_report.md` using this format:
+
+# Worker Report
+
+## Summary
+<what was verified or fixed>
+
+## Changed Files
+- `path/to/file` — brief description of change (if any)
+
+## Commands Run
+<lint/test/typecheck commands and their results>
+
+## Acceptance Criteria
+- [x] criterion met
+- [ ] criterion not met (explain)
+
+## Risks
+<any risks, unresolved issues, or notes for Claude Code>
+
+## Next Action
+READY_FOR_REVIEW | NEEDS_DEBUG | NEEDS_USER_INPUT | BLOCKED
 ```
 
 ---
