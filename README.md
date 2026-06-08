@@ -16,16 +16,20 @@ Gemini CLIは実装補助、Codexは検証補助として使用する。
 
 ## 事前準備：`.env` の設定
 
+`.env.example` をコピーして `.env` を作成し、必要な値を記入する：
+
 ```bash
-cp .env .env.local  # 任意。.env を直接編集してもよい
+cp .env.example .env
 ```
 
 `.env` を開き、最低限以下を記入する：
 
-| 変数                | 説明                      | 取得先                                      |
-| ------------------- | ------------------------- | ------------------------------------------- |
-| `LINEAR_API_KEY`    | Linear Personal API Token | Linear > Settings > API > Personal API keys |
-| `ANTHROPIC_API_KEY` | Anthropic API キー        | console.anthropic.com/settings/keys         |
+| 変数                | 必須 | 説明                      | 取得先                                      |
+| ------------------- | ---- | ------------------------- | ------------------------------------------- |
+| `LINEAR_API_KEY`    | 任意 | Linear Personal API Token。設定するとポーリングモードが有効になる | Linear > Settings > API > Personal API keys |
+| `ANTHROPIC_API_KEY` | 必須 | Anthropic API キー        | console.anthropic.com/settings/keys         |
+
+> **Note**: `.env` はGit管理しない。秘密情報（APIキー等）は `.env.example` に記入しないこと。
 
 ## 動作モード
 
@@ -109,11 +113,20 @@ bash scripts/ai/scheduler.sh stop
 
 ## 環境変数リファレンス
 
-| 変数             | デフォルト | 説明                                                              |
-| ---------------- | ---------- | ----------------------------------------------------------------- |
-| `LINEAR_API_KEY` | なし       | Linear Personal API Token。設定するとポーリングモードが有効になる |
-| `CHECK_INTERVAL` | `60`       | Linear ポーリング間隔（秒）                                       |
-| `INTERVAL`       | `3600`     | フォールバック実行間隔（秒）                                      |
+| 変数                | 必須     | デフォルト | 説明                                                              |
+| ------------------- | -------- | ---------- | ----------------------------------------------------------------- |
+| `LINEAR_API_KEY`    | 任意     | なし       | Linear Personal API Token。設定するとポーリングモードが有効になる |
+| `ANTHROPIC_API_KEY` | 必須     | なし       | Anthropic API キー。Claude Code の動作に必要                      |
+| `CHECK_INTERVAL`    | 任意     | `60`       | Linear ポーリング間隔（秒）                                       |
+| `INTERVAL`          | 任意     | `3600`     | フォールバック実行間隔（秒）                                      |
+| `TZ`                | 任意     | システム依存 | ログや実行環境のタイムゾーン（例: `Asia/Tokyo`）                 |
+
+### 秘密情報の管理
+
+- `.env` はGit管理しない（`.gitignore` で除外済み）
+- `.env.example` には実際のAPIキーやトークンを記入しない
+- APIキー、トークン、認証情報はログやREADMEに出力しない
+- 誤って秘密情報をコミットした場合は、すぐに値を無効化・再発行すること
 
 ## ログ
 
