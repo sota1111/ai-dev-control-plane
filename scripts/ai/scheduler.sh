@@ -3,8 +3,8 @@
 #
 # 動作モード:
 #   LINEAR_API_KEY が設定されている場合:
-#     CHECK_INTERVAL 秒ごとに Linear の Todo/Backlog/In Progress/Blocked 状態の
-#     Issue が更新されているかを確認し、更新があれば run_auto.sh を実行する。
+#     CHECK_INTERVAL 秒ごとに Linear の Todo / In Progress の Issue が残っているか確認し、
+#     1件でも存在すれば run_auto.sh を実行する。
 #
 #   LINEAR_API_KEY が未設定の場合:
 #     フォールバックとして INTERVAL 秒ごとに無条件で run_auto.sh を実行する。
@@ -48,15 +48,14 @@ log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$SCHEDULER_LOG"
 }
 
-# Linear の actionable Issue の最新 updatedAt を取得し、
-# 前回取得値から変化があれば 0（更新あり）、なければ 1（変化なし）を返す。
+# Linear に Todo / In Progress の Issue が1件でも存在すれば 0、なければ 1 を返す。
 linear_has_updates() {
   if [ -z "${LINEAR_API_KEY:-}" ]; then
     return 2  # API key not set
   fi
 
   local query
-  query='{"query":"{ issues(filter: { state: { type: { in: [\"triage\",\"backlog\",\"unstarted\",\"started\"] } } }, orderBy: updatedAt, first: 1) { nodes { id updatedAt } } }"}'
+  query='{"query":"{ issues(filter: { state: { type: { in: [\"unstarted\",\"started\"] } } }, first: 1) { nodes { id title } } }"}'
 
   local response
   response=$(curl -sf -X POST \
@@ -68,26 +67,22 @@ linear_has_updates() {
     return 1
   }
 
-  local latest
-  latest=$(echo "$response" | jq -r '.data.issues.nodes[0].updatedAt // empty' 2>/dev/null)
+  local count
+  count=$(echo "$response" | jq '.data.issues.nodes | length' 2>/dev/null)
 
-  if [ -z "$latest" ]; then
-    log "Linear API returned no issues or unexpected response"
+  if [ -z "$count" ]; then
+    log "Linear API returned unexpected response"
     return 1
   fi
 
-  local cached=""
-  if [ -f "$LINEAR_STATE_FILE" ]; then
-    cached=$(cat "$LINEAR_STATE_FILE")
-  fi
-
-  if [ "$latest" != "$cached" ]; then
-    echo "$latest" > "$LINEAR_STATE_FILE"
-    log "Linear update detected (updatedAt: ${latest}, prev: ${cached:-none})"
+  if [ "$count" -gt 0 ]; then
+    local title
+    title=$(echo "$response" | jq -r '.data.issues.nodes[0].title // ""' 2>/dev/null)
+    log "Active issues found (Todo/In Progress) — triggering run. First: \"${title}\""
     return 0
   fi
 
-  return 1  # no change
+  return 1  # no active issues
 }
 
 # セッションリミットのリセット時刻を解析し、リセット+10分後の epoch 秒を返す
@@ -249,7 +244,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
       linear_has_updates || update_status=$?
 
       if [ "$update_status" -eq 0 ]; then
-        log "--- Run start (Linear update triggered) ---"
+        log "--- Run start (active issues found) ---"
         _tmp_log=$(mktemp)
         bash scripts/ai/run_auto.sh > "$_tmp_log" 2>&1 &
         _RUN_PID=$!
@@ -291,7 +286,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
         fi
         rm -f "$_tmp_log"
       elif [ "$update_status" -eq 1 ]; then
-        log "No Linear updates detected, skipping run."
+        log "No active issues (Todo/In Progress) in Linear, skipping run."
       else
         log "Linear API key not set (unexpected), skipping."
       fi
