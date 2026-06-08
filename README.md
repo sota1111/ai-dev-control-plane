@@ -12,7 +12,7 @@ Gemini CLIは実装補助、Codexは検証補助として使用する。
 
 # スケジューラー
 
-`scripts/ai/scheduler.sh` は Linear の更新を監視し、変化があれば自動で Claude を起動する。
+`scripts/ai/scheduler.sh` は `CHECK_INTERVAL` 秒ごとに Linear をポーリングし、対象状態の Issue が1件でも存在すれば自動で Claude を起動する。
 
 ## 事前準備：`.env` の設定
 
@@ -31,8 +31,9 @@ cp .env .env.local  # 任意。.env を直接編集してもよい
 
 ### Linear ポーリングモード（推奨）
 
-`LINEAR_API_KEY` が設定されている場合、`CHECK_INTERVAL` 秒ごとに Linear を確認し、  
-Todo / Backlog / In Progress の Issue が更新されたときだけ Claude を実行する。
+`LINEAR_API_KEY` が設定されている場合、`CHECK_INTERVAL` 秒ごとに Linear API をポーリングする。
+Linear 上の Issue 状態タイプが `unstarted`（Backlog/Todo）または `started`（In Progress）の Issue が1件でも存在する場合、`scripts/ai/run_auto.sh` を実行する。
+Issue の更新差分（`updatedAt` の変化）は現在判定していない。
 
 ### フォールバックモード
 
@@ -97,7 +98,6 @@ bash scripts/ai/scheduler.sh status
 ```
 Scheduler is running (PID: 12345)
 Log: docs/ai/auto_logs/scheduler.log
-Last Linear updatedAt: 2026-05-28T01:19:09.175Z
 Mode: Linear polling (CHECK_INTERVAL=60s)
 ```
 
