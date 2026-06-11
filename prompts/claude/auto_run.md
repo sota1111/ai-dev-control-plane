@@ -19,6 +19,38 @@ In Progress → Todo → Backlog
 
 ---
 
+## Work Start Pre-Processing
+
+**IMPORTANT: Perform these steps for each selected issue BEFORE any classification or analysis.**
+
+When you have selected the highest-priority issue to process, execute the following steps first:
+
+### Step 1: Update Linear status to In Progress
+
+Check the issue's current `status` field from the retrieved issue data:
+
+- If status is `Todo`: call `mcp__linear-server__save_issue` with `id: <issue-id>` and `state: "In Progress"`
+- If status is already `In Progress` or any other value: skip — do not make an unnecessary update
+- On success: output `[PRE] <issue-id> status: <old_status> → In Progress (<UTC datetime>)`
+- On skip: output `[PRE] <issue-id> status already In Progress, skipped`
+- On failure: output `[PRE] <issue-id> status update FAILED: <reason>` and continue (do not abort)
+
+### Step 2: Remove usage-limit label (if present)
+
+Check whether the issue has a label named `usage-limit` in its labels list:
+
+- If `usage-limit` label is present: call `mcp__linear-server__save_issue` with `id: <issue-id>` and `labels` set to the issue's current labels list **minus** the `usage-limit` entry (keep all other labels)
+- If `usage-limit` label is NOT present: skip
+- On success: output `[PRE] <issue-id> usage-limit label: found and removed`
+- On skip: output `[PRE] <issue-id> usage-limit label: not present, skipped`
+- On failure: output `[PRE] <issue-id> usage-limit removal FAILED: <reason>` and continue (do not abort)
+
+### Step 3: Proceed
+
+Only after completing Steps 1 and 2 (or confirming they are not needed), proceed to Issue Classification below.
+
+---
+
 ## Issue Classification
 
 Before starting work on any Issue, classify it and post the classification as a Linear comment:
