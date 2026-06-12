@@ -4,12 +4,28 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-# Load .env if present
+# Load .env if present without executing its contents.
 if [ -f "${PROJECT_ROOT}/.env" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "${PROJECT_ROOT}/.env" || true
-  set +a
+  while IFS= read -r line || [ -n "${line}" ]; do
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+
+    case "${line}" in
+      ""|\#*) continue ;;
+      export\ *) line="${line#export }" ;;
+    esac
+
+    key="${line%%=*}"
+    value="${line#*=}"
+
+    if [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      value="${value%\"}"
+      value="${value#\"}"
+      value="${value%\'}"
+      value="${value#\'}"
+      export "${key}=${value}"
+    fi
+  done < "${PROJECT_ROOT}/.env"
 fi
 
 # Validate required env var
