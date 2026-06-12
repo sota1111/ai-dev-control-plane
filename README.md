@@ -234,6 +234,48 @@ curl -X POST https://elitism-unnerving-gallstone.ngrok-free.dev/webhooks/linear 
 | `NGROK_COMMAND` | Webhook 使用時 | なし | ngrok 起動コマンド（例: `ngrok http --url=... 3000`） |
 | `NGROK_WEBHOOK_URL` | 任意 | なし | ngrok の公開 URL（確認用） |
 
+### Webhook サーバー常駐動作・停止・ログ確認
+
+#### 常駐動作の仕組み
+
+`npm run start:webhook` で起動した Webhook サーバーは、AI 実行（`run_auto.sh`）を子プロセスとして起動します。子プロセスは独立したプロセスグループ（`detached: true`）で動作するため、以下の状況でも Webhook サーバー本体は終了しません：
+
+- `run_auto.sh` / `run_codex.sh` が失敗または Terminated（exit code 143 / SIGTERM）
+- Claude / Gemini / Codex のいずれかが強制終了
+- 子プロセスが SIGTERM を受け取った場合
+
+#### サーバーの停止方法
+
+Webhook サーバー本体を停止するには、以下のいずれかを実行します：
+
+```bash
+# フォアグラウンドで起動中の場合
+Ctrl+C   # SIGINT — サーバーが "Server received SIGINT" をログ出力して正常終了
+
+# バックグラウンドプロセスの場合
+kill <PID>   # SIGTERM — サーバーが "Server received SIGTERM" をログ出力して正常終了
+```
+
+> **注意**: `kill -9 <PID>`（SIGKILL）を使うとログなしで強制終了します。通常は `kill <PID>` を使用してください。
+
+#### ログの見方
+
+| ログプレフィックス | 意味 |
+|---|---|
+| `[WEBHOOK:PARENT]` | Webhook サーバー本体（親プロセス）のイベント |
+| `[WEBHOOK:CHILD]` | 子プロセス（`run_auto.sh`）の起動・終了イベント |
+| `[RUN:<issueId>]` | 子プロセスの標準出力・エラー出力 |
+| `[WEBHOOK]` | Webhook 受信・処理ログ |
+
+#### 子プロセス終了と親プロセス終了の切り分け
+
+- `[WEBHOOK:CHILD] ... terminated by signal=SIGTERM` → 子プロセスが SIGTERM を受けた（サーバー本体は継続中）
+- `[WEBHOOK:PARENT] Server received SIGTERM` → サーバー本体が SIGTERM を受けた（正常終了中）
+
+#### `npm run dev:webhook` での動作
+
+`concurrently --kill-others-on-fail=false` を使って webhook サーバーと ngrok を同時起動します。ngrok が一時的に終了・再起動しても、webhook サーバーは継続して動作します。
+
 ## セキュリティ・権限方針
 
 このdevcontainerはAI自動実行環境（Claude Code `--dangerously-skip-permissions` モード）であるため、コンテナ側の権限を最小化する。

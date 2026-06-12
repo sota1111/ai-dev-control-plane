@@ -6,7 +6,7 @@
   "scripts": {
     "start:webhook": "node src/webhook-server.js",
     "start:ngrok": "bash -c \"$NGROK_COMMAND\"",
-    "dev:webhook": "concurrently \"npm run start:webhook\" \"npm run start:ngrok\"",
+    "dev:webhook": "concurrently --kill-others-on-fail=false \"npm run start:webhook\" \"npm run start:ngrok\"",
     "test": "jest --forceExit"
   },
   "dependencies": {
