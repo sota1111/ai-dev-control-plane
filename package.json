@@ -1,0 +1,18 @@
+{
+  "name": "ai-dev-control-plane",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start:webhook": "node src/webhook-server.js",
+    "start:ngrok": "bash -c \"$NGROK_COMMAND\"",
+    "dev:webhook": "concurrently \"npm run start:webhook\" \"npm run start:ngrok\""
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
