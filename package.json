@@ -4,6 +4,7 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
+    "lint": "node --check src/runner.js && node --check src/runner-cli.js && node --check src/webhook-server.js && node --check src/lib/usageLimitParser.js",
     "start:webhook": "node src/webhook-server.js",
     "start:ngrok": "bash -c \"$NGROK_COMMAND\"",
     "dev:webhook": "concurrently --kill-others-on-fail=false \"npm run start:webhook\" \"npm run start:ngrok\"",
