@@ -1,22 +1,43 @@
 const express = require('express');
 const path = require('path');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const app = express();
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString('utf8');
+  }
+}));
 
 // Error handler for JSON parsing errors
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     return res.status(400).json({ error: 'Invalid JSON' });
   }
-  next();
+  next(err);
 });
 
 const PORT = process.env.PORT || 3000;
 const LINEAR_WEBHOOK_SECRET = process.env.LINEAR_WEBHOOK_SECRET;
 const runningIssues = new Set();
+
+function verifyLinearSignature(req) {
+  if (!LINEAR_WEBHOOK_SECRET) {
+    return true; // development mode: skip verification
+  }
+  const signature = req.headers['linear-signature'];
+  if (!signature) {
+    console.warn('[WEBHOOK] No linear-signature header found');
+    return false;
+  }
+  const expected = crypto
+    .createHmac('sha256', LINEAR_WEBHOOK_SECRET)
+    .update(req.rawBody || '')
+    .digest('hex');
+  return signature === expected;
+}
 
 if (!LINEAR_WEBHOOK_SECRET) {
   console.warn('[WEBHOOK] WARNING: LINEAR_WEBHOOK_SECRET not set. Running in development mode without signature verification.');
@@ -60,6 +81,11 @@ app.post('/webhooks/linear', (req, res) => {
   // express.json() handles parsing, but we check if it succeeded
   if (!body || typeof body !== 'object') {
     return res.status(400).json({ error: 'Invalid JSON' });
+  }
+
+  if (!verifyLinearSignature(req)) {
+    console.warn('[WEBHOOK] Signature verification failed');
+    return res.status(401).json({ error: 'Invalid signature' });
   }
 
   console.log(`[WEBHOOK] Received event type=${body.type || 'unknown'} action=${body.action || 'unknown'} at ${new Date().toISOString()}`);

@@ -143,6 +143,87 @@ docs/ai/auto_logs/scheduler.log   # スケジューラー動作ログ
 docs/ai/auto_logs/run_*.log       # 各 Claude 実行ログ（タイムスタンプ付き）
 ```
 
+## Webhook モード（推奨）
+
+ポーリング方式の代わりに、Linear Webhook からイベントを受信してリアルタイムに処理を開始できます。
+
+### 前提条件
+
+- ngrok がインストールされ、`NGROK_COMMAND` が `.env` に設定されていること
+- Linear の Webhook 設定が完了していること
+  - URL: `https://elitism-unnerving-gallstone.ngrok-free.dev/webhooks/linear`
+  - Secret: Linear > Settings > API > Webhooks で確認し、`LINEAR_WEBHOOK_SECRET` に設定
+
+### Webhook モード用 `.env` 設定
+
+`.env` に以下を追加・設定する：
+
+```
+WEBHOOK_MODE=true
+PORT=3000
+LINEAR_WEBHOOK_SECRET=<Linear Webhook の Secret>
+NGROK_COMMAND=ngrok http --url=elitism-unnerving-gallstone.ngrok-free.dev 3000
+```
+
+### 起動
+
+#### Webhook サーバーと ngrok をまとめて起動（開発用）
+
+```bash
+npm run dev:webhook
+```
+
+#### 個別起動
+
+```bash
+# Webhook サーバーのみ起動
+npm run start:webhook
+
+# ngrok のみ起動
+npm run start:ngrok
+```
+
+#### ポーリングスケジューラーを無効化して起動
+
+```bash
+WEBHOOK_MODE=true bash scripts/ai/scheduler.sh
+# → "WEBHOOK_MODE=true: ポーリングスケジューラーは無効化されています。" と表示して終了
+```
+
+### 疎通確認
+
+#### ローカル疎通確認
+
+```bash
+curl -X POST http://localhost:3000/webhooks/linear \
+  -H "Content-Type: application/json" \
+  -d '{"test":true}'
+```
+
+#### ngrok 経由の疎通確認
+
+```bash
+curl -X POST https://elitism-unnerving-gallstone.ngrok-free.dev/webhooks/linear \
+  -H "Content-Type: application/json" \
+  -d '{"test":true}'
+```
+
+#### 期待結果
+
+- ローカル・ngrok 経由ともに `{"status":"ignored","reason":"not an issue event"}` が返る（200）
+- Webhook サーバーのログに受信ログが出力される
+- ngrok の inspection UI（http://127.0.0.1:4040）でリクエストが確認できる
+
+### 環境変数（Webhook モード）
+
+| 変数 | 必須 | デフォルト | 説明 |
+|------|------|-----------|------|
+| `WEBHOOK_MODE` | 任意 | `false` | `true` にするとポーリングを無効化 |
+| `PORT` | 任意 | `3000` | Webhook サーバーのポート番号 |
+| `LINEAR_WEBHOOK_SECRET` | 任意 | なし | Linear Webhook 署名検証用シークレット。未設定時は開発モードで動作（警告表示） |
+| `NGROK_COMMAND` | Webhook 使用時 | なし | ngrok 起動コマンド（例: `ngrok http --url=... 3000`） |
+| `NGROK_WEBHOOK_URL` | 任意 | なし | ngrok の公開 URL（確認用） |
+
 ## セキュリティ・権限方針
 
 このdevcontainerはAI自動実行環境（Claude Code `--dangerously-skip-permissions` モード）であるため、コンテナ側の権限を最小化する。
