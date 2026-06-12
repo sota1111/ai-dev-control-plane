@@ -85,6 +85,13 @@ gh auth login
 az login --use-device-code
 ```
 
+#### gcloud 認証
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+```
+
 ### 起動（ログをリアルタイム表示）
 
 ```bash
