@@ -346,6 +346,37 @@ async function removeUsageLimitLabelFromAllIssues() {
   }
 }
 
+async function setIssueInProgress(issueId) {
+  try {
+    const issueData = await linearQuery(
+      'query($id: String!) { issue(id: $id) { id state { type } team { id } } }',
+      { id: issueId }
+    );
+    if (!issueData.issue) return;
+    if (issueData.issue.state?.type === 'started') {
+      log('WEBHOOK', `setIssueInProgress: ${issueId} already started, skip`);
+      return;
+    }
+    const { id: uuid, team } = issueData.issue;
+    const statesData = await linearQuery(
+      'query($teamId: String!) { workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "started" } }, first: 1) { nodes { id name } } }',
+      { teamId: team.id }
+    );
+    const stateId = statesData.workflowStates?.nodes[0]?.id;
+    if (!stateId) {
+      log('WEBHOOK', `setIssueInProgress: no started state found for team ${team.id}`);
+      return;
+    }
+    await linearQuery(
+      'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
+      { id: uuid, stateId }
+    );
+    log('WEBHOOK', `setIssueInProgress: ${issueId} updated to In Progress`);
+  } catch (err) {
+    log('ERROR', `setIssueInProgress failed: ${err.message}`, { issue: issueId });
+  }
+}
+
 module.exports = {
   SKIPPED_LOCKED,
   LOG_DIR,
@@ -368,5 +399,6 @@ module.exports = {
   enqueue,
   dequeue,
   removeFromQueue,
-  isQueued
+  isQueued,
+  setIssueInProgress
 };
