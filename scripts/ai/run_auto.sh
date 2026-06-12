@@ -40,7 +40,7 @@ fi
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] run_auto.sh is already running (script-launched). Skipping." >&2
-  exit 0
+  exit 75
 fi
 # ─────────────────────────────────────────────────────────────────────────────
 

@@ -307,6 +307,45 @@ function isQueued(issueId) {
   return queue.some(item => item.issueId === issueId);
 }
 
+async function notifyUsageLimitToAllActiveIssues(epochSeconds) {
+  try {
+    const data = await linearQuery(
+      '{ issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: 50) { nodes { id } } }'
+    );
+    const issues = data.issues?.nodes || [];
+    for (const issue of issues) {
+      await postUsageLimitComment(issue.id, epochSeconds).catch(() => {});
+      await addUsageLimitLabel(issue.id).catch(() => {});
+    }
+    log('RUNNER', `notifyUsageLimitToAllActiveIssues done for ${issues.length} issue(s)`);
+  } catch (err) {
+    log('ERROR', `notifyUsageLimitToAllActiveIssues failed: ${err.message}`);
+  }
+}
+
+async function removeUsageLimitLabelFromAllIssues() {
+  try {
+    const labelsData = await linearQuery(
+      'query { issueLabels(filter: { name: { eq: "usage-limit" } }) { nodes { id } } }'
+    );
+    const labelId = labelsData.issueLabels.nodes[0]?.id;
+    if (!labelId) {
+      log('RUNNER', 'removeUsageLimitLabelFromAllIssues: no usage-limit label found');
+      return;
+    }
+    const issueData = await linearQuery(
+      `{ issues(filter: { labels: { id: { eq: "${labelId}" } } }, first: 50) { nodes { id labelIds } } }`
+    );
+    const issues = issueData.issues?.nodes || [];
+    for (const issue of issues) {
+      await removeUsageLimitLabel(issue.id).catch(() => {});
+    }
+    log('RUNNER', `removeUsageLimitLabelFromAllIssues done for ${issues.length} issue(s)`);
+  } catch (err) {
+    log('ERROR', `removeUsageLimitLabelFromAllIssues failed: ${err.message}`);
+  }
+}
+
 module.exports = {
   SKIPPED_LOCKED,
   LOG_DIR,
@@ -322,6 +361,8 @@ module.exports = {
   postUsageLimitComment,
   addUsageLimitLabel,
   removeUsageLimitLabel,
+  notifyUsageLimitToAllActiveIssues,
+  removeUsageLimitLabelFromAllIssues,
   loadQueue,
   saveQueue,
   enqueue,
