@@ -4,6 +4,7 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { parseUsageLimitResetEpoch } = require('./lib/usageLimitParser');
+const runner = require('./runner');
 
 // Distinguish parent-received signals from child process signals
 process.on('SIGTERM', () => {
@@ -44,8 +45,6 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 const LINEAR_WEBHOOK_SECRET = process.env.LINEAR_WEBHOOK_SECRET;
-const runningIssues = new Set();
-const pendingRetryIssues = new Set();
 
 function verifyLinearSignature(req) {
   if (!LINEAR_WEBHOOK_SECRET) {
@@ -53,7 +52,7 @@ function verifyLinearSignature(req) {
   }
   const signature = req.headers['linear-signature'];
   if (!signature) {
-    console.warn('[WEBHOOK] No linear-signature header found');
+    runner.log('WEBHOOK', 'No linear-signature header found');
     return false;
   }
   const expected = crypto
@@ -83,18 +82,20 @@ function triggerRun(issueId) {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
-  console.log(`[WEBHOOK:CHILD] Spawned run_auto.sh for issueId=${issueId} pid=${child.pid} startedAt=${startedAt}`);
+  runner.log('WEBHOOK', `Spawned run_auto.sh for issueId=${issueId} pid=${child.pid} startedAt=${startedAt}`, { issue: issueId });
 
   let output = '';
 
   child.stdout.on('data', (data) => {
     const str = data.toString();
     output += str;
+    runner.log('RUN', str.trim(), { issue: issueId, trigger: 'webhook' });
     process.stdout.write(`[RUN:${issueId}] ${str}`);
   });
   child.stderr.on('data', (data) => {
     const str = data.toString();
     output += str;
+    runner.log('RUN', `stderr: ${str.trim()}`, { issue: issueId, trigger: 'webhook' });
     process.stderr.write(`[RUN:${issueId}] ${str}`);
   });
 
@@ -104,15 +105,15 @@ function triggerRun(issueId) {
       if (signal) {
         // Child received a signal (e.g. SIGTERM from external kill).
         // This is the CHILD's signal — the parent webhook server is still running.
-        console.log(`[WEBHOOK:CHILD] run_auto.sh for issueId=${issueId} terminated by signal=${signal} pid=${child.pid} startedAt=${startedAt} endedAt=${endedAt}`);
+        runner.log('WEBHOOK', `run_auto.sh for issueId=${issueId} terminated by signal=${signal} pid=${child.pid} startedAt=${startedAt} endedAt=${endedAt}`, { issue: issueId });
       } else {
-        console.log(`[WEBHOOK:CHILD] run_auto.sh for issueId=${issueId} exited code=${code} pid=${child.pid} startedAt=${startedAt} endedAt=${endedAt}`);
+        runner.log('WEBHOOK', `run_auto.sh for issueId=${issueId} exited code=${code} pid=${child.pid} startedAt=${startedAt} endedAt=${endedAt}`, { issue: issueId });
       }
       resolve({ code: code ?? (signal ? 143 : 1), output });
     });
     child.on('error', (err) => {
       const endedAt = new Date().toISOString();
-      console.error(`[WEBHOOK:CHILD] Failed to spawn run_auto.sh for issueId=${issueId} error=${err.message} startedAt=${startedAt} endedAt=${endedAt}`);
+      runner.log('WEBHOOK', `Failed to spawn run_auto.sh for issueId=${issueId} error=${err.message} startedAt=${startedAt} endedAt=${endedAt}`, { issue: issueId });
       resolve({ code: 1, output: err.message });
     });
   });
@@ -131,17 +132,17 @@ app.post('/webhooks/linear', (req, res) => {
   }
 
   if (!verifyLinearSignature(req)) {
-    console.warn('[WEBHOOK] Signature verification failed');
+    runner.log('WEBHOOK', 'Signature verification failed');
     return res.status(401).json({ error: 'Invalid signature' });
   }
 
-  console.log(`[WEBHOOK] Received event type=${body.type || 'unknown'} action=${body.action || 'unknown'} at ${new Date().toISOString()}`);
+  runner.log('WEBHOOK', `Received event type=${body.type || 'unknown'} action=${body.action || 'unknown'} at ${new Date().toISOString()}`);
 
   if (body.type !== "Issue") {
     return res.status(200).json({ status: "ignored", reason: "not an issue event" });
   }
 
-  console.log(`[WEBHOOK] Issue event: id=${body.data?.identifier || body.data?.id || 'unknown'} title="${body.data?.title || ''}" state=${body.data?.state?.name || ''} labels=${(body.data?.labels || []).map(l => l.name).join(',')}`);
+  runner.log('WEBHOOK', `Issue event: id=${body.data?.identifier || body.data?.id || 'unknown'} title="${body.data?.title || ''}" state=${body.data?.state?.name || ''} labels=${(body.data?.labels || []).map(l => l.name).join(',')}`);
 
   if (!["create", "update"].includes(body.action)) {
     return res.status(200).json({ status: "ignored", reason: "unhandled action" });
@@ -152,52 +153,95 @@ app.post('/webhooks/linear', (req, res) => {
     return res.status(200).json({ status: "ignored", reason: "no issue id" });
   }
 
-  if (runningIssues.has(issueId) || pendingRetryIssues.has(issueId)) {
-    return res.status(200).json({ status: "ignored", reason: `already processing or pending retry for ${issueId}` });
+  // 既に処理中またはキュー内にある場合はスキップ
+  if (runner.isQueued(issueId)) {
+    return res.status(200).json({ status: "ignored", reason: `already queued: ${issueId}` });
   }
 
-  runningIssues.add(issueId);
   res.status(200).json({ status: "accepted", issueId: issueId });
 
   setImmediate(async () => {
     try {
-      const { code, output } = await triggerRun(issueId);
-      if (code === 0) {
-        console.log(`[WEBHOOK] Processing completed for issueId=${issueId} exit=0`);
-        runningIssues.delete(issueId);
-      } else {
-        const resetEpoch = parseUsageLimitResetEpoch(output);
-        if (resetEpoch !== null) {
-          console.log(`[WEBHOOK] Usage limit detected for issueId=${issueId}. Reset+buffer at ${new Date(resetEpoch * 1000).toISOString()}`);
-          pendingRetryIssues.add(issueId);
-          runningIssues.delete(issueId);
-          const delayMs = Math.max(0, resetEpoch * 1000 - Date.now());
-          console.log(`[WEBHOOK] Retry scheduled for issueId=${issueId} in ${delayMs}ms`);
-          setTimeout(async () => {
-            console.log(`[WEBHOOK] Retry starting for issueId=${issueId}`);
-            pendingRetryIssues.delete(issueId);
-            runningIssues.add(issueId);
-            try {
-              const { code: retryCode } = await triggerRun(issueId);
-              if (retryCode === 0) {
-                console.log(`[WEBHOOK] Retry completed successfully for issueId=${issueId}`);
-              } else {
-                console.log(`[WEBHOOK] Retry failed for issueId=${issueId} exit=${retryCode}`);
-              }
-            } catch (retryErr) {
-              console.error(`[WEBHOOK] Retry error for issueId=${issueId}: ${retryErr.message}`);
-            } finally {
-              runningIssues.delete(issueId);
-            }
-          }, delayMs);
+      // Linear 全体チェック: Todo/In Progress Issue がなければ起動しない
+      let hasPending = true;
+      try {
+        hasPending = await runner.hasPendingIssues();
+      } catch (e) {
+        runner.log('WEBHOOK', `hasPendingIssues error (fail-open): ${e.message}`, { issue: issueId });
+      }
+      if (!hasPending) {
+        runner.log('WEBHOOK', 'no pending issues in Linear, skipping run', { issue: issueId });
+        return;
+      }
+
+      // キューに追加
+      runner.enqueue(issueId, 'webhook');
+
+      // キューから取り出して実行
+      const item = runner.dequeue();
+      if (!item) return;
+      const queuedIssueId = item.issueId;
+
+      // ロック取得
+      const locked = runner.acquireLock({ trigger: 'webhook', issue: queuedIssueId });
+      if (!locked) {
+        runner.log('WEBHOOK', 'SKIPPED_LOCKED — re-enqueuing', { issue: queuedIssueId });
+        runner.enqueue(queuedIssueId, 'webhook');
+        return;
+      }
+
+      try {
+        runner.log('RUN', 'start', { trigger: 'webhook', issue: queuedIssueId });
+        const { code, output } = await triggerRun(queuedIssueId);
+
+        if (code === 0) {
+          runner.log('RUN', 'completed successfully', { trigger: 'webhook', issue: queuedIssueId });
+          await runner.removeUsageLimitLabel(queuedIssueId).catch(() => {});
+        } else if (code === runner.SKIPPED_LOCKED) {
+          runner.log('WEBHOOK', 'SKIPPED_LOCKED received from run_auto.sh', { issue: queuedIssueId });
+          runner.enqueue(queuedIssueId, 'webhook');
         } else {
-          console.log(`[WEBHOOK] Run failed for issueId=${issueId} exit=${code}. No usage limit detected, not retrying.`);
-          runningIssues.delete(issueId);
+          const resetEpoch = parseUsageLimitResetEpoch(output);
+          if (resetEpoch !== null) {
+            runner.log('RUN', 'usage limit detected', { trigger: 'webhook', issue: queuedIssueId });
+            await runner.postUsageLimitComment(queuedIssueId, resetEpoch).catch(() => {});
+            await runner.addUsageLimitLabel(queuedIssueId).catch(() => {});
+            const retryAt = new Date(resetEpoch * 1000).toISOString();
+            runner.enqueue(queuedIssueId, 'webhook', retryAt);
+            runner.log('RETRY', 'scheduled', { trigger: 'webhook', issue: queuedIssueId, retryAt });
+
+            // 後方互換: setTimeout でも retry をトリガー
+            const delayMs = Math.max(0, resetEpoch * 1000 - Date.now());
+            setTimeout(async () => {
+              runner.log('RETRY', 'firing', { trigger: 'webhook', issue: queuedIssueId });
+              const retryItem = runner.dequeue();
+              if (!retryItem) return;
+              const retryLocked = runner.acquireLock({ trigger: 'retry', issue: retryItem.issueId });
+              if (!retryLocked) {
+                runner.enqueue(retryItem.issueId, 'retry');
+                return;
+              }
+              try {
+                const { code: retryCode } = await triggerRun(retryItem.issueId);
+                if (retryCode === 0) {
+                  runner.log('RETRY', 'completed successfully', { issue: retryItem.issueId });
+                  await runner.removeUsageLimitLabel(retryItem.issueId).catch(() => {});
+                } else {
+                  runner.log('RETRY', `failed exit=${retryCode}`, { issue: retryItem.issueId });
+                }
+              } finally {
+                runner.releaseLock();
+              }
+            }, delayMs);
+          } else {
+            runner.log('RUN', `failed exit=${code}`, { trigger: 'webhook', issue: queuedIssueId });
+          }
         }
+      } finally {
+        runner.releaseLock();
       }
     } catch (err) {
-      runningIssues.delete(issueId);
-      console.error(`[WEBHOOK] Processing error for issueId=${issueId}: ${err.message}`);
+      runner.log('WEBHOOK', `processing error: ${err.message}`, { issue: issueId });
     }
   });
 });
@@ -209,3 +253,4 @@ if (require.main === module) {
 }
 
 module.exports = app;
+

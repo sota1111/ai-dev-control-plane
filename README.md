@@ -117,6 +117,74 @@ Mode: Linear polling (CHECK_INTERVAL=60s)
 bash scripts/ai/scheduler.sh stop
 ```
 
+## Webhook サーバー
+
+`npm run start:webhook` で webhook サーバーを起動する。
+
+Linear Webhook の Issue create / update イベントを受信し、`scripts/ai/run_auto.sh` を起動する。
+
+```bash
+npm run start:webhook
+```
+
+## 共通ログ
+
+scheduler と webhook の両方が `docs/ai/auto_logs/auto_runner.log` へログを書き込む。
+
+```
+docs/ai/auto_logs/
+  auto_runner.log   # 共通ログ（scheduler + webhook + run_auto.sh 出力）
+  scheduler.log     # scheduler.sh の後方互換ログ（auto_runner.log と同内容）
+  runner.lock       # プロセス間共通ロックファイル
+  runner.queue.json # 保留キューファイル（webhook 側のリトライ管理）
+```
+
+ログ行フォーマット例:
+```
+[2026-06-12 12:00:00] [SCHEDULER] Next check in 60s
+[2026-06-12 12:01:00] [SCHEDULER] LOCK acquired (pid=12345)
+[2026-06-12 12:01:00] [SCHEDULER] --- Run start (active issues found) ---
+[2026-06-12 12:06:00] [SCHEDULER] --- Run completed successfully ---
+[2026-06-12 12:06:00] [SCHEDULER] LOCK released (pid=12345)
+```
+
+## 重複起動防止（scheduler と webhook の共存）
+
+scheduler と webhook は **同一のロックファイル** `docs/ai/auto_logs/runner.lock` を使用する。
+
+- `run_auto.sh` の起動前にロックを取得し、完了後に解放する
+- ロック取得失敗時は `SKIPPED_LOCKED` としてログに出力し、`run_auto.sh` を起動しない
+- SKIPPED_LOCKED は成功扱いしない
+- ロックファイルのプロセスが死んでいる場合、または 30分以上経過した場合は stale lock として自動削除・再取得する
+
+## usage-limit 検知時の挙動
+
+`run_auto.sh` が usage-limit で失敗した場合:
+1. Linear の対象 Issue にコメントを投稿（次回実行予定時刻 JST 付き）
+2. 対象 Issue に `usage-limit` ラベルを付与（既存ラベルは保持）
+3. リセット時刻 +10分後に retry を予約
+4. retry 実行後、成功した場合は `usage-limit` ラベルを除去
+
+## retry 予約と実行の仕様
+
+- webhook 経由の retry は `docs/ai/auto_logs/runner.queue.json` で管理される
+- キューは webhook サーバー再起動後も永続化される
+- 同一 Issue の retry が複数回登録されても1件にまとめられる
+- scheduler 側は現状インメモリで retry を管理（将来的に統合予定）
+
+## ロック取得失敗時の扱い
+
+- scheduler: `SKIPPED_LOCKED` としてログに出力し、次の CHECK_INTERVAL 待機後に再試行する
+- webhook: `SKIPPED_LOCKED` としてログに出力し、キューに入れて後続で再実行する
+- どちらも `run_auto.sh` が処理を完了していない場合に "completed successfully" を出力しない
+
+## pending queue の扱い（webhook）
+
+- `enqueue(issueId, trigger, retryAt)` でキューに追加（重複排除）
+- `retryAt` が null の場合は即座に実行可能
+- `retryAt` が将来時刻の場合はその時刻以降に実行
+- ロック取得失敗時にキューに戻し、後続処理で実行
+
 ## 環境変数リファレンス
 
 | 変数                | 必須     | デフォルト | 説明                                                              |
