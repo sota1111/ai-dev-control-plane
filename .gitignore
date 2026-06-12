@@ -1,5 +1,8 @@
 .devcontainer/devcontainer-lock.json
 
+# Node.js
+node_modules/
+
 # 環境変数（シークレットを含むため追跡しない）
 .env
 .env.local
