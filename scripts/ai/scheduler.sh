@@ -44,6 +44,19 @@ LINEAR_API_URL="https://api.linear.app/graphql"
 
 mkdir -p "$LOG_DIR"
 
+WEBHOOK_MODE=${WEBHOOK_MODE:-false}
+
+# --- webhook モード ---
+# WEBHOOK_MODE=true の場合、ポーリングループを完全にスキップして終了する。
+# Webhook サーバー（src/webhook-server.js）が起動時のトリガーを担う。
+if [[ "${1:-}" != "stop" ]] && [[ "${1:-}" != "status" ]] && \
+   [[ "${1:-}" != "--watch" ]] && [[ "${1:-}" != "--foreground" ]] && \
+   [[ "$WEBHOOK_MODE" == "true" ]]; then
+  echo "WEBHOOK_MODE=true: ポーリングスケジューラーは無効化されています。"
+  echo "Webhook サーバーを起動してください: npm run start:webhook"
+  exit 0
+fi
+
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$SCHEDULER_LOG"
 }
@@ -421,6 +434,12 @@ fi
 # --- foreground loop (PIDファイルはここで書く) ---
 if [[ "${1:-}" == "--foreground" ]]; then
   echo $$ > "$PID_FILE"
+
+  if [[ "$WEBHOOK_MODE" == "true" ]]; then
+    log "WEBHOOK_MODE=true: polling disabled. Scheduler exiting."
+    rm -f "$PID_FILE"
+    exit 0
+  fi
 
   _SLEEP_PID=""
   _RUN_PID=""
