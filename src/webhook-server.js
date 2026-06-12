@@ -192,7 +192,6 @@ app.post('/webhooks/linear', (req, res) => {
 
       try {
         runner.log('RUN', 'start', { trigger: 'webhook', issue: queuedIssueId });
-        await runner.setIssueInProgress(queuedIssueId);
         const { code, output } = await triggerRun(queuedIssueId);
 
         if (code === 0) {
@@ -205,8 +204,7 @@ app.post('/webhooks/linear', (req, res) => {
           const resetEpoch = parseUsageLimitResetEpoch(output);
           if (resetEpoch !== null) {
             runner.log('RUN', 'usage limit detected', { trigger: 'webhook', issue: queuedIssueId });
-            await runner.postUsageLimitComment(queuedIssueId, resetEpoch).catch(() => {});
-            await runner.addUsageLimitLabel(queuedIssueId).catch(() => {});
+            await runner.notifyUsageLimitToAllActiveIssues(resetEpoch).catch(() => {});
             const retryAt = new Date(resetEpoch * 1000).toISOString();
             runner.enqueue(queuedIssueId, 'webhook', retryAt);
             runner.log('RETRY', 'scheduled', { trigger: 'webhook', issue: queuedIssueId, retryAt });
