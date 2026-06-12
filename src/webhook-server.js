@@ -5,6 +5,28 @@ const crypto = require('crypto');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { parseUsageLimitResetEpoch } = require('./lib/usageLimitParser');
 
+// Distinguish parent-received signals from child process signals
+process.on('SIGTERM', () => {
+  console.log(`[WEBHOOK:PARENT] Server received SIGTERM at ${new Date().toISOString()} — user-initiated stop, shutting down gracefully`);
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log(`[WEBHOOK:PARENT] Server received SIGINT at ${new Date().toISOString()} — user-initiated stop (Ctrl+C), shutting down gracefully`);
+  process.exit(0);
+});
+
+process.on('uncaughtException', (err) => {
+  // Log but DO NOT exit — keep server alive
+  console.error(`[WEBHOOK:PARENT] uncaughtException at ${new Date().toISOString()}: ${err.message}\n${err.stack}`);
+});
+
+process.on('unhandledRejection', (reason) => {
+  // Log but DO NOT exit — keep server alive
+  const msg = reason instanceof Error ? reason.stack : String(reason);
+  console.error(`[WEBHOOK:PARENT] unhandledRejection at ${new Date().toISOString()}: ${msg}`);
+});
+
 const app = express();
 app.use(express.json({
   verify: (req, res, buf) => {
@@ -49,13 +71,19 @@ function triggerRun(issueId) {
   // SECURITY: Pass issueId only via environment variable, never as shell argument
   const env = { ...process.env, WEBHOOK_ISSUE_ID: issueId };
   const projectRoot = path.join(__dirname, '..');
-  
+  const startedAt = new Date().toISOString();
+
+  // detached: true puts child in its own process group (POSIX).
+  // Signals sent to the webhook server's process group do NOT propagate to the child,
+  // and signals sent to the child's process group do NOT propagate to this server.
   const child = spawn('bash', ['scripts/ai/run_auto.sh'], {
     env,
     cwd: projectRoot,
-    detached: false,
+    detached: true,
     stdio: ['ignore', 'pipe', 'pipe']
   });
+
+  console.log(`[WEBHOOK:CHILD] Spawned run_auto.sh for issueId=${issueId} pid=${child.pid} startedAt=${startedAt}`);
 
   let output = '';
 
@@ -71,9 +99,20 @@ function triggerRun(issueId) {
   });
 
   return new Promise((resolve) => {
-    child.on('close', (code) => resolve({ code: code ?? 0, output }));
+    child.on('close', (code, signal) => {
+      const endedAt = new Date().toISOString();
+      if (signal) {
+        // Child received a signal (e.g. SIGTERM from external kill).
+        // This is the CHILD's signal — the parent webhook server is still running.
+        console.log(`[WEBHOOK:CHILD] run_auto.sh for issueId=${issueId} terminated by signal=${signal} pid=${child.pid} startedAt=${startedAt} endedAt=${endedAt}`);
+      } else {
+        console.log(`[WEBHOOK:CHILD] run_auto.sh for issueId=${issueId} exited code=${code} pid=${child.pid} startedAt=${startedAt} endedAt=${endedAt}`);
+      }
+      resolve({ code: code ?? (signal ? 143 : 1), output });
+    });
     child.on('error', (err) => {
-      console.error(`[WEBHOOK] Failed to spawn run_auto.sh for ${issueId}: ${err.message}`);
+      const endedAt = new Date().toISOString();
+      console.error(`[WEBHOOK:CHILD] Failed to spawn run_auto.sh for issueId=${issueId} error=${err.message} startedAt=${startedAt} endedAt=${endedAt}`);
       resolve({ code: 1, output: err.message });
     });
   });
