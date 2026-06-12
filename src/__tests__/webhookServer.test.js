@@ -1,5 +1,26 @@
 const request = require('supertest');
 
+jest.mock('../runner', () => ({
+  SKIPPED_LOCKED: 75,
+  log: jest.fn(),
+  acquireLock: jest.fn().mockReturnValue(true),
+  releaseLock: jest.fn(),
+  hasPendingIssues: jest.fn().mockResolvedValue(true),
+  postUsageLimitComment: jest.fn().mockResolvedValue(undefined),
+  addUsageLimitLabel: jest.fn().mockResolvedValue(undefined),
+  removeUsageLimitLabel: jest.fn().mockResolvedValue(undefined),
+  enqueue: jest.fn(),
+  dequeue: jest.fn().mockReturnValue(null),
+  removeFromQueue: jest.fn(),
+  isQueued: jest.fn().mockReturnValue(false),
+  LOG_DIR: '/tmp/test-logs',
+  LOCK_FILE: '/tmp/test-logs/runner.lock',
+  QUEUE_FILE: '/tmp/test-logs/runner.queue.json',
+  LOG_FILE: '/tmp/test-logs/auto_runner.log',
+  STALE_LOCK_MS: 30 * 60 * 1000,
+  LINEAR_API_URL: 'https://api.linear.app/graphql',
+}));
+
 // Mock child_process BEFORE requiring the server
 jest.mock('child_process', () => ({
   spawn: jest.fn()
@@ -33,6 +54,7 @@ describe('webhook usage limit retry', () => {
   const originalSetTimeout = global.setTimeout;
 
   beforeEach(() => {
+    jest.clearAllMocks();
     spawn.mockReset();
     // Default mock behavior: successful run
     spawn.mockImplementation(() => mockSpawnChild({ exitCode: 0 }));
@@ -42,7 +64,14 @@ describe('webhook usage limit retry', () => {
       if (ms <= 100) return originalSetTimeout(fn, ms); // allow mockSpawnChild and small waits
       return { unref: () => {} }; // block retry timeout
     });
+
+    const runner = require('../runner');
+    runner.acquireLock.mockReturnValue(true);
+    runner.hasPendingIssues.mockResolvedValue(true);
+    runner.isQueued.mockReturnValue(false);
+    runner.dequeue.mockReturnValue(null);
   });
+
 
   afterEach(() => {
     jest.restoreAllMocks();
@@ -61,6 +90,11 @@ describe('webhook usage limit retry', () => {
 
   test('schedules retry when run_auto.sh outputs usage limit message', async () => {
     const id = 'TEST-RETRY';
+    const runner = require('../runner');
+    
+    // dequeue が一度だけ this issue を返す
+    runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
+    
     spawn.mockImplementationOnce(() => mockSpawnChild({
       stdout: "You've hit your session limit · resets 3:30pm (UTC)",
       exitCode: 1
@@ -72,18 +106,20 @@ describe('webhook usage limit retry', () => {
     // Wait for the async triggerRun block to complete its first run
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
-    // Check that setTimeout was called with a large delay (the retry)
-    const retryCall = setTimeout.mock.calls.find(call => call[1] > 1000);
-    expect(retryCall).toBeDefined();
+    // runner.enqueue が retryAt 付きで呼ばれたことを確認
+    expect(runner.enqueue).toHaveBeenCalledWith(id, 'webhook', expect.any(String));
 
-    // pendingRetryIssues should contain TEST-RETRY
+    // 同じ issueId が再度 webhook で来た場合、isQueued=true で ignored
+    runner.isQueued.mockReturnValue(true);
     const res2 = await request(app).post('/webhooks/linear').send(issuePayload(id));
     expect(res2.body.status).toBe('ignored');
-    expect(res2.body.reason).toMatch(/already processing or pending retry/);
   });
 
   test('does not retry when run_auto.sh fails without usage limit message', async () => {
     const id = 'TEST-NO-RETRY';
+    const runner = require('../runner');
+    runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
+    
     spawn.mockImplementationOnce(() => mockSpawnChild({
       stdout: 'some random error',
       exitCode: 1
@@ -97,7 +133,13 @@ describe('webhook usage limit retry', () => {
     const retryCall = setTimeout.mock.calls.find(call => call[1] > 1000);
     expect(retryCall).toBeUndefined();
 
+    // runner.enqueue should NOT have been called with a retryAt
+    const enqueueCallsWithRetryAt = runner.enqueue.mock.calls.filter(call => call[2] != null);
+    expect(enqueueCallsWithRetryAt).toHaveLength(0);
+
     // Should be able to re-submit (not in pending)
+    runner.isQueued.mockReturnValue(false);
+    runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
     spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
     const res2 = await request(app).post('/webhooks/linear').send(issuePayload(id));
     expect(res2.body.status).toBe('accepted');
@@ -105,6 +147,9 @@ describe('webhook usage limit retry', () => {
 
   test('does not affect normal successful runs', async () => {
     const id = 'TEST-SUCCESS';
+    const runner = require('../runner');
+    runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
+    
     spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
     
     await request(app).post('/webhooks/linear').send(issuePayload(id));
@@ -114,9 +159,15 @@ describe('webhook usage limit retry', () => {
     const retryCall = setTimeout.mock.calls.find(call => call[1] > 1000);
     expect(retryCall).toBeUndefined();
 
+    // After success, removeUsageLimitLabel should be called
+    expect(runner.removeUsageLimitLabel).toHaveBeenCalledWith(id);
+
     // After success, issue removed from runningIssues → second webhook accepted
+    runner.isQueued.mockReturnValue(false);
+    runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
     spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
     const res2 = await request(app).post('/webhooks/linear').send(issuePayload(id));
     expect(res2.body.status).toBe('accepted');
   });
 });
+

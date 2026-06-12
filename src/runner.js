@@ -302,6 +302,11 @@ function removeFromQueue(issueId) {
   }
 }
 
+function isQueued(issueId) {
+  const queue = loadQueue();
+  return queue.some(item => item.issueId === issueId);
+}
+
 module.exports = {
   SKIPPED_LOCKED,
   LOG_DIR,
@@ -321,5 +326,6 @@ module.exports = {
   saveQueue,
   enqueue,
   dequeue,
-  removeFromQueue
+  removeFromQueue,
+  isQueued
 };
