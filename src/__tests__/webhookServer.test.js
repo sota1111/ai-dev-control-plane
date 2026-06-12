@@ -15,6 +15,7 @@ jest.mock('../runner', () => ({
   dequeue: jest.fn().mockReturnValue(null),
   removeFromQueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
+  isLocked: jest.fn().mockReturnValue(false),
   LOG_DIR: '/tmp/test-logs',
   LOCK_FILE: '/tmp/test-logs/runner.lock',
   QUEUE_FILE: '/tmp/test-logs/runner.queue.json',
@@ -183,5 +184,48 @@ describe('webhook usage limit retry', () => {
     spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
     const res2 = await request(app).post('/webhooks/linear').send(issuePayload(id));
     expect(res2.body.status).toBe('accepted');
+  });
+
+  test('skips non-Urgent issue when a run is locked', async () => {
+    const runner = require('../runner');
+    runner.isLocked.mockReturnValue(true); // simulate active run
+    runner.isQueued.mockReturnValue(false);
+
+    const nonUrgentPayload = {
+      type: 'Issue',
+      action: 'update',
+      data: { identifier: 'TEST-NON-URGENT', title: 'test', state: { name: 'Todo' }, labels: [], priority: 2 }
+    };
+
+    const res = await request(app).post('/webhooks/linear').send(nonUrgentPayload);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('accepted'); // HTTP response is still accepted
+
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
+
+    // Should not enqueue non-Urgent issue when locked
+    expect(runner.enqueue).not.toHaveBeenCalled();
+  });
+
+  test('does not skip Urgent issue even when a run is locked', async () => {
+    const runner = require('../runner');
+    runner.isLocked.mockReturnValue(true); // simulate active run
+    runner.isQueued.mockReturnValue(false);
+    runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-URGENT', trigger: 'webhook', retryAt: null });
+    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
+
+    const urgentPayload = {
+      type: 'Issue',
+      action: 'update',
+      data: { identifier: 'TEST-URGENT', title: 'urgent task', state: { name: 'Todo' }, labels: [], priority: 1 }
+    };
+
+    const res = await request(app).post('/webhooks/linear').send(urgentPayload);
+    expect(res.status).toBe(200);
+
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
+
+    // Urgent issue should be enqueued even when locked
+    expect(runner.enqueue).toHaveBeenCalledWith('TEST-URGENT', 'webhook');
   });
 });

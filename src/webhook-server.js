@@ -162,6 +162,14 @@ app.post('/webhooks/linear', (req, res) => {
 
   setImmediate(async () => {
     try {
+      // 作業優先度チェック: 作業中(locked)かつ non-Urgent の場合はスキップ
+      const issuePriority = body.data?.priority ?? 0;
+      const isUrgent = issuePriority === 1;
+      if (!isUrgent && runner.isLocked()) {
+        runner.log('WEBHOOK', `non-Urgent issue (priority=${issuePriority}) skipped while locked`, { issue: issueId });
+        return;
+      }
+
       // Linear 全体チェック: Todo/In Progress Issue がなければ起動しない
       let hasPending = true;
       try {
