@@ -89,6 +89,27 @@ function releaseLock() {
   }
 }
 
+function isLocked() {
+  try {
+    if (!fs.existsSync(LOCK_FILE)) return false;
+    const content = fs.readFileSync(LOCK_FILE, 'utf8');
+    const parts = content.split(':');
+    const pid = parseInt(parts[0], 10);
+    const timestamp = new Date(parts.slice(1).join(':'));
+    if (isNaN(pid)) return false;
+    const isStale = (Date.now() - timestamp.getTime()) > STALE_LOCK_MS;
+    if (isStale) return false;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (e) {
+      return e.code !== 'ESRCH';
+    }
+  } catch (err) {
+    return false;
+  }
+}
+
 async function linearQuery(query, variables = {}) {
   const apiKey = process.env.LINEAR_API_KEY;
   if (!apiKey) throw new Error('LINEAR_API_KEY not set');
@@ -400,5 +421,6 @@ module.exports = {
   dequeue,
   removeFromQueue,
   isQueued,
+  isLocked,
   setIssueInProgress
 };
