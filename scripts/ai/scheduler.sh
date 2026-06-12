@@ -37,7 +37,11 @@ fi
 INTERVAL=${INTERVAL:-3600}
 CHECK_INTERVAL=${CHECK_INTERVAL:-60}
 LOG_DIR="docs/ai/auto_logs"
+AUTO_RUNNER_LOG="${LOG_DIR}/auto_runner.log"
 SCHEDULER_LOG="${LOG_DIR}/scheduler.log"
+LOCK_FILE="${LOG_DIR}/runner.lock"
+STALE_LOCK_SECONDS=1800  # 30 minutes (matches runner.js STALE_LOCK_MS)
+SKIPPED_LOCKED=75
 PID_FILE="/tmp/l-concierge-scheduler.pid"
 LINEAR_STATE_FILE="${LOG_DIR}/linear_state.txt"
 LINEAR_API_URL="https://api.linear.app/graphql"
@@ -58,7 +62,67 @@ if [[ "${1:-}" != "stop" ]] && [[ "${1:-}" != "status" ]] && \
 fi
 
 log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$SCHEDULER_LOG"
+  local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [SCHEDULER] $*"
+  echo "$msg" >> "$AUTO_RUNNER_LOG"
+  echo "$msg" >> "$SCHEDULER_LOG"
+}
+
+# 共通ロック取得: 成功=0, 失敗=1
+_acquire_lock() {
+  mkdir -p "$LOG_DIR"
+
+  if [ ! -f "$LOCK_FILE" ]; then
+    echo "$$:$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$LOCK_FILE"
+    log "LOCK acquired (pid=$$)"
+    return 0
+  fi
+
+  local content pid timestamp_str
+  content=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
+  pid=$(echo "$content" | cut -d: -f1)
+  timestamp_str=$(echo "$content" | cut -d: -f2-)
+
+  local is_dead=false
+  if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+    is_dead=true
+  fi
+
+  local is_stale=false
+  if [ -n "$timestamp_str" ]; then
+    local lock_epoch now_epoch age
+    lock_epoch=$(date -u -d "$timestamp_str" +%s 2>/dev/null || echo 0)
+    now_epoch=$(date -u +%s)
+    age=$((now_epoch - lock_epoch))
+    if [ "$age" -gt "$STALE_LOCK_SECONDS" ]; then
+      is_stale=true
+    fi
+  fi
+
+  if [ "$is_dead" = "true" ] || [ "$is_stale" = "true" ]; then
+    local reason="stale"
+    [ "$is_dead" = "true" ] && reason="dead process (pid=${pid})"
+    log "LOCK removing ${reason} lock"
+    rm -f "$LOCK_FILE"
+    echo "$$:$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$LOCK_FILE"
+    log "LOCK acquired after ${reason} removal (pid=$$)"
+    return 0
+  fi
+
+  log "SKIPPED_LOCKED: lock held by pid=${pid}"
+  return 1
+}
+
+# 共通ロック解放
+_release_lock() {
+  if [ -f "$LOCK_FILE" ]; then
+    local content pid
+    content=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
+    pid=$(echo "$content" | cut -d: -f1)
+    if [ "$pid" = "$$" ]; then
+      rm -f "$LOCK_FILE"
+      log "LOCK released (pid=$$)"
+    fi
+  fi
 }
 
 # Linear に Todo / In Progress の Issue が1件でも存在すれば 0、なければ 1 を返す。
@@ -449,6 +513,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
     if [[ -n "$_RUN_PID" ]]; then
       log "Scheduler stopping — waiting for current run to complete (PID: ${_RUN_PID})..."
       wait "$_RUN_PID" 2>/dev/null || true
+      _release_lock
     fi
     rm -f "$PID_FILE"
     log "Scheduler stopped"
@@ -478,13 +543,21 @@ if [[ "${1:-}" == "--foreground" ]]; then
 
       if [ "$update_status" -eq 0 ]; then
         log "--- Run start (active issues found) ---"
+        if ! _acquire_lock; then
+          log "SKIPPED_LOCKED: run_auto.sh skipped (lock not available)"
+          continue
+        fi
         _tmp_log=$(mktemp)
         bash scripts/ai/run_auto.sh > "$_tmp_log" 2>&1 &
         _RUN_PID=$!
         wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
         _RUN_PID=""
+        cat "$_tmp_log" >> "$AUTO_RUNNER_LOG"
         cat "$_tmp_log" >> "$SCHEDULER_LOG"
-        if [ "$_run_exit" -eq 0 ]; then
+        _release_lock
+        if [ "$_run_exit" -eq "$SKIPPED_LOCKED" ]; then
+          log "--- Run SKIPPED_LOCKED (lock not available) ---"
+        elif [ "$_run_exit" -eq 0 ]; then
           log "--- Run completed successfully ---"
           _remove_usage_limit_label
         else
@@ -505,18 +578,27 @@ if [[ "${1:-}" == "--foreground" ]]; then
               wait "$_SLEEP_PID" 2>/dev/null || true
             done
             log "--- Run start (session limit reset, forced) ---"
-            _tmp_log2=$(mktemp)
-            bash scripts/ai/run_auto.sh > "$_tmp_log2" 2>&1 &
-            _RUN_PID=$!
-            wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
-            _RUN_PID=""
-            cat "$_tmp_log2" >> "$SCHEDULER_LOG"
-            rm -f "$_tmp_log2"
-            if [ "$_run_exit" -eq 0 ]; then
-              log "--- Run completed successfully ---"
-              _remove_usage_limit_label
+            # forced run also needs lock
+            if ! _acquire_lock; then
+              log "SKIPPED_LOCKED: run_auto.sh skipped (lock not available)"
             else
-              log "--- Run failed (exit: ${_run_exit}) ---"
+              _tmp_log2=$(mktemp)
+              bash scripts/ai/run_auto.sh > "$_tmp_log2" 2>&1 &
+              _RUN_PID=$!
+              wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
+              _RUN_PID=""
+              cat "$_tmp_log2" >> "$AUTO_RUNNER_LOG"
+              cat "$_tmp_log2" >> "$SCHEDULER_LOG"
+              rm -f "$_tmp_log2"
+              _release_lock
+              if [ "$_run_exit" -eq "$SKIPPED_LOCKED" ]; then
+                log "--- Run SKIPPED_LOCKED (lock not available) ---"
+              elif [ "$_run_exit" -eq 0 ]; then
+                log "--- Run completed successfully ---"
+                _remove_usage_limit_label
+              else
+                log "--- Run failed (exit: ${_run_exit}) ---"
+              fi
             fi
           fi
         fi
@@ -535,13 +617,21 @@ if [[ "${1:-}" == "--foreground" ]]; then
       wait "$_SLEEP_PID" 2>/dev/null || true
 
       log "--- Run start (fixed interval) ---"
+      if ! _acquire_lock; then
+        log "SKIPPED_LOCKED: run_auto.sh skipped (lock not available)"
+        continue
+      fi
       _tmp_log=$(mktemp)
       bash scripts/ai/run_auto.sh > "$_tmp_log" 2>&1 &
       _RUN_PID=$!
       wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
       _RUN_PID=""
+      cat "$_tmp_log" >> "$AUTO_RUNNER_LOG"
       cat "$_tmp_log" >> "$SCHEDULER_LOG"
-      if [ "$_run_exit" -eq 0 ]; then
+      _release_lock
+      if [ "$_run_exit" -eq "$SKIPPED_LOCKED" ]; then
+        log "--- Run SKIPPED_LOCKED (lock not available) ---"
+      elif [ "$_run_exit" -eq 0 ]; then
         log "--- Run completed successfully ---"
         _remove_usage_limit_label
       else
@@ -562,18 +652,27 @@ if [[ "${1:-}" == "--foreground" ]]; then
             wait "$_SLEEP_PID" 2>/dev/null || true
           done
           log "--- Run start (session limit reset, forced) ---"
-          _tmp_log2=$(mktemp)
-          bash scripts/ai/run_auto.sh > "$_tmp_log2" 2>&1 &
-          _RUN_PID=$!
-          wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
-          _RUN_PID=""
-          cat "$_tmp_log2" >> "$SCHEDULER_LOG"
-          rm -f "$_tmp_log2"
-          if [ "$_run_exit" -eq 0 ]; then
-            log "--- Run completed successfully ---"
-            _remove_usage_limit_label
+          # forced run also needs lock
+          if ! _acquire_lock; then
+            log "SKIPPED_LOCKED: run_auto.sh skipped (lock not available)"
           else
-            log "--- Run failed (exit: ${_run_exit}) ---"
+            _tmp_log2=$(mktemp)
+            bash scripts/ai/run_auto.sh > "$_tmp_log2" 2>&1 &
+            _RUN_PID=$!
+            wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
+            _RUN_PID=""
+            cat "$_tmp_log2" >> "$AUTO_RUNNER_LOG"
+            cat "$_tmp_log2" >> "$SCHEDULER_LOG"
+            rm -f "$_tmp_log2"
+            _release_lock
+            if [ "$_run_exit" -eq "$SKIPPED_LOCKED" ]; then
+              log "--- Run SKIPPED_LOCKED (lock not available) ---"
+            elif [ "$_run_exit" -eq 0 ]; then
+              log "--- Run completed successfully ---"
+              _remove_usage_limit_label
+            else
+              log "--- Run failed (exit: ${_run_exit}) ---"
+            fi
           fi
         fi
       fi
