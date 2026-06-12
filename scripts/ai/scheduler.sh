@@ -162,249 +162,6 @@ linear_has_updates() {
   return 1  # no active issues
 }
 
-# セッションリミットのリセット時刻を解析し、リセット+10分後の epoch 秒を返す
-# 引数: run_auto.sh の出力テキスト
-# 例: "You've hit your session limit · resets 3:30pm (UTC)"
-# 例: "You've hit your session limit · resets 6pm (UTC)"
-_parse_session_reset_epoch() {
-  local output="$1"
-  local reset_str
-  reset_str=$(echo "$output" | grep -oiP "(?<=resets )[0-9]+(:[0-9]+)?(am|pm)?(?= \(UTC\))" | head -1) || true
-  [ -z "$reset_str" ] && return 1
-
-  local hour min=0 ampm=''
-  if [[ "$reset_str" =~ ^([0-9]+):([0-9]+)(am|pm)$ ]]; then
-    hour="${BASH_REMATCH[1]}"; min="${BASH_REMATCH[2]}"; ampm="${BASH_REMATCH[3]}"
-  elif [[ "$reset_str" =~ ^([0-9]+):([0-9]+)$ ]]; then
-    hour="${BASH_REMATCH[1]}"; min="${BASH_REMATCH[2]}"
-  elif [[ "$reset_str" =~ ^([0-9]+)(am|pm)$ ]]; then
-    hour="${BASH_REMATCH[1]}"; ampm="${BASH_REMATCH[2]}"
-  elif [[ "$reset_str" =~ ^([0-9]+)$ ]]; then
-    hour="${BASH_REMATCH[1]}"
-  else
-    return 1
-  fi
-
-  if [[ "$ampm" == "pm" ]] && [[ "$hour" -ne 12 ]]; then hour=$((hour + 12)); fi
-  if [[ "$ampm" == "am" ]] && [[ "$hour" -eq 12 ]]; then hour=0; fi
-
-  local reset_epoch
-  reset_epoch=$(date -u -d "today $(printf '%02d:%02d:00' "$hour" "$min") UTC" +%s 2>/dev/null) || return 1
-  local target=$((reset_epoch + 600))   # +10 分
-  local now_epoch; now_epoch=$(date -u +%s)
-  if [[ "$target" -le "$now_epoch" ]]; then target=$((target + 86400)); fi
-  echo "$target"
-}
-
-# AIセッション制限時にLinearへ通知（Codex経由）
-_notify_via_codex() {
-  local next_run_epoch="$1"
-  if [ -z "${LINEAR_API_KEY:-}" ]; then
-    log "Linear API key not set, skipping usage limit notification"
-    return 0
-  fi
-
-  local next_run_jst
-  next_run_jst=$(date -u -d "@$((next_run_epoch + 32400))" '+%Y-%m-%d %H:%M')
-  local comment_body="usage-limit: Next auto run: ${next_run_jst} JST"
-
-  log "Notifying usage limit via Codex: ${comment_body}"
-
-  local prompt
-  prompt="You are a Linear notification agent. Your only task is to post a usage-limit notification to Linear.
-
-Environment: LINEAR_API_KEY is set in the environment.
-Linear GraphQL API endpoint: https://api.linear.app/graphql
-Authorization header: use the value of LINEAR_API_KEY directly (no 'Bearer' prefix needed).
-
-Steps to complete:
-1. Fetch all issues in 'unstarted' or 'started' state (first: 50).
-   Query: { issues(filter: { state: { type: { in: [\"unstarted\",\"started\"] } } }, first: 50) { nodes { id labelIds } } }
-
-2. Ensure the label 'usage-limit' exists. Fetch all labels first:
-   { issueLabels(first: 50) { nodes { id name } } }
-   If not found, get the first team ID and create the label:
-   mutation { issueLabelCreate(input: { name: \"usage-limit\", color: \"#FF6B6B\", teamId: \"<team_id>\" }) { issueLabel { id } } }
-
-3. For each active issue, post the comment:
-   mutation { commentCreate(input: { issueId: \"<id>\", body: \"${comment_body}\" }) { success } }
-
-4. For each active issue, update labels by APPENDING the usage-limit label (do not drop existing labels):
-   mutation { issueUpdate(id: \"<id>\", input: { labelIds: [<existing_label_ids_plus_usage_limit_id>] }) { success } }
-
-Use curl or Python to make the API calls. Complete all steps and exit 0 on success."
-
-  if timeout 120 codex --sandbox danger-full-access exec "${prompt}" >> "$SCHEDULER_LOG" 2>&1; then
-    log "Usage limit notification sent via Codex"
-  else
-    log "Codex notification failed, falling back to direct API"
-    _notify_usage_limit_to_linear "$next_run_epoch"
-  fi
-}
-
-# AIセッション制限時にLinearへ通知（コメント投稿とラベル付与）
-_notify_usage_limit_to_linear() {
-  local next_run_epoch="$1"
-  if [ -z "${LINEAR_API_KEY:-}" ]; then
-    log "Linear API key not set, skipping usage limit notification"
-    return 0
-  fi
-
-  local next_run_jst
-  next_run_jst=$(date -u -d "@$((next_run_epoch + 32400))" '+%Y-%m-%d %H:%M')
-  local comment_body="usage-limit: Next auto run: ${next_run_jst} JST"
-
-  # 1. usage-limit ラベルの ID を取得（なければ作成）
-  local query_labels='{"query":"{ issueLabels(first: 50) { nodes { id name } } }"}'
-  local resp_labels
-  resp_labels=$(curl -sf -X POST \
-    -H "Content-Type: application/json" \
-    -H "Authorization: ${LINEAR_API_KEY}" \
-    --data "$query_labels" \
-    "$LINEAR_API_URL" 2>/dev/null) || true
-  
-  local label_id
-  label_id=$(echo "$resp_labels" | jq -r '.data.issueLabels.nodes[] | select(.name == "usage-limit") | .id' 2>/dev/null | head -1) || true
-
-  if [ -z "$label_id" ] || [ "$label_id" == "null" ]; then
-    log "Label 'usage-limit' not found, creating..."
-    local query_team='{"query":"{ teams(first: 1) { nodes { id } } }"}'
-    local resp_team
-    resp_team=$(curl -sf -X POST \
-      -H "Content-Type: application/json" \
-      -H "Authorization: ${LINEAR_API_KEY}" \
-      --data "$query_team" \
-      "$LINEAR_API_URL" 2>/dev/null) || true
-    local team_id
-    team_id=$(echo "$resp_team" | jq -r '.data.teams.nodes[0].id' 2>/dev/null) || true
-    
-    if [ -n "$team_id" ] && [ "$team_id" != "null" ]; then
-      local mutation_label
-      mutation_label=$(printf '{"query":"mutation { issueLabelCreate(input: { name: \\"usage-limit\\", color: \\"#FF6B6B\\", teamId: \\"%s\\" }) { issueLabel { id } } }"}' "$team_id")
-      local resp_label_create
-      resp_label_create=$(curl -sf -X POST \
-        -H "Content-Type: application/json" \
-        -H "Authorization: ${LINEAR_API_KEY}" \
-        --data "$mutation_label" \
-        "$LINEAR_API_URL" 2>/dev/null) || true
-      label_id=$(echo "$resp_label_create" | jq -r '.data.issueLabelCreate.issueLabel.id' 2>/dev/null) || true
-    fi
-  fi
-
-  # 2. アクティブな Issue を取得して通知
-  local query_issues='{"query":"{ issues(filter: { state: { type: { in: [\"unstarted\",\"started\"] } } }, first: 50) { nodes { id } } }"}'
-  local resp_issues
-  resp_issues=$(curl -sf -X POST \
-    -H "Content-Type: application/json" \
-    -H "Authorization: ${LINEAR_API_KEY}" \
-    --data "$query_issues" \
-    "$LINEAR_API_URL" 2>/dev/null) || true
-  
-  local issue_ids
-  issue_ids=$(echo "$resp_issues" | jq -r '.data.issues.nodes[].id' 2>/dev/null) || true
-
-  for issue_id in $issue_ids; do
-    [ -z "$issue_id" ] || [ "$issue_id" == "null" ] && continue
-    log "Notifying usage limit for issue: ${issue_id}"
-    
-    # a. コメント投稿
-    local mutation_comment
-    mutation_comment=$(printf '{"query":"mutation { commentCreate(input: { issueId: \\"%s\\", body: \\"%s\\" }) { success } }"}' "$issue_id" "$comment_body")
-    curl -sf -X POST \
-      -H "Content-Type: application/json" \
-      -H "Authorization: ${LINEAR_API_KEY}" \
-      --data "$mutation_comment" \
-      "$LINEAR_API_URL" >/dev/null 2>&1 || true
-
-    # b. ラベル付与
-    if [ -n "$label_id" ] && [ "$label_id" != "null" ]; then
-      local mutation_update
-      mutation_update=$(printf '{"query":"mutation { issueUpdate(id: \\"%s\\", input: { labelIds: [\\"%s\\"] }) { success } }"}' "$issue_id" "$label_id")
-      curl -sf -X POST \
-        -H "Content-Type: application/json" \
-        -H "Authorization: ${LINEAR_API_KEY}" \
-        --data "$mutation_update" \
-        "$LINEAR_API_URL" >/dev/null 2>&1 || true
-    fi
-  done
-
-  log "Usage limit notification process completed"
-  return 0
-}
-
-# タスク完了時にLinearのusage-limitラベルを除去する
-_remove_usage_limit_label() {
-  if [ -z "${LINEAR_API_KEY:-}" ]; then
-    log "Linear API key not set, skipping usage-limit label removal"
-    return 0
-  fi
-
-  # 1. usage-limit ラベルの ID を取得
-  local query_labels='{"query":"{ issueLabels(first: 50) { nodes { id name } } }"}'
-  local resp_labels
-  resp_labels=$(curl -sf -X POST \
-    -H "Content-Type: application/json" \
-    -H "Authorization: ${LINEAR_API_KEY}" \
-    --data "$query_labels" \
-    "$LINEAR_API_URL" 2>/dev/null) || true
-
-  local label_id
-  label_id=$(echo "$resp_labels" | jq -r '.data.issueLabels.nodes[] | select(.name == "usage-limit") | .id' 2>/dev/null | head -1) || true
-
-  if [ -z "$label_id" ] || [ "$label_id" == "null" ]; then
-    log "Label 'usage-limit' not found, nothing to remove"
-    return 0
-  fi
-
-  # 2. usage-limit ラベルを持つ Issue を取得
-  local query_issues
-  query_issues=$(printf '{"query":"{ issues(filter: { labels: { id: { eq: \"%s\" } } }, first: 50) { nodes { id labelIds } } }"}' "$label_id")
-  local resp_issues
-  resp_issues=$(curl -sf -X POST \
-    -H "Content-Type: application/json" \
-    -H "Authorization: ${LINEAR_API_KEY}" \
-    --data "$query_issues" \
-    "$LINEAR_API_URL" 2>/dev/null) || true
-
-  local issue_count
-  issue_count=$(echo "$resp_issues" | jq '.data.issues.nodes | length' 2>/dev/null) || true
-
-  if [ -z "$issue_count" ] || [ "$issue_count" -eq 0 ]; then
-    log "No issues with 'usage-limit' label found"
-    return 0
-  fi
-
-  log "Removing 'usage-limit' label from ${issue_count} issue(s)..."
-
-  # 3. 各 Issue からusage-limitラベルを除去（他のラベルは保持）
-  local issues_json
-  issues_json=$(echo "$resp_issues" | jq -c '.data.issues.nodes[]' 2>/dev/null) || true
-
-  while IFS= read -r issue_json; do
-    local issue_id
-    issue_id=$(echo "$issue_json" | jq -r '.id' 2>/dev/null) || true
-    [ -z "$issue_id" ] || [ "$issue_id" == "null" ] && continue
-
-    # 既存ラベルIDからusage-limitを除いたリストを作る
-    local new_label_ids
-    new_label_ids=$(echo "$issue_json" | jq -r --arg lid "$label_id" '[.labelIds[] | select(. != $lid)] | @json' 2>/dev/null) || true
-    [ -z "$new_label_ids" ] && new_label_ids='[]'
-
-    local mutation_update
-    mutation_update=$(printf '{"query":"mutation { issueUpdate(id: \\"%s\\", input: { labelIds: %s }) { success } }"}' "$issue_id" "$new_label_ids")
-    curl -sf -X POST \
-      -H "Content-Type: application/json" \
-      -H "Authorization: ${LINEAR_API_KEY}" \
-      --data "$mutation_update" \
-      "$LINEAR_API_URL" >/dev/null 2>&1 || true
-
-    log "Removed 'usage-limit' label from issue: ${issue_id}"
-  done <<< "$issues_json"
-
-  log "Usage-limit label removal completed"
-  return 0
-}
-
 # --- stop ---
 if [[ "${1:-}" == "stop" ]]; then
   if [ -f "$PID_FILE" ]; then
@@ -559,15 +316,15 @@ if [[ "${1:-}" == "--foreground" ]]; then
           log "--- Run SKIPPED_LOCKED (lock not available) ---"
         elif [ "$_run_exit" -eq 0 ]; then
           log "--- Run completed successfully ---"
-          _remove_usage_limit_label
+          node src/runner-cli.js remove-usage-limit-label >> "$AUTO_RUNNER_LOG" 2>&1 || true
         else
           log "--- Run failed (exit: ${_run_exit}) ---"
-          _session_wait=$(_parse_session_reset_epoch "$(cat "$_tmp_log")") || _session_wait=""
+          _session_wait=$(node src/runner-cli.js parse-usage-limit-epoch < "$_tmp_log" 2>/dev/null) || _session_wait=""
           if [ -n "$_session_wait" ]; then
             _reset_disp=$(date -u -d "@$((_session_wait - 600))" '+%H:%M UTC')
             _wait_min=$(( (_session_wait - $(date -u +%s) + 59) / 60 ))
             log "Session limit detected (reset: ${_reset_disp}). Waiting until 10 min after reset (~${_wait_min} min)..."
-            _notify_via_codex "$_session_wait"
+            node src/runner-cli.js notify-usage-limit "$_session_wait" >> "$AUTO_RUNNER_LOG" 2>&1 || true
             while true; do
               _now_e=$(date -u +%s)
               _rem=$((_session_wait - _now_e))
@@ -595,7 +352,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
                 log "--- Run SKIPPED_LOCKED (lock not available) ---"
               elif [ "$_run_exit" -eq 0 ]; then
                 log "--- Run completed successfully ---"
-                _remove_usage_limit_label
+                node src/runner-cli.js remove-usage-limit-label >> "$AUTO_RUNNER_LOG" 2>&1 || true
               else
                 log "--- Run failed (exit: ${_run_exit}) ---"
               fi
@@ -633,15 +390,15 @@ if [[ "${1:-}" == "--foreground" ]]; then
         log "--- Run SKIPPED_LOCKED (lock not available) ---"
       elif [ "$_run_exit" -eq 0 ]; then
         log "--- Run completed successfully ---"
-        _remove_usage_limit_label
+        node src/runner-cli.js remove-usage-limit-label >> "$AUTO_RUNNER_LOG" 2>&1 || true
       else
         log "--- Run failed (exit: ${_run_exit}) ---"
-        _session_wait=$(_parse_session_reset_epoch "$(cat "$_tmp_log")") || _session_wait=""
+        _session_wait=$(node src/runner-cli.js parse-usage-limit-epoch < "$_tmp_log" 2>/dev/null) || _session_wait=""
         if [ -n "$_session_wait" ]; then
           _reset_disp=$(date -u -d "@$((_session_wait - 600))" '+%H:%M UTC')
           _wait_min=$(( (_session_wait - $(date -u +%s) + 59) / 60 ))
           log "Session limit detected (reset: ${_reset_disp}). Waiting until 10 min after reset (~${_wait_min} min)..."
-          _notify_via_codex "$_session_wait"
+          node src/runner-cli.js notify-usage-limit "$_session_wait" >> "$AUTO_RUNNER_LOG" 2>&1 || true
           while true; do
             _now_e=$(date -u +%s)
             _rem=$((_session_wait - _now_e))
@@ -669,7 +426,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
               log "--- Run SKIPPED_LOCKED (lock not available) ---"
             elif [ "$_run_exit" -eq 0 ]; then
               log "--- Run completed successfully ---"
-              _remove_usage_limit_label
+              node src/runner-cli.js remove-usage-limit-label >> "$AUTO_RUNNER_LOG" 2>&1 || true
             else
               log "--- Run failed (exit: ${_run_exit}) ---"
             fi

@@ -208,7 +208,7 @@ scheduler と webhook は **同一のロックファイル** `docs/ai/auto_logs/
 
 ```
 docs/ai/auto_logs/scheduler.log   # スケジューラー動作ログ
-docs/ai/auto_logs/run_*.log       # 各 Claude 実行ログ（タイムスタンプ付き）
+docs/ai/auto_logs/run_*.log       # 各 Claude 実行ログ（run_auto.sh が生成、タイムスタンプ付き）
 ```
 
 ## Webhook モード（推奨）
@@ -331,13 +331,11 @@ kill <PID>   # SIGTERM — サーバーが "Server received SIGTERM" をログ�
 | ログプレフィックス | 意味 |
 |---|---|
 | `[WEBHOOK:PARENT]` | Webhook サーバー本体（親プロセス）のイベント |
-| `[WEBHOOK:CHILD]` | 子プロセス（`run_auto.sh`）の起動・終了イベント |
 | `[RUN:<issueId>]` | 子プロセスの標準出力・エラー出力 |
 | `[WEBHOOK]` | Webhook 受信・処理ログ |
 
 #### 子プロセス終了と親プロセス終了の切り分け
 
-- `[WEBHOOK:CHILD] ... terminated by signal=SIGTERM` → 子プロセスが SIGTERM を受けた（サーバー本体は継続中）
 - `[WEBHOOK:PARENT] Server received SIGTERM` → サーバー本体が SIGTERM を受けた（正常終了中）
 
 #### `npm run dev:webhook` での動作
@@ -387,8 +385,8 @@ webhook 経由で起動した Claude Code が usage limit に達した場合、u
 
 3. ログで再実行が予約されていることを確認する
    ```
-   [WEBHOOK] Usage limit detected for issueId=TEST-001. Reset+buffer at 2026-06-12T15:40:00.000Z
-   [WEBHOOK] Retry scheduled for issueId=TEST-001 in 20400000ms
+   [RUN] issue=TEST-001 trigger=webhook usage limit detected
+   [RETRY] issue=TEST-001 trigger=webhook scheduled retryAt=<ISO>
    ```
 
 4. 同じ issueId の webhook を連続送信しても二重実行されないことを確認する
@@ -396,7 +394,7 @@ webhook 経由で起動した Claude Code が usage limit に達した場合、u
    curl -X POST http://localhost:3000/webhooks/linear \
      -H "Content-Type: application/json" \
      -d '{"type":"Issue","action":"update","data":{"identifier":"TEST-001","title":"test","state":{"name":"In Progress"},"labels":[]}}'
-   # → {"status":"ignored","reason":"already processing or pending retry for TEST-001"}
+   # → {"status":"ignored","reason":"already queued: TEST-001"}
    ```
 
 5. 再実行時に同じ issueId が処理されることを確認する
