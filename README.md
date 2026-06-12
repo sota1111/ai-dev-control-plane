@@ -248,3 +248,46 @@ curl -X POST https://elitism-unnerving-gallstone.ngrok-free.dev/webhooks/linear 
 ### 理由
 
 Claude Codeが `--dangerously-skip-permissions` で動作する場合、コンテナ内での権限昇格リスクを下げるため、devcontainer側で不要な権限を予め排除する。
+
+## Usage Limit 自動再実行
+
+### 概要
+
+webhook 経由で起動した Claude Code が usage limit に達した場合、usage 復活時刻 + 10分後に自動で同じ Issue を再実行します。
+
+### 環境変数
+
+| 変数名 | デフォルト | 説明 |
+|--------|-----------|------|
+| `USAGE_LIMIT_RETRY_BUFFER_SECONDS` | `600` | usage 復活後の追加待機秒数 |
+
+### 手動確認手順
+
+1. webhook server を起動する
+   ```bash
+   npm run start:webhook
+   ```
+
+2. webhook エンドポイントにテストイベントを送信する（run_auto.sh が usage limit エラーを返す状況を用意する）
+   ```bash
+   curl -X POST http://localhost:3000/webhooks/linear \
+     -H "Content-Type: application/json" \
+     -d '{"type":"Issue","action":"update","data":{"identifier":"TEST-001","title":"test","state":{"name":"In Progress"},"labels":[]}}'
+   ```
+
+3. ログで再実行が予約されていることを確認する
+   ```
+   [WEBHOOK] Usage limit detected for issueId=TEST-001. Reset+buffer at 2026-06-12T15:40:00.000Z
+   [WEBHOOK] Retry scheduled for issueId=TEST-001 in 20400000ms
+   ```
+
+4. 同じ issueId の webhook を連続送信しても二重実行されないことを確認する
+   ```bash
+   curl -X POST http://localhost:3000/webhooks/linear \
+     -H "Content-Type: application/json" \
+     -d '{"type":"Issue","action":"update","data":{"identifier":"TEST-001","title":"test","state":{"name":"In Progress"},"labels":[]}}'
+   # → {"status":"ignored","reason":"already processing or pending retry for TEST-001"}
+   ```
+
+5. 再実行時に同じ issueId が処理されることを確認する
+   - ログに `[WEBHOOK] Retry starting for issueId=TEST-001` が表示される

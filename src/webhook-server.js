@@ -3,6 +3,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const { parseUsageLimitResetEpoch } = require('./lib/usageLimitParser');
 
 const app = express();
 app.use(express.json({
@@ -22,6 +23,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 const LINEAR_WEBHOOK_SECRET = process.env.LINEAR_WEBHOOK_SECRET;
 const runningIssues = new Set();
+const pendingRetryIssues = new Set();
 
 function verifyLinearSignature(req) {
   if (!LINEAR_WEBHOOK_SECRET) {
@@ -55,18 +57,24 @@ function triggerRun(issueId) {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
+  let output = '';
+
   child.stdout.on('data', (data) => {
-    process.stdout.write(`[RUN:${issueId}] ${data}`);
+    const str = data.toString();
+    output += str;
+    process.stdout.write(`[RUN:${issueId}] ${str}`);
   });
   child.stderr.on('data', (data) => {
-    process.stderr.write(`[RUN:${issueId}] ${data}`);
+    const str = data.toString();
+    output += str;
+    process.stderr.write(`[RUN:${issueId}] ${str}`);
   });
 
   return new Promise((resolve) => {
-    child.on('close', (code) => resolve(code ?? 0));
+    child.on('close', (code) => resolve({ code: code ?? 0, output }));
     child.on('error', (err) => {
       console.error(`[WEBHOOK] Failed to spawn run_auto.sh for ${issueId}: ${err.message}`);
-      resolve(1);
+      resolve({ code: 1, output: err.message });
     });
   });
 }
@@ -105,8 +113,8 @@ app.post('/webhooks/linear', (req, res) => {
     return res.status(200).json({ status: "ignored", reason: "no issue id" });
   }
 
-  if (runningIssues.has(issueId)) {
-    return res.status(200).json({ status: "ignored", reason: `already processing ${issueId}` });
+  if (runningIssues.has(issueId) || pendingRetryIssues.has(issueId)) {
+    return res.status(200).json({ status: "ignored", reason: `already processing or pending retry for ${issueId}` });
   }
 
   runningIssues.add(issueId);
@@ -114,9 +122,40 @@ app.post('/webhooks/linear', (req, res) => {
 
   setImmediate(async () => {
     try {
-      const exitCode = await triggerRun(issueId);
-      runningIssues.delete(issueId);
-      console.log(`[WEBHOOK] Processing completed for issueId=${issueId} exit=${exitCode}`);
+      const { code, output } = await triggerRun(issueId);
+      if (code === 0) {
+        console.log(`[WEBHOOK] Processing completed for issueId=${issueId} exit=0`);
+        runningIssues.delete(issueId);
+      } else {
+        const resetEpoch = parseUsageLimitResetEpoch(output);
+        if (resetEpoch !== null) {
+          console.log(`[WEBHOOK] Usage limit detected for issueId=${issueId}. Reset+buffer at ${new Date(resetEpoch * 1000).toISOString()}`);
+          pendingRetryIssues.add(issueId);
+          runningIssues.delete(issueId);
+          const delayMs = Math.max(0, resetEpoch * 1000 - Date.now());
+          console.log(`[WEBHOOK] Retry scheduled for issueId=${issueId} in ${delayMs}ms`);
+          setTimeout(async () => {
+            console.log(`[WEBHOOK] Retry starting for issueId=${issueId}`);
+            pendingRetryIssues.delete(issueId);
+            runningIssues.add(issueId);
+            try {
+              const { code: retryCode } = await triggerRun(issueId);
+              if (retryCode === 0) {
+                console.log(`[WEBHOOK] Retry completed successfully for issueId=${issueId}`);
+              } else {
+                console.log(`[WEBHOOK] Retry failed for issueId=${issueId} exit=${retryCode}`);
+              }
+            } catch (retryErr) {
+              console.error(`[WEBHOOK] Retry error for issueId=${issueId}: ${retryErr.message}`);
+            } finally {
+              runningIssues.delete(issueId);
+            }
+          }, delayMs);
+        } else {
+          console.log(`[WEBHOOK] Run failed for issueId=${issueId} exit=${code}. No usage limit detected, not retrying.`);
+          runningIssues.delete(issueId);
+        }
+      }
     } catch (err) {
       runningIssues.delete(issueId);
       console.error(`[WEBHOOK] Processing error for issueId=${issueId}: ${err.message}`);
@@ -124,6 +163,10 @@ app.post('/webhooks/linear', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`[WEBHOOK] Server listening on port ${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`[WEBHOOK] Server listening on port ${PORT}`);
+  });
+}
+
+module.exports = app;
