@@ -68,7 +68,7 @@ app.post('/webhooks/linear', (req, res) => {
     return res.status(200).json({ status: "ignored", reason: "not an issue event" });
   }
 
-  if (!["create", "update", "remove"].includes(body.action)) {
+  if (!["create", "update"].includes(body.action)) {
     return res.status(200).json({ status: "ignored", reason: "unhandled action" });
   }
 
