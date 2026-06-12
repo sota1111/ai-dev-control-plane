@@ -214,6 +214,16 @@ curl -X POST https://elitism-unnerving-gallstone.ngrok-free.dev/webhooks/linear 
 - Webhook サーバーのログに受信ログが出力される
 - ngrok の inspection UI（http://127.0.0.1:4040）でリクエストが確認できる
 
+### よくある失敗例
+
+| エラー / 症状 | 原因 | 対処 |
+|---|---|---|
+| `ERR_NGROK_8012` | localhost:3000 の Webhook サーバーが未起動 | `npm run start:webhook` を先に起動してから ngrok を起動するか、`npm run dev:webhook` で両方まとめて起動する |
+| ngrok は起動しているが POST が転送されない | Webhook サーバーが起動していない | `curl http://localhost:3000/webhooks/linear` でローカル疎通を先に確認する |
+| Linear Webhook が届かない | Linear 側の Webhook URL がルート URL になっている | Linear > Settings > API > Webhooks で URL が `/webhooks/linear` パス付きで登録されているか確認する |
+| 秘密情報がログに出力される | `.env` の値をログ出力している | `LINEAR_WEBHOOK_SECRET`・API キー等は絶対にログに出力しない |
+| `.env` がリポジトリに含まれてしまう | `.gitignore` に `.env` が追加されていない | `.gitignore` に `.env` が含まれていることを確認し、誤ってコミットした場合はすぐに値を無効化・再発行する |
+
 ### 環境変数（Webhook モード）
 
 | 変数 | 必須 | デフォルト | 説明 |

@@ -94,6 +94,8 @@ app.post('/webhooks/linear', (req, res) => {
     return res.status(200).json({ status: "ignored", reason: "not an issue event" });
   }
 
+  console.log(`[WEBHOOK] Issue event: id=${body.data?.identifier || body.data?.id || 'unknown'} title="${body.data?.title || ''}" state=${body.data?.state?.name || ''} labels=${(body.data?.labels || []).map(l => l.name).join(',')}`);
+
   if (!["create", "update"].includes(body.action)) {
     return res.status(200).json({ status: "ignored", reason: "unhandled action" });
   }
