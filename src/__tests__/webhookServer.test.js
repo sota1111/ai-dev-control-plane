@@ -6,6 +6,7 @@ jest.mock('../runner', () => ({
   acquireLock: jest.fn().mockReturnValue(true),
   releaseLock: jest.fn(),
   hasPendingIssues: jest.fn().mockResolvedValue(true),
+  setIssueInProgress: jest.fn().mockResolvedValue(undefined),
   postUsageLimitComment: jest.fn().mockResolvedValue(undefined),
   addUsageLimitLabel: jest.fn().mockResolvedValue(undefined),
   removeUsageLimitLabel: jest.fn().mockResolvedValue(undefined),
@@ -145,6 +146,22 @@ describe('webhook usage limit retry', () => {
     expect(res2.body.status).toBe('accepted');
   });
 
+  test('calls setIssueInProgress before triggerRun', async () => {
+    const id = 'TEST-IN-PROGRESS';
+    const runner = require('../runner');
+    runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
+    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
+
+    await request(app).post('/webhooks/linear').send(issuePayload(id));
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
+
+    expect(runner.setIssueInProgress).toHaveBeenCalledWith(id);
+    // setIssueInProgress must be called before spawn (triggerRun)
+    const setProgressOrder = runner.setIssueInProgress.mock.invocationCallOrder[0];
+    const spawnOrder = spawn.mock.invocationCallOrder[0];
+    expect(setProgressOrder).toBeLessThan(spawnOrder);
+  });
+
   test('does not affect normal successful runs', async () => {
     const id = 'TEST-SUCCESS';
     const runner = require('../runner');
@@ -170,4 +187,3 @@ describe('webhook usage limit retry', () => {
     expect(res2.body.status).toBe('accepted');
   });
 });
-
