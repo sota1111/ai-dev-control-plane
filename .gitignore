@@ -20,3 +20,6 @@ docs/ai/70_final_report.md
 prompts/gemini/implement.md
 prompts/codex/debug.md
 docs/ai/linear/
+
+# Local archive (not tracked)
+.local/
