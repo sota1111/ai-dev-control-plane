@@ -3,17 +3,39 @@ const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const { DiscordNotifier } = require('./lib/discordNotifier');
+
+const _discordNotifier = process.env.DISCORD_WEBHOOK_URL
+  ? new DiscordNotifier(process.env.DISCORD_WEBHOOK_URL)
+  : null;
+
+if (_discordNotifier) {
+  _discordNotifier.start();
+  const _origStdoutWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = function(chunk, ...args) {
+    _discordNotifier.add(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+    return _origStdoutWrite(chunk, ...args);
+  };
+  const _origStderrWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = function(chunk, ...args) {
+    _discordNotifier.add(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+    return _origStderrWrite(chunk, ...args);
+  };
+}
+
 const { parseUsageLimitResetEpoch } = require('./lib/usageLimitParser');
 const runner = require('./runner');
 
 // Distinguish parent-received signals from child process signals
 process.on('SIGTERM', () => {
   console.log(`[WEBHOOK:PARENT] Server received SIGTERM at ${new Date().toISOString()} — user-initiated stop, shutting down gracefully`);
+  if (_discordNotifier) _discordNotifier.stop();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   console.log(`[WEBHOOK:PARENT] Server received SIGINT at ${new Date().toISOString()} — user-initiated stop (Ctrl+C), shutting down gracefully`);
+  if (_discordNotifier) _discordNotifier.stop();
   process.exit(0);
 });
 
