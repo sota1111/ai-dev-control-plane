@@ -361,10 +361,16 @@ if [[ "${1:-}" == "--foreground" ]]; then
           continue
         fi
         _tmp_log=$(mktemp)
-        bash scripts/ai/run_auto.sh > "$_tmp_log" 2>&1 &
+        _FIFO_RUN=$(mktemp -u /tmp/scheduler-fifo-XXXXXX)
+        mkfifo "$_FIFO_RUN"
+        bash scripts/ai/run_auto.sh > "$_FIFO_RUN" 2>&1 &
         _RUN_PID=$!
+        tee -a "$_tmp_log" < "$_FIFO_RUN" | while IFS= read -r _line; do
+          _discord_buffer_add "$_line"
+        done
         wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
         _RUN_PID=""
+        rm -f "$_FIFO_RUN"
         cat "$_tmp_log" >> "$AUTO_RUNNER_LOG"
         cat "$_tmp_log" >> "$SCHEDULER_LOG"
         _release_lock
@@ -396,10 +402,16 @@ if [[ "${1:-}" == "--foreground" ]]; then
               log "SKIPPED_LOCKED: run_auto.sh skipped (lock not available)"
             else
               _tmp_log2=$(mktemp)
-              bash scripts/ai/run_auto.sh > "$_tmp_log2" 2>&1 &
+              _FIFO_RUN2=$(mktemp -u /tmp/scheduler-fifo-XXXXXX)
+              mkfifo "$_FIFO_RUN2"
+              bash scripts/ai/run_auto.sh > "$_FIFO_RUN2" 2>&1 &
               _RUN_PID=$!
+              tee -a "$_tmp_log2" < "$_FIFO_RUN2" | while IFS= read -r _line; do
+                _discord_buffer_add "$_line"
+              done
               wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
               _RUN_PID=""
+              rm -f "$_FIFO_RUN2"
               cat "$_tmp_log2" >> "$AUTO_RUNNER_LOG"
               cat "$_tmp_log2" >> "$SCHEDULER_LOG"
               rm -f "$_tmp_log2"
@@ -435,10 +447,16 @@ if [[ "${1:-}" == "--foreground" ]]; then
         continue
       fi
       _tmp_log=$(mktemp)
-      bash scripts/ai/run_auto.sh > "$_tmp_log" 2>&1 &
+      _FIFO_RUN=$(mktemp -u /tmp/scheduler-fifo-XXXXXX)
+      mkfifo "$_FIFO_RUN"
+      bash scripts/ai/run_auto.sh > "$_FIFO_RUN" 2>&1 &
       _RUN_PID=$!
+      tee -a "$_tmp_log" < "$_FIFO_RUN" | while IFS= read -r _line; do
+        _discord_buffer_add "$_line"
+      done
       wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
       _RUN_PID=""
+      rm -f "$_FIFO_RUN"
       cat "$_tmp_log" >> "$AUTO_RUNNER_LOG"
       cat "$_tmp_log" >> "$SCHEDULER_LOG"
       _release_lock
@@ -470,10 +488,16 @@ if [[ "${1:-}" == "--foreground" ]]; then
             log "SKIPPED_LOCKED: run_auto.sh skipped (lock not available)"
           else
             _tmp_log2=$(mktemp)
-            bash scripts/ai/run_auto.sh > "$_tmp_log2" 2>&1 &
+            _FIFO_RUN2=$(mktemp -u /tmp/scheduler-fifo-XXXXXX)
+            mkfifo "$_FIFO_RUN2"
+            bash scripts/ai/run_auto.sh > "$_FIFO_RUN2" 2>&1 &
             _RUN_PID=$!
+            tee -a "$_tmp_log2" < "$_FIFO_RUN2" | while IFS= read -r _line; do
+              _discord_buffer_add "$_line"
+            done
             wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
             _RUN_PID=""
+            rm -f "$_FIFO_RUN2"
             cat "$_tmp_log2" >> "$AUTO_RUNNER_LOG"
             cat "$_tmp_log2" >> "$SCHEDULER_LOG"
             rm -f "$_tmp_log2"
