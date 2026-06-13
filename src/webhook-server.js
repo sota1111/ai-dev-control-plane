@@ -228,24 +228,48 @@ app.post('/webhooks/linear', (req, res) => {
     return res.status(200).json({ status: "ignored", reason: "not an issue event" });
   }
 
-  runner.log('WEBHOOK', `Issue event: id=${body.data?.identifier || body.data?.id || 'unknown'} title="${body.data?.title || ''}" state=${body.data?.state?.name || ''} labels=${(body.data?.labels || []).map(l => l.name).join(',')}`);
+  const action = body.action || "";
+  const issueId = body.data?.identifier || body.data?.id;
+  const stateName = body.data?.state?.name || "";
+  const stateType = body.data?.state?.type || "";
+  const archivedAt = body.data?.archivedAt || null;
 
-  if (!["create", "update"].includes(body.action)) {
+  runner.log('WEBHOOK', `Issue event: identifier=${issueId || 'unknown'} action=${action} state.name=${stateName} state.type=${stateType} labels=${(body.data?.labels || []).map(l => l.name).join(',')}`);
+
+  if (!["create", "update"].includes(action)) {
     return res.status(200).json({ status: "ignored", reason: "unhandled action" });
   }
 
-  const issueId = body.data?.identifier || body.data?.id;
   if (!issueId) {
     return res.status(200).json({ status: "ignored", reason: "no issue id" });
   }
 
-  const stateName = body.data?.state?.name || "";
-  const stateType = body.data?.state?.type || "";
-  const isTerminalState = ["completed", "canceled"].includes(stateType)
-    || ["Done", "Canceled", "Cancelled"].includes(stateName);
+  const isTerminalState = ["completed", "canceled", "duplicate"].includes(stateType)
+    || ["Done", "Canceled", "Cancelled", "Duplicate"].includes(stateName);
+
   if (isTerminalState) {
-    runner.log("WEBHOOK", `terminal issue state ignored: ${stateName || stateType}`, { issue: issueId });
+    runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=terminal state`, { issue: issueId });
+    runner.removeFromQueue(issueId);
     return res.status(200).json({ status: "ignored", reason: `terminal state: ${stateName || stateType}` });
+  }
+
+  if (archivedAt) {
+    runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=archived issue`, { issue: issueId });
+    runner.removeFromQueue(issueId);
+    return res.status(200).json({ status: "ignored", reason: "archived issue" });
+  }
+
+  // For update events: only proceed if a meaningful field changed.
+  // Label-only changes (e.g. AI removing usage-limit label) are non-meaningful.
+  if (action === "update") {
+    const updatedFrom = body.updatedFrom || {};
+    const meaningfulFields = ["stateId", "title", "description", "priority", "assigneeId", "dueDate", "estimate", "parentId"];
+    const hasMeaningfulChange = meaningfulFields.some(f => f in updatedFrom);
+
+    if (!hasMeaningfulChange) {
+      runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=non-meaningful update`, { issue: issueId });
+      return res.status(200).json({ status: "ignored", reason: "non-meaningful update" });
+    }
   }
 
   // 既に処理中またはキュー内にある場合はスキップ

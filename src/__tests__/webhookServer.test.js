@@ -315,3 +315,182 @@ describe('webhook usage limit retry', () => {
     expect(runner.releaseLock).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('webhook issue filtering', () => {
+  const originalSetTimeout = global.setTimeout;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    spawn.mockReset();
+    spawn.mockImplementation(() => mockSpawnChild({ exitCode: 0 }));
+    jest.spyOn(global, 'setTimeout').mockImplementation((fn, ms) => {
+      if (ms <= 100) return originalSetTimeout(fn, ms);
+      return { unref: () => {} };
+    });
+
+    const runner = require('../runner');
+    runner.acquireLock.mockReturnValue(true);
+    runner.hasPendingIssues.mockResolvedValue(true);
+    runner.isQueued.mockReturnValue(false);
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+    runner.dequeue.mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  function makePayload(action, stateOverrides = {}, extra = {}) {
+    return {
+      type: 'Issue',
+      action,
+      data: {
+        identifier: 'TEST-FILTER',
+        title: 'test issue',
+        state: { name: 'In Progress', type: 'started', ...stateOverrides },
+        labels: [],
+        ...extra
+      }
+    };
+  }
+
+  test('completed issue update is ignored', async () => {
+    const runner = require('../runner');
+    const payload = makePayload('update', { name: 'Done', type: 'completed' });
+    const res = await request(app).post('/webhooks/linear').send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ignored');
+    expect(res.body.reason).toMatch(/terminal state/);
+    expect(runner.removeFromQueue).toHaveBeenCalledWith('TEST-FILTER');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('canceled issue update is ignored', async () => {
+    const runner = require('../runner');
+    const payload = makePayload('update', { name: 'Canceled', type: 'canceled' });
+    const res = await request(app).post('/webhooks/linear').send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ignored');
+    expect(res.body.reason).toMatch(/terminal state/);
+    expect(runner.removeFromQueue).toHaveBeenCalledWith('TEST-FILTER');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('duplicate issue update is ignored', async () => {
+    const runner = require('../runner');
+    const payload = makePayload('update', { name: 'Duplicate', type: 'duplicate' });
+    const res = await request(app).post('/webhooks/linear').send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ignored');
+    expect(res.body.reason).toMatch(/terminal state/);
+    expect(runner.removeFromQueue).toHaveBeenCalledWith('TEST-FILTER');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('archived issue update is ignored', async () => {
+    const runner = require('../runner');
+    const payload = {
+      type: 'Issue',
+      action: 'update',
+      data: {
+        identifier: 'TEST-ARCHIVED',
+        title: 'archived issue',
+        state: { name: 'In Progress', type: 'started' },
+        labels: [],
+        archivedAt: '2026-06-01T00:00:00.000Z'
+      }
+    };
+    const res = await request(app).post('/webhooks/linear').send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ignored');
+    expect(res.body.reason).toBe('archived issue');
+    expect(runner.removeFromQueue).toHaveBeenCalledWith('TEST-ARCHIVED');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('active issue create is accepted', async () => {
+    const runner = require('../runner');
+    runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-CREATE', trigger: 'webhook', retryAt: null });
+    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
+
+    const payload = {
+      type: 'Issue',
+      action: 'create',
+      data: {
+        identifier: 'TEST-CREATE',
+        title: 'new issue',
+        state: { name: 'Todo', type: 'unstarted' },
+        labels: []
+      }
+    };
+    const res = await request(app).post('/webhooks/linear').send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('accepted');
+
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    expect(spawn).toHaveBeenCalled();
+  });
+
+  test('active issue meaningful update is accepted', async () => {
+    const runner = require('../runner');
+    runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-MEANINGFUL', trigger: 'webhook', retryAt: null });
+    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
+
+    const payload = {
+      type: 'Issue',
+      action: 'update',
+      updatedFrom: { title: 'old title' },
+      data: {
+        identifier: 'TEST-MEANINGFUL',
+        title: 'new title',
+        state: { name: 'In Progress', type: 'started' },
+        labels: []
+      }
+    };
+    const res = await request(app).post('/webhooks/linear').send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('accepted');
+
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    expect(spawn).toHaveBeenCalled();
+  });
+
+  test('completed queued issue is removed before execution', async () => {
+    const runner = require('../runner');
+    const payload = {
+      type: 'Issue',
+      action: 'update',
+      data: {
+        identifier: 'TEST-QUEUED-DONE',
+        title: 'done task',
+        state: { name: 'Done', type: 'completed' },
+        labels: []
+      }
+    };
+    const res = await request(app).post('/webhooks/linear').send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ignored');
+    expect(runner.removeFromQueue).toHaveBeenCalledWith('TEST-QUEUED-DONE');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('usage-limit cleanup update does not retrigger run', async () => {
+    const runner = require('../runner');
+    const payload = {
+      type: 'Issue',
+      action: 'update',
+      updatedFrom: { labelIds: ['some-label-uuid'] },
+      data: {
+        identifier: 'TEST-LABEL-CLEANUP',
+        title: 'active issue',
+        state: { name: 'In Progress', type: 'started' },
+        labels: []
+      }
+    };
+    const res = await request(app).post('/webhooks/linear').send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ignored');
+    expect(res.body.reason).toBe('non-meaningful update');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});
