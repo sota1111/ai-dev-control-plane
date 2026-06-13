@@ -13,6 +13,16 @@ The following authentication commands (from README) are assumed to have been com
 
 Please process Linear issues using the following procedure.
 
+## Agent Responsibility Boundary
+
+- Initial task check / タスク確認 is handled by Codex CLI.
+  - Write the task-check instruction to `prompts/codex/debug.md`.
+  - Run `scripts/ai/run_codex.sh` once for the selected issue.
+  - Read `docs/ai/60_worker_codex_report.md` before proceeding.
+- Claude Code takes over from decomposition onward: decomposition judgment, child Issue creation, worker delegation, Linear status sync, PR flow, and final reporting.
+- Do not repeat the task check for the same issue within one run.
+
+
 Use the MCP tool `mcp__linear-server__list_issues` to retrieve issues.
 
 Target the following statuses:

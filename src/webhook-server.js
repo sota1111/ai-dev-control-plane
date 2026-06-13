@@ -252,6 +252,15 @@ app.post('/webhooks/linear', (req, res) => {
     return res.status(200).json({ status: "ignored", reason: "no issue id" });
   }
 
+  const stateName = body.data?.state?.name || "";
+  const stateType = body.data?.state?.type || "";
+  const isTerminalState = ["completed", "canceled"].includes(stateType)
+    || ["Done", "Canceled", "Cancelled"].includes(stateName);
+  if (isTerminalState) {
+    runner.log("WEBHOOK", `terminal issue state ignored: ${stateName || stateType}`, { issue: issueId });
+    return res.status(200).json({ status: "ignored", reason: `terminal state: ${stateName || stateType}` });
+  }
+
   // 既に処理中またはキュー内にある場合はスキップ
   if (runner.isQueued(issueId)) {
     return res.status(200).json({ status: "ignored", reason: `already queued: ${issueId}` });
