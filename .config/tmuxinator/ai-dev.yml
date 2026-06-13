@@ -1,0 +1,23 @@
+name: ai-dev
+root: /workspaces/ai-dev-control-plane
+windows:
+  - name: webhook
+    layout: even-horizontal
+    panes:
+      - echo "=== Webhook サーバー起動 ===" && npm run dev:webhook
+      - echo "=== ngrok 起動 (port 3000) ===" && ngrok http 3000
+  - name: claude
+    panes:
+      - claude
+  - name: codex
+    panes:
+      - codex
+  - name: gemini
+    panes:
+      - gemini
+  - name: status
+    layout: even-vertical
+    panes:
+      - git status && echo "---" && git log --oneline -5
+      - echo "=== プロセス確認 ===" && ps aux | grep -E "node|ngrok|claude|codex|gemini" | grep -v grep || true
+      - echo "=== ログ確認 ===" && ls -la logs/ 2>/dev/null || echo "logsディレクトリなし"
