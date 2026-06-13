@@ -148,6 +148,7 @@ async function runItem(item) {
 
   if (code === 0) {
     runner.log('RUN', 'completed successfully', { trigger: item.trigger || 'queue', issue: issueId });
+    runner.clearUsageLimitCooldown();
     await runner.removeUsageLimitLabel(issueId).catch(() => {});
   } else if (code === runner.SKIPPED_LOCKED) {
     runner.log('WEBHOOK', 'SKIPPED_LOCKED received from run_auto.sh — re-enqueuing', { issue: issueId });
@@ -158,6 +159,7 @@ async function runItem(item) {
       runner.log('RUN', 'usage limit detected', { trigger: item.trigger || 'queue', issue: issueId });
       await runner.notifyUsageLimitToAllActiveIssues(resetEpoch).catch(() => {});
       const retryAt = new Date(resetEpoch * 1000).toISOString();
+      runner.setUsageLimitCooldownUntil(retryAt);
       runner.enqueue(issueId, item.trigger || 'queue', retryAt);
       runner.log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt });
 
@@ -165,25 +167,10 @@ async function runItem(item) {
       const delayMs = Math.max(0, resetEpoch * 1000 - Date.now());
       setTimeout(async () => {
         runner.log('RETRY', 'firing', { trigger: item.trigger || 'queue', issue: issueId });
-        const retryItem = runner.dequeue();
-        if (!retryItem) return;
-        const retryLocked = runner.acquireLock({ trigger: 'retry', issue: retryItem.issueId });
-        if (!retryLocked) {
-          runner.enqueue(retryItem.issueId, 'retry');
-          return;
-        }
-        try {
-          const { code: retryCode } = await triggerRun(retryItem.issueId);
-          if (retryCode === 0) {
-            runner.log('RETRY', 'completed successfully', { issue: retryItem.issueId });
-            await runner.removeUsageLimitLabel(retryItem.issueId).catch(() => {});
-          } else {
-            runner.log('RETRY', `failed exit=${retryCode}`, { issue: retryItem.issueId });
-          }
-        } finally {
-          runner.releaseLock();
-        }
+        runner.clearUsageLimitCooldown();
+        await drainQueue();
       }, delayMs);
+
     } else {
       runner.log('RUN', `failed exit=${code}`, { trigger: item.trigger || 'queue', issue: issueId });
     }
@@ -270,6 +257,13 @@ app.post('/webhooks/linear', (req, res) => {
 
   setImmediate(async () => {
     try {
+      const cooldownRetryAt = runner.getUsageLimitCooldownUntil();
+      if (cooldownRetryAt) {
+        runner.enqueue(issueId, 'webhook', cooldownRetryAt);
+        runner.log('WEBHOOK', `usage limit cooldown active, queued until ${cooldownRetryAt}`, { issue: issueId });
+        return;
+      }
+
       const issuePriority = body.data?.priority ?? 0;
       const isUrgent = issuePriority === 1;
 

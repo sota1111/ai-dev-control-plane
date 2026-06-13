@@ -77,6 +77,42 @@ describe('runner', () => {
     });
   });
 
+  describe('usage limit cooldown', () => {
+    it('setUsageLimitCooldownUntil() writes cooldown JSON atomically', () => {
+      fs.existsSync.mockReturnValue(true);
+      const retryAt = new Date(Date.now() + 600000).toISOString();
+
+      runner.setUsageLimitCooldownUntil(retryAt);
+
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.usage-limit.json.tmp'),
+        JSON.stringify({ retryAt }, null, 2)
+      );
+      expect(fs.renameSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.usage-limit.json.tmp'),
+        runner.USAGE_LIMIT_FILE
+      );
+    });
+
+    it('getUsageLimitCooldownUntil() returns a future cooldown', () => {
+      const retryAt = new Date(Date.now() + 600000).toISOString();
+      fs.existsSync.mockImplementation((path) => path === runner.USAGE_LIMIT_FILE);
+      fs.readFileSync.mockReturnValue(JSON.stringify({ retryAt }));
+
+      expect(runner.getUsageLimitCooldownUntil()).toBe(retryAt);
+    });
+
+    it('getUsageLimitCooldownUntil() clears expired cooldowns', () => {
+      const retryAt = new Date(Date.now() - 1000).toISOString();
+      fs.existsSync.mockImplementation((path) => path === runner.USAGE_LIMIT_FILE);
+      fs.readFileSync.mockReturnValue(JSON.stringify({ retryAt }));
+
+      expect(runner.getUsageLimitCooldownUntil()).toBe(null);
+      expect(fs.unlinkSync).toHaveBeenCalledWith(runner.USAGE_LIMIT_FILE);
+    });
+  });
+
+
   describe('queue management', () => {
     it('enqueue() adds item to queue JSON file', () => {
       fs.existsSync.mockReturnValue(false); // queue file doesn't exist
