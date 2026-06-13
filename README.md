@@ -169,8 +169,9 @@ scheduler と webhook は **同一のロックファイル** `docs/ai/auto_logs/
 `run_auto.sh` が usage-limit で失敗した場合:
 1. Linear の対象 Issue にコメントを投稿（次回実行予定時刻 JST 付き）
 2. 対象 Issue に `usage-limit` ラベルを付与（既存ラベルは保持）
-3. リセット時刻 +10分後に retry を予約
-4. retry 実行後、成功した場合は `usage-limit` ラベルを除去
+3. リセット時刻 +10分後を Claude Code 全体の cooldown として保存
+4. cooldown 中に届いた webhook は `run_auto.sh` を起動せず、同じ retry 時刻でキューに追加
+5. retry 実行後、成功した場合は cooldown と `usage-limit` ラベルを除去
 
 ## retry 予約と実行の仕様
 
@@ -368,7 +369,7 @@ Claude Codeが `--dangerously-skip-permissions` で動作する場合、コン�
 
 ### 概要
 
-webhook 経由で起動した Claude Code が usage limit に達した場合、usage 復活時刻 + 10分後に自動で同じ Issue を再実行します。
+webhook 経由で起動した Claude Code が usage limit に達した場合、usage 復活時刻 + 10分後まで Claude Code 全体を cooldown にします。cooldown 中に届いた webhook は新規実行せず、同じ retry 時刻でキューに追加します。
 
 ### 環境変数
 

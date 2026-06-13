@@ -11,6 +11,9 @@ jest.mock('../runner', () => ({
   addUsageLimitLabel: jest.fn().mockResolvedValue(undefined),
   notifyUsageLimitToAllActiveIssues: jest.fn().mockResolvedValue(undefined),
   removeUsageLimitLabel: jest.fn().mockResolvedValue(undefined),
+  setUsageLimitCooldownUntil: jest.fn(),
+  clearUsageLimitCooldown: jest.fn(),
+  getUsageLimitCooldownUntil: jest.fn().mockReturnValue(null),
   enqueue: jest.fn(),
   dequeue: jest.fn().mockReturnValue(null),
   removeFromQueue: jest.fn(),
@@ -73,6 +76,7 @@ describe('webhook usage limit retry', () => {
     runner.acquireLock.mockReturnValue(true);
     runner.hasPendingIssues.mockResolvedValue(true);
     runner.isQueued.mockReturnValue(false);
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
   });
 
@@ -113,12 +117,31 @@ describe('webhook usage limit retry', () => {
     // runner.enqueue が retryAt 付きで呼ばれたことを確認
     expect(runner.enqueue).toHaveBeenCalledWith(id, 'webhook', expect.any(String));
     expect(runner.notifyUsageLimitToAllActiveIssues).toHaveBeenCalled();
+    expect(runner.setUsageLimitCooldownUntil).toHaveBeenCalledWith(expect.any(String));
 
     // 同じ issueId が再度 webhook で来た場合、isQueued=true で ignored
     runner.isQueued.mockReturnValue(true);
     const res2 = await request(app).post('/webhooks/linear').send(issuePayload(id));
     expect(res2.body.status).toBe('ignored');
   });
+
+  test('queues webhook without spawning while usage limit cooldown is active', async () => {
+    const runner = require('../runner');
+    const retryAt = new Date(Date.now() + 600000).toISOString();
+    runner.getUsageLimitCooldownUntil.mockReturnValue(retryAt);
+
+    const res = await request(app).post('/webhooks/linear').send(issuePayload('TEST-COOLDOWN'));
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('accepted');
+
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
+
+    expect(runner.enqueue).toHaveBeenCalledWith('TEST-COOLDOWN', 'webhook', retryAt);
+    expect(runner.hasPendingIssues).not.toHaveBeenCalled();
+    expect(runner.acquireLock).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
 
   test('does not retry when run_auto.sh fails without usage limit message', async () => {
     const id = 'TEST-NO-RETRY';

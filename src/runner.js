@@ -6,6 +6,7 @@ const SKIPPED_LOCKED = 75;  // exit code when lock is not available
 const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
 const LOCK_FILE = path.join(LOG_DIR, 'runner.lock');
 const QUEUE_FILE = path.join(LOG_DIR, 'runner.queue.json');
+const USAGE_LIMIT_FILE = path.join(LOG_DIR, 'runner.usage-limit.json');
 const LOG_FILE = path.join(LOG_DIR, 'auto_runner.log');
 const STALE_LOCK_MS = 30 * 60 * 1000;  // 30 minutes
 const LINEAR_API_URL = 'https://api.linear.app/graphql';
@@ -249,6 +250,53 @@ async function removeUsageLimitLabel(issueId) {
   }
 }
 
+function setUsageLimitCooldownUntil(retryAt) {
+  try {
+    if (!fs.existsSync(LOG_DIR)) {
+      fs.mkdirSync(LOG_DIR, { recursive: true });
+    }
+    const tmpFile = USAGE_LIMIT_FILE + ".tmp";
+    fs.writeFileSync(tmpFile, JSON.stringify({ retryAt }, null, 2));
+    fs.renameSync(tmpFile, USAGE_LIMIT_FILE);
+    log("RUNNER", "usage limit cooldown set", { retryAt });
+  } catch (err) {
+    log("ERROR", `setUsageLimitCooldownUntil failed: ${err.message}`);
+  }
+}
+
+function clearUsageLimitCooldown() {
+  try {
+    if (fs.existsSync(USAGE_LIMIT_FILE)) {
+      fs.unlinkSync(USAGE_LIMIT_FILE);
+      log("RUNNER", "usage limit cooldown cleared");
+    }
+  } catch (err) {
+    log("ERROR", `clearUsageLimitCooldown failed: ${err.message}`);
+  }
+}
+
+function getUsageLimitCooldownUntil(nowMs = Date.now()) {
+  try {
+    if (!fs.existsSync(USAGE_LIMIT_FILE)) return null;
+    const state = JSON.parse(fs.readFileSync(USAGE_LIMIT_FILE, "utf8"));
+    const retryAt = state.retryAt;
+    if (!retryAt) return null;
+    const retryAtMs = new Date(retryAt).getTime();
+    if (Number.isNaN(retryAtMs)) {
+      clearUsageLimitCooldown();
+      return null;
+    }
+    if (retryAtMs <= nowMs) {
+      clearUsageLimitCooldown();
+      return null;
+    }
+    return retryAt;
+  } catch (err) {
+    log("ERROR", `getUsageLimitCooldownUntil failed: ${err.message}`);
+    return null;
+  }
+}
+
 function loadQueue() {
   try {
     if (!fs.existsSync(QUEUE_FILE)) return [];
@@ -403,6 +451,7 @@ module.exports = {
   LOG_DIR,
   LOCK_FILE,
   QUEUE_FILE,
+  USAGE_LIMIT_FILE,
   LOG_FILE,
   STALE_LOCK_MS,
   LINEAR_API_URL,
@@ -413,6 +462,9 @@ module.exports = {
   postUsageLimitComment,
   addUsageLimitLabel,
   removeUsageLimitLabel,
+  setUsageLimitCooldownUntil,
+  clearUsageLimitCooldown,
+  getUsageLimitCooldownUntil,
   notifyUsageLimitToAllActiveIssues,
   removeUsageLimitLabelFromAllIssues,
   loadQueue,
