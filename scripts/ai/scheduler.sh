@@ -40,6 +40,7 @@ LOG_DIR="docs/ai/auto_logs"
 AUTO_RUNNER_LOG="${LOG_DIR}/auto_runner.log"
 SCHEDULER_LOG="${LOG_DIR}/scheduler.log"
 LOCK_FILE="${LOG_DIR}/runner.lock"
+DISCORD_BUFFER_FILE="/tmp/ai-scheduler-discord-buffer-$$.txt"
 STALE_LOCK_SECONDS=1800  # 30 minutes (matches runner.js STALE_LOCK_MS)
 SKIPPED_LOCKED=75
 PID_FILE="/tmp/l-concierge-scheduler.pid"
@@ -65,6 +66,52 @@ log() {
   local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [SCHEDULER] $*"
   echo "$msg" >> "$AUTO_RUNNER_LOG"
   echo "$msg" >> "$SCHEDULER_LOG"
+  _discord_buffer_add "$msg"
+}
+
+_discord_buffer_add() {
+  if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+    printf '%s\n' "$*" >> "$DISCORD_BUFFER_FILE"
+  fi
+}
+
+_discord_flush() {
+  if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then return; fi
+  [ -f "$DISCORD_BUFFER_FILE" ] && [ -s "$DISCORD_BUFFER_FILE" ] || return
+  local content
+  content=$(cat "$DISCORD_BUFFER_FILE")
+  > "$DISCORD_BUFFER_FILE"
+  # Split into 1990-char chunks and post each
+  while [ "${#content}" -gt 0 ]; do
+    local chunk="${content:0:1990}"
+    content="${content:1990}"
+    local escaped
+    escaped=$(node -e "process.stdout.write(JSON.stringify(require('fs').readFileSync('/dev/stdin','utf8')))" <<< "$chunk" 2>/dev/null) || \
+    escaped=$(python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" <<< "$chunk" 2>/dev/null) || \
+    escaped="\"${chunk//\"/\\\"}\""
+    local http_code
+    http_code=$(curl -sf -o /tmp/_discord_resp_$$.txt -w "%{http_code}" -X POST \
+      -H "Content-Type: application/json" \
+      --data "{\"content\":${escaped}}" \
+      "$DISCORD_WEBHOOK_URL" 2>/dev/null) || http_code="0"
+    if [ "$http_code" = "429" ]; then
+      local retry_after
+      retry_after=$(grep -o '"retry_after":[0-9.]*' /tmp/_discord_resp_$$.txt 2>/dev/null | cut -d: -f2 || echo "5")
+      sleep "${retry_after:-5}"
+      curl -sf -X POST \
+        -H "Content-Type: application/json" \
+        --data "{\"content\":${escaped}}" \
+        "$DISCORD_WEBHOOK_URL" > /dev/null 2>&1 || true
+    fi
+    rm -f /tmp/_discord_resp_$$.txt
+  done
+}
+
+_discord_flush_loop() {
+  while true; do
+    sleep 5
+    _discord_flush
+  done
 }
 
 # 共通ロック取得: 成功=0, 失敗=1
@@ -256,6 +303,12 @@ fi
 if [[ "${1:-}" == "--foreground" ]]; then
   echo $$ > "$PID_FILE"
 
+  _DISCORD_FLUSH_PID=""
+  if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+    _discord_flush_loop &
+    _DISCORD_FLUSH_PID=$!
+  fi
+
   if [[ "$WEBHOOK_MODE" == "true" ]]; then
     log "WEBHOOK_MODE=true: polling disabled. Scheduler exiting."
     rm -f "$PID_FILE"
@@ -273,6 +326,9 @@ if [[ "${1:-}" == "--foreground" ]]; then
       _release_lock
     fi
     rm -f "$PID_FILE"
+    kill "${_DISCORD_FLUSH_PID:-}" 2>/dev/null || true
+    _discord_flush
+    rm -f "$DISCORD_BUFFER_FILE"
     log "Scheduler stopped"
     exit 0
   }
