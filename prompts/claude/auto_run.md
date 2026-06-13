@@ -1,3 +1,16 @@
+## Authentication Assumptions
+
+The following authentication commands (from README) are assumed to have been completed on this machine. Do NOT attempt to re-authenticate.
+
+- Linear MCP: configured via `claude → /mcp → linear`
+- Gemini CLI: authenticated via `gemini`
+- Codex CLI: authenticated via `codex`, Linear MCP via `codex mcp login linear`
+- GitHub CLI: authenticated via `gh auth login`
+- Azure CLI: authenticated via `az login --use-device-code`
+- gcloud: authenticated via `gcloud auth login` and `gcloud auth application-default login`
+
+---
+
 Please process Linear issues using the following procedure.
 
 Use the MCP tool `mcp__linear-server__list_issues` to retrieve issues.
@@ -228,6 +241,39 @@ If merge has conflicts:
 1. `git merge --abort`
 2. Attempt `git rebase main` on the feature branch
 3. If unresolvable, set parent Issue to `Blocked` with conflict details
+
+---
+
+## Permission Error Handling
+
+If you encounter a permission error, authentication failure, or insufficient credentials while working on a task:
+
+1. **Do NOT retry** the failing operation
+2. **Change the task's Linear status to `In Review`** (not Blocked):
+   ```
+   mcp__linear-server__save_issue: state = "In Review"
+   ```
+3. **Post a comment on the Linear issue** in this format:
+   ```
+   ## 権限不足による一時停止
+
+   ### 必要な権限
+   - <specific permission, role, or credential that is missing>
+
+   ### 試みた操作
+   - <what was attempted that failed>
+
+   ### 再開条件
+   必要な権限を取得後、このIssueをTodo/In Progressに戻して再実行してください。
+   ```
+4. **Move on to the next actionable issue** in the priority queue
+5. **Do NOT** set the issue to `Blocked` — use `In Review` for permission-related holds
+
+Examples of permission errors that trigger this protocol:
+- `ERROR: (gcloud.run.deploy) PERMISSION_DENIED`
+- `Error: You do not have permission to...`
+- `403 Forbidden` when accessing GCP, GitHub, or other external services
+- Missing API keys or credentials for external services
 
 ---
 
