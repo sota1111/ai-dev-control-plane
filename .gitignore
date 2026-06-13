@@ -23,3 +23,13 @@ docs/ai/linear/
 
 # Local archive (not tracked)
 .local/
+
+# Authentication credential directories (bind mount for Dev Container persistence)
+.claude/
+.codex/
+.gemini/
+.config/gemini/
+.config/gh/
+.azure/
+.config/gcloud/
+.config/ngrok/
