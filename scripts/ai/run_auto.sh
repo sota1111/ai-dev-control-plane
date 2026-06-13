@@ -44,6 +44,25 @@ if ! flock -n 9; then
 fi
 # ─────────────────────────────────────────────────────────────────────────────
 
+RUNTIME_PROMPT="$(cat "$PROMPT_FILE")"
+
+if [[ -n "${WEBHOOK_ISSUE_ID:-}" ]]; then
+  RUNTIME_PROMPT="## Webhook Single-Issue Mode
+
+This run was triggered by Linear webhook for Issue: ${WEBHOOK_ISSUE_ID}
+
+Mandatory behavior:
+- Process only ${WEBHOOK_ISSUE_ID}. Do not search for or select other Linear issues.
+- Perform the initial task check exactly once. The task check must be delegated to Codex CLI before Claude Code starts decomposition.
+- For the Codex task check, write instructions to prompts/codex/debug.md, run scripts/ai/run_codex.sh, and read docs/ai/60_worker_codex_report.md. The check should verify the target issue status, latest comments, labels, acceptance criteria, and whether it is actionable.
+- After the Codex task check is complete, Claude Code owns decomposition, child issue registration, worker delegation, Linear status updates, PR flow, and final reporting.
+- When ${WEBHOOK_ISSUE_ID} reaches a terminal outcome for this run, exit immediately with 0 or 1. Do not re-check the Linear queue and do not continue to another issue.
+
+---
+
+${RUNTIME_PROMPT}"
+fi
+
 echo "== Claude Code Auto Runner =="
 echo "Start: ${TIMESTAMP}"
 echo "Log: ${LOG_FILE}"
@@ -107,7 +126,7 @@ claude \
   --dangerously-skip-permissions \
   --output-format stream-json \
   --verbose \
-  -p "$(cat "$PROMPT_FILE")" \
+  -p "$RUNTIME_PROMPT" \
   2>&1 | python3 -u -c "$_STREAM_FILTER" | tee "$LOG_FILE"
 
 EXIT_CODE=${PIPESTATUS[0]}

@@ -150,6 +150,23 @@ describe('webhook usage limit retry', () => {
     expect(res2.body.status).toBe('accepted');
   });
 
+  test("ignores terminal issue update events", async () => {
+    const runner = require("../runner");
+    const terminalPayload = {
+      type: "Issue",
+      action: "update",
+      data: { identifier: "TEST-DONE", title: "done task", state: { name: "Done", type: "completed" }, labels: [] }
+    };
+
+    const res = await request(app).post("/webhooks/linear").send(terminalPayload);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ignored");
+    expect(res.body.reason).toBe("terminal state: Done");
+    expect(runner.enqueue).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   test('does not call setIssueInProgress (Claude Code handles In Progress)', async () => {
     const id = 'TEST-IN-PROGRESS';
     const runner = require('../runner');

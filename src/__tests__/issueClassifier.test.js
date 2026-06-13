@@ -64,4 +64,10 @@ describe('classifyIssue', () => {
     expect(typeof r.reason).toBe('string');
     expect(r.reason.length).toBeGreaterThan(0);
   });
+  test('task confirmation keyword → REVIEW/codex before webhook planning', () => {
+    const r = classifyIssue({ id: '11', title: 'webhook完了時のタスク確認', description: '' });
+    expect(r.type).toBe('REVIEW');
+    expect(r.worker).toBe('codex');
+  });
+
 });

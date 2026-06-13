@@ -64,7 +64,17 @@ function classifyIssue(issue) {
     return { type: TYPES.DOC, worker: TYPE_TO_WORKER.DOC, reason: 'Title prefix [DOC]' };
   }
 
-  // 2. Control-plane / orchestration detection → PLAN/claude-code
+  if (title.startsWith("[QUESTION]")) {
+    return { type: TYPES.REVIEW, worker: TYPE_TO_WORKER.REVIEW, reason: "Title prefix [QUESTION]" };
+  }
+
+  // 2. Task confirmation requests -> REVIEW/codex
+  const taskCheckKeywords = ["task confirmation", "task check", "タスク確認", "確認依頼"];
+  if (taskCheckKeywords.some(k => text.includes(k.toLowerCase()))) {
+    return { type: TYPES.REVIEW, worker: TYPE_TO_WORKER.REVIEW, reason: "Task confirmation request detected" };
+  }
+
+  // 3. Control-plane / orchestration detection → PLAN/claude-code
   const planKeywords = [
     'usage-limit', 'queue', 'lock', 'webhook', 'scheduler',
     'claude code', 'worker routing', '自動分類', 'ルーティング',
@@ -78,7 +88,7 @@ function classifyIssue(issue) {
     return { type: TYPES.PLAN, worker: TYPE_TO_WORKER.PLAN, reason: 'Multiple repository URLs detected' };
   }
 
-  // 3. Security-related → SECURITY/codex
+  // 4. Security-related → SECURITY/codex
   const securityKeywords = [
     'secret', 'credential', 'permission', 'セキュリティ',
     '認証', '権限', 'env var', 'devcontainer'
@@ -87,13 +97,13 @@ function classifyIssue(issue) {
     return { type: TYPES.SECURITY, worker: TYPE_TO_WORKER.SECURITY, reason: 'Security-related keyword detected' };
   }
 
-  // 4. Review / diff analysis → REVIEW/codex
+  // 5. Review / diff analysis → REVIEW/codex
   const reviewKeywords = ['review', 'diff', 'pr', 'pull request', 'レビュー', '差分'];
   if (reviewKeywords.some(k => text.includes(k.toLowerCase()))) {
     return { type: TYPES.REVIEW, worker: TYPE_TO_WORKER.REVIEW, reason: 'Review / diff analysis keyword detected' };
   }
 
-  // 5. Bug/debug/test failure → DEBUG/codex
+  // 6. Bug/debug/test failure → DEBUG/codex
   const debugKeywords = [
     'bug', 'fix', 'error', 'fail', 'lint', 'typecheck',
     'test failure', 'バグ', '修正', 'エラー', 'テスト失敗',
@@ -103,13 +113,13 @@ function classifyIssue(issue) {
     return { type: TYPES.DEBUG, worker: TYPE_TO_WORKER.DEBUG, reason: 'Bug/debug/test failure detected' };
   }
 
-  // 6. Documentation → DOC/codex
+  // 7. Documentation → DOC/codex
   const docKeywords = ['readme', 'claude.md', '.env.example', 'doc', 'ドキュメント'];
   if (docKeywords.some(k => text.includes(k.toLowerCase()))) {
     return { type: TYPES.DOC, worker: TYPE_TO_WORKER.DOC, reason: 'Documentation keyword detected' };
   }
 
-  // 7. Default: IMPLEMENT/gemini
+  // 8. Default: IMPLEMENT/gemini
   return { type: TYPES.IMPLEMENT, worker: TYPE_TO_WORKER.IMPLEMENT, reason: 'Default classification' };
 }
 
