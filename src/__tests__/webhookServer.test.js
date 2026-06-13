@@ -16,6 +16,7 @@ jest.mock('../runner', () => ({
   removeFromQueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
   isLocked: jest.fn().mockReturnValue(false),
+  loadQueue: jest.fn().mockReturnValue([]),
   LOG_DIR: '/tmp/test-logs',
   LOCK_FILE: '/tmp/test-logs/runner.lock',
   QUEUE_FILE: '/tmp/test-logs/runner.queue.json',
@@ -186,7 +187,7 @@ describe('webhook usage limit retry', () => {
     expect(res2.body.status).toBe('accepted');
   });
 
-  test('skips non-Urgent issue when a run is locked', async () => {
+  test('enqueues non-Urgent issue when a run is locked', async () => {
     const runner = require('../runner');
     runner.isLocked.mockReturnValue(true); // simulate active run
     runner.isQueued.mockReturnValue(false);
@@ -203,8 +204,8 @@ describe('webhook usage limit retry', () => {
 
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
-    // Should not enqueue non-Urgent issue when locked
-    expect(runner.enqueue).not.toHaveBeenCalled();
+    // Should enqueue non-Urgent issue when locked
+    expect(runner.enqueue).toHaveBeenCalledWith('TEST-NON-URGENT', 'webhook');
   });
 
   test('does not skip Urgent issue even when a run is locked', async () => {
@@ -227,5 +228,50 @@ describe('webhook usage limit retry', () => {
 
     // Urgent issue should be enqueued even when locked
     expect(runner.enqueue).toHaveBeenCalledWith('TEST-URGENT', 'webhook');
+  });
+
+  test('drains queue after main task completes', async () => {
+    const runner = require('../runner');
+    runner.isLocked.mockReturnValue(false);
+    runner.isQueued.mockReturnValue(false);
+
+    // Initial issue
+    const id1 = 'TEST-MAIN';
+    // Queued issue to be drained
+    const id2 = 'TEST-DRAIN';
+
+    // Mock dequeue sequence:
+    // 1. First dequeue for the main task
+    // 2. Second dequeue during drain
+    // 3. Third dequeue returns null to end drain
+    runner.dequeue
+      .mockReturnValueOnce({ issueId: id1, trigger: 'webhook' })
+      .mockReturnValueOnce({ issueId: id2, trigger: 'webhook' })
+      .mockReturnValue(null);
+
+    // Mock loadQueue to show one item remains after id1 is dequeued
+    runner.loadQueue
+      .mockReturnValueOnce([{ issueId: id2 }]) // called after id1 run finishes
+      .mockReturnValue([]); // called after id2 run finishes
+
+    spawn.mockImplementation(() => mockSpawnChild({ exitCode: 0 }));
+
+    await request(app).post('/webhooks/linear').send(issuePayload(id1));
+
+    // Wait for main task and drain loop
+    await new Promise(resolve => originalSetTimeout(resolve, 100));
+
+    // Verify both were "run" (spawn called twice)
+    expect(spawn).toHaveBeenCalledTimes(2);
+    
+    // Verify first spawn was for id1
+    expect(spawn.mock.calls[0][0]).toBe('bash');
+    // We can't easily check env in spawn mock calls without more setup, 
+    // but we can check the runner logs if we wanted. 
+    // Here, just confirming it triggered twice is a good signal for drain.
+
+    // Verify lock was acquired and released for both
+    expect(runner.acquireLock).toHaveBeenCalledTimes(2);
+    expect(runner.releaseLock).toHaveBeenCalledTimes(2);
   });
 });

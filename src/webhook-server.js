@@ -141,6 +141,83 @@ function triggerRun(issueId) {
   });
 }
 
+async function runItem(item) {
+  const { issueId } = item;
+  runner.log('RUN', 'start', { trigger: item.trigger || 'queue', issue: issueId });
+  const { code, output } = await triggerRun(issueId);
+
+  if (code === 0) {
+    runner.log('RUN', 'completed successfully', { trigger: item.trigger || 'queue', issue: issueId });
+    await runner.removeUsageLimitLabel(issueId).catch(() => {});
+  } else if (code === runner.SKIPPED_LOCKED) {
+    runner.log('WEBHOOK', 'SKIPPED_LOCKED received from run_auto.sh — re-enqueuing', { issue: issueId });
+    runner.enqueue(issueId, item.trigger || 'queue');
+  } else {
+    const resetEpoch = parseUsageLimitResetEpoch(output);
+    if (resetEpoch !== null) {
+      runner.log('RUN', 'usage limit detected', { trigger: item.trigger || 'queue', issue: issueId });
+      await runner.notifyUsageLimitToAllActiveIssues(resetEpoch).catch(() => {});
+      const retryAt = new Date(resetEpoch * 1000).toISOString();
+      runner.enqueue(issueId, item.trigger || 'queue', retryAt);
+      runner.log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt });
+
+      // backward compat: setTimeout retry
+      const delayMs = Math.max(0, resetEpoch * 1000 - Date.now());
+      setTimeout(async () => {
+        runner.log('RETRY', 'firing', { trigger: item.trigger || 'queue', issue: issueId });
+        const retryItem = runner.dequeue();
+        if (!retryItem) return;
+        const retryLocked = runner.acquireLock({ trigger: 'retry', issue: retryItem.issueId });
+        if (!retryLocked) {
+          runner.enqueue(retryItem.issueId, 'retry');
+          return;
+        }
+        try {
+          const { code: retryCode } = await triggerRun(retryItem.issueId);
+          if (retryCode === 0) {
+            runner.log('RETRY', 'completed successfully', { issue: retryItem.issueId });
+            await runner.removeUsageLimitLabel(retryItem.issueId).catch(() => {});
+          } else {
+            runner.log('RETRY', `failed exit=${retryCode}`, { issue: retryItem.issueId });
+          }
+        } finally {
+          runner.releaseLock();
+        }
+      }, delayMs);
+    } else {
+      runner.log('RUN', `failed exit=${code}`, { trigger: item.trigger || 'queue', issue: issueId });
+    }
+  }
+}
+
+async function drainQueue() {
+  let item;
+  while ((item = runner.dequeue()) !== null) {
+    // Skip items whose retryAt is in the future
+    if (item.retryAt && new Date(item.retryAt) > new Date()) {
+      runner.enqueue(item.issueId, item.trigger, item.retryAt);
+      break;
+    }
+    const remaining = runner.loadQueue().length;
+    runner.log('QUEUE', `drain: starting issueId=${item.issueId}, queue remaining after this: ${remaining}`, { issue: item.issueId });
+
+    const locked = runner.acquireLock({ trigger: 'drain', issue: item.issueId });
+    if (!locked) {
+      runner.log('QUEUE', 'drain: SKIPPED_LOCKED — re-enqueuing', { issue: item.issueId });
+      runner.enqueue(item.issueId, item.trigger || 'drain');
+      break;
+    }
+    try {
+      await runItem(item);
+    } catch (err) {
+      runner.log('QUEUE', `drain error: ${err.message}`, { issue: item.issueId });
+    } finally {
+      runner.releaseLock();
+    }
+  }
+  runner.log('QUEUE', `drain complete — queue empty`);
+}
+
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
@@ -184,11 +261,13 @@ app.post('/webhooks/linear', (req, res) => {
 
   setImmediate(async () => {
     try {
-      // 作業優先度チェック: 作業中(locked)かつ non-Urgent の場合はスキップ
       const issuePriority = body.data?.priority ?? 0;
       const isUrgent = issuePriority === 1;
+
       if (!isUrgent && runner.isLocked()) {
-        runner.log('WEBHOOK', `non-Urgent issue (priority=${issuePriority}) skipped while locked`, { issue: issueId });
+        // Non-Urgent while locked: enqueue for later drain
+        runner.enqueue(issueId, 'webhook');
+        runner.log('WEBHOOK', `non-Urgent issue (priority=${issuePriority}) queued while locked, queue size=${runner.loadQueue().length}`, { issue: issueId });
         return;
       }
 
@@ -204,10 +283,8 @@ app.post('/webhooks/linear', (req, res) => {
         return;
       }
 
-      // キューに追加
+      // キューに追加してすぐ取り出す
       runner.enqueue(issueId, 'webhook');
-
-      // キューから取り出して実行
       const item = runner.dequeue();
       if (!item) return;
       const queuedIssueId = item.issueId;
@@ -221,53 +298,17 @@ app.post('/webhooks/linear', (req, res) => {
       }
 
       try {
-        runner.log('RUN', 'start', { trigger: 'webhook', issue: queuedIssueId });
-        const { code, output } = await triggerRun(queuedIssueId);
-
-        if (code === 0) {
-          runner.log('RUN', 'completed successfully', { trigger: 'webhook', issue: queuedIssueId });
-          await runner.removeUsageLimitLabel(queuedIssueId).catch(() => {});
-        } else if (code === runner.SKIPPED_LOCKED) {
-          runner.log('WEBHOOK', 'SKIPPED_LOCKED received from run_auto.sh', { issue: queuedIssueId });
-          runner.enqueue(queuedIssueId, 'webhook');
-        } else {
-          const resetEpoch = parseUsageLimitResetEpoch(output);
-          if (resetEpoch !== null) {
-            runner.log('RUN', 'usage limit detected', { trigger: 'webhook', issue: queuedIssueId });
-            await runner.notifyUsageLimitToAllActiveIssues(resetEpoch).catch(() => {});
-            const retryAt = new Date(resetEpoch * 1000).toISOString();
-            runner.enqueue(queuedIssueId, 'webhook', retryAt);
-            runner.log('RETRY', 'scheduled', { trigger: 'webhook', issue: queuedIssueId, retryAt });
-
-            // 後方互換: setTimeout でも retry をトリガー
-            const delayMs = Math.max(0, resetEpoch * 1000 - Date.now());
-            setTimeout(async () => {
-              runner.log('RETRY', 'firing', { trigger: 'webhook', issue: queuedIssueId });
-              const retryItem = runner.dequeue();
-              if (!retryItem) return;
-              const retryLocked = runner.acquireLock({ trigger: 'retry', issue: retryItem.issueId });
-              if (!retryLocked) {
-                runner.enqueue(retryItem.issueId, 'retry');
-                return;
-              }
-              try {
-                const { code: retryCode } = await triggerRun(retryItem.issueId);
-                if (retryCode === 0) {
-                  runner.log('RETRY', 'completed successfully', { issue: retryItem.issueId });
-                  await runner.removeUsageLimitLabel(retryItem.issueId).catch(() => {});
-                } else {
-                  runner.log('RETRY', `failed exit=${retryCode}`, { issue: retryItem.issueId });
-                }
-              } finally {
-                runner.releaseLock();
-              }
-            }, delayMs);
-          } else {
-            runner.log('RUN', `failed exit=${code}`, { trigger: 'webhook', issue: queuedIssueId });
-          }
-        }
+        await runItem(item);
       } finally {
         runner.releaseLock();
+        // After main task: drain remaining queue
+        const queueSize = runner.loadQueue().length;
+        if (queueSize > 0) {
+          runner.log('QUEUE', `main task done, draining ${queueSize} remaining item(s)`);
+          await drainQueue();
+        } else {
+          runner.log('QUEUE', 'main task done, queue empty — no drain needed');
+        }
       }
     } catch (err) {
       runner.log('WEBHOOK', `processing error: ${err.message}`, { issue: issueId });
