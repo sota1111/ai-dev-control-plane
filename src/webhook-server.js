@@ -262,11 +262,11 @@ app.post('/webhooks/linear', (req, res) => {
   // For update events: only proceed if a meaningful field changed.
   // Label-only changes (e.g. AI removing usage-limit label) are non-meaningful.
   if (action === "update") {
-    const updatedFrom = body.updatedFrom || {};
+    const updatedFrom = body.updatedFrom;
     const meaningfulFields = ["stateId", "title", "description", "priority", "assigneeId", "dueDate", "estimate", "parentId"];
-    const hasMeaningfulChange = meaningfulFields.some(f => f in updatedFrom);
+    const hasMeaningfulChange = updatedFrom && meaningfulFields.some(f => f in updatedFrom);
 
-    if (!hasMeaningfulChange) {
+    if (updatedFrom && !hasMeaningfulChange) {
       runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=non-meaningful update`, { issue: issueId });
       return res.status(200).json({ status: "ignored", reason: "non-meaningful update" });
     }
