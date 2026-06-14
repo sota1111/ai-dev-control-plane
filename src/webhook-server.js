@@ -143,6 +143,14 @@ function triggerRun(issueId) {
 
 async function runItem(item) {
   const { issueId } = item;
+
+  // Check current Linear state before executing
+  const eligibility = await runner.getIssueExecutionEligibility(issueId);
+  if (!eligibility.eligible) {
+    runner.log('RUN', `skipped: ${eligibility.reason}`, { trigger: item.trigger || 'queue', issue: issueId });
+    return;
+  }
+
   runner.log('RUN', 'start', { trigger: item.trigger || 'queue', issue: issueId });
   const { code, output } = await triggerRun(issueId);
 
@@ -185,6 +193,14 @@ async function drainQueue() {
       runner.enqueue(item.issueId, item.trigger, item.retryAt);
       break;
     }
+
+    // Check current Linear state before executing
+    const eligibility = await runner.getIssueExecutionEligibility(item.issueId);
+    if (!eligibility.eligible) {
+      runner.log('QUEUE', `drain: skipped issueId=${item.issueId} reason=${eligibility.reason}`, { issue: item.issueId });
+      continue;
+    }
+
     const remaining = runner.loadQueue().length;
     runner.log('QUEUE', `drain: starting issueId=${item.issueId}, queue remaining after this: ${remaining}`, { issue: item.issueId });
 

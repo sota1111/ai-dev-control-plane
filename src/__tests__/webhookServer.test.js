@@ -20,6 +20,7 @@ jest.mock('../runner', () => ({
   isQueued: jest.fn().mockReturnValue(false),
   isLocked: jest.fn().mockReturnValue(false),
   loadQueue: jest.fn().mockReturnValue([]),
+  getIssueExecutionEligibility: jest.fn().mockResolvedValue({ eligible: true }),
   LOG_DIR: '/tmp/test-logs',
   LOCK_FILE: '/tmp/test-logs/runner.lock',
   QUEUE_FILE: '/tmp/test-logs/runner.queue.json',
@@ -78,6 +79,7 @@ describe('webhook usage limit retry', () => {
     runner.isQueued.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
+    runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
   });
 
 
@@ -334,6 +336,7 @@ describe('webhook issue filtering', () => {
     runner.isQueued.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
+    runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
   });
 
   afterEach(() => {
@@ -492,5 +495,92 @@ describe('webhook issue filtering', () => {
     expect(res.body.status).toBe('ignored');
     expect(res.body.reason).toBe('non-meaningful update');
     expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe('pre-execution eligibility check', () => {
+  const originalSetTimeout = global.setTimeout;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    spawn.mockReset();
+    spawn.mockImplementation(() => mockSpawnChild({ exitCode: 0 }));
+    jest.spyOn(global, 'setTimeout').mockImplementation((fn, ms) => {
+      if (ms <= 100) return originalSetTimeout(fn, ms);
+      return { unref: () => {} };
+    });
+
+    const runner = require('../runner');
+    runner.acquireLock.mockReturnValue(true);
+    runner.hasPendingIssues.mockResolvedValue(true);
+    runner.isQueued.mockReturnValue(false);
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+    runner.dequeue.mockReturnValue(null);
+    runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const issuePayload = (id = 'TEST-001') => ({
+    type: 'Issue',
+    action: 'update',
+    updatedFrom: { stateId: 'old-state' },
+    data: { identifier: id, title: 'test', state: { name: 'In Progress', type: 'started' }, labels: [] }
+  });
+
+  test('queued completed issue is skipped before runItem', async () => {
+    const runner = require('../runner');
+    const id = 'TEST-QUEUED-COMPLETED';
+    runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
+    runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: false, reason: 'terminal state before run' });
+
+    await request(app).post('/webhooks/linear').send(issuePayload(id));
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
+
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('retry completed issue is skipped before triggerRun', async () => {
+    const runner = require('../runner');
+    const id = 'TEST-RETRY-COMPLETED';
+    // Issue is dequeued (would be in retry queue) but is now completed
+    runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
+    runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: false, reason: 'terminal state before run' });
+
+    await request(app).post('/webhooks/linear').send(issuePayload(id));
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
+
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('archived queued issue is removed before execution', async () => {
+    const runner = require('../runner');
+    const id = 'TEST-ARCHIVED-QUEUED';
+    runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
+    runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: false, reason: 'archived issue before run' });
+
+    await request(app).post('/webhooks/linear').send(issuePayload(id));
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
+
+    expect(spawn).not.toHaveBeenCalled();
+    // getIssueExecutionEligibility itself calls removeFromQueue internally (runner.js),
+    // but since runner is mocked, verify eligibility was checked
+    expect(runner.getIssueExecutionEligibility).toHaveBeenCalledWith(id);
+  });
+
+  test('active queued issue still runs', async () => {
+    const runner = require('../runner');
+    const id = 'TEST-ACTIVE-RUNS';
+    runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
+    runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
+    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
+
+    await request(app).post('/webhooks/linear').send(issuePayload(id));
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
+
+    expect(spawn).toHaveBeenCalled();
+    expect(runner.getIssueExecutionEligibility).toHaveBeenCalledWith(id);
   });
 });

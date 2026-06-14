@@ -446,6 +446,48 @@ async function setIssueInProgress(issueId) {
   }
 }
 
+async function getIssueExecutionEligibility(issueId) {
+  try {
+    const query = `
+      query($id: String!) {
+        issue(id: $id) {
+          id
+          identifier
+          archivedAt
+          state { name type }
+        }
+      }
+    `;
+    const data = await linearQuery(query, { id: issueId });
+
+    if (!data.issue) {
+      removeFromQueue(issueId);
+      return { eligible: false, reason: 'issue not found before run' };
+    }
+
+    const { archivedAt, state } = data.issue;
+
+    if (archivedAt) {
+      removeFromQueue(issueId);
+      return { eligible: false, reason: 'archived issue before run' };
+    }
+
+    const isTerminal = ['completed', 'canceled', 'duplicate'].includes(state?.type)
+      || ['Done', 'Canceled', 'Cancelled', 'Duplicate'].includes(state?.name);
+
+    if (isTerminal) {
+      removeFromQueue(issueId);
+      return { eligible: false, reason: 'terminal state before run' };
+    }
+
+    return { eligible: true };
+  } catch (err) {
+    // Fail open: if Linear API is unavailable, allow execution to proceed
+    log('ERROR', `getIssueExecutionEligibility failed: ${err.message}`, { issue: issueId });
+    return { eligible: true };
+  }
+}
+
 module.exports = {
   SKIPPED_LOCKED,
   LOG_DIR,
@@ -474,5 +516,6 @@ module.exports = {
   removeFromQueue,
   isQueued,
   isLocked,
-  setIssueInProgress
+  setIssueInProgress,
+  getIssueExecutionEligibility
 };
