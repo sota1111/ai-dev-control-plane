@@ -300,6 +300,7 @@ describe('discordAskHandler', () => {
 
         expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'handler completed', expect.objectContaining({
           intent: 'STATUS_CHECK',
+          responsePreview: JSON.stringify('現在実行中のタスク: なし'),
         }));
       });
 
