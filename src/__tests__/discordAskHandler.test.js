@@ -162,7 +162,216 @@ describe('discordAskHandler', () => {
       const response = await handleAskModalSubmit(interaction);
       
       expect(response.body.data.content).toContain('エラーが発生しました');
-      expect(runner.log).toHaveBeenCalledWith('DISCORD', expect.stringContaining('handleAskModalSubmit error: Test Error'));
+      expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', expect.stringContaining('handler error: Test Error'));
+    });
+
+    describe('logging', () => {
+      let runner;
+      
+      beforeEach(() => {
+        runner = require('../runner');
+        jest.clearAllMocks();
+      });
+
+      test('logs modal submit received on entry', async () => {
+        const interaction = {
+          id: 'interaction-123',
+          member: { user: { id: 'user-456' } },
+          data: {
+            components: [
+              { type: 18, component: { custom_id: 'ask_input', value: 'test query' } }
+            ]
+          }
+        };
+        classifyIntent.mockReturnValue({ intent: 'STATUS_CHECK', issueId: null, originalText: 'test query' });
+        handlers.handleStatusIntent.mockResolvedValue('ok');
+
+        await handleAskModalSubmit(interaction);
+
+        expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'modal submit received', expect.objectContaining({
+          interactionId: 'interaction-123',
+          userId: 'user-456',
+        }));
+      });
+
+      test('logs input extracted with length', async () => {
+        const interaction = {
+          data: {
+            components: [
+              { type: 18, component: { custom_id: 'ask_input', value: 'hello world' } }
+            ]
+          }
+        };
+        classifyIntent.mockReturnValue({ intent: 'STATUS_CHECK', issueId: null, originalText: 'hello world' });
+        handlers.handleStatusIntent.mockResolvedValue('ok');
+
+        await handleAskModalSubmit(interaction);
+
+        expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'input extracted', expect.objectContaining({
+          length: 11,
+        }));
+      });
+
+      test('logs intent classified with UNKNOWN intent', async () => {
+        const interaction = {
+          data: {
+            components: [
+              { type: 18, component: { custom_id: 'ask_input', value: 'わからない質問' } }
+            ]
+          }
+        };
+        classifyIntent.mockReturnValue({ intent: 'UNKNOWN', issueId: null, originalText: 'わからない質問' });
+        handlers.handleUnknownIntent.mockReturnValue('対応できない依頼です');
+
+        await handleAskModalSubmit(interaction);
+
+        expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'intent classified', expect.objectContaining({
+          intent: 'UNKNOWN',
+        }));
+      });
+
+      test('logs intent classified with QUEUE_CHECK intent', async () => {
+        const interaction = {
+          data: {
+            components: [
+              { type: 18, component: { custom_id: 'ask_input', value: 'キューは？' } }
+            ]
+          }
+        };
+        classifyIntent.mockReturnValue({ intent: 'QUEUE_CHECK', issueId: null, originalText: 'キューは？' });
+        handlers.handleQueueIntent.mockResolvedValue('queue info');
+
+        await handleAskModalSubmit(interaction);
+
+        expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'intent classified', expect.objectContaining({
+          intent: 'QUEUE_CHECK',
+        }));
+      });
+
+      test('logs issueId when extracted', async () => {
+        const interaction = {
+          data: {
+            components: [
+              { type: 18, component: { custom_id: 'ask_input', value: 'SOT-532 の状態は？' } }
+            ]
+          }
+        };
+        classifyIntent.mockReturnValue({ intent: 'ISSUE_STATUS', issueId: 'SOT-532', originalText: 'SOT-532 の状態は？' });
+        handlers.handleIssueStatusIntent.mockResolvedValue('issue status');
+
+        await handleAskModalSubmit(interaction);
+
+        expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'intent classified', expect.objectContaining({
+          issueId: 'SOT-532',
+        }));
+      });
+
+      test('logs handler selected', async () => {
+        const interaction = {
+          data: {
+            components: [
+              { type: 18, component: { custom_id: 'ask_input', value: 'status?' } }
+            ]
+          }
+        };
+        classifyIntent.mockReturnValue({ intent: 'STATUS_CHECK', issueId: null, originalText: 'status?' });
+        handlers.handleStatusIntent.mockResolvedValue('ok');
+
+        await handleAskModalSubmit(interaction);
+
+        expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'handler selected', expect.objectContaining({
+          handler: 'handleStatusIntent',
+          intent: 'STATUS_CHECK',
+        }));
+      });
+
+      test('logs handler completed with responsePreview', async () => {
+        const interaction = {
+          data: {
+            components: [
+              { type: 18, component: { custom_id: 'ask_input', value: 'status?' } }
+            ]
+          }
+        };
+        classifyIntent.mockReturnValue({ intent: 'STATUS_CHECK', issueId: null, originalText: 'status?' });
+        handlers.handleStatusIntent.mockResolvedValue('現在実行中のタスク: なし');
+
+        await handleAskModalSubmit(interaction);
+
+        expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'handler completed', expect.objectContaining({
+          intent: 'STATUS_CHECK',
+          responsePreview: JSON.stringify('現在実行中のタスク: なし'),
+        }));
+      });
+
+      test('logs response sent', async () => {
+        const interaction = {
+          data: {
+            components: [
+              { type: 18, component: { custom_id: 'ask_input', value: 'test' } }
+            ]
+          }
+        };
+        classifyIntent.mockReturnValue({ intent: 'STATUS_CHECK', issueId: null, originalText: 'test' });
+        handlers.handleStatusIntent.mockResolvedValue('result');
+
+        await handleAskModalSubmit(interaction);
+
+        expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'response sent', expect.objectContaining({
+          mode: 'direct',
+        }));
+      });
+
+      test('logs handler error on exception', async () => {
+        const interaction = {
+          data: {
+            components: [
+              { type: 18, component: { custom_id: 'ask_input', value: 'valid' } }
+            ]
+          }
+        };
+        classifyIntent.mockImplementation(() => { throw new Error('Test Error'); });
+
+        const runner = require('../runner');
+        await handleAskModalSubmit(interaction);
+
+        expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', expect.stringContaining('handler error: Test Error'));
+      });
+    });
+  });
+
+  describe('sanitizeDiscordAskLogText', () => {
+    const { sanitizeDiscordAskLogText } = require('../lib/discordAskHandler');
+
+    test('masks token= patterns', () => {
+      expect(sanitizeDiscordAskLogText('token=abc123secret')).not.toContain('abc123secret');
+      expect(sanitizeDiscordAskLogText('token=abc123secret')).toContain('[MASKED]');
+    });
+
+    test('masks secret= patterns', () => {
+      expect(sanitizeDiscordAskLogText('secret=mysecretvalue')).toContain('[MASKED]');
+    });
+
+    test('masks api_key= patterns', () => {
+      expect(sanitizeDiscordAskLogText('api_key=sk-1234567')).toContain('[MASKED]');
+    });
+
+    test('masks password= patterns', () => {
+      expect(sanitizeDiscordAskLogText('password=hunter2')).toContain('[MASKED]');
+    });
+
+    test('masks webhook_url= patterns', () => {
+      expect(sanitizeDiscordAskLogText('webhook_url=https://example.com/secret')).toContain('[MASKED]');
+    });
+
+    test('preserves non-secret text', () => {
+      const text = 'SOT-532 をキューから削除して';
+      expect(sanitizeDiscordAskLogText(text)).toBe(text);
+    });
+
+    test('truncates text to 300 characters', () => {
+      const long = 'a'.repeat(400);
+      expect(sanitizeDiscordAskLogText(long)).toHaveLength(300);
     });
   });
 });
