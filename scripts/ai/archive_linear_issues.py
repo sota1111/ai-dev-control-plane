@@ -98,6 +98,7 @@ def main():
     parser = argparse.ArgumentParser(description="Linear Issue Archive Script")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be archived without making changes")
     parser.add_argument("--parent-target-count", type=int, default=150, help="Max number of parent Issues to keep on Linear")
+    parser.add_argument("--total-target-count", type=int, default=200, help="Max total number of Issues to keep on Linear")
     parser.add_argument("--execute", action="store_true", help="Actually perform the archive operation")
     
     args = parser.parse_args()
@@ -105,6 +106,7 @@ def main():
     # If neither --dry-run nor --execute is provided, default to dry-run
     is_dry_run = args.dry_run or not args.execute
     parent_target_count = args.parent_target_count
+    total_target_count = args.total_target_count
     
     issues = fetch_all_issues()
     
@@ -121,12 +123,19 @@ def main():
     children.sort(key=lambda x: x["createdAt"])
     parents.sort(key=lambda x: x["createdAt"])
     
-    archive_candidates_children = children
+    # Calculate how many issues need to be archived to reach total_target_count.
+    num_to_archive_total = max(0, len(issues) - total_target_count)
+
+    # Archive oldest children first.
+    num_children_to_archive = min(len(children), num_to_archive_total)
+    archive_candidates_children = children[:num_children_to_archive]
+
+    # If still excess after archiving children, archive oldest excess parents.
+    remaining_after_children = num_to_archive_total - num_children_to_archive
     archive_candidates_parents = []
     
-    if len(parents) > parent_target_count:
-        num_to_archive = len(parents) - parent_target_count
-        archive_candidates_parents = parents[:num_to_archive]
+    if remaining_after_children > 0:
+        archive_candidates_parents = parents[:remaining_after_children]
         
     total_candidates = len(archive_candidates_children) + len(archive_candidates_parents)
     
@@ -144,6 +153,7 @@ def main():
         print(f"現在の親 Issue 数: {len(parents)}")
         print(f"現在の子 Issue 数: {len(children)}")
         print(f"親 Issue 上限: {parent_target_count}")
+        print(f"総 Issue 上限: {total_target_count}")
         
         print(f"\n退避対象の子 Issue 一覧 ({len(archive_candidates_children)} 件):")
         for c in archive_candidates_children:
@@ -154,9 +164,11 @@ def main():
             for p in archive_candidates_parents:
                 print(f"  - {p['identifier']}: {p['title']}  →  .local/linear-issue-archive/{today}/parents/{p['identifier']}.json")
                 
-        print(f"\n実行後に残る親 Issue 数: {len(parents) - len(archive_candidates_parents)}")
-        print(f"実行後に残る子 Issue 数: 0")
-        print(f"実行後に残る総 Issue 数: {len(parents) - len(archive_candidates_parents)}")
+        remaining_parents = len(parents) - len(archive_candidates_parents)
+        remaining_children = len(children) - len(archive_candidates_children)
+        print(f"\n実行後に残る親 Issue 数: {remaining_parents}")
+        print(f"実行後に残る子 Issue 数: {remaining_children}")
+        print(f"実行後に残る総 Issue 数: {remaining_parents + remaining_children}")
         
         print("\nDRY RUN のため Linear は変更されません。")
         print("--execute オプションを付けて実行すると実際にアーカイブされます。")
