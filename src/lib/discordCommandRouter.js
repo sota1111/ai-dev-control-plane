@@ -9,6 +9,7 @@ const {
   handleReply,
   handleRetry,
 } = require('./discordCommandHandlers');
+const { handleAskCommand, handleAskModalSubmit, ASK_MODAL_CUSTOM_ID } = require('./discordAskHandler');
 
 // Interaction types
 const InteractionType = {
@@ -91,14 +92,7 @@ async function handleSlashCommand(commandName, interaction) {
       result = await handleRetry(interaction);
       break;
     case 'ask':
-      // Will be implemented in SOT-532 — return placeholder modal trigger
-      return {
-        status: 200,
-        body: {
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: { content: '/ask コマンドは準備中です。', flags: 64 },
-        },
-      };
+      return await handleAskCommand();
     default:
       return {
         status: 200,
@@ -119,12 +113,15 @@ async function handleSlashCommand(commandName, interaction) {
 }
 
 async function handleModalSubmit(interaction) {
-  // Will be implemented in SOT-532
+  const customId = interaction.data && interaction.data.custom_id;
+  if (customId === ASK_MODAL_CUSTOM_ID) {
+    return await handleAskModalSubmit(interaction);
+  }
   return {
     status: 200,
     body: {
       type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-      data: { content: 'モーダル処理は準備中です。', flags: 64 },
+      data: { content: '不明なモーダルです。', flags: 64 },
     },
   };
 }
