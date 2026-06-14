@@ -250,15 +250,15 @@ async function removeUsageLimitLabel(issueId) {
   }
 }
 
-function setUsageLimitCooldownUntil(retryAt) {
+function setUsageLimitCooldownUntil(retryAt, issueId = null) {
   try {
     if (!fs.existsSync(LOG_DIR)) {
       fs.mkdirSync(LOG_DIR, { recursive: true });
     }
     const tmpFile = USAGE_LIMIT_FILE + ".tmp";
-    fs.writeFileSync(tmpFile, JSON.stringify({ retryAt }, null, 2));
+    fs.writeFileSync(tmpFile, JSON.stringify({ retryAt, issueId }, null, 2));
     fs.renameSync(tmpFile, USAGE_LIMIT_FILE);
-    log("RUNNER", "usage limit cooldown set", { retryAt });
+    log("RUNNER", "usage limit cooldown set", { retryAt, issueId });
   } catch (err) {
     log("ERROR", `setUsageLimitCooldownUntil failed: ${err.message}`);
   }
@@ -278,8 +278,18 @@ function clearUsageLimitCooldown() {
 function getUsageLimitCooldownUntil(nowMs = Date.now()) {
   try {
     if (!fs.existsSync(USAGE_LIMIT_FILE)) return null;
-    const state = JSON.parse(fs.readFileSync(USAGE_LIMIT_FILE, "utf8"));
-    const retryAt = state.retryAt;
+    const content = fs.readFileSync(USAGE_LIMIT_FILE, "utf8");
+    const state = JSON.parse(content);
+    
+    // Support both old string format and new object format
+    let retryAt, issueId;
+    if (typeof state === 'string') {
+      retryAt = state;
+    } else {
+      retryAt = state.retryAt;
+      issueId = state.issueId;
+    }
+
     if (!retryAt) return null;
     const retryAtMs = new Date(retryAt).getTime();
     if (Number.isNaN(retryAtMs)) {
@@ -290,7 +300,7 @@ function getUsageLimitCooldownUntil(nowMs = Date.now()) {
       clearUsageLimitCooldown();
       return null;
     }
-    return retryAt;
+    return { retryAt, issueId };
   } catch (err) {
     log("ERROR", `getUsageLimitCooldownUntil failed: ${err.message}`);
     return null;
@@ -498,6 +508,7 @@ module.exports = {
   STALE_LOCK_MS,
   LINEAR_API_URL,
   log,
+  linearQuery,
   acquireLock,
   releaseLock,
   hasPendingIssues,

@@ -1,5 +1,15 @@
 'use strict';
 
+const {
+  handleStatus,
+  handleQueue,
+  handleCooldown,
+  handlePause,
+  handleResume,
+  handleReply,
+  handleRetry,
+} = require('./discordCommandHandlers');
+
 // Interaction types
 const InteractionType = {
   PING: 1,
@@ -56,23 +66,54 @@ async function routeInteraction(interaction) {
 }
 
 async function handleSlashCommand(commandName, interaction) {
-  // Handlers will be added in SOT-531 and SOT-532
-  // For now, return a placeholder response for known commands
-  const knownCommands = ['status', 'queue', 'cooldown', 'pause', 'resume', 'reply', 'retry', 'ask'];
-  if (knownCommands.includes(commandName)) {
-    return {
-      status: 200,
-      body: {
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: { content: `/${commandName} コマンドは準備中です。`, flags: 64 },
-      },
-    };
+  let result;
+
+  switch (commandName) {
+    case 'status':
+      result = await handleStatus();
+      break;
+    case 'queue':
+      result = await handleQueue();
+      break;
+    case 'cooldown':
+      result = await handleCooldown();
+      break;
+    case 'pause':
+      result = await handlePause();
+      break;
+    case 'resume':
+      result = await handleResume();
+      break;
+    case 'reply':
+      result = await handleReply(interaction);
+      break;
+    case 'retry':
+      result = await handleRetry(interaction);
+      break;
+    case 'ask':
+      // Will be implemented in SOT-532 — return placeholder modal trigger
+      return {
+        status: 200,
+        body: {
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { content: '/ask コマンドは準備中です。', flags: 64 },
+        },
+      };
+    default:
+      return {
+        status: 200,
+        body: {
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { content: `不明なコマンド: /${commandName}`, flags: 64 },
+        },
+      };
   }
+
   return {
     status: 200,
     body: {
       type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-      data: { content: `不明なコマンド: /${commandName}`, flags: 64 },
+      data: { content: result.content, flags: 64 },
     },
   };
 }

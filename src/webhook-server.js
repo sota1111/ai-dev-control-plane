@@ -169,7 +169,7 @@ async function runItem(item) {
       runner.log('RUN', 'usage limit detected', { trigger: item.trigger || 'queue', issue: issueId });
       await runner.notifyUsageLimitToAllActiveIssues(resetEpoch).catch(() => {});
       const retryAt = new Date(resetEpoch * 1000).toISOString();
-      runner.setUsageLimitCooldownUntil(retryAt);
+      runner.setUsageLimitCooldownUntil(retryAt, issueId);
       runner.enqueue(issueId, item.trigger || 'queue', retryAt);
       runner.log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt });
 
@@ -299,8 +299,9 @@ app.post('/webhooks/linear', (req, res) => {
 
   setImmediate(async () => {
     try {
-      const cooldownRetryAt = runner.getUsageLimitCooldownUntil();
-      if (cooldownRetryAt) {
+      const cooldown = runner.getUsageLimitCooldownUntil();
+      if (cooldown) {
+        const cooldownRetryAt = cooldown.retryAt;
         runner.enqueue(issueId, 'webhook', cooldownRetryAt);
         runner.log('WEBHOOK', `usage limit cooldown active, queued until ${cooldownRetryAt}`, { issue: issueId });
         return;
