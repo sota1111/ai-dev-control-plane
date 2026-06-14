@@ -4,6 +4,8 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { DiscordNotifier } = require('./lib/discordNotifier');
+const { verifyDiscordSignature } = require('./lib/discordInteractions');
+const { routeInteraction } = require('./lib/discordCommandRouter');
 
 const _discordNotifier = process.env.DISCORD_WEBHOOK_URL
   ? new DiscordNotifier(process.env.DISCORD_WEBHOOK_URL)
@@ -357,6 +359,42 @@ app.post('/webhooks/linear', (req, res) => {
       runner.log('WEBHOOK', `processing error: ${err.message}`, { issue: issueId });
     }
   });
+});
+
+app.post('/webhooks/discord', (req, res) => {
+  const publicKey = process.env.DISCORD_PUBLIC_KEY;
+  if (!publicKey) {
+    runner.log('DISCORD', 'DISCORD_PUBLIC_KEY not configured — rejecting request');
+    return res.status(401).json({ error: 'Discord public key not configured' });
+  }
+
+  const signature = req.headers['x-signature-ed25519'];
+  const timestamp = req.headers['x-signature-timestamp'];
+  const rawBody = req.rawBody;
+
+  if (!signature || !timestamp || !rawBody) {
+    runner.log('DISCORD', 'Missing signature headers');
+    return res.status(401).json({ error: 'Invalid request signature' });
+  }
+
+  if (!verifyDiscordSignature(publicKey, signature, timestamp, rawBody)) {
+    runner.log('DISCORD', 'Signature verification failed');
+    return res.status(401).json({ error: 'Invalid request signature' });
+  }
+
+  const interaction = req.body;
+
+  routeInteraction(interaction)
+    .then(({ status, body }) => {
+      res.status(status).json(body);
+    })
+    .catch((err) => {
+      runner.log('DISCORD', `Error handling interaction: ${err.message}`);
+      res.status(200).json({
+        type: 4,
+        data: { content: 'エラーが発生しました。しばらくしてから再試行してください。', flags: 64 },
+      });
+    });
 });
 
 if (require.main === module) {
