@@ -86,7 +86,7 @@ describe('runner', () => {
 
       expect(fs.writeFileSync).toHaveBeenCalledWith(
         expect.stringContaining('runner.usage-limit.json.tmp'),
-        JSON.stringify({ retryAt }, null, 2)
+        JSON.stringify({ retryAt, issueId: null }, null, 2)
       );
       expect(fs.renameSync).toHaveBeenCalledWith(
         expect.stringContaining('runner.usage-limit.json.tmp'),
@@ -99,7 +99,7 @@ describe('runner', () => {
       fs.existsSync.mockImplementation((path) => path === runner.USAGE_LIMIT_FILE);
       fs.readFileSync.mockReturnValue(JSON.stringify({ retryAt }));
 
-      expect(runner.getUsageLimitCooldownUntil()).toBe(retryAt);
+      expect(runner.getUsageLimitCooldownUntil()).toEqual({ retryAt, issueId: undefined });
     });
 
     it('getUsageLimitCooldownUntil() clears expired cooldowns', () => {

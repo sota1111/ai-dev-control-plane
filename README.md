@@ -199,6 +199,58 @@ scheduler と webhook は **同一のロックファイル** `docs/ai/auto_logs/
 - `retryAt` が将来時刻の場合はその時刻以降に実行
 - ロック取得失敗時にキューに戻し、後続処理で実行
 
+## Discord Bot セットアップ
+
+### 1. Discord Application 作成
+
+1. [Discord Developer Portal](https://discord.com/developers/applications) にアクセス
+2. 「New Application」をクリックし、アプリ名を入力
+3. 左メニューの「Bot」→「Add Bot」をクリック
+4. 「Reset Token」でBot Tokenを取得（一度しか表示されないので保存）
+5. 左メニューの「General Information」から Application ID と Public Key を取得
+
+### 2. 環境変数を設定
+
+`.env` ファイルに以下を追加:
+
+```env
+DISCORD_BOT_TOKEN=your_bot_token_here
+DISCORD_APPLICATION_ID=your_application_id_here
+DISCORD_PUBLIC_KEY=your_public_key_here
+```
+
+### 3. Interactions Endpoint URL を設定
+
+1. ngrok などでサーバーを公開: `npm run dev:webhook`
+2. Discord Developer Portal の「General Information」→「Interactions Endpoint URL」に `https://your-domain.ngrok.io/webhooks/discord` を設定
+3. Discordが検証リクエストを送信し、成功すれば設定完了
+
+### 4. スラッシュコマンドを登録
+
+```bash
+node scripts/register_discord_commands.js
+```
+
+### 5. Bot をサーバーに招待
+
+1. Discord Developer Portal の「OAuth2」→「URL Generator」
+2. Scopes: `bot`, `applications.commands` を選択
+3. Bot Permissions: `Send Messages` を選択
+4. 生成されたURLでサーバーに招待
+
+### 利用可能なコマンド
+
+| コマンド | 説明 |
+|---------|------|
+| `/status` | 実行中Issue、ロック状態、キュー数、cooldownを表示 |
+| `/queue` | 実行キューの内容を表示 |
+| `/cooldown` | usage-limit cooldown状態を表示 |
+| `/pause` | 新規実行を一時停止 |
+| `/resume` | 一時停止を解除 |
+| `/reply issue:SOT-xxx body:...` | 指定IssueへLinearコメントを投稿 |
+| `/retry issue:SOT-xxx` | 指定Issueを再実行キューへ投入 |
+| `/ask` | 自然言語で質問・指示（モーダルが開く） |
+
 ## 環境変数リファレンス
 
 | 変数                | 必須     | デフォルト | 説明                                                              |

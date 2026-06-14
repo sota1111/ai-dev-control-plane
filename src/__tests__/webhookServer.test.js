@@ -119,7 +119,7 @@ describe('webhook usage limit retry', () => {
     // runner.enqueue が retryAt 付きで呼ばれたことを確認
     expect(runner.enqueue).toHaveBeenCalledWith(id, 'webhook', expect.any(String));
     expect(runner.notifyUsageLimitToAllActiveIssues).toHaveBeenCalled();
-    expect(runner.setUsageLimitCooldownUntil).toHaveBeenCalledWith(expect.any(String));
+    expect(runner.setUsageLimitCooldownUntil).toHaveBeenCalledWith(expect.any(String), id);
 
     // 同じ issueId が再度 webhook で来た場合、isQueued=true で ignored
     runner.isQueued.mockReturnValue(true);
@@ -130,7 +130,7 @@ describe('webhook usage limit retry', () => {
   test('queues webhook without spawning while usage limit cooldown is active', async () => {
     const runner = require('../runner');
     const retryAt = new Date(Date.now() + 600000).toISOString();
-    runner.getUsageLimitCooldownUntil.mockReturnValue(retryAt);
+    runner.getUsageLimitCooldownUntil.mockReturnValue({ retryAt, issueId: null });
 
     const res = await request(app).post('/webhooks/linear').send(issuePayload('TEST-COOLDOWN'));
     expect(res.status).toBe(200);
