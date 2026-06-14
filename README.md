@@ -225,11 +225,20 @@ DISCORD_PUBLIC_KEY=your_public_key_here
 2. Discord Developer Portal の「General Information」→「Interactions Endpoint URL」に `https://your-domain.ngrok.io/webhooks/discord` を設定
 3. Discordが検証リクエストを送信し、成功すれば設定完了
 
+> **このプロジェクトの設定例（ngrok固定URL使用時）:**
+> - Webhook サーバー起動: `npm run dev:webhook`
+> - Interactions Endpoint URL: `https://elitism-unnerving-gallstone.ngrok-free.dev/webhooks/discord`
+>
+> ngrok URL が変わった場合は後述の「ngrok URL 変更時の更新箇所」を参照。
+
 ### 4. スラッシュコマンドを登録
 
 ```bash
 node scripts/register_discord_commands.js
 ```
+
+> **注意:** コマンドの追加・変更時は再度実行することで上書き登録される（既存コマンドと重複しても安全）。
+> グローバルコマンドの反映には最大1時間かかる場合がある。
 
 ### 5. Bot をサーバーに招待
 
@@ -237,6 +246,19 @@ node scripts/register_discord_commands.js
 2. Scopes: `bot`, `applications.commands` を選択
 3. Bot Permissions: `Send Messages` を選択
 4. 生成されたURLでサーバーに招待
+
+#### Bot 招待URL の例
+
+以下の URL テンプレートの `<DISCORD_APPLICATION_ID>` を実際の Application ID に置き換えてアクセスする:
+
+```
+https://discord.com/oauth2/authorize?client_id=<DISCORD_APPLICATION_ID>&permissions=2048&scope=bot%20applications.commands
+```
+
+必要な権限:
+- `bot` scope — Botとしてサーバーに参加
+- `applications.commands` scope — スラッシュコマンドを登録・使用
+- Bot Permission: `Send Messages` (permission value: 2048)
 
 ### 利用可能なコマンド
 
@@ -250,6 +272,20 @@ node scripts/register_discord_commands.js
 | `/reply issue:SOT-xxx body:...` | 指定IssueへLinearコメントを投稿 |
 | `/retry issue:SOT-xxx` | 指定Issueを再実行キューへ投入 |
 | `/ask` | 自然言語で質問・指示（モーダルが開く） |
+
+### ngrok URL が変わった場合の更新箇所
+
+ngrok の URL が変わった場合（有料プラン固定URL使用時は不要）、以下の箇所を更新する:
+
+| 更新箇所 | 内容 |
+|---|---|
+| Discord Developer Portal | General Information → Interactions Endpoint URL を新しい URL に更新 |
+| Linear Webhook 設定 | Settings → API → Webhooks の URL を更新（Linear 側） |
+| `.env` の `NGROK_COMMAND` | ngrok コマンドの URL 部分を更新 |
+| `.env` の `NGROK_WEBHOOK_URL` | 確認用 URL を更新 |
+
+Discord の Interactions Endpoint URL は `https://<新しいURL>/webhooks/discord` になる。
+Linear の Webhook URL は `https://<新しいURL>/webhooks/linear` になる。
 
 ## 環境変数リファレンス
 
