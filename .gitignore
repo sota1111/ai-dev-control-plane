@@ -33,3 +33,4 @@ docs/ai/linear/
 .azure/
 .config/gcloud/
 .config/ngrok/
+__pycache__/
