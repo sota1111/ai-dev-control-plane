@@ -130,7 +130,7 @@ bash scripts/ai/scheduler.sh stop
 
 Linear Webhook の Issue create / update イベントを受信し、`scripts/ai/run_auto.sh` を起動する。
 
-ただし以下の Issue の webhook は無視し、`run_auto.sh` を起動しない：
+ただし以下の Issue の webhook は無視し、`run_auto.sh` を起動しません。また、実行直前（queue / retry から取り出した際）にも Linear API で最新状態を再検証し、同様の条件に合致する Issue は実行をスキップします：
 
 - state.type が `completed` / `canceled` / `duplicate` の Issue
 - `archivedAt` を持つ Archived Issue
