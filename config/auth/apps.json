@@ -1,0 +1,148 @@
+[
+  {
+    "name": "english-phrase-trainer",
+    "repo": "sota1111/english-phrase-trainer",
+    "localPath": "/workspaces/english-phrase-trainer",
+    "cloudRunService": "english-phrase-trainer",
+    "region": "asia-northeast1",
+    "gcpProject": "gen-lang-client-0243034020",
+    "cloudRunConfirmed": false,
+    "authMigrationStatus": "done",
+    "frameworkType": "nextjs",
+    "requiredEnvVars": [
+      "NEXT_PUBLIC_FIREBASE_API_KEY",
+      "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN",
+      "NEXT_PUBLIC_FIREBASE_PROJECT_ID",
+      "NEXT_PUBLIC_FIREBASE_APP_ID",
+      "ALLOWED_USER_EMAILS",
+      "AUTH_SECRET"
+    ],
+    "authSecretName": "english-trainer-auth-secret",
+    "cloudRunSyncEnabled": true
+  },
+  {
+    "name": "stock-signal-research",
+    "repo": "sota1111/stock-signal-research",
+    "localPath": "/workspaces/stock-signal-research",
+    "cloudRunService": "stock-signal-service",
+    "region": "asia-northeast1",
+    "gcpProject": "gen-lang-client-0243034020",
+    "cloudRunConfirmed": false,
+    "authMigrationStatus": "todo",
+    "frameworkType": "fastapi-react",
+    "requiredEnvVars": [
+      "AUTH_USERNAME",
+      "AUTH_PASSWORD",
+      "AUTH_SECRET_KEY"
+    ],
+    "authSecretName": "stock-signal-auth-secret-key",
+    "cloudRunSyncEnabled": false
+  },
+  {
+    "name": "state-machine-simulator",
+    "repo": "sota1111/state-machine-simulator",
+    "localPath": "/workspaces/state-machine-simulator",
+    "cloudRunService": "state-machine-simulator",
+    "region": "asia-northeast1",
+    "gcpProject": "gen-lang-client-0243034020",
+    "cloudRunConfirmed": true,
+    "authMigrationStatus": "todo",
+    "frameworkType": "fastapi-react",
+    "requiredEnvVars": [
+      "AUTH_PASSWORD",
+      "JWT_SECRET"
+    ],
+    "authSecretName": "state-machine-jwt-secret",
+    "cloudRunSyncEnabled": false
+  },
+  {
+    "name": "shrine-stair-trainer",
+    "repo": "sota1111/shrine-stair-trainer",
+    "localPath": "/workspaces/shrine-stair-trainer",
+    "cloudRunService": "shrine-stair-trainer",
+    "region": "asia-northeast1",
+    "gcpProject": "gen-lang-client-0243034020",
+    "cloudRunConfirmed": false,
+    "authMigrationStatus": "todo",
+    "frameworkType": "vite-react-static",
+    "requiredEnvVars": [
+      "VITE_AUTH_PASSWORD"
+    ],
+    "authSecretName": "shrine-trainer-auth-password",
+    "cloudRunSyncEnabled": false
+  },
+  {
+    "name": "kindle-sale-monitor",
+    "repo": "sota1111/kindle-sale-monitor",
+    "localPath": "/workspaces/kindle-sale-monitor",
+    "cloudRunService": "kindle-sale-monitor",
+    "region": "asia-northeast1",
+    "gcpProject": "gen-lang-client-0243034020",
+    "cloudRunConfirmed": false,
+    "authMigrationStatus": "todo",
+    "frameworkType": "fastapi-server-rendered",
+    "requiredEnvVars": [
+      "AUTH_USERNAME",
+      "AUTH_PASSWORD",
+      "AUTH_SECRET_KEY"
+    ],
+    "authSecretName": "kindle-monitor-auth-secret-key",
+    "cloudRunSyncEnabled": false
+  },
+  {
+    "name": "booking-monitor",
+    "repo": "sota1111/booking-monitor",
+    "localPath": "/workspaces/booking-monitor",
+    "cloudRunService": "booking-monitor",
+    "region": "asia-northeast1",
+    "gcpProject": "gen-lang-client-0243034020",
+    "cloudRunConfirmed": false,
+    "authMigrationStatus": "todo",
+    "frameworkType": "flask",
+    "notes": "GitHub default branch is feat/SOT-274-booking-monitor, not main",
+    "requiredEnvVars": [
+      "AUTH_USERNAME",
+      "AUTH_PASSWORD",
+      "AUTH_SECRET_KEY"
+    ],
+    "authSecretName": "booking-monitor-auth-secret-key",
+    "cloudRunSyncEnabled": false
+  },
+  {
+    "name": "toddler-nas-photo-indexer",
+    "repo": "sota1111/toddler-nas-photo-indexer",
+    "localPath": "/workspaces/toddler-nas-photo-indexer",
+    "cloudRunService": "toddler-nas-photo-indexer-backend",
+    "region": "asia-northeast1",
+    "gcpProject": "gen-lang-client-0243034020",
+    "cloudRunConfirmed": false,
+    "authMigrationStatus": "todo",
+    "frameworkType": "fastapi-react",
+    "requiredEnvVars": [
+      "AUTH_USERNAME",
+      "AUTH_PASSWORD",
+      "AUTH_SECRET_KEY"
+    ],
+    "authSecretName": "nas-indexer-auth-secret-key",
+    "cloudRunSyncEnabled": false
+  },
+  {
+    "name": "toddler-private-rag",
+    "repo": "sota1111/toddler-private-rag",
+    "localPath": "/workspaces/toddler-private-rag",
+    "cloudRunService": "toddler-private-rag-backend",
+    "region": "asia-northeast1",
+    "gcpProject": "gen-lang-client-0243034020",
+    "cloudRunConfirmed": false,
+    "authMigrationStatus": "todo",
+    "frameworkType": "fastapi-react",
+    "notes": "Uses FastAPI OAuth2 password bearer with JWT. No Firebase auth found. Access confirmed via gh CLI.",
+    "requiredEnvVars": [
+      "AUTH_USERNAME",
+      "AUTH_PASSWORD",
+      "AUTH_SECRET_KEY"
+    ],
+    "authSecretName": "rag-auth-secret-key",
+    "cloudRunSyncEnabled": false
+  }
+]

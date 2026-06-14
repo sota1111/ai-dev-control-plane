@@ -501,3 +501,79 @@ webhook 経由で起動した Claude Code が usage limit に達した場合、u
 
 5. 再実行時に同じ issueId が処理されることを確認する
    - ログに `[WEBHOOK] Retry starting for issueId=TEST-001` が表示される
+
+---
+
+## 共通Firebase認証管理
+
+ai-dev-control-plane に共通認証スクリプトが含まれています。
+Firebase Authentication ユーザー管理と、Cloud Run への認証環境変数同期を一元管理します。
+
+### ⚠️ セキュリティポリシー
+
+- **パスワードは Linear Issue、README、.env.example、ログ、Git 履歴に残さないこと**
+- パスワードはターミナルでのみ対話入力し、入力時は非表示（マスク）になります
+- Firebase ユーザー作成後、パスワードは保存されず Firebase Auth にのみ反映されます
+
+### Firebase Console での初回作業（人間が1度だけ実施）
+
+以下は自動化できないため、人間が Firebase Console で直接作業してください：
+
+1. **Firebase プロジェクトを確認または作成**
+   - https://console.firebase.google.com/
+   - プロジェクト ID を控えておく
+
+2. **Email/Password プロバイダを有効化**
+   - Firebase Console > Authentication > Sign-in method
+   - 「メール/パスワード」を有効化
+
+3. **Web アプリの設定値を取得**
+   - Firebase Console > プロジェクトの設定 > マイアプリ
+   - 以下の値を控える:
+     - `NEXT_PUBLIC_FIREBASE_API_KEY`
+     - `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
+     - `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+     - `NEXT_PUBLIC_FIREBASE_APP_ID`
+
+### セットアップ手順
+
+```bash
+# 1. Firebase プロジェクト ID を設定
+export FIREBASE_PROJECT_ID=your-firebase-project-id
+
+# 2. gcloud 認証（Cloud Run 更新に必要）
+gcloud auth application-default login
+
+# 3. 対話型セットアップを起動
+npm run auth:setup
+```
+
+セットアップメニュー:
+- `1` — Firebase ユーザー作成/更新（ターミナルでパスワードを入力）
+- `2` — Cloud Run 認証環境変数を同期（ALLOWED_USER_EMAILS + Firebase 設定）
+- `3` — 両方実行
+- `4` — 設定状況確認
+- `0` — 終了
+
+### アプリ設定ファイル
+
+`config/auth/apps.json` に全アプリの Cloud Run サービス名・リージョン・認証設定が記載されています。
+
+Firebase Auth 移行済みのアプリのみ `"cloudRunSyncEnabled": true` になっています。
+未移行アプリは移行後に `cloudRunSyncEnabled` を `true` に変更してください。
+
+### 移行状況
+
+各アプリの認証移行状況は `docs/auth/migration-plan.md` を参照してください。
+
+現在 Firebase Auth 移行済み:
+- ✅ english-phrase-trainer
+
+未移行（今後の作業対象）:
+- ⬜ stock-signal-research
+- ⬜ state-machine-simulator
+- ⬜ shrine-stair-trainer
+- ⬜ kindle-sale-monitor
+- ⬜ booking-monitor
+- ⬜ toddler-nas-photo-indexer
+- ⬜ toddler-private-rag
