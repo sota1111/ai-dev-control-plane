@@ -123,6 +123,7 @@ for line in sys.stdin:
 '
 
 claude \
+  --model sonnet \
   --dangerously-skip-permissions \
   --output-format stream-json \
   --verbose \

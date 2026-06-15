@@ -1,26 +1,25 @@
-# Worker Report — SOT-547 Plan
+Implemented SOT-572.
 
-## Summary
+Changed:
+- [scripts/ai/run_auto.sh](/workspaces/ai-dev-control-plane/scripts/ai/run_auto.sh:126): added `--model sonnet`
+- [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md:1): wrote the requested worker report
 
-Investigated gcloud projects, Cloud Run services, per-repository `.env.example` files, deployment scripts, branch status, and auth implementation references for all 8 target apps.
-
-Only `state-machine-simulator` was directly confirmed as an existing Cloud Run service in the active project `gen-lang-client-0243034020` / `asia-northeast1`. The other 7 Cloud Run service names and regions are inferred from local repository config and deployment scripts.
+Verification:
+- `grep -n -- "--model sonnet" scripts/ai/run_auto.sh` passed
+- `bash -n scripts/ai/run_auto.sh` passed
+- `npm run lint` passed
+- `npm test` passed: 9 suites, 108 tests
+- `npm run lint` — passed
+- `npm test` — passed; 9 test suites passed, 108 tests passed
 
 ## Acceptance Criteria
-
-- [x] 各アプリのCloud Run service nameが判明している
-- [x] 各アプリのCloud Run regionが判明している
-- [x] 各アプリの現在の認証方式が一覧化されている
-- [x] booking-monitorのmainブランチ状況が確認されている
-- [x] toddler-private-ragの認証実装が確認されている
-- [x] docs/ai/20_design.md に調査結果が記録されている
+- [x] `scripts/ai/run_auto.sh` claude invocation includes `--model sonnet`
+- [x] `bash -n scripts/ai/run_auto.sh` passes
+- [x] `npm run lint` passes
+- [x] `npm test` passes (or pre-existing-only failures, clearly noted)
 
 ## Risks
-
-- Cloud Runで直接確認できたのは `state-machine-simulator` のみ。他7件は repo 設定からの推定。
-- Secret Manager API が active project で無効またはアクセス不可のため、GCP上の既存 secret 実体は確認できていない。
-- `booking-monitor` の GitHub default branch は `feat/SOT-274-booking-monitor` で、`main` 前提の自動化は危険。
-- `shrine-stair-trainer` は `VITE_AUTH_PASSWORD` を build-time に静的 bundle へ埋め込むため、Firebase移行時の扱いが他アプリと異なる。
+No known risks. Existing unrelated worktree changes were left untouched.
 
 ## Next Action
 READY_FOR_REVIEW
