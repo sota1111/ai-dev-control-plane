@@ -756,16 +756,15 @@ Firebase Auth 移行済みのアプリのみ `"cloudRunSyncEnabled": true` に�
 
 ### 移行状況
 
-各アプリの認証移行状況は `docs/auth/migration-plan.md` を参照してください。
+各アプリの詳細な認証移行手順は [`docs/auth/migration-plan.md`](docs/auth/migration-plan.md) を参照してください。
 
-現在 Firebase Auth 移行済み:
-- ✅ english-phrase-trainer
-
-未移行（今後の作業対象）:
-- ⬜ stock-signal-research
-- ⬜ state-machine-simulator
-- ⬜ shrine-stair-trainer
-- ⬜ kindle-sale-monitor
-- ⬜ booking-monitor
-- ⬜ toddler-nas-photo-indexer
-- ⬜ toddler-private-rag
+| アプリ | 現在の認証方式 | Firebase Auth 移行 | Cloud Run sync | 備考 |
+|--------|--------------|:-----------------:|:--------------:|------|
+| english-phrase-trainer | Firebase Auth + Cookie | ✅ 移行済み | ✅ | 基準実装 |
+| stock-signal-research | FastAPI OAuth2 + JWT | ⬜ 未移行 | ❌ | Cloud Run サービス名: `stock-signal-service` |
+| state-machine-simulator | FastAPI password + JWT | ⬜ 未移行 | ❌ | |
+| shrine-stair-trainer | Vite build-time パスワード（クライアントサイド） | ⬜ 未移行 | ❌ | 静的フロントのため移行パターンが異なる |
+| kindle-sale-monitor | Starlette session + パスワード | ⬜ 未移行 | ❌ | Cloud Scheduler 用エンドポイントは別認証を維持 |
+| booking-monitor | Flask session + パスワード | ⬜ 未移行 | ❌ | デフォルトブランチが `feat/SOT-274-booking-monitor` |
+| toddler-nas-photo-indexer | FastAPI OAuth2 + JWT | ⬜ 未移行 | ❌ | |
+| toddler-private-rag | FastAPI OAuth2 + JWT | ⬜ 未移行 | ❌ | |
