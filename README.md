@@ -85,7 +85,7 @@
         │                   │  scheduler.sh（定期監視）│
         │                   │  webhook-server.js（即時）│
         │                   └───────────┬────────────┘
-        │                               │ run_auto.sh
+        │                               │ runner-cli queue/drain
         │                   ┌───────────▼────────────┐
         └───────────────────│      Claude Code        │  管制塔（唯一の窓口）
                             │  - 要件/設計/タスク分解   │
@@ -283,7 +283,7 @@ ln -s /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-dev.yml  ~/.config/
 
 # スケジューラー
 
-`scripts/ai/scheduler.sh` は `CHECK_INTERVAL` 秒ごとに Linear をポーリングし、対象状態の Issue が1件でも存在すれば自動で Claude を起動する。
+`scripts/ai/scheduler.sh` は `CHECK_INTERVAL` 秒ごとに Linear をポーリングし、対象状態の Issue を共通実行キューに enqueue して drain を実行する。
 
 > 事前準備（`.env` の作成と各種認証）は [クイックスタート](#クイックスタート実行手順) を参照。
 
@@ -292,7 +292,7 @@ ln -s /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-dev.yml  ~/.config/
 ### Linear ポーリングモード（推奨）
 
 `LINEAR_API_KEY` が設定されている場合、`CHECK_INTERVAL` 秒ごとに Linear API をポーリングする。
-Linear 上の Issue 状態タイプが `unstarted`（Backlog/Todo）または `started`（In Progress）の Issue が1件でも存在する場合、`scripts/ai/run_auto.sh` を実行する。
+Linear 上の Issue 状態タイプが `unstarted`（Backlog/Todo）または `started`（In Progress）の Issue が存在する場合、各 Issue を `node src/runner-cli.js enqueue` でキューに追加し、`node src/runner-cli.js drain` で共通実行パイプラインを通じて処理する。
 Issue の更新差分（`updatedAt` の変化）は現在判定していない。
 
 ### フォールバックモード
@@ -320,9 +320,9 @@ Mode: Linear polling (CHECK_INTERVAL=60s)
 
 `npm run start:webhook` で webhook サーバーを起動する。
 
-Linear Webhook の Issue create / update イベントを受信し、`scripts/ai/run_auto.sh` を起動する。
+Linear Webhook の Issue create / update イベントを受信し、対象 Issue を共通実行キューに enqueue して処理する。
 
-ただし以下の Issue の webhook は無視し、`run_auto.sh` を起動しません。また、実行直前（queue / retry から取り出した際）にも Linear API で最新状態を再検証し、同様の条件に合致する Issue は実行をスキップします：
+ただし以下の Issue の webhook は無視し、キューへの enqueue を行いません。また、実行直前（queue / retry から取り出した際）にも Linear API で最新状態を再検証し、同様の条件に合致する Issue は実行をスキップします：
 
 - state.type が `completed` / `canceled` / `duplicate` の Issue
 - `archivedAt` を持つ Archived Issue
@@ -610,7 +610,7 @@ curl -X POST https://elitism-unnerving-gallstone.ngrok-free.dev/webhooks/linear 
 
 #### 常駐動作の仕組み
 
-`npm run start:webhook` で起動した Webhook サーバーは、AI 実行（`run_auto.sh`）を子プロセスとして起動します。子プロセスは独立したプロセスグループ（`detached: true`）で動作するため、以下の状況でも Webhook サーバー本体は終了しません：
+`npm run start:webhook` で起動した Webhook サーバーは、対象 Issue を共通実行キューに enqueue し、共通実行パイプラインで処理します。実行プロセスは独立したプロセスグループ（`detached: true`）で動作するため、以下の状況でも Webhook サーバー本体は終了しません：
 
 - `run_auto.sh` / `run_codex.sh` が失敗または Terminated（exit code 143 / SIGTERM）
 - Claude / Gemini / Codex のいずれかが強制終了
