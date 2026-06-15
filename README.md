@@ -12,6 +12,7 @@
 - [アーキテクチャ全体像](#アーキテクチャ全体像)
 - [役割分担](#役割分担)
 - [クイックスタート（実行手順）](#クイックスタート実行手順)
+- [tmux / tmuxinator](#tmux--tmuxinator)
 - [スケジューラー](#スケジューラー)
 - [Webhook サーバー](#webhook-サーバー)
 - [Discord Bot セットアップ](#discord-bot-セットアップ)
@@ -207,6 +208,49 @@ bash scripts/ai/run_auto.sh
 ### 5. 動作確認
 
 Linear に Issue を作成（または状態を `Todo` / `In Progress` に変更）すると、Claude Code が起動して処理を開始する。進捗は Linear のコメント、または Discord の `/status` で確認できる。
+
+---
+
+## tmux / tmuxinator
+
+tmuxinator を使うと、Webhook サーバー・ngrok・Claude / Codex / Gemini CLI・ステータス確認用 pane を**一括起動**できる。
+
+詳細は [`docs/tmuxinator-setup.md`](./docs/tmuxinator-setup.md) を参照。
+
+### インストール
+
+```bash
+# tmux（通常はプリインストール済み）
+which tmux || sudo apt-get install -y tmux
+
+# tmuxinator
+gem install tmuxinator
+```
+
+### 設定ファイルのリンク
+
+```bash
+# シンボリックリンクを張る
+ln -s /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-auth.yml ~/.config/tmuxinator/ai-auth.yml
+ln -s /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-dev.yml  ~/.config/tmuxinator/ai-dev.yml
+```
+
+### 起動コマンド
+
+| 用途 | コマンド |
+|------|---------|
+| 初回認証（全 CLI を順番に認証） | `tmuxinator start ai-auth` |
+| 通常開発（Webhook + ngrok + 各 CLI） | `tmuxinator start ai-dev` |
+| パス直接指定で起動（リンク不要） | `tmuxinator start -p .config/tmuxinator/ai-auth.yml` |
+
+### セッション操作
+
+| 操作 | コマンド |
+|------|---------|
+| セッションから抜ける (detach) | `Ctrl+b d` |
+| セッションに戻る (attach) | `tmux attach -t ai-dev` |
+| セッション一覧 | `tmux ls` |
+| セッション終了 | `tmux kill-session -t ai-dev` |
 
 ---
 
