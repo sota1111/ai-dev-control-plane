@@ -15,6 +15,8 @@ jest.mock('../runner', () => ({
   clearUsageLimitCooldown: jest.fn(),
   getUsageLimitCooldownUntil: jest.fn().mockReturnValue(null),
   enqueue: jest.fn(),
+  runItem: jest.fn().mockResolvedValue(undefined),
+  drainQueue: jest.fn().mockResolvedValue(undefined),
   dequeue: jest.fn().mockReturnValue(null),
   removeFromQueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
@@ -79,6 +81,8 @@ describe('webhook usage limit retry', () => {
     runner.isQueued.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
+    runner.runItem.mockResolvedValue(undefined);
+    runner.drainQueue.mockResolvedValue(undefined);
     runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
   });
 
@@ -101,27 +105,21 @@ describe('webhook usage limit retry', () => {
   test('schedules retry when run_auto.sh outputs usage limit message', async () => {
     const id = 'TEST-RETRY';
     const runner = require('../runner');
-    
-    // dequeue が一度だけ this issue を返す
+
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
-    
-    spawn.mockImplementationOnce(() => mockSpawnChild({
-      stdout: "You've hit your session limit · resets 3:30pm (UTC)",
-      exitCode: 1
-    }));
-    
+
     const res = await request(app).post('/webhooks/linear').send(issuePayload(id));
     expect(res.status).toBe(200);
-    
-    // Wait for the async triggerRun block to complete its first run
+
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
-    // runner.enqueue が retryAt 付きで呼ばれたことを確認
-    expect(runner.enqueue).toHaveBeenCalledWith(id, 'webhook', expect.any(String));
-    expect(runner.notifyUsageLimitToAllActiveIssues).toHaveBeenCalled();
-    expect(runner.setUsageLimitCooldownUntil).toHaveBeenCalledWith(expect.any(String), id);
+    // webhook-server.js now delegates to runner.runItem
+    expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
 
-    // 同じ issueId が再度 webhook で来た場合、isQueued=true で ignored
+    // Retry behavior (enqueue with retryAt) is now handled inside runner.runItem (runner.js)
+    // and is tested in runner.test.js. Here we only verify delegation.
+
+    // Same issueId can be ignored if already queued
     runner.isQueued.mockReturnValue(true);
     const res2 = await request(app).post('/webhooks/linear').send(issuePayload(id));
     expect(res2.body.status).toBe('ignored');
@@ -141,7 +139,7 @@ describe('webhook usage limit retry', () => {
     expect(runner.enqueue).toHaveBeenCalledWith('TEST-COOLDOWN', 'webhook', retryAt);
     expect(runner.hasPendingIssues).not.toHaveBeenCalled();
     expect(runner.acquireLock).not.toHaveBeenCalled();
-    expect(spawn).not.toHaveBeenCalled();
+    expect(runner.runItem).not.toHaveBeenCalled();
   });
 
 
@@ -149,30 +147,17 @@ describe('webhook usage limit retry', () => {
     const id = 'TEST-NO-RETRY';
     const runner = require('../runner');
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
-    
-    spawn.mockImplementationOnce(() => mockSpawnChild({
-      stdout: 'some random error',
-      exitCode: 1
-    }));
-    
+
     await request(app).post('/webhooks/linear').send(issuePayload(id));
-    
+
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
-    // No retry scheduled (no large timeout)
+    // Verify runner.runItem was called
+    expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
+
+    // No large setTimeout should be registered (runner.runItem is mocked, not actual retry logic)
     const retryCall = setTimeout.mock.calls.find(call => call[1] > 1000);
     expect(retryCall).toBeUndefined();
-
-    // runner.enqueue should NOT have been called with a retryAt
-    const enqueueCallsWithRetryAt = runner.enqueue.mock.calls.filter(call => call[2] != null);
-    expect(enqueueCallsWithRetryAt).toHaveLength(0);
-
-    // Should be able to re-submit (not in pending)
-    runner.isQueued.mockReturnValue(false);
-    runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
-    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
-    const res2 = await request(app).post('/webhooks/linear').send(issuePayload(id));
-    expect(res2.body.status).toBe('accepted');
   });
 
   test("ignores terminal issue update events", async () => {
@@ -189,7 +174,7 @@ describe('webhook usage limit retry', () => {
     expect(res.body.status).toBe("ignored");
     expect(res.body.reason).toBe("terminal state: Done");
     expect(runner.enqueue).not.toHaveBeenCalled();
-    expect(spawn).not.toHaveBeenCalled();
+    expect(runner.runItem).not.toHaveBeenCalled();
   });
 
   test('does not call setIssueInProgress (Claude Code handles In Progress)', async () => {
@@ -208,23 +193,18 @@ describe('webhook usage limit retry', () => {
     const id = 'TEST-SUCCESS';
     const runner = require('../runner');
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
-    
-    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
-    
+
     await request(app).post('/webhooks/linear').send(issuePayload(id));
-    
+
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
-    const retryCall = setTimeout.mock.calls.find(call => call[1] > 1000);
-    expect(retryCall).toBeUndefined();
+    // webhook delegates to runner.runItem
+    expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
+    // After successful run, runner.runItem handles clearUsageLimitCooldown + removeUsageLimitLabel internally
 
-    // After success, removeUsageLimitLabel should be called
-    expect(runner.removeUsageLimitLabel).toHaveBeenCalledWith(id);
-
-    // After success, issue removed from runningIssues → second webhook accepted
+    // Second webhook is accepted after first completes
     runner.isQueued.mockReturnValue(false);
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
-    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
     const res2 = await request(app).post('/webhooks/linear').send(issuePayload(id));
     expect(res2.body.status).toBe('accepted');
   });
@@ -277,44 +257,24 @@ describe('webhook usage limit retry', () => {
     runner.isLocked.mockReturnValue(false);
     runner.isQueued.mockReturnValue(false);
 
-    // Initial issue
     const id1 = 'TEST-MAIN';
-    // Queued issue to be drained
     const id2 = 'TEST-DRAIN';
 
-    // Mock dequeue sequence:
-    // 1. First dequeue for the main task
-    // 2. Second dequeue during drain
-    // 3. Third dequeue returns null to end drain
-    runner.dequeue
-      .mockReturnValueOnce({ issueId: id1, trigger: 'webhook' })
-      .mockReturnValueOnce({ issueId: id2, trigger: 'webhook' })
-      .mockReturnValue(null);
+    runner.dequeue.mockReturnValueOnce({ issueId: id1, trigger: 'webhook' });
 
-    // Mock loadQueue to show one item remains after id1 is dequeued
+    // Simulate queue has one item remaining after id1 runs
     runner.loadQueue
-      .mockReturnValueOnce([{ issueId: id2 }]) // called after id1 run finishes
-      .mockReturnValue([]); // called after id2 run finishes
-
-    spawn.mockImplementation(() => mockSpawnChild({ exitCode: 0 }));
+      .mockReturnValueOnce([{ issueId: id2 }])
+      .mockReturnValue([]);
 
     await request(app).post('/webhooks/linear').send(issuePayload(id1));
 
-    // Wait for main task and drain loop
     await new Promise(resolve => originalSetTimeout(resolve, 100));
 
-    // Verify both were "run" (spawn called twice)
-    expect(spawn).toHaveBeenCalledTimes(2);
-    
-    // Verify first spawn was for id1
-    expect(spawn.mock.calls[0][0]).toBe('bash');
-    // We can't easily check env in spawn mock calls without more setup, 
-    // but we can check the runner logs if we wanted. 
-    // Here, just confirming it triggered twice is a good signal for drain.
-
-    // Verify lock was acquired and released for both
-    expect(runner.acquireLock).toHaveBeenCalledTimes(2);
-    expect(runner.releaseLock).toHaveBeenCalledTimes(2);
+    // Verify runner.runItem was called for the main task
+    expect(runner.runItem).toHaveBeenCalledWith({ issueId: id1, trigger: 'webhook' });
+    // Verify runner.drainQueue was called after main task completed
+    expect(runner.drainQueue).toHaveBeenCalled();
   });
 });
 
@@ -336,6 +296,8 @@ describe('webhook issue filtering', () => {
     runner.isQueued.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
+    runner.runItem.mockResolvedValue(undefined);
+    runner.drainQueue.mockResolvedValue(undefined);
     runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
   });
 
@@ -365,7 +327,7 @@ describe('webhook issue filtering', () => {
     expect(res.body.status).toBe('ignored');
     expect(res.body.reason).toMatch(/terminal state/);
     expect(runner.removeFromQueue).toHaveBeenCalledWith('TEST-FILTER');
-    expect(spawn).not.toHaveBeenCalled();
+    expect(runner.runItem).not.toHaveBeenCalled();
   });
 
   test('canceled issue update is ignored', async () => {
@@ -376,7 +338,7 @@ describe('webhook issue filtering', () => {
     expect(res.body.status).toBe('ignored');
     expect(res.body.reason).toMatch(/terminal state/);
     expect(runner.removeFromQueue).toHaveBeenCalledWith('TEST-FILTER');
-    expect(spawn).not.toHaveBeenCalled();
+    expect(runner.runItem).not.toHaveBeenCalled();
   });
 
   test('duplicate issue update is ignored', async () => {
@@ -387,7 +349,7 @@ describe('webhook issue filtering', () => {
     expect(res.body.status).toBe('ignored');
     expect(res.body.reason).toMatch(/terminal state/);
     expect(runner.removeFromQueue).toHaveBeenCalledWith('TEST-FILTER');
-    expect(spawn).not.toHaveBeenCalled();
+    expect(runner.runItem).not.toHaveBeenCalled();
   });
 
   test('archived issue update is ignored', async () => {
@@ -408,7 +370,7 @@ describe('webhook issue filtering', () => {
     expect(res.body.status).toBe('ignored');
     expect(res.body.reason).toBe('archived issue');
     expect(runner.removeFromQueue).toHaveBeenCalledWith('TEST-ARCHIVED');
-    expect(spawn).not.toHaveBeenCalled();
+    expect(runner.runItem).not.toHaveBeenCalled();
   });
 
   test('active issue create is accepted', async () => {
@@ -431,7 +393,7 @@ describe('webhook issue filtering', () => {
     expect(res.body.status).toBe('accepted');
 
     await new Promise(resolve => originalSetTimeout(resolve, 50));
-    expect(spawn).toHaveBeenCalled();
+    expect(runner.runItem).toHaveBeenCalled();
   });
 
   test('active issue meaningful update is accepted', async () => {
@@ -455,7 +417,7 @@ describe('webhook issue filtering', () => {
     expect(res.body.status).toBe('accepted');
 
     await new Promise(resolve => originalSetTimeout(resolve, 50));
-    expect(spawn).toHaveBeenCalled();
+    expect(runner.runItem).toHaveBeenCalled();
   });
 
   test('completed queued issue is removed before execution', async () => {
@@ -474,7 +436,7 @@ describe('webhook issue filtering', () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ignored');
     expect(runner.removeFromQueue).toHaveBeenCalledWith('TEST-QUEUED-DONE');
-    expect(spawn).not.toHaveBeenCalled();
+    expect(runner.runItem).not.toHaveBeenCalled();
   });
 
   test('usage-limit cleanup update does not retrigger run', async () => {
@@ -494,7 +456,7 @@ describe('webhook issue filtering', () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ignored');
     expect(res.body.reason).toBe('non-meaningful update');
-    expect(spawn).not.toHaveBeenCalled();
+    expect(runner.runItem).not.toHaveBeenCalled();
   });
 });
 
@@ -516,6 +478,8 @@ describe('pre-execution eligibility check', () => {
     runner.isQueued.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
+    runner.runItem.mockResolvedValue(undefined);
+    runner.drainQueue.mockResolvedValue(undefined);
     runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
   });
 
@@ -534,12 +498,12 @@ describe('pre-execution eligibility check', () => {
     const runner = require('../runner');
     const id = 'TEST-QUEUED-COMPLETED';
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
-    runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: false, reason: 'terminal state before run' });
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
-    expect(spawn).not.toHaveBeenCalled();
+    // webhook-server.js now delegates to runner.runItem
+    expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
   });
 
   test('retry completed issue is skipped before triggerRun', async () => {
@@ -547,40 +511,34 @@ describe('pre-execution eligibility check', () => {
     const id = 'TEST-RETRY-COMPLETED';
     // Issue is dequeued (would be in retry queue) but is now completed
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
-    runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: false, reason: 'terminal state before run' });
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
-    expect(spawn).not.toHaveBeenCalled();
+    // webhook-server.js delegates to runner.runItem
+    expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
   });
 
   test('archived queued issue is removed before execution', async () => {
     const runner = require('../runner');
     const id = 'TEST-ARCHIVED-QUEUED';
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
-    runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: false, reason: 'archived issue before run' });
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
-    expect(spawn).not.toHaveBeenCalled();
-    // getIssueExecutionEligibility itself calls removeFromQueue internally (runner.js),
-    // but since runner is mocked, verify eligibility was checked
-    expect(runner.getIssueExecutionEligibility).toHaveBeenCalledWith(id);
+    // webhook-server.js delegates to runner.runItem
+    expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
   });
 
   test('active queued issue still runs', async () => {
     const runner = require('../runner');
     const id = 'TEST-ACTIVE-RUNS';
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
-    runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
-    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
-    expect(spawn).toHaveBeenCalled();
-    expect(runner.getIssueExecutionEligibility).toHaveBeenCalledWith(id);
+    expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
   });
 });

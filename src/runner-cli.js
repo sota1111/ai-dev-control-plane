@@ -78,8 +78,47 @@ async function main() {
       await runner.removeUsageLimitLabelFromAllIssues();
       break;
     }
+    case 'enqueue': {
+      const issueId = args[0];
+      const trigger = args[1] || 'manual';
+      const retryAt = args[2] || null;
+      if (!issueId) {
+        process.stderr.write('Usage: runner-cli.js enqueue <issueId> [trigger] [retryAt]\n');
+        process.exit(1);
+      }
+      runner.enqueue(issueId, trigger, retryAt, { reason: 'scheduler' });
+      runner.log('CLI', `enqueued issueId=${issueId} trigger=${trigger}`, { issue: issueId });
+      process.stdout.write(`[QUEUE] Enqueued: ${issueId} (trigger: ${trigger})\n`);
+      process.exit(0);
+      break;
+    }
+    case 'drain': {
+      await runner.drainQueue();
+      process.exit(0);
+      break;
+    }
+    case 'status': {
+      const queue = runner.loadQueue();
+      const locked = runner.isLocked();
+      const cooldown = runner.getUsageLimitCooldownUntil();
+      const status = {
+        locked,
+        queueSize: queue.length,
+        cooldown: cooldown || null,
+        queue
+      };
+      process.stdout.write(JSON.stringify(status, null, 2) + '\n');
+      process.exit(0);
+      break;
+    }
+    case 'cooldown-status': {
+      const cooldown = runner.getUsageLimitCooldownUntil();
+      process.stdout.write(JSON.stringify(cooldown || { active: false }, null, 2) + '\n');
+      process.exit(0);
+      break;
+    }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status\n`);
       process.exit(1);
     }
   }

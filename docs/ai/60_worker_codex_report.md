@@ -1,59 +1,100 @@
-Wrote the task check report to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md).
+Verification complete. I wrote the report to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md).
 
-Key result: repo exists, Firebase setup/admin docs and tooling are present, but no runtime Email/Password login implementation was found under `src`. The report marks `Next Action` as `NEEDS_DEBUG`.
-ebase-user.js`, and Cloud Run env synchronization checks `ALLOWED_USER_EMAILS` in `scripts/auth/cloudrun-sync.js`. The requested `src`-scoped checks found no Google auth code, no `ALLOWED_USER_EMAILS` references, and no `NEXT_PUBLIC_FIREBASE` references.
+Results:
+- `npm run lint`: pass
+- `npm run typecheck`: N/A, no script exists
+- `npm test`: pass twice, `9` suites and `108` tests
+- Structural checks: pass
+- Source fixes: none required
 
-## Repository State
-- Exists: yes
-- Firebase SDK file: `scripts/auth/firebase-user.js` (Firebase Admin SDK initialization via `firebase-admin`; no app runtime SDK file such as `lib/firebase.ts` found)
-- Auth component: not found in `src` (no login page, auth context, middleware, or runtime auth component found)
-- .env.example Firebase vars: found:
-  - `NEXT_PUBLIC_FIREBASE_API_KEY`
-  - `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
-  - `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
-  - `NEXT_PUBLIC_FIREBASE_APP_ID`
-  - `ALLOWED_USER_EMAILS`
-- README Firebase docs: found. `README.md` includes a "共通Firebase認証管理" section with Firebase Console setup, Email/Password provider enablement, Firebase web app config values, `npm run auth:setup`, user creation/update, Cloud Run env sync, and `ALLOWED_USER_EMAILS` sync notes.
+Only changed file from my work: `docs/ai/60_worker_codex_report.md`. Existing unrelated dirty state remains: `.claude/settings.local.json` and `.tmp_ai-dev-test4/`.
+webhook-server.js
+sed -n '1,240p' src/runner-cli.js
+sed -n '1,220p' scripts/ai/scheduler.sh
+```
+Result: Context files read successfully.
 
-## Google Auth References
-none found in `/workspaces/ai-dev-control-plane/src` for:
-- `GoogleAuthProvider`
-- `signInWithPopup`
-- `signInWithRedirect`
-- `google`
+```bash
+npm run lint 2>&1
+```
+Result: exit 0. All configured `node --check` checks passed.
 
-## ALLOWED_USER_EMAILS References
-none found in `/workspaces/ai-dev-control-plane/src`
+```bash
+npm run typecheck 2>&1 || echo "No typecheck script"
+```
+Result: exit 0 via fallback. `npm run typecheck` reported `Missing script: "typecheck"`, then printed `No typecheck script`.
 
-Note: `ALLOWED_USER_EMAILS` is present outside `src` in `.env.example`, README docs, `config/auth/apps.json`, and `scripts/auth/cloudrun-sync.js`.
+```bash
+npm test 2>&1
+```
+Result: exit 0. 9 test suites passed, 108 tests passed.
 
-## Firebase ENV Var References
-none found in `/workspaces/ai-dev-control-plane/src`
+```bash
+grep -n "^function triggerRun\|^async function runItem\|^async function drainQueue" src/webhook-server.js && echo "FAIL: local functions still present" || echo "OK: no local runner functions in webhook-server.js"
+```
+Result: `OK: no local runner functions in webhook-server.js`.
 
-Note: `NEXT_PUBLIC_FIREBASE_*` variables are present outside `src` in `.env.example`, README docs, and `config/auth/apps.json`.
+```bash
+grep -n "runner\.runItem\|runner\.drainQueue" src/webhook-server.js
+```
+Result:
+```text
+212:        await runner.runItem(item);
+219:          await runner.drainQueue();
+```
 
-## Gap Analysis
-- [ ] Email/Password login implementation exists
-  - Not found in this repository's `src`. Only admin/setup tooling for Firebase user creation exists.
-- [x] Google auth not required (no Google auth code)
-  - The requested `src` grep returned `no google auth found`.
-- [ ] ALLOWED_USER_EMAILS restriction implemented
-  - Not found in `src`. Cloud Run sync tooling validates that `ALLOWED_USER_EMAILS` is non-empty before deployment env sync, but runtime authorization enforcement is not implemented in this repo's source.
-- [ ] Unauthenticated redirect to login
-  - No login page, middleware, or auth guard found in `src`.
-- [ ] Unauthorized email blocked
-  - No runtime email allowlist enforcement found in `src`.
-- [ ] Logout implemented
-  - No runtime logout implementation found in `src`.
-- [x] .env.example has Firebase vars
-  - Firebase public config vars and `ALLOWED_USER_EMAILS` are present.
-- [x] README has Email/Password provider setup docs
-  - README documents enabling the Firebase Email/Password provider and using the shared auth setup flow.
+```bash
+grep -n "drainQueue" src/lib/discordCommandHandlers.js
+```
+Result:
+```text
+192:      runner.drainQueue().catch(err => {
+193:        runner.log('DISCORD', `drainQueue error after /retry: ${err.message}`);
+```
+
+```bash
+grep -n "bash scripts/ai/run_auto.sh" scripts/ai/scheduler.sh && echo "FAIL: direct run_auto.sh invocation found" || echo "OK: no direct run_auto.sh invocation"
+```
+Result: `OK: no direct run_auto.sh invocation`.
+
+```bash
+grep -n "case 'enqueue'\|case 'drain'\|case 'status'\|case 'cooldown-status'" src/runner-cli.js
+```
+Result:
+```text
+81:    case 'enqueue': {
+95:    case 'drain': {
+100:    case 'status': {
+114:    case 'cooldown-status': {
+```
+
+```bash
+grep -n "runItem\|drainQueue\|triggerRun" src/runner.js | grep "module.exports\|exports\." | head -5
+```
+Result: no output because `module.exports = {` is on a separate line from the exported symbol names. Direct inspection of the export block confirmed `triggerRun`, `runItem`, and `drainQueue` are exported.
+
+```bash
+tail -80 src/runner.js
+```
+Result: confirmed `module.exports` includes `triggerRun`, `runItem`, and `drainQueue`.
+
+```bash
+npm test 2>&1
+```
+Result: exit 0. 9 test suites passed, 108 tests passed.
+
+## Acceptance Criteria
+- [x] npm run lint が exit 0
+- [x] npm run typecheck が exit 0 (または N/A)
+- [x] npm test が exit 0、全テスト pass
+- [x] webhook-server.js にローカル triggerRun/runItem/drainQueue が存在しない
+- [x] webhook-server.js が runner.runItem / runner.drainQueue を呼ぶ
+- [x] discordCommandHandlers.js の handleRetry が drainQueue を呼ぶ
+- [x] scheduler.sh が run_auto.sh を直接起動しない
+- [x] runner-cli.js に drain/enqueue/status/cooldown-status コマンドが存在する
 
 ## Risks
-- This repo appears to be the control-plane repository, not the application runtime listed in `config/auth/apps.json` such as `/workspaces/english-phrase-trainer`. If SOT-576 is intended to verify an app's actual login behavior, this repo alone is insufficient.
-- The requested checks are scoped mostly to `/src`, but the Firebase auth-related code in this repo lives under `scripts/auth`. Runtime acceptance criteria cannot be verified from `src` because no frontend/login runtime exists here.
-- `.env.example`, README, package files, and this report were already modified in the working tree before this check; only this report file was updated by this worker.
+No unresolved issues. Note: the exact export grep command does not print matches for `src/runner.js` because the file uses a multi-line `module.exports` object. The export block itself includes `triggerRun`, `runItem`, and `drainQueue`.
 
 ## Next Action
-NEEDS_DEBUG
+READY_FOR_REVIEW

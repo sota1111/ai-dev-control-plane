@@ -316,14 +316,13 @@ if [[ "${1:-}" == "--foreground" ]]; then
   fi
 
   _SLEEP_PID=""
-  _RUN_PID=""
+  _DRAIN_PID=""
+
   _fg_cleanup() {
     kill "$_SLEEP_PID" 2>/dev/null || true
-    # 実行中の run_auto.sh がある場合は完了を待つ（途中で kill すると Execution error になるため）
-    if [[ -n "$_RUN_PID" ]]; then
-      log "Scheduler stopping — waiting for current run to complete (PID: ${_RUN_PID})..."
-      wait "$_RUN_PID" 2>/dev/null || true
-      _release_lock
+    if [[ -n "$_DRAIN_PID" ]]; then
+      log "Scheduler stopping — waiting for current drain to complete (PID: ${_DRAIN_PID})..."
+      wait "$_DRAIN_PID" 2>/dev/null || true
     fi
     rm -f "$PID_FILE"
     kill "${_DISCORD_FLUSH_PID:-}" 2>/dev/null || true
@@ -342,178 +341,80 @@ if [[ "${1:-}" == "--foreground" ]]; then
     log "WARNING: LINEAR_API_KEY is not set. Set it to enable Linear-triggered execution."
   fi
 
+  # Helper: run drain and stream output to logs + Discord
+  _run_drain() {
+    local _fifo
+    _fifo=$(mktemp -u /tmp/scheduler-drain-fifo-XXXXXX)
+    mkfifo "$_fifo"
+    node src/runner-cli.js drain > "$_fifo" 2>&1 &
+    _DRAIN_PID=$!
+    while IFS= read -r _drain_line; do
+      echo "$_drain_line" >> "$AUTO_RUNNER_LOG"
+      echo "$_drain_line" >> "$SCHEDULER_LOG"
+      _discord_buffer_add "$_drain_line"
+    done < "$_fifo"
+    rm -f "$_fifo"
+    wait "$_DRAIN_PID" 2>/dev/null || true
+    _DRAIN_PID=""
+  }
+
+  # Get active issue identifiers from Linear (up to 10, ordered by priority)
+  _linear_get_active_identifiers() {
+    if [ -z "${LINEAR_API_KEY:-}" ]; then
+      return 1
+    fi
+    local query response identifiers
+    query='{"query":"{ issues(filter: { state: { type: { in: [\"unstarted\",\"started\"] } } }, orderBy: priority, first: 10) { nodes { id identifier title } } }"}'
+    response=$(curl -sf -X POST \
+      -H "Content-Type: application/json" \
+      -H "Authorization: ${LINEAR_API_KEY}" \
+      --data "$query" \
+      "$LINEAR_API_URL" 2>/dev/null) || {
+      log "Linear API request failed"
+      return 1
+    }
+    identifiers=$(echo "$response" | jq -r '.data.issues.nodes[].identifier // empty' 2>/dev/null || echo "")
+    echo "$identifiers"
+  }
+
+  # On startup: drain any pending queue items from before restart (prcess recovery)
+  if [ -f "${LOG_DIR}/runner.queue.json" ] && [ -s "${LOG_DIR}/runner.queue.json" ]; then
+    log "Draining pending queue items from previous run (restart recovery)..."
+    _run_drain
+  fi
+
   while true; do
     if [ -n "${LINEAR_API_KEY:-}" ]; then
-      # Linear ポーリングモード: CHECK_INTERVAL 待機後にチェック・実行
-      # 初回はスケジューラー起動時点から、再実行時はタスク完了後からカウント開始
       log "Next check in ${CHECK_INTERVAL}s"
       sleep "$CHECK_INTERVAL" &
       _SLEEP_PID=$!
       wait "$_SLEEP_PID" 2>/dev/null || true
 
-      update_status=0
-      linear_has_updates || update_status=$?
+      active_identifiers=$(_linear_get_active_identifiers || echo "")
 
-      if [ "$update_status" -eq 0 ]; then
-        log "--- Run start (active issues found) ---"
-        if ! _acquire_lock; then
-          log "SKIPPED_LOCKED: run_auto.sh skipped (lock not available)"
-          continue
-        fi
-        _tmp_log=$(mktemp)
-        _FIFO_RUN=$(mktemp -u /tmp/scheduler-fifo-XXXXXX)
-        mkfifo "$_FIFO_RUN"
-        bash scripts/ai/run_auto.sh > "$_FIFO_RUN" 2>&1 &
-        _RUN_PID=$!
-        tee -a "$_tmp_log" < "$_FIFO_RUN" | while IFS= read -r _line; do
-          _discord_buffer_add "$_line"
-        done
-        wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
-        _RUN_PID=""
-        rm -f "$_FIFO_RUN"
-        cat "$_tmp_log" >> "$AUTO_RUNNER_LOG"
-        cat "$_tmp_log" >> "$SCHEDULER_LOG"
-        _release_lock
-        if [ "$_run_exit" -eq "$SKIPPED_LOCKED" ]; then
-          log "--- Run SKIPPED_LOCKED (lock not available) ---"
-        elif [ "$_run_exit" -eq 0 ]; then
-          log "--- Run completed successfully ---"
-          node src/runner-cli.js remove-usage-limit-label >> "$AUTO_RUNNER_LOG" 2>&1 || true
-        else
-          log "--- Run failed (exit: ${_run_exit}) ---"
-          _session_wait=$(node src/runner-cli.js parse-usage-limit-epoch < "$_tmp_log" 2>/dev/null) || _session_wait=""
-          if [ -n "$_session_wait" ]; then
-            _reset_disp=$(date -u -d "@$((_session_wait - 600))" '+%H:%M UTC')
-            _wait_min=$(( (_session_wait - $(date -u +%s) + 59) / 60 ))
-            log "Session limit detected (reset: ${_reset_disp}). Waiting until 10 min after reset (~${_wait_min} min)..."
-            node src/runner-cli.js notify-usage-limit "$_session_wait" >> "$AUTO_RUNNER_LOG" 2>&1 || true
-            while true; do
-              _now_e=$(date -u +%s)
-              _rem=$((_session_wait - _now_e))
-              if [ "$_rem" -le 0 ]; then break; fi
-              _chunk=$(( _rem < 30 ? _rem : 30 ))
-              sleep "$_chunk" &
-              _SLEEP_PID=$!
-              wait "$_SLEEP_PID" 2>/dev/null || true
-            done
-            log "--- Run start (session limit reset, forced) ---"
-            # forced run also needs lock
-            if ! _acquire_lock; then
-              log "SKIPPED_LOCKED: run_auto.sh skipped (lock not available)"
-            else
-              _tmp_log2=$(mktemp)
-              _FIFO_RUN2=$(mktemp -u /tmp/scheduler-fifo-XXXXXX)
-              mkfifo "$_FIFO_RUN2"
-              bash scripts/ai/run_auto.sh > "$_FIFO_RUN2" 2>&1 &
-              _RUN_PID=$!
-              tee -a "$_tmp_log2" < "$_FIFO_RUN2" | while IFS= read -r _line; do
-                _discord_buffer_add "$_line"
-              done
-              wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
-              _RUN_PID=""
-              rm -f "$_FIFO_RUN2"
-              cat "$_tmp_log2" >> "$AUTO_RUNNER_LOG"
-              cat "$_tmp_log2" >> "$SCHEDULER_LOG"
-              rm -f "$_tmp_log2"
-              _release_lock
-              if [ "$_run_exit" -eq "$SKIPPED_LOCKED" ]; then
-                log "--- Run SKIPPED_LOCKED (lock not available) ---"
-              elif [ "$_run_exit" -eq 0 ]; then
-                log "--- Run completed successfully ---"
-                node src/runner-cli.js remove-usage-limit-label >> "$AUTO_RUNNER_LOG" 2>&1 || true
-              else
-                log "--- Run failed (exit: ${_run_exit}) ---"
-              fi
-            fi
-          fi
-        fi
-        rm -f "$_tmp_log"
-      elif [ "$update_status" -eq 1 ]; then
-        log "No active issues (Todo/In Progress) in Linear, skipping run."
+      if [ -n "$active_identifiers" ]; then
+        log "--- Active issues found — enqueuing and draining ---"
+        while IFS= read -r _issue_id; do
+          [ -z "$_issue_id" ] && continue
+          log "Enqueuing: ${_issue_id}"
+          node src/runner-cli.js enqueue "$_issue_id" scheduler >> "$AUTO_RUNNER_LOG" 2>&1 || true
+        done <<< "$active_identifiers"
+        _run_drain
+        log "--- Drain complete ---"
       else
-        log "Linear API key not set (unexpected), skipping."
+        log "No active issues (Todo/In Progress) in Linear, skipping run."
       fi
+
     else
-      # フォールバック: INTERVAL 待機後に実行
-      # 初回はスケジューラー起動時点から、再実行時はタスク完了後からカウント開始
-      log "Next run in ${INTERVAL}s"
+      # Fallback: fixed interval, drain any existing queue items
+      log "Next check in ${INTERVAL}s"
       sleep "$INTERVAL" &
       _SLEEP_PID=$!
       wait "$_SLEEP_PID" 2>/dev/null || true
 
-      log "--- Run start (fixed interval) ---"
-      if ! _acquire_lock; then
-        log "SKIPPED_LOCKED: run_auto.sh skipped (lock not available)"
-        continue
-      fi
-      _tmp_log=$(mktemp)
-      _FIFO_RUN=$(mktemp -u /tmp/scheduler-fifo-XXXXXX)
-      mkfifo "$_FIFO_RUN"
-      bash scripts/ai/run_auto.sh > "$_FIFO_RUN" 2>&1 &
-      _RUN_PID=$!
-      tee -a "$_tmp_log" < "$_FIFO_RUN" | while IFS= read -r _line; do
-        _discord_buffer_add "$_line"
-      done
-      wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
-      _RUN_PID=""
-      rm -f "$_FIFO_RUN"
-      cat "$_tmp_log" >> "$AUTO_RUNNER_LOG"
-      cat "$_tmp_log" >> "$SCHEDULER_LOG"
-      _release_lock
-      if [ "$_run_exit" -eq "$SKIPPED_LOCKED" ]; then
-        log "--- Run SKIPPED_LOCKED (lock not available) ---"
-      elif [ "$_run_exit" -eq 0 ]; then
-        log "--- Run completed successfully ---"
-        node src/runner-cli.js remove-usage-limit-label >> "$AUTO_RUNNER_LOG" 2>&1 || true
-      else
-        log "--- Run failed (exit: ${_run_exit}) ---"
-        _session_wait=$(node src/runner-cli.js parse-usage-limit-epoch < "$_tmp_log" 2>/dev/null) || _session_wait=""
-        if [ -n "$_session_wait" ]; then
-          _reset_disp=$(date -u -d "@$((_session_wait - 600))" '+%H:%M UTC')
-          _wait_min=$(( (_session_wait - $(date -u +%s) + 59) / 60 ))
-          log "Session limit detected (reset: ${_reset_disp}). Waiting until 10 min after reset (~${_wait_min} min)..."
-          node src/runner-cli.js notify-usage-limit "$_session_wait" >> "$AUTO_RUNNER_LOG" 2>&1 || true
-          while true; do
-            _now_e=$(date -u +%s)
-            _rem=$((_session_wait - _now_e))
-            if [ "$_rem" -le 0 ]; then break; fi
-            _chunk=$(( _rem < 30 ? _rem : 30 ))
-            sleep "$_chunk" &
-            _SLEEP_PID=$!
-            wait "$_SLEEP_PID" 2>/dev/null || true
-          done
-          log "--- Run start (session limit reset, forced) ---"
-          # forced run also needs lock
-          if ! _acquire_lock; then
-            log "SKIPPED_LOCKED: run_auto.sh skipped (lock not available)"
-          else
-            _tmp_log2=$(mktemp)
-            _FIFO_RUN2=$(mktemp -u /tmp/scheduler-fifo-XXXXXX)
-            mkfifo "$_FIFO_RUN2"
-            bash scripts/ai/run_auto.sh > "$_FIFO_RUN2" 2>&1 &
-            _RUN_PID=$!
-            tee -a "$_tmp_log2" < "$_FIFO_RUN2" | while IFS= read -r _line; do
-              _discord_buffer_add "$_line"
-            done
-            wait "$_RUN_PID" && _run_exit=0 || _run_exit=$?
-            _RUN_PID=""
-            rm -f "$_FIFO_RUN2"
-            cat "$_tmp_log2" >> "$AUTO_RUNNER_LOG"
-            cat "$_tmp_log2" >> "$SCHEDULER_LOG"
-            rm -f "$_tmp_log2"
-            _release_lock
-            if [ "$_run_exit" -eq "$SKIPPED_LOCKED" ]; then
-              log "--- Run SKIPPED_LOCKED (lock not available) ---"
-            elif [ "$_run_exit" -eq 0 ]; then
-              log "--- Run completed successfully ---"
-              node src/runner-cli.js remove-usage-limit-label >> "$AUTO_RUNNER_LOG" 2>&1 || true
-            else
-              log "--- Run failed (exit: ${_run_exit}) ---"
-            fi
-          fi
-        fi
-      fi
-      rm -f "$_tmp_log"
+      log "--- Fixed interval drain ---"
+      _run_drain
+      log "--- Drain complete ---"
     fi
   done
   exit 0

@@ -9,6 +9,7 @@ jest.mock('../runner', () => ({
   LOG_DIR: '/tmp/test_logs',
   enqueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
+  drainQueue: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../lib/discordPauseState', () => ({
@@ -107,11 +108,16 @@ describe('handleRetry', () => {
     expect(result.content).toContain('SOT-xxx');
   });
 
-  test('enqueues valid issue', async () => {
+  test('enqueues valid issue and triggers drain', async () => {
     runner.isQueued.mockReturnValueOnce(false);
     const interaction = { data: { options: [{ name: 'issue', value: 'SOT-123' }] } };
     const result = await handlers.handleRetry(interaction);
     expect(runner.enqueue).toHaveBeenCalledWith('SOT-123', 'discord-retry');
     expect(result.content).toContain('✅');
+    expect(result.content).toContain('ドレインを開始します');
+
+    // Wait for setImmediate
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(runner.drainQueue).toHaveBeenCalled();
   });
 });

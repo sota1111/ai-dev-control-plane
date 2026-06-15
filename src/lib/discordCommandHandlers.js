@@ -35,7 +35,8 @@ async function handleStatus() {
     let cooldownInfo = 'なし';
     if (cooldown) {
       const retryAt = new Date(cooldown.retryAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
-      cooldownInfo = `⏳ ${cooldown.issueId || '不明'} — 復帰予定: ${retryAt}`;
+      const issueRef = cooldown.issueIdentifier || cooldown.issueId || '不明';
+      cooldownInfo = `⏳ ${issueRef} — 復帰予定: ${retryAt}`;
     }
 
     let pauseStatus = paused
@@ -82,9 +83,10 @@ async function handleCooldown() {
       return { content: '## Usage-Limit Cooldown\ncooldown中のIssueはありません。' };
     }
     const retryAt = new Date(cooldown.retryAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const issueRef = cooldown.issueIdentifier || cooldown.issueId || '不明';
     const content = [
       '## Usage-Limit Cooldown',
-      `**Issue**: ${cooldown.issueId || '不明'}`,
+      `**Issue**: ${issueRef}`,
       `**復帰予定時刻**: ${retryAt}`,
     ].join('\n');
     return { content };
@@ -181,13 +183,21 @@ async function handleRetry(interaction) {
     }
     const issueId = validation.id;
 
-    if (runner.isQueued(issueId)) {
-      return { content: `ℹ **${issueId}** はすでにキューに存在します。` };
-    }
-
+    const wasQueued = runner.isQueued(issueId);
     runner.enqueue(issueId, 'discord-retry');
-    runner.log('DISCORD', `${issueId} enqueued via Discord /retry`);
-    return { content: `✅ **${issueId}** を実行キューへ投入しました。` };
+    runner.log('DISCORD', `${issueId} enqueued via Discord /retry (wasQueued=${wasQueued})`);
+
+    // Trigger drain asynchronously — do not block the Discord response
+    setImmediate(() => {
+      runner.drainQueue().catch(err => {
+        runner.log('DISCORD', `drainQueue error after /retry: ${err.message}`);
+      });
+    });
+
+    if (wasQueued) {
+      return { content: `ℹ **${issueId}** はすでにキューに存在します。ドレインを開始します。` };
+    }
+    return { content: `✅ **${issueId}** を実行キューへ投入しました。ドレインを開始します。` };
   } catch (err) {
     runner.log('DISCORD', `handleRetry error: ${err.message}`);
     return { content: `❌ エラーが発生しました: ${err.message}` };
