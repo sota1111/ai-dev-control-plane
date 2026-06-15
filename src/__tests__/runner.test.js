@@ -1,7 +1,9 @@
 const fs = require('fs');
+const https = require('https');
 const runner = require('../runner');
 
 jest.mock('fs');
+jest.mock('https');
 
 describe('runner', () => {
   const mockLockFile = runner.LOCK_FILE;
@@ -195,6 +197,101 @@ describe('runner', () => {
         expect.stringContaining('runner.queue.json.tmp'),
         expect.not.stringContaining('SOT-1')
       );
+    });
+  });
+
+  describe('buildUsageLimitCommentBody', () => {
+    it('formats epoch seconds as YYYY-MM-DD HH:mm JST', () => {
+      // 2026-06-16 02:30 JST = epoch 1781544600
+      const result = runner.buildUsageLimitCommentBody(1781544600);
+      expect(result).toBe('usage-limit: Next auto run: 2026-06-16 02:30 JST');
+    });
+
+    it('produces identical body for same epoch (idempotent)', () => {
+      const epoch = 1750009800;
+      expect(runner.buildUsageLimitCommentBody(epoch)).toBe(runner.buildUsageLimitCommentBody(epoch));
+    });
+  });
+
+  describe('postUsageLimitComment', () => {
+    let writeSpy;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      process.env.LINEAR_API_KEY = 'test-key';
+      writeSpy = jest.fn();
+    });
+
+    function setupLinearMocks(responses) {
+      let index = 0;
+      https.request.mockImplementation((options, callback) => {
+        const responseData = JSON.stringify({ data: responses[index++] });
+        const res = {
+          on: jest.fn((event, cb) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: writeSpy,
+          end: jest.fn(),
+          destroy: jest.fn()
+        };
+      });
+    }
+
+    it('skips posting when identical comment already exists', async () => {
+      const epoch = 1750009800; // 2026-06-16 02:30 JST
+      const body = runner.buildUsageLimitCommentBody(epoch);
+
+      setupLinearMocks([
+        { issue: { id: 'uuid-123' } },
+        { issue: { comments: { nodes: [{ body }] } } }
+      ]);
+
+      await runner.postUsageLimitComment('SOT-602', epoch);
+
+      // Should call 2 times (issue lookup + comments fetch)
+      expect(https.request).toHaveBeenCalledTimes(2);
+      
+      // Verify no commentCreate mutation was sent in any of the write calls
+      const writtenBodies = writeSpy.mock.calls.map(c => c[0]);
+      expect(writtenBodies.some(b => b.includes('commentCreate'))).toBe(false);
+    });
+
+    it('posts comment when no existing comment matches', async () => {
+      const epoch = 1750009800;
+
+      setupLinearMocks([
+        { issue: { id: 'uuid-123' } },
+        { issue: { comments: { nodes: [] } } },
+        { commentCreate: { success: true } }
+      ]);
+
+      await runner.postUsageLimitComment('SOT-602', epoch);
+
+      expect(https.request).toHaveBeenCalledTimes(3);
+      const writtenBodies = writeSpy.mock.calls.map(c => c[0]);
+      expect(writtenBodies.some(b => b.includes('commentCreate'))).toBe(true);
+    });
+
+    it('posts comment when existing comment has different body', async () => {
+      const epoch = 1750009800;
+      const differentBody = 'usage-limit: Next auto run: 2026-06-16 04:10 JST';
+
+      setupLinearMocks([
+        { issue: { id: 'uuid-123' } },
+        { issue: { comments: { nodes: [{ body: differentBody }] } } },
+        { commentCreate: { success: true } }
+      ]);
+
+      await runner.postUsageLimitComment('SOT-602', epoch);
+
+      expect(https.request).toHaveBeenCalledTimes(3);
+      const writtenBodies = writeSpy.mock.calls.map(c => c[0]);
+      expect(writtenBodies.some(b => b.includes('commentCreate'))).toBe(true);
     });
   });
 });

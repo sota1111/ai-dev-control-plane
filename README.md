@@ -368,7 +368,7 @@ scheduler と webhook は **同一のロックファイル** `docs/ai/auto_logs/
 
 `run_auto.sh` が usage-limit で失敗した場合:
 
-1. Linear の対象 Issue にコメントを投稿（次回実行予定時刻 JST 付き）
+1. Linear の対象 Issue にコメントを投稿（次回実行予定時刻 JST 付き）。同一 Issue・同一 retry 時刻のコメントが既に存在する場合は投稿しない（重複防止）
 2. 対象 Issue に `usage-limit` ラベルを付与（既存ラベルは保持）
 3. リセット時刻 +10分後を Claude Code 全体の cooldown として `runner.cooldown.json` に永続化
 4. cooldown 中に届いたリクエスト（scheduler/webhook/Discord）は実行せず、同じ retry 時刻でキューに追加

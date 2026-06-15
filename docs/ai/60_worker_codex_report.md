@@ -1,100 +1,172 @@
-Verification complete. I wrote the report to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md).
+# Worker Report
 
-Results:
-- `npm run lint`: pass
-- `npm run typecheck`: N/A, no script exists
-- `npm test`: pass twice, `9` suites and `108` tests
-- Structural checks: pass
-- Source fixes: none required
+## Summary
+`src/runner.js` contains both requested usage-limit notification functions. `postUsageLimitComment(issueId, resetEpoch)` resolves the Linear issue UUID, formats the reset epoch as `YYYY-MM-DD HH:mm JST`, and posts `usage-limit: Next auto run: <time>` using the Linear GraphQL `commentCreate` mutation. `notifyUsageLimitToAllActiveIssues(epochSeconds)` queries up to 50 active issues in `unstarted` or `started` states, then calls `postUsageLimitComment()` and `addUsageLimitLabel()` for each issue.
 
-Only changed file from my work: `docs/ai/60_worker_codex_report.md`. Existing unrelated dirty state remains: `.claude/settings.local.json` and `.tmp_ai-dev-test4/`.
+No existing comment lookup or deduplication logic was found in the usage-limit comment path. `src/__tests__/runner.test.js` exists, but it currently covers lock, cooldown, and queue behavior only; it does not cover `postUsageLimitComment()` or `notifyUsageLimitToAllActiveIssues()`.
+
+Existing tests pass: 9 suites, 108 tests.
+
+## Key Findings
+- postUsageLimitComment location: `src/runner.js:176`
+- notifyUsageLimitToAllActiveIssues location: `src/runner.js:497`
+- Comment API used: Linear GraphQL mutation `commentCreate(input: { issueId: $issueId, body: $body })` at `src/runner.js:187-193`
+- Existing comment dedup logic: no; `postUsageLimitComment()` posts directly after resolving the issue UUID and does not query existing comments before calling `commentCreate`
+- Test framework: Jest (`npm test` runs `jest --forceExit`)
+- Tests passing: yes; `npm test 2>&1 | tail -30` reported 9 passed suites and 108 passed tests
+
+## Changed Files
+(none - this is a task check only)
+
+## Commands Run
+`grep -n "postUsageLimitComment\|notifyUsageLimitToAllActiveIssues\|usage-limit\|Next auto run\|commentCreate\|comment" /workspaces/ai-dev-control-plane/src/runner.js | head -80`
+
+Result:
+```text
+11:const USAGE_LIMIT_FILE = path.join(LOG_DIR, 'runner.usage-limit.json');
+176:async function postUsageLimitComment(issueId, resetEpoch) {
+189:        commentCreate(input: { issueId: $issueId, body: $body }) {
+193:    `, { issueId: uuid, body: `usage-limit: Next auto run: ${jstTime}` });
+195:    log('ERROR', `postUsageLimitComment failed: ${err.message}`, { issue: issueId });
+206:    const labelsData = await linearQuery('query { issueLabels(filter: { name: { eq: "usage-limit" } }) { nodes { id } } }');
+216:      `, { name: 'usage-limit', teamId, color: '#FF6B6B' });
+240:    const labelsData = await linearQuery('query { issueLabels(filter: { name: { eq: "usage-limit" } }) { nodes { id } } }');
+497:async function notifyUsageLimitToAllActiveIssues(epochSeconds) {
+504:      await postUsageLimitComment(issue.id, epochSeconds).catch(() => {});
+507:    log('RUNNER', `notifyUsageLimitToAllActiveIssues done for ${issues.length} issue(s)`);
+509:    log('ERROR', `notifyUsageLimitToAllActiveIssues failed: ${err.message}`);
+516:      'query { issueLabels(filter: { name: { eq: "usage-limit" } }) { nodes { id } } }'
+520:      log('RUNNER', 'removeUsageLimitLabelFromAllIssues: no usage-limit label found');
+685:      await notifyUsageLimitToAllActiveIssues(resetEpoch).catch(() => {});
+774:  postUsageLimitComment,
+780:  notifyUsageLimitToAllActiveIssues,
+```
+
+`ls /workspaces/ai-dev-control-plane/src/`
+
+Result:
+```text
+__tests__
+lib
+runner-cli.js
+runner.js
 webhook-server.js
-sed -n '1,240p' src/runner-cli.js
-sed -n '1,220p' scripts/ai/scheduler.sh
 ```
-Result: Context files read successfully.
 
-```bash
-npm run lint 2>&1
-```
-Result: exit 0. All configured `node --check` checks passed.
+`ls /workspaces/ai-dev-control-plane/test/ 2>/dev/null || ls /workspaces/ai-dev-control-plane/__tests__/ 2>/dev/null || ls /workspaces/ai-dev-control-plane/tests/ 2>/dev/null || echo "no test dir found"`
 
-```bash
-npm run typecheck 2>&1 || echo "No typecheck script"
-```
-Result: exit 0 via fallback. `npm run typecheck` reported `Missing script: "typecheck"`, then printed `No typecheck script`.
-
-```bash
-npm test 2>&1
-```
-Result: exit 0. 9 test suites passed, 108 tests passed.
-
-```bash
-grep -n "^function triggerRun\|^async function runItem\|^async function drainQueue" src/webhook-server.js && echo "FAIL: local functions still present" || echo "OK: no local runner functions in webhook-server.js"
-```
-Result: `OK: no local runner functions in webhook-server.js`.
-
-```bash
-grep -n "runner\.runItem\|runner\.drainQueue" src/webhook-server.js
-```
 Result:
 ```text
-212:        await runner.runItem(item);
-219:          await runner.drainQueue();
+no test dir found
 ```
 
-```bash
-grep -n "drainQueue" src/lib/discordCommandHandlers.js
-```
+`ls /workspaces/ai-dev-control-plane/src/__tests__`
+
 Result:
 ```text
-192:      runner.drainQueue().catch(err => {
-193:        runner.log('DISCORD', `drainQueue error after /retry: ${err.message}`);
+discordAskHandler.test.js
+discordCommandHandlers.test.js
+discordIntentClassifier.test.js
+discordInteractions.test.js
+discordNotifierIntegration.test.js
+issueClassifier.test.js
+runner.test.js
+usageLimitParser.test.js
+webhookServer.test.js
 ```
 
-```bash
-grep -n "bash scripts/ai/run_auto.sh" scripts/ai/scheduler.sh && echo "FAIL: direct run_auto.sh invocation found" || echo "OK: no direct run_auto.sh invocation"
-```
-Result: `OK: no direct run_auto.sh invocation`.
+`cat /workspaces/ai-dev-control-plane/package.json`
 
-```bash
-grep -n "case 'enqueue'\|case 'drain'\|case 'status'\|case 'cooldown-status'" src/runner-cli.js
+Result:
+```json
+{
+  "name": "ai-dev-control-plane",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "lint": "node --check src/runner.js && node --check src/runner-cli.js && node --check src/webhook-server.js && node --check src/lib/usageLimitParser.js && node --check src/lib/discordNotifier.js && node --check src/lib/issueClassifier.js && node --check src/lib/discordInteractions.js && node --check src/lib/discordCommandRouter.js && node --check src/lib/discordCommandHandlers.js && node --check src/lib/discordPauseState.js && node --check src/lib/discordAskHandler.js && node --check src/lib/discordIntentClassifier.js && node --check src/lib/discordIntentHandlers.js && node --check scripts/register_discord_commands.js && node --check scripts/auth/firebase-user.js && node --check scripts/auth/cloudrun-sync.js && node --check scripts/auth/auth-setup.js",
+    "auth:setup": "node scripts/auth/auth-setup.js",
+    "start:webhook": "node src/webhook-server.js",
+    "start:ngrok": "bash -c \"$NGROK_COMMAND\"",
+    "dev:webhook": "concurrently --kill-others-on-fail=false \"npm run start:webhook\" \"npm run start:ngrok\"",
+    "test": "jest --forceExit"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "firebase": "^12.14.0",
+    "firebase-admin": "^12.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "jest": "^29.0.0",
+    "supertest": "^6.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node"
+  }
+}
 ```
+
+`nl -ba /workspaces/ai-dev-control-plane/src/runner.js | sed -n '150,225p'`
+
+Result: confirmed `postUsageLimitComment()` at lines 176-197. It queries `issue(id: $id)`, formats JST time, and calls `commentCreate` with body `usage-limit: Next auto run: ${jstTime}`.
+
+`nl -ba /workspaces/ai-dev-control-plane/src/runner.js | sed -n '480,515p'`
+
+Result: confirmed `notifyUsageLimitToAllActiveIssues()` at lines 497-511. It queries active issues and calls `postUsageLimitComment()` and `addUsageLimitLabel()` for each.
+
+`nl -ba /workspaces/ai-dev-control-plane/src/runner.js | sed -n '660,695p'`
+
+Result: confirmed usage-limit detection flow in `runOne()`: when `parseUsageLimitResetEpoch(output)` returns a value, it calls `notifyUsageLimitToAllActiveIssues(resetEpoch)`, sets cooldown, and enqueues retry.
+
+`grep -n "postUsageLimitComment\|notifyUsageLimitToAllActiveIssues\|usage-limit\|Next auto run\|commentCreate\|comments" /workspaces/ai-dev-control-plane/src/__tests__/runner.test.js | head -120`
+
 Result:
 ```text
-81:    case 'enqueue': {
-95:    case 'drain': {
-100:    case 'status': {
-114:    case 'cooldown-status': {
+93:        expect.stringContaining('runner.usage-limit.json.tmp'),
+101:        expect.stringContaining('runner.usage-limit.json.tmp'),
 ```
 
-```bash
-grep -n "runItem\|drainQueue\|triggerRun" src/runner.js | grep "module.exports\|exports\." | head -5
-```
-Result: no output because `module.exports = {` is on a separate line from the exported symbol names. Direct inspection of the export block confirmed `triggerRun`, `runItem`, and `drainQueue` are exported.
+`grep -n "comments\|commentCreate\|postUsageLimit" /workspaces/ai-dev-control-plane/src/runner.js`
 
-```bash
-tail -80 src/runner.js
+Result:
+```text
+176:async function postUsageLimitComment(issueId, resetEpoch) {
+189:        commentCreate(input: { issueId: $issueId, body: $body }) {
+195:    log('ERROR', `postUsageLimitComment failed: ${err.message}`, { issue: issueId });
+504:      await postUsageLimitComment(issue.id, epochSeconds).catch(() => {});
 ```
-Result: confirmed `module.exports` includes `triggerRun`, `runItem`, and `drainQueue`.
 
-```bash
-npm test 2>&1
+`cd /workspaces/ai-dev-control-plane && npm test 2>&1 | tail -30`
+
+Result:
+```text
+PASS src/__tests__/discordAskHandler.test.js
+PASS src/__tests__/usageLimitParser.test.js
+PASS src/__tests__/runner.test.js
+PASS src/__tests__/discordIntentClassifier.test.js
+PASS src/__tests__/discordCommandHandlers.test.js
+PASS src/__tests__/discordNotifierIntegration.test.js
+PASS src/__tests__/webhookServer.test.js
+
+Test Suites: 9 passed, 9 total
+Tests:       108 passed, 108 total
+Snapshots:   0 total
+Time:        1.256 s, estimated 2 s
+Ran all test suites.
+Force exiting Jest: Have you considered using `--detectOpenHandles` to detect async operations that kept running after all tests finished?
 ```
-Result: exit 0. 9 test suites passed, 108 tests passed.
 
 ## Acceptance Criteria
-- [x] npm run lint が exit 0
-- [x] npm run typecheck が exit 0 (または N/A)
-- [x] npm test が exit 0、全テスト pass
-- [x] webhook-server.js にローカル triggerRun/runItem/drainQueue が存在しない
-- [x] webhook-server.js が runner.runItem / runner.drainQueue を呼ぶ
-- [x] discordCommandHandlers.js の handleRetry が drainQueue を呼ぶ
-- [x] scheduler.sh が run_auto.sh を直接起動しない
-- [x] runner-cli.js に drain/enqueue/status/cooldown-status コマンドが存在する
+- [x] postUsageLimitComment() identified
+- [x] notifyUsageLimitToAllActiveIssues() identified
+- [x] Comment API call location identified
+- [x] Existing tests pass
 
 ## Risks
-No unresolved issues. Note: the exact export grep command does not print matches for `src/runner.js` because the file uses a multi-line `module.exports` object. The export block itself includes `triggerRun`, `runItem`, and `drainQueue`.
+No blocker for the task check. The implementation currently has no comment deduplication before `commentCreate`, so repeated handling of the same retry timestamp can post duplicate `usage-limit: Next auto run` comments. Existing runner tests do not exercise this comment posting path.
 
 ## Next Action
 READY_FOR_REVIEW
