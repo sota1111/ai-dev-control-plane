@@ -6,7 +6,7 @@
     "cloudRunService": "english-phrase-trainer",
     "region": "asia-northeast1",
     "gcpProject": "gen-lang-client-0243034020",
-    "cloudRunConfirmed": false,
+    "cloudRunConfirmed": true,
     "authMigrationStatus": "done",
     "frameworkType": "nextjs",
     "requiredEnvVars": [
@@ -18,7 +18,8 @@
       "AUTH_SECRET"
     ],
     "authSecretName": "english-trainer-auth-secret",
-    "cloudRunSyncEnabled": true
+    "cloudRunSyncEnabled": true,
+    "notes": "基準実装。他アプリの移行リファレンス。"
   },
   {
     "name": "stock-signal-research",
@@ -28,14 +29,18 @@
     "region": "asia-northeast1",
     "gcpProject": "gen-lang-client-0243034020",
     "cloudRunConfirmed": false,
-    "authMigrationStatus": "todo",
+    "authMigrationStatus": "done",
     "frameworkType": "fastapi-react",
     "requiredEnvVars": [
-      "AUTH_USERNAME",
-      "AUTH_PASSWORD",
-      "AUTH_SECRET_KEY"
+      "VITE_FIREBASE_API_KEY",
+      "VITE_FIREBASE_AUTH_DOMAIN",
+      "VITE_FIREBASE_PROJECT_ID",
+      "VITE_FIREBASE_APP_ID",
+      "ALLOWED_USER_EMAILS",
+      "AUTH_SECRET",
+      "GOOGLE_CLOUD_PROJECT"
     ],
-    "authSecretName": "stock-signal-auth-secret-key",
+    "authSecretName": "stock-signal-auth-secret",
     "cloudRunSyncEnabled": false
   },
   {
@@ -46,14 +51,20 @@
     "region": "asia-northeast1",
     "gcpProject": "gen-lang-client-0243034020",
     "cloudRunConfirmed": true,
-    "authMigrationStatus": "todo",
+    "authMigrationStatus": "done",
     "frameworkType": "fastapi-react",
     "requiredEnvVars": [
-      "AUTH_PASSWORD",
-      "JWT_SECRET"
+      "VITE_FIREBASE_API_KEY",
+      "VITE_FIREBASE_AUTH_DOMAIN",
+      "VITE_FIREBASE_PROJECT_ID",
+      "VITE_FIREBASE_APP_ID",
+      "ALLOWED_USER_EMAILS",
+      "AUTH_SECRET",
+      "GOOGLE_CLOUD_PROJECT"
     ],
-    "authSecretName": "state-machine-jwt-secret",
-    "cloudRunSyncEnabled": false
+    "authSecretName": "state-machine-auth-secret",
+    "cloudRunSyncEnabled": false,
+    "notes": "READMEに旧認証変数 AUTH_PASSWORD/JWT_SECRET の記述が残存。SOT-581で修正予定。"
   },
   {
     "name": "shrine-stair-trainer",
@@ -63,13 +74,17 @@
     "region": "asia-northeast1",
     "gcpProject": "gen-lang-client-0243034020",
     "cloudRunConfirmed": false,
-    "authMigrationStatus": "todo",
+    "authMigrationStatus": "done-frontend-only",
     "frameworkType": "vite-react-static",
     "requiredEnvVars": [
-      "VITE_AUTH_PASSWORD"
+      "VITE_FIREBASE_API_KEY",
+      "VITE_FIREBASE_AUTH_DOMAIN",
+      "VITE_FIREBASE_PROJECT_ID",
+      "VITE_FIREBASE_APP_ID"
     ],
-    "authSecretName": "shrine-trainer-auth-password",
-    "cloudRunSyncEnabled": false
+    "authSecretName": null,
+    "cloudRunSyncEnabled": false,
+    "notes": "静的フロントエンドのみ。サーバー側 Firebase ID token 検証なし。AUTH_SECRET 不要。Firebase Console の手動ユーザー作成でアクセス制限。Cloud Run は --allow-unauthenticated で公開し、アプリ内 Firebase Auth で画面保護。"
   },
   {
     "name": "kindle-sale-monitor",
@@ -79,15 +94,20 @@
     "region": "asia-northeast1",
     "gcpProject": "gen-lang-client-0243034020",
     "cloudRunConfirmed": false,
-    "authMigrationStatus": "todo",
+    "authMigrationStatus": "done",
     "frameworkType": "fastapi-server-rendered",
     "requiredEnvVars": [
-      "AUTH_USERNAME",
-      "AUTH_PASSWORD",
-      "AUTH_SECRET_KEY"
+      "FIREBASE_API_KEY",
+      "FIREBASE_AUTH_DOMAIN",
+      "FIREBASE_PROJECT_ID",
+      "FIREBASE_APP_ID",
+      "ALLOWED_USER_EMAILS",
+      "AUTH_SECRET",
+      "GOOGLE_CLOUD_PROJECT"
     ],
-    "authSecretName": "kindle-monitor-auth-secret-key",
-    "cloudRunSyncEnabled": false
+    "authSecretName": "kindle-monitor-auth-secret",
+    "cloudRunSyncEnabled": false,
+    "notes": "管理画面は Firebase Auth。/run エンドポイントは Cloud Scheduler 専用（OIDC）。テストファイルに旧認証変数の参照が残存。SOT-581で修正予定。"
   },
   {
     "name": "booking-monitor",
@@ -99,13 +119,16 @@
     "cloudRunConfirmed": false,
     "authMigrationStatus": "todo",
     "frameworkType": "flask",
-    "notes": "",
+    "notes": "Firebase Auth 未実装。GitHub origin/HEAD が feat/SOT-274-booking-monitor を指すが、ローカル main は最新。SOT-582で実装予定。",
     "requiredEnvVars": [
-      "AUTH_USERNAME",
-      "AUTH_PASSWORD",
-      "AUTH_SECRET_KEY"
+      "FIREBASE_API_KEY",
+      "FIREBASE_AUTH_DOMAIN",
+      "FIREBASE_PROJECT_ID",
+      "FIREBASE_APP_ID",
+      "ALLOWED_USER_EMAILS",
+      "AUTH_SECRET"
     ],
-    "authSecretName": "booking-monitor-auth-secret-key",
+    "authSecretName": "booking-monitor-auth-secret",
     "cloudRunSyncEnabled": false
   },
   {
@@ -116,15 +139,20 @@
     "region": "asia-northeast1",
     "gcpProject": "gen-lang-client-0243034020",
     "cloudRunConfirmed": false,
-    "authMigrationStatus": "todo",
+    "authMigrationStatus": "done",
     "frameworkType": "fastapi-react",
     "requiredEnvVars": [
-      "AUTH_USERNAME",
-      "AUTH_PASSWORD",
-      "AUTH_SECRET_KEY"
+      "VITE_FIREBASE_API_KEY",
+      "VITE_FIREBASE_AUTH_DOMAIN",
+      "VITE_FIREBASE_PROJECT_ID",
+      "VITE_FIREBASE_APP_ID",
+      "ALLOWED_USER_EMAILS",
+      "AUTH_SECRET",
+      "GOOGLE_CLOUD_PROJECT"
     ],
-    "authSecretName": "nas-indexer-auth-secret-key",
-    "cloudRunSyncEnabled": false
+    "authSecretName": "nas-indexer-auth-secret",
+    "cloudRunSyncEnabled": false,
+    "notes": "NASパスや接続情報をログに出さないよう秘匿情報扱いを維持すること。"
   },
   {
     "name": "toddler-private-rag",
@@ -134,15 +162,19 @@
     "region": "asia-northeast1",
     "gcpProject": "gen-lang-client-0243034020",
     "cloudRunConfirmed": false,
-    "authMigrationStatus": "todo",
+    "authMigrationStatus": "partial",
     "frameworkType": "fastapi-react",
-    "notes": "Uses FastAPI OAuth2 password bearer with JWT. No Firebase auth found. Access confirmed via gh CLI.",
+    "notes": "Firebase Auth コード/環境変数あり。READMEは旧認証方式 (AUTH_USERNAME/AUTH_PASSWORD/AUTH_SECRET_KEY) の記述が残存。SOT-581で修正予定。保育園情報を扱うため未ログイン API アクセスを必ず拒否すること。",
     "requiredEnvVars": [
-      "AUTH_USERNAME",
-      "AUTH_PASSWORD",
-      "AUTH_SECRET_KEY"
+      "VITE_FIREBASE_API_KEY",
+      "VITE_FIREBASE_AUTH_DOMAIN",
+      "VITE_FIREBASE_PROJECT_ID",
+      "VITE_FIREBASE_APP_ID",
+      "ALLOWED_USER_EMAILS",
+      "AUTH_SECRET",
+      "GOOGLE_CLOUD_PROJECT"
     ],
-    "authSecretName": "rag-auth-secret-key",
+    "authSecretName": "rag-auth-secret",
     "cloudRunSyncEnabled": false
   }
 ]
