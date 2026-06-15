@@ -4,10 +4,10 @@
 # 動作モード:
 #   LINEAR_API_KEY が設定されている場合:
 #     CHECK_INTERVAL 秒ごとに Linear の Todo / In Progress の Issue が残っているか確認し、
-#     1件でも存在すれば run_auto.sh を実行する。
+#     1件でも存在すれば runner-cli.js 経由でキューに enqueue し、drain を実行する。
 #
 #   LINEAR_API_KEY が未設定の場合:
-#     フォールバックとして INTERVAL 秒ごとに無条件で run_auto.sh を実行する。
+#     フォールバックとして INTERVAL 秒ごとに無条件で runner-cli.js drain を実行する。
 #
 # 環境変数:
 #   LINEAR_API_KEY   Linear Personal API Token（Settings > API > Personal API keys）
