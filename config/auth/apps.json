@@ -99,7 +99,7 @@
     "cloudRunConfirmed": false,
     "authMigrationStatus": "todo",
     "frameworkType": "flask",
-    "notes": "GitHub default branch is feat/SOT-274-booking-monitor, not main",
+    "notes": "",
     "requiredEnvVars": [
       "AUTH_USERNAME",
       "AUTH_PASSWORD",
