@@ -84,9 +84,18 @@ describe('runner', () => {
 
       runner.setUsageLimitCooldownUntil(retryAt);
 
+      // Should write to both COOLDOWN_FILE and USAGE_LIMIT_FILE
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.cooldown.json.tmp'),
+        expect.stringContaining(retryAt)
+      );
       expect(fs.writeFileSync).toHaveBeenCalledWith(
         expect.stringContaining('runner.usage-limit.json.tmp'),
         JSON.stringify({ retryAt, issueId: null }, null, 2)
+      );
+      expect(fs.renameSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.cooldown.json.tmp'),
+        runner.COOLDOWN_FILE
       );
       expect(fs.renameSync).toHaveBeenCalledWith(
         expect.stringContaining('runner.usage-limit.json.tmp'),
@@ -96,18 +105,27 @@ describe('runner', () => {
 
     it('getUsageLimitCooldownUntil() returns a future cooldown', () => {
       const retryAt = new Date(Date.now() + 600000).toISOString();
-      fs.existsSync.mockImplementation((path) => path === runner.USAGE_LIMIT_FILE);
-      fs.readFileSync.mockReturnValue(JSON.stringify({ retryAt }));
+      // Mock COOLDOWN_FILE exists
+      fs.existsSync.mockImplementation((path) => path === runner.COOLDOWN_FILE);
+      fs.readFileSync.mockReturnValue(JSON.stringify({ until: retryAt }));
 
-      expect(runner.getUsageLimitCooldownUntil()).toEqual({ retryAt, issueId: undefined });
+      expect(runner.getUsageLimitCooldownUntil()).toEqual({
+        retryAt,
+        issueId: null,
+        issueIdentifier: null,
+        active: true
+      });
     });
 
     it('getUsageLimitCooldownUntil() clears expired cooldowns', () => {
       const retryAt = new Date(Date.now() - 1000).toISOString();
-      fs.existsSync.mockImplementation((path) => path === runner.USAGE_LIMIT_FILE);
-      fs.readFileSync.mockReturnValue(JSON.stringify({ retryAt }));
+      fs.existsSync.mockImplementation((path) => 
+        path === runner.COOLDOWN_FILE || path === runner.USAGE_LIMIT_FILE
+      );
+      fs.readFileSync.mockReturnValue(JSON.stringify({ until: retryAt }));
 
       expect(runner.getUsageLimitCooldownUntil()).toBe(null);
+      expect(fs.unlinkSync).toHaveBeenCalledWith(runner.COOLDOWN_FILE);
       expect(fs.unlinkSync).toHaveBeenCalledWith(runner.USAGE_LIMIT_FILE);
     });
   });
@@ -125,12 +143,15 @@ describe('runner', () => {
       expect(fs.renameSync).toHaveBeenCalled();
     });
 
-    it('enqueue() does not duplicate same issueId', () => {
+    it('enqueue() updates existing item instead of skipping', () => {
       fs.existsSync.mockReturnValue(true);
       fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-123', trigger: 'webhook' }]));
       
       runner.enqueue('SOT-123', 'manual');
-      expect(fs.writeFileSync).not.toHaveBeenCalled();
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.queue.json.tmp'),
+        expect.stringContaining('"trigger": "manual"')
+      );
     });
 
     it('dequeue() returns first ready item (retryAt=null)', () => {

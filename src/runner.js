@@ -1,12 +1,17 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const { spawn } = require('child_process');
+const { parseUsageLimitResetEpoch } = require('./lib/usageLimitParser');
 
 const SKIPPED_LOCKED = 75;  // exit code when lock is not available
 const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
 const LOCK_FILE = path.join(LOG_DIR, 'runner.lock');
 const QUEUE_FILE = path.join(LOG_DIR, 'runner.queue.json');
 const USAGE_LIMIT_FILE = path.join(LOG_DIR, 'runner.usage-limit.json');
+const COOLDOWN_FILE = path.join(LOG_DIR, 'runner.cooldown.json');
+const USAGE_LIMIT_RETRY_BUFFER_SECONDS = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
+const MAX_DRAIN_ITEMS = 20;  // safety guard against infinite drain loops
 const LOG_FILE = path.join(LOG_DIR, 'auto_runner.log');
 const STALE_LOCK_MS = 30 * 60 * 1000;  // 30 minutes
 const LINEAR_API_URL = 'https://api.linear.app/graphql';
@@ -250,38 +255,102 @@ async function removeUsageLimitLabel(issueId) {
   }
 }
 
-function setUsageLimitCooldownUntil(retryAt, issueId = null) {
+function setUsageLimitCooldownUntil(retryAt, issueIdOrOptions = null) {
+  // Accept both old signature (retryAt, issueId) and new (retryAt, { issueId, issueIdentifier, resetAt, bufferSeconds })
+  let issueId = null;
+  let issueIdentifier = null;
+  let resetAt = null;
+  let bufferSeconds = USAGE_LIMIT_RETRY_BUFFER_SECONDS;
+
+  if (typeof issueIdOrOptions === 'string') {
+    issueId = issueIdOrOptions; // backward compat
+  } else if (issueIdOrOptions && typeof issueIdOrOptions === 'object') {
+    issueId = issueIdOrOptions.issueId || null;
+    issueIdentifier = issueIdOrOptions.issueIdentifier || null;
+    resetAt = issueIdOrOptions.resetAt || null;
+    bufferSeconds = issueIdOrOptions.bufferSeconds != null ? issueIdOrOptions.bufferSeconds : USAGE_LIMIT_RETRY_BUFFER_SECONDS;
+  }
+
   try {
     if (!fs.existsSync(LOG_DIR)) {
       fs.mkdirSync(LOG_DIR, { recursive: true });
     }
-    const tmpFile = USAGE_LIMIT_FILE + ".tmp";
-    fs.writeFileSync(tmpFile, JSON.stringify({ retryAt, issueId }, null, 2));
-    fs.renameSync(tmpFile, USAGE_LIMIT_FILE);
-    log("RUNNER", "usage limit cooldown set", { retryAt, issueId });
+    const now = new Date().toISOString();
+
+    // Write to new COOLDOWN_FILE with rich structure
+    const cooldownData = {
+      active: true,
+      until: retryAt,
+      detectedAt: now,
+      sourceIssueId: issueId,
+      sourceIssueIdentifier: issueIdentifier,
+      resetAt: resetAt,
+      bufferSeconds: bufferSeconds
+    };
+    const cooldownTmp = COOLDOWN_FILE + '.tmp';
+    fs.writeFileSync(cooldownTmp, JSON.stringify(cooldownData, null, 2));
+    fs.renameSync(cooldownTmp, COOLDOWN_FILE);
+
+    // Also write backward-compat USAGE_LIMIT_FILE so old scheduler.sh can still read it
+    const legacyData = { retryAt, issueId };
+    const legacyTmp = USAGE_LIMIT_FILE + '.tmp';
+    fs.writeFileSync(legacyTmp, JSON.stringify(legacyData, null, 2));
+    fs.renameSync(legacyTmp, USAGE_LIMIT_FILE);
+
+    log('RUNNER', 'usage limit cooldown set', { retryAt, issueId: issueId || undefined, issueIdentifier: issueIdentifier || undefined });
   } catch (err) {
-    log("ERROR", `setUsageLimitCooldownUntil failed: ${err.message}`);
+    log('ERROR', `setUsageLimitCooldownUntil failed: ${err.message}`);
   }
 }
 
 function clearUsageLimitCooldown() {
   try {
+    if (fs.existsSync(COOLDOWN_FILE)) {
+      fs.unlinkSync(COOLDOWN_FILE);
+    }
     if (fs.existsSync(USAGE_LIMIT_FILE)) {
       fs.unlinkSync(USAGE_LIMIT_FILE);
-      log("RUNNER", "usage limit cooldown cleared");
     }
+    log('RUNNER', 'usage limit cooldown cleared');
   } catch (err) {
-    log("ERROR", `clearUsageLimitCooldown failed: ${err.message}`);
+    log('ERROR', `clearUsageLimitCooldown failed: ${err.message}`);
   }
 }
 
 function getUsageLimitCooldownUntil(nowMs = Date.now()) {
+  // Try new COOLDOWN_FILE first
+  if (fs.existsSync(COOLDOWN_FILE)) {
+    try {
+      const content = fs.readFileSync(COOLDOWN_FILE, 'utf8');
+      const state = JSON.parse(content);
+      const retryAt = state.until || state.retryAt || null;
+      if (!retryAt) {
+        clearUsageLimitCooldown();
+        return null;
+      }
+      const retryAtMs = new Date(retryAt).getTime();
+      if (isNaN(retryAtMs) || retryAtMs <= nowMs) {
+        clearUsageLimitCooldown();
+        return null;
+      }
+      return {
+        retryAt,
+        issueId: state.sourceIssueId || null,
+        issueIdentifier: state.sourceIssueIdentifier || null,
+        active: true
+      };
+    } catch (err) {
+      log('ERROR', `getUsageLimitCooldownUntil: COOLDOWN_FILE parse failed: ${err.message}`);
+      // Fall through to legacy file
+    }
+  }
+
+  // Fall back to legacy USAGE_LIMIT_FILE
   try {
     if (!fs.existsSync(USAGE_LIMIT_FILE)) return null;
-    const content = fs.readFileSync(USAGE_LIMIT_FILE, "utf8");
+    const content = fs.readFileSync(USAGE_LIMIT_FILE, 'utf8');
     const state = JSON.parse(content);
-    
-    // Support both old string format and new object format
+
     let retryAt, issueId;
     if (typeof state === 'string') {
       retryAt = state;
@@ -292,7 +361,7 @@ function getUsageLimitCooldownUntil(nowMs = Date.now()) {
 
     if (!retryAt) return null;
     const retryAtMs = new Date(retryAt).getTime();
-    if (Number.isNaN(retryAtMs)) {
+    if (isNaN(retryAtMs)) {
       clearUsageLimitCooldown();
       return null;
     }
@@ -300,9 +369,9 @@ function getUsageLimitCooldownUntil(nowMs = Date.now()) {
       clearUsageLimitCooldown();
       return null;
     }
-    return { retryAt, issueId };
+    return { retryAt, issueId: issueId || null };
   } catch (err) {
-    log("ERROR", `getUsageLimitCooldownUntil failed: ${err.message}`);
+    log('ERROR', `getUsageLimitCooldownUntil failed: ${err.message}`);
     return null;
   }
 }
@@ -311,9 +380,17 @@ function loadQueue() {
   try {
     if (!fs.existsSync(QUEUE_FILE)) return [];
     const content = fs.readFileSync(QUEUE_FILE, 'utf8');
-    const queue = JSON.parse(content);
-    return Array.isArray(queue) ? queue : [];
+    try {
+      const queue = JSON.parse(content);
+      return Array.isArray(queue) ? queue : [];
+    } catch (parseErr) {
+      const backupFile = QUEUE_FILE + '.corrupt.' + Date.now();
+      try { fs.writeFileSync(backupFile, content); } catch (_) {}
+      log('QUEUE', `loadQueue: JSON parse failed, backed up corrupt file to ${path.basename(backupFile)}: ${parseErr.message}`);
+      return [];
+    }
   } catch (err) {
+    log('QUEUE', `loadQueue ERROR: ${err.message}`);
     return [];
   }
 }
@@ -331,17 +408,48 @@ function saveQueue(queue) {
   }
 }
 
-function enqueue(issueId, trigger, retryAt = null) {
+function enqueue(issueId, trigger, retryAt = null, { issueIdentifier = null, reason = null } = {}) {
   try {
     const queue = loadQueue();
-    if (queue.some(item => item.issueId === issueId)) {
+    const now = new Date().toISOString();
+    const existingIndex = queue.findIndex(item => item.issueId === issueId);
+
+    if (existingIndex !== -1) {
+      const existing = queue[existingIndex];
+
+      // Merge retryAt: null (immediate) beats any future time; among two future times, earlier wins
+      const existingRetryMs = existing.retryAt ? new Date(existing.retryAt).getTime() : null;
+      const newRetryMs = retryAt ? new Date(retryAt).getTime() : null;
+      let mergedRetryAt;
+      if (newRetryMs === null || existingRetryMs === null) {
+        mergedRetryAt = null; // immediate beats any future time
+      } else {
+        mergedRetryAt = new Date(Math.min(existingRetryMs, newRetryMs)).toISOString();
+      }
+
+      queue[existingIndex] = {
+        ...existing,
+        trigger,
+        retryAt: mergedRetryAt,
+        lastAttemptAt: now,
+        attemptCount: (existing.attemptCount || 0) + 1,
+        reason: reason || existing.reason || null,
+        ...(issueIdentifier && !existing.issueIdentifier ? { issueIdentifier } : {})
+      };
+      saveQueue(queue);
+      log('QUEUE', 'enqueue: updated existing item', { issue: issueId, trigger, retryAt: mergedRetryAt });
       return;
     }
+
     queue.push({
       issueId,
+      issueIdentifier: issueIdentifier || null,
       trigger,
-      enqueuedAt: new Date().toISOString(),
-      retryAt
+      retryAt,
+      enqueuedAt: now,
+      lastAttemptAt: null,
+      attemptCount: 0,
+      reason: reason || null
     });
     saveQueue(queue);
     log('QUEUE', 'enqueued', { issue: issueId, trigger });
@@ -498,19 +606,170 @@ async function getIssueExecutionEligibility(issueId) {
   }
 }
 
+function triggerRun(issueId) {
+  // SECURITY: Pass issueId only via environment variable, never as shell argument
+  const env = { ...process.env, WEBHOOK_ISSUE_ID: issueId };
+  const projectRoot = path.join(__dirname, '..');
+  const startedAt = new Date().toISOString();
+
+  // detached: true puts child in its own process group (POSIX)
+  const child = spawn('bash', ['scripts/ai/run_auto.sh'], {
+    env,
+    cwd: projectRoot,
+    detached: true,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  log('RUNNER', `Spawned run_auto.sh for issueId=${issueId} pid=${child.pid} startedAt=${startedAt}`, { issue: issueId });
+
+  let output = '';
+
+  child.stdout.on('data', (data) => {
+    const str = data.toString();
+    output += str;
+    log('RUN', str.trim(), { issue: issueId });
+    process.stdout.write(`[RUN:${issueId}] ${str}`);
+  });
+  child.stderr.on('data', (data) => {
+    const str = data.toString();
+    output += str;
+    log('RUN', `stderr: ${str.trim()}`, { issue: issueId });
+    process.stderr.write(`[RUN:${issueId}] ${str}`);
+  });
+
+  return new Promise((resolve) => {
+    child.on('close', (code, signal) => {
+      const endedAt = new Date().toISOString();
+      if (signal) {
+        log('RUNNER', `run_auto.sh terminated by signal=${signal} pid=${child.pid} startedAt=${startedAt} endedAt=${endedAt}`, { issue: issueId });
+      } else {
+        log('RUNNER', `run_auto.sh exited code=${code} pid=${child.pid} startedAt=${startedAt} endedAt=${endedAt}`, { issue: issueId });
+      }
+      resolve({ code: code ?? (signal ? 143 : 1), output });
+    });
+    child.on('error', (err) => {
+      const endedAt = new Date().toISOString();
+      log('RUNNER', `Failed to spawn run_auto.sh error=${err.message} startedAt=${startedAt} endedAt=${endedAt}`, { issue: issueId });
+      resolve({ code: 1, output: err.message });
+    });
+  });
+}
+
+async function runItem(item) {
+  const { issueId } = item;
+
+  // Check current Linear state before executing
+  const eligibility = await getIssueExecutionEligibility(issueId);
+  if (!eligibility.eligible) {
+    log('RUN', `skipped: ${eligibility.reason}`, { trigger: item.trigger || 'queue', issue: issueId });
+    return;
+  }
+
+  log('RUN', 'start', { trigger: item.trigger || 'queue', issue: issueId });
+  const { code, output } = await triggerRun(issueId);
+
+  if (code === 0) {
+    log('RUN', 'completed successfully', { trigger: item.trigger || 'queue', issue: issueId });
+    clearUsageLimitCooldown();
+    await removeUsageLimitLabel(issueId).catch(() => {});
+  } else if (code === SKIPPED_LOCKED) {
+    log('RUNNER', 'SKIPPED_LOCKED received from run_auto.sh — re-enqueuing', { issue: issueId });
+    enqueue(issueId, item.trigger || 'queue', null, {
+      issueIdentifier: item.issueIdentifier || null,
+      reason: 'lock_conflict'
+    });
+  } else {
+    const resetEpoch = parseUsageLimitResetEpoch(output);
+    if (resetEpoch !== null) {
+      log('RUN', 'usage limit detected', { trigger: item.trigger || 'queue', issue: issueId });
+      await notifyUsageLimitToAllActiveIssues(resetEpoch).catch(() => {});
+      const resetAt = new Date(resetEpoch * 1000).toISOString();
+      const retryAt = new Date((resetEpoch + USAGE_LIMIT_RETRY_BUFFER_SECONDS) * 1000).toISOString();
+      setUsageLimitCooldownUntil(retryAt, {
+        issueId,
+        issueIdentifier: item.issueIdentifier || null,
+        resetAt,
+        bufferSeconds: USAGE_LIMIT_RETRY_BUFFER_SECONDS
+      });
+      enqueue(issueId, item.trigger || 'queue', retryAt, {
+        issueIdentifier: item.issueIdentifier || null,
+        reason: 'usage_limit'
+      });
+      log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt });
+    } else {
+      log('RUN', `failed exit=${code}`, { trigger: item.trigger || 'queue', issue: issueId });
+    }
+  }
+}
+
+async function drainQueue() {
+  let processedCount = 0;
+  let item;
+
+  while (processedCount < MAX_DRAIN_ITEMS && (item = dequeue()) !== null) {
+    // Skip items whose retryAt is in the future — put back and stop drain
+    if (item.retryAt && new Date(item.retryAt) > new Date()) {
+      enqueue(item.issueId, item.trigger, item.retryAt, {
+        issueIdentifier: item.issueIdentifier || null,
+        reason: item.reason || null
+      });
+      log('QUEUE', `drain: item ${item.issueId} has future retryAt=${item.retryAt}, stopping drain`);
+      break;
+    }
+
+    // Revalidate issue state before executing
+    const eligibility = await getIssueExecutionEligibility(item.issueId);
+    if (!eligibility.eligible) {
+      log('QUEUE', `drain: skipped issueId=${item.issueId} reason=${eligibility.reason}`, { issue: item.issueId });
+      continue;
+    }
+
+    const remaining = loadQueue().length;
+    log('QUEUE', `drain: starting issueId=${item.issueId}, queue remaining after this: ${remaining}`, { issue: item.issueId });
+
+    const locked = acquireLock({ trigger: 'drain', issue: item.issueId });
+    if (!locked) {
+      log('QUEUE', 'drain: SKIPPED_LOCKED — re-enqueuing', { issue: item.issueId });
+      enqueue(item.issueId, item.trigger || 'drain', null, {
+        issueIdentifier: item.issueIdentifier || null,
+        reason: 'lock_conflict'
+      });
+      break;
+    }
+    try {
+      await runItem(item);
+      processedCount++;
+    } catch (err) {
+      log('QUEUE', `drain error: ${err.message}`, { issue: item.issueId });
+    } finally {
+      releaseLock();
+    }
+  }
+
+  if (processedCount >= MAX_DRAIN_ITEMS) {
+    log('QUEUE', `drain: safety limit reached (${MAX_DRAIN_ITEMS} items). Stopping.`);
+  } else {
+    log('QUEUE', 'drain complete');
+  }
+}
+
 module.exports = {
   SKIPPED_LOCKED,
   LOG_DIR,
   LOCK_FILE,
   QUEUE_FILE,
+  COOLDOWN_FILE,
   USAGE_LIMIT_FILE,
   LOG_FILE,
   STALE_LOCK_MS,
   LINEAR_API_URL,
+  USAGE_LIMIT_RETRY_BUFFER_SECONDS,
+  MAX_DRAIN_ITEMS,
   log,
   linearQuery,
   acquireLock,
   releaseLock,
+  isLocked,
   hasPendingIssues,
   postUsageLimitComment,
   addUsageLimitLabel,
@@ -526,7 +785,9 @@ module.exports = {
   dequeue,
   removeFromQueue,
   isQueued,
-  isLocked,
   setIssueInProgress,
-  getIssueExecutionEligibility
+  getIssueExecutionEligibility,
+  triggerRun,
+  runItem,
+  drainQueue
 };
