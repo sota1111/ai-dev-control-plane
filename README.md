@@ -341,7 +341,8 @@ docs/ai/auto_logs/
   auto_runner.log   # 共通ログ（scheduler + webhook + run_auto.sh 出力）
   scheduler.log     # scheduler.sh の後方互換ログ（auto_runner.log と同内容）
   runner.lock       # プロセス間共通ロックファイル
-  runner.queue.json # 保留キューファイル（webhook 側のリトライ管理）
+  runner.queue.json    # 共通実行キューファイル（scheduler/webhook/Discord 統合）
+  runner.cooldown.json # usage-limit cooldown 永続化ファイル
 ```
 
 ログ行フォーマット例:
@@ -358,8 +359,8 @@ docs/ai/auto_logs/
 
 scheduler と webhook は **同一のロックファイル** `docs/ai/auto_logs/runner.lock` を使用する。
 
-- `run_auto.sh` の起動前にロックを取得し、完了後に解放する
-- ロック取得失敗時は `SKIPPED_LOCKED` としてログに出力し、`run_auto.sh` を起動しない
+- `runner.runItem()` 実行前にロックを取得し、完了後に解放する
+- ロック取得失敗時は Issue をキューに残し（または再投入し）、後続の drain で実行する
 - SKIPPED_LOCKED は成功扱いしない
 - ロックファイルのプロセスが死んでいる場合、または 30分以上経過した場合は stale lock として自動削除・再取得する
 
@@ -369,29 +370,34 @@ scheduler と webhook は **同一のロックファイル** `docs/ai/auto_logs/
 
 1. Linear の対象 Issue にコメントを投稿（次回実行予定時刻 JST 付き）
 2. 対象 Issue に `usage-limit` ラベルを付与（既存ラベルは保持）
-3. リセット時刻 +10分後を Claude Code 全体の cooldown として保存
-4. cooldown 中に届いた webhook は `run_auto.sh` を起動せず、同じ retry 時刻でキューに追加
-5. retry 実行後、成功した場合は cooldown と `usage-limit` ラベルを除去
+3. リセット時刻 +10分後を Claude Code 全体の cooldown として `runner.cooldown.json` に永続化
+4. cooldown 中に届いたリクエスト（scheduler/webhook/Discord）は実行せず、同じ retry 時刻でキューに追加
+5. cooldown 解除後に自動で drain が実行され、キューの Issue が順次処理される
+6. 成功した場合は cooldown と `usage-limit` ラベルを除去
 
-## retry 予約と実行の仕様
+## 共通実行キュー（runner.queue.json）
 
-- webhook 経由の retry は `docs/ai/auto_logs/runner.queue.json` で管理される
-- キューは webhook サーバー再起動後も永続化される
-- 同一 Issue の retry が複数回登録されても1件にまとめられる
-- scheduler 側は現状インメモリで retry を管理（将来的に統合予定）
+scheduler / webhook / Discord のすべての実行リクエストは共通キュー `docs/ai/auto_logs/runner.queue.json` を経由する。
+
+- `runner.enqueue(issueId, trigger, retryAt)` でキューに追加（重複排除・更新）
+- `runner.drainQueue()` でキューを順次処理（MAX 20件/回）
+- キューはプロセス再起動後も永続化される
+- 同一 Issue が複数回登録されても1件にまとめられ、retryAt は早い方が優先される
+- scheduler 起動時にキューに残件があれば自動で drain される（再起動復旧）
 
 ## ロック取得失敗時の扱い
 
-- scheduler: `SKIPPED_LOCKED` としてログに出力し、次の CHECK_INTERVAL 待機後に再試行する
-- webhook: `SKIPPED_LOCKED` としてログに出力し、キューに入れて後続で再実行する
-- どちらも `run_auto.sh` が処理を完了していない場合に "completed successfully" を出力しない
+scheduler / webhook / Discord のいずれも共通の挙動:
 
-## pending queue の扱い（webhook）
+- `SKIPPED_LOCKED` としてログに出力
+- Issue はキューに残り（または再投入され）、ロック解放後の drain で自動実行される
+- `run_auto.sh` が処理を完了していない場合に "completed successfully" を出力しない
 
-- `enqueue(issueId, trigger, retryAt)` でキューに追加（重複排除）
+## retryAt の仕様
+
 - `retryAt` が null の場合は即座に実行可能
 - `retryAt` が将来時刻の場合はその時刻以降に実行
-- ロック取得失敗時にキューに戻し、後続処理で実行
+- usage-limit cooldown 中の enqueue は cooldown 解除時刻を retryAt に設定
 
 ## Discord Bot セットアップ
 
