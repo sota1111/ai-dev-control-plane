@@ -71,7 +71,7 @@ ai-dev-control-plane を共通認証の操作盤とし、全個人用アプリ�
 - **現在の認証**: Flask session + `AUTH_USERNAME`, `AUTH_PASSWORD`, `AUTH_SECRET_KEY`
 - **移行方針**: Flask に Firebase Admin SDK を追加し、Firebase ID Token を検証するエンドポイントを追加。
 - **既存環境変数の扱い**: `AUTH_USERNAME`, `AUTH_PASSWORD`, `AUTH_SECRET_KEY` は非推奨化
-- **注意**: GitHub のデフォルトブランチが `feat/SOT-274-booking-monitor` であり `main` ではない。作業前にブランチ状況を確認すること。定期監視エンドポイントの認証はユーザー認証と分離すること。
+- **注意**: 定期監視エンドポイントの認証はユーザー認証と分離すること。
 - **未完了理由**: 未着手
 
 ### toddler-nas-photo-indexer ⬜ 未移行
@@ -130,5 +130,4 @@ english-phrase-trainer の実装を参照すること:
 | アプリ | ブロッカー | 必要な人間対応 |
 |--------|-----------|--------------|
 | shrine-stair-trainer | 静的フロントのみのため、バックエンドなし。設計が異なる | Firebase Auth 移行設計の承認 |
-| booking-monitor | GitHub デフォルトブランチが `feat/SOT-274-booking-monitor`（main ではない） | main ブランチへの移行確認 |
 | toddler-private-rag | Firebase Auth 未実装（確認済み）。アクセスは可能 | 移行タスクの優先度決定 |

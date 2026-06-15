@@ -786,6 +786,6 @@ Firebase Auth 移行済みのアプリのみ `"cloudRunSyncEnabled": true` に�
 | state-machine-simulator   | FastAPI password + JWT                           |     ⬜ 未移行      |       ❌       |                                                     |
 | shrine-stair-trainer      | Vite build-time パスワード（クライアントサイド） |     ⬜ 未移行      |       ❌       | 静的フロントのため移行パターンが異なる              |
 | kindle-sale-monitor       | Starlette session + パスワード                   |     ⬜ 未移行      |       ❌       | Cloud Scheduler 用エンドポイントは別認証を維持      |
-| booking-monitor           | Flask session + パスワード                       |     ⬜ 未移行      |       ❌       | デフォルトブランチが `feat/SOT-274-booking-monitor` |
+| booking-monitor           | Flask session + パスワード                       |     ⬜ 未移行      |       ❌       |                                                     |
 | toddler-nas-photo-indexer | FastAPI OAuth2 + JWT                             |     ⬜ 未移行      |       ❌       |                                                     |
 | toddler-private-rag       | FastAPI OAuth2 + JWT                             |     ⬜ 未移行      |       ❌       |                                                     |
