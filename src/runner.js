@@ -173,16 +173,38 @@ async function hasPendingIssues() {
   }
 }
 
+function buildUsageLimitCommentBody(resetEpoch) {
+  const date = new Date(resetEpoch * 1000);
+  const jstDate = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  const iso = jstDate.toISOString();
+  const jstTime = `${iso.substring(0, 10)} ${iso.substring(11, 16)} JST`;
+  return `usage-limit: Next auto run: ${jstTime}`;
+}
+
 async function postUsageLimitComment(issueId, resetEpoch) {
   try {
     const getIssue = await linearQuery('query($id: String!) { issue(id: $id) { id } }', { id: issueId });
     if (!getIssue.issue) return;
     const uuid = getIssue.issue.id;
 
-    const date = new Date(resetEpoch * 1000);
-    const jstDate = new Date(date.getTime() + 9 * 60 * 60 * 1000);
-    const iso = jstDate.toISOString();
-    const jstTime = `${iso.substring(0, 10)} ${iso.substring(11, 16)} JST`;
+    const body = buildUsageLimitCommentBody(resetEpoch);
+
+    // Check for duplicate comment before posting
+    let existingComments = [];
+    try {
+      const commentsData = await linearQuery(
+        'query($id: String!) { issue(id: $id) { comments(first: 50) { nodes { body } } } }',
+        { id: uuid }
+      );
+      existingComments = commentsData.issue?.comments?.nodes || [];
+    } catch (err) {
+      log('WARN', `postUsageLimitComment: could not fetch comments, proceeding to post. ${err.message}`, { issue: issueId });
+    }
+
+    if (existingComments.some(c => c.body === body)) {
+      log('RUNNER', 'usage-limit comment already exists, skipped', { issue: issueId, body });
+      return;
+    }
 
     await linearQuery(`
       mutation($issueId: String!, $body: String!) {
@@ -190,7 +212,7 @@ async function postUsageLimitComment(issueId, resetEpoch) {
           success
         }
       }
-    `, { issueId: uuid, body: `usage-limit: Next auto run: ${jstTime}` });
+    `, { issueId: uuid, body });
   } catch (err) {
     log('ERROR', `postUsageLimitComment failed: ${err.message}`, { issue: issueId });
   }
@@ -772,6 +794,7 @@ module.exports = {
   isLocked,
   hasPendingIssues,
   postUsageLimitComment,
+  buildUsageLimitCommentBody,
   addUsageLimitLabel,
   removeUsageLimitLabel,
   setUsageLimitCooldownUntil,
