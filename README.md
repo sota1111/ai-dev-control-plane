@@ -104,17 +104,17 @@
 
 主要コンポーネント:
 
-| コンポーネント | 役割 | 実体 |
-| --- | --- | --- |
-| **Claude Code** | オーケストレーター（唯一の人間窓口） | `prompts/claude/auto_run.md` に従って動作 |
-| **Gemini CLI** | 実装ワーカー | `scripts/ai/run_gemini.sh` |
-| **Codex CLI** | デバッグ・検証ワーカー | `scripts/ai/run_codex.sh` |
-| **スケジューラー** | Linear をポーリングして起動 | `scripts/ai/scheduler.sh` |
-| **Webhook サーバー** | Linear/Discord イベントで即時起動 | `src/webhook-server.js` |
-| **Discord Bot** | 遠隔での状態確認・制御 | `src/lib/discord*.js` |
-| **自律実行ランナー** | Claude Code を起動する実行エントリ | `scripts/ai/run_auto.sh` |
-| **Linear** | 指示・進捗・状態の管理場所 | 外部 SaaS（MCP / API / Webhook 連携） |
-| **GitHub** | 成果物・履歴の保管庫 | 外部 SaaS（`gh` CLI 連携） |
+| コンポーネント       | 役割                                 | 実体                                      |
+| -------------------- | ------------------------------------ | ----------------------------------------- |
+| **Claude Code**      | オーケストレーター（唯一の人間窓口） | `prompts/claude/auto_run.md` に従って動作 |
+| **Gemini CLI**       | 実装ワーカー                         | `scripts/ai/run_gemini.sh`                |
+| **Codex CLI**        | デバッグ・検証ワーカー               | `scripts/ai/run_codex.sh`                 |
+| **スケジューラー**   | Linear をポーリングして起動          | `scripts/ai/scheduler.sh`                 |
+| **Webhook サーバー** | Linear/Discord イベントで即時起動    | `src/webhook-server.js`                   |
+| **Discord Bot**      | 遠隔での状態確認・制御               | `src/lib/discord*.js`                     |
+| **自律実行ランナー** | Claude Code を起動する実行エントリ   | `scripts/ai/run_auto.sh`                  |
+| **Linear**           | 指示・進捗・状態の管理場所           | 外部 SaaS（MCP / API / Webhook 連携）     |
+| **GitHub**           | 成果物・履歴の保管庫                 | 外部 SaaS（`gh` CLI 連携）                |
 
 > **対象アプリの実装場所**: 実装対象のプロジェクトは `/workspaces/<project-name>` にクローンして作業する。この管理プレーン（ai-dev-control-plane）自身は「オーケストレーション基盤」であり、各アプリのコードは含まない。詳細は [`CLAUDE.md`](./CLAUDE.md) の Development Environment を参照。
 
@@ -122,11 +122,11 @@
 
 ## 役割分担
 
-| 担当 | やること | やらないこと |
-| --- | --- | --- |
+| 担当            | やること                                                                                 | やらないこと                                                         |
+| --------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | **Claude Code** | 要件整理・設計・タスク分解・ワーカー指示・レビュー・品質ゲート・GitHub 操作・Linear 同期 | 多ファイル実装・lint/test の反復・長時間ログ解析・フル README 再構築 |
-| **Gemini CLI** | 機能実装・UI/API/ビジネスロジック作成（`[IMPLEMENT]`） | スコープ外のリファクタ・設計変更 |
-| **Codex CLI** | lint/typecheck/test 実行・原因特定・最小修正・E2E 検証（`[DEBUG]`） | スコープ拡大・無関係なリファクタ |
+| **Gemini CLI**  | 機能実装・UI/API/ビジネスロジック作成（`[IMPLEMENT]`）                                   | スコープ外のリファクタ・設計変更                                     |
+| **Codex CLI**   | lint/typecheck/test 実行・原因特定・最小修正・E2E 検証（`[DEBUG]`）                      | スコープ拡大・無関係なリファクタ                                     |
 
 ---
 
@@ -153,24 +153,24 @@ cp .env.example .env
 
 最低限、以下を記入する:
 
-| 変数 | 必須 | 説明 | 取得先 |
-| --- | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | 必須 | Anthropic API キー（Claude Code の動作に必要） | console.anthropic.com/settings/keys |
-| `LINEAR_API_KEY` | 任意 | Linear Personal API Token。設定するとポーリングモードが有効になる | Linear > Settings > API > Personal API keys |
+| 変数                | 必須 | 説明                                                              | 取得先                                      |
+| ------------------- | ---- | ----------------------------------------------------------------- | ------------------------------------------- |
+| `ANTHROPIC_API_KEY` | 必須 | Anthropic API キー（Claude Code の動作に必要）                    | console.anthropic.com/settings/keys         |
+| `LINEAR_API_KEY`    | 任意 | Linear Personal API Token。設定するとポーリングモードが有効になる | Linear > Settings > API > Personal API keys |
 
 > **Note**: `.env` は Git 管理しない。秘密情報（API キー等）は `.env.example` に記入しないこと。
 
 ### 3. 各種ツールの認証
 
-| 対象 | コマンド |
-| --- | --- |
-| Linear（Claude 用 MCP） | `claude` を起動 → `/mcp` → linear を選択 |
-| Linear（Codex 用 MCP） | `codex mcp login linear` |
-| Gemini CLI | `gemini` を起動して認証 |
-| Codex CLI | `codex` を起動して認証 |
-| GitHub CLI | `gh auth login` |
-| Azure CLI | `az login --use-device-code` |
-| gcloud | `gcloud auth login` &nbsp;/&nbsp; `gcloud auth application-default login` |
+| 対象                    | コマンド                                                                  |
+| ----------------------- | ------------------------------------------------------------------------- |
+| Linear（Claude 用 MCP） | `claude` を起動 → `/mcp` → linear を選択                                  |
+| Linear（Codex 用 MCP）  | `codex mcp login linear`                                                  |
+| Gemini CLI              | `gemini` を起動して認証                                                   |
+| Codex CLI               | `codex` を起動して認証                                                    |
+| GitHub CLI              | `gh auth login`                                                           |
+| Azure CLI               | `az login --use-device-code`                                              |
+| gcloud                  | `gcloud auth login` &nbsp;/&nbsp; `gcloud auth application-default login` |
 
 ### 4. 起動（いずれか1つ）
 
@@ -237,47 +237,47 @@ ln -s /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-dev.yml  ~/.config/
 
 ### 起動コマンド
 
-| 用途 | コマンド |
-|------|---------|
-| 初回認証（全 CLI を順番に認証） | `tmuxinator start ai-auth` |
-| 通常開発（Webhook + ngrok + 各 CLI） | `tmuxinator start ai-dev` |
-| パス直接指定で起動（リンク不要） | `tmuxinator start -p .config/tmuxinator/ai-auth.yml` |
+| 用途                                 | コマンド                                             |
+| ------------------------------------ | ---------------------------------------------------- |
+| 初回認証（全 CLI を順番に認証）      | `tmuxinator start ai-auth`                           |
+| 通常開発（Webhook + ngrok + 各 CLI） | `tmuxinator start ai-dev`                            |
+| パス直接指定で起動（リンク不要）     | `tmuxinator start -p .config/tmuxinator/ai-auth.yml` |
 
 ### 初期起動コマンド詳細
 
 #### `tmuxinator start ai-dev`（通常開発）
 
-| ウィンドウ | pane | 実行コマンド |
-|-----------|------|------------|
-| `webhook` | 左 | `npm run dev:webhook`（Webhook サーバー起動） |
-| `webhook` | 右 | `ngrok http 3000`（ngrok トンネル起動） |
-| `claude` | — | `claude` |
-| `codex` | — | `codex` |
-| `gemini` | — | `gemini` |
-| `status` | 上 | `git status && git log --oneline -5` |
-| `status` | 中 | `ps aux \| grep -E "node\|ngrok\|claude\|codex\|gemini"` |
-| `status` | 下 | `ls -la logs/` |
+| ウィンドウ | pane | 実行コマンド                                             |
+| ---------- | ---- | -------------------------------------------------------- |
+| `webhook`  | 左   | `npm run dev:webhook`（Webhook サーバー起動）            |
+| `webhook`  | 右   | `ngrok http 3000`（ngrok トンネル起動）                  |
+| `claude`   | —    | `claude`                                                 |
+| `codex`    | —    | `codex`                                                  |
+| `gemini`   | —    | `gemini`                                                 |
+| `status`   | 上   | `git status && git log --oneline -5`                     |
+| `status`   | 中   | `ps aux \| grep -E "node\|ngrok\|claude\|codex\|gemini"` |
+| `status`   | 下   | `ls -la logs/`                                           |
 
 #### `tmuxinator start ai-auth`（初回認証）
 
-| ウィンドウ | 実行コマンド |
-|-----------|------------|
-| `claude` | `claude`（起動後 `/mcp` → Linear を選択して MCP 設定） |
-| `gemini` | `gemini` |
-| `codex` | `codex` |
-| `codex-mcp` | `codex mcp login linear` |
-| `gh` | `gh auth login` |
-| `azure` | `az login --use-device-code` |
-| `gcloud` | `gcloud auth login` / `gcloud auth application-default login` |
+| ウィンドウ  | 実行コマンド                                                  |
+| ----------- | ------------------------------------------------------------- |
+| `claude`    | `claude`（起動後 `/mcp` → Linear を選択して MCP 設定）        |
+| `gemini`    | `gemini`                                                      |
+| `codex`     | `codex`                                                       |
+| `codex-mcp` | `codex mcp login linear`                                      |
+| `gh`        | `gh auth login`                                               |
+| `azure`     | `az login --use-device-code`                                  |
+| `gcloud`    | `gcloud auth login` / `gcloud auth application-default login` |
 
 ### セッション操作
 
-| 操作 | コマンド |
-|------|---------|
-| セッションから抜ける (detach) | `Ctrl+b d` |
-| セッションに戻る (attach) | `tmux attach -t ai-dev` |
-| セッション一覧 | `tmux ls` |
-| セッション終了 | `tmux kill-session -t ai-dev` |
+| 操作                          | コマンド                      |
+| ----------------------------- | ----------------------------- |
+| セッションから抜ける (detach) | `Ctrl+b d`                    |
+| セッションに戻る (attach)     | `tmux attach -t ai-dev`       |
+| セッション一覧                | `tmux ls`                     |
+| セッション終了                | `tmux kill-session -t ai-dev` |
 
 ---
 
@@ -345,6 +345,7 @@ docs/ai/auto_logs/
 ```
 
 ログ行フォーマット例:
+
 ```
 [2026-06-12 12:00:00] [SCHEDULER] Next check in 60s
 [2026-06-12 12:01:00] [SCHEDULER] LOCK acquired (pid=12345)
@@ -365,6 +366,7 @@ scheduler と webhook は **同一のロックファイル** `docs/ai/auto_logs/
 ## usage-limit 検知時の挙動
 
 `run_auto.sh` が usage-limit で失敗した場合:
+
 1. Linear の対象 Issue にコメントを投稿（次回実行予定時刻 JST 付き）
 2. 対象 Issue に `usage-limit` ラベルを付与（既存ラベルは保持）
 3. リセット時刻 +10分後を Claude Code 全体の cooldown として保存
@@ -418,6 +420,7 @@ DISCORD_PUBLIC_KEY=your_public_key_here
 3. Discordが検証リクエストを送信し、成功すれば設定完了
 
 > **このプロジェクトの設定例（ngrok固定URL使用時）:**
+>
 > - Webhook サーバー起動: `npm run dev:webhook`
 > - Interactions Endpoint URL: `https://elitism-unnerving-gallstone.ngrok-free.dev/webhooks/discord`
 >
@@ -448,46 +451,47 @@ https://discord.com/oauth2/authorize?client_id=<DISCORD_APPLICATION_ID>&permissi
 ```
 
 必要な権限:
+
 - `bot` scope — Botとしてサーバーに参加
 - `applications.commands` scope — スラッシュコマンドを登録・使用
 - Bot Permission: `Send Messages` (permission value: 2048)
 
 ### 利用可能なコマンド
 
-| コマンド | 説明 |
-|---------|------|
-| `/status` | 実行中Issue、ロック状態、キュー数、cooldownを表示 |
-| `/queue` | 実行キューの内容を表示 |
-| `/cooldown` | usage-limit cooldown状態を表示 |
-| `/pause` | 新規実行を一時停止 |
-| `/resume` | 一時停止を解除 |
-| `/reply issue:SOT-xxx body:...` | 指定IssueへLinearコメントを投稿 |
-| `/retry issue:SOT-xxx` | 指定Issueを再実行キューへ投入 |
-| `/ask` | 自然言語で質問・指示（モーダルが開く） |
+| コマンド                        | 説明                                              |
+| ------------------------------- | ------------------------------------------------- |
+| `/status`                       | 実行中Issue、ロック状態、キュー数、cooldownを表示 |
+| `/queue`                        | 実行キューの内容を表示                            |
+| `/cooldown`                     | usage-limit cooldown状態を表示                    |
+| `/pause`                        | 新規実行を一時停止                                |
+| `/resume`                       | 一時停止を解除                                    |
+| `/reply issue:SOT-xxx body:...` | 指定IssueへLinearコメントを投稿                   |
+| `/retry issue:SOT-xxx`          | 指定Issueを再実行キューへ投入                     |
+| `/ask`                          | 自然言語で質問・指示（モーダルが開く）            |
 
 ### ngrok URL が変わった場合の更新箇所
 
 ngrok の URL が変わった場合（有料プラン固定URL使用時は不要）、以下の箇所を更新する:
 
-| 更新箇所 | 内容 |
-|---|---|
-| Discord Developer Portal | General Information → Interactions Endpoint URL を新しい URL に更新 |
-| Linear Webhook 設定 | Settings → API → Webhooks の URL を更新（Linear 側） |
-| `.env` の `NGROK_COMMAND` | ngrok コマンドの URL 部分を更新 |
-| `.env` の `NGROK_WEBHOOK_URL` | 確認用 URL を更新 |
+| 更新箇所                      | 内容                                                                |
+| ----------------------------- | ------------------------------------------------------------------- |
+| Discord Developer Portal      | General Information → Interactions Endpoint URL を新しい URL に更新 |
+| Linear Webhook 設定           | Settings → API → Webhooks の URL を更新（Linear 側）                |
+| `.env` の `NGROK_COMMAND`     | ngrok コマンドの URL 部分を更新                                     |
+| `.env` の `NGROK_WEBHOOK_URL` | 確認用 URL を更新                                                   |
 
 Discord の Interactions Endpoint URL は `https://<新しいURL>/webhooks/discord` になる。
 Linear の Webhook URL は `https://<新しいURL>/webhooks/linear` になる。
 
 ## 環境変数リファレンス
 
-| 変数                | 必須     | デフォルト | 説明                                                              |
-| ------------------- | -------- | ---------- | ----------------------------------------------------------------- |
-| `LINEAR_API_KEY`    | 任意     | なし       | Linear Personal API Token。設定するとポーリングモードが有効になる |
-| `ANTHROPIC_API_KEY` | 必須     | なし       | Anthropic API キー。Claude Code の動作に必要                      |
-| `CHECK_INTERVAL`    | 任意     | `60`       | Linear ポーリング間隔（秒）                                       |
-| `INTERVAL`          | 任意     | `3600`     | フォールバック実行間隔（秒）                                      |
-| `TZ`                | 任意     | システム依存 | ログや実行環境のタイムゾーン（例: `Asia/Tokyo`）                 |
+| 変数                | 必須 | デフォルト   | 説明                                                              |
+| ------------------- | ---- | ------------ | ----------------------------------------------------------------- |
+| `LINEAR_API_KEY`    | 任意 | なし         | Linear Personal API Token。設定するとポーリングモードが有効になる |
+| `ANTHROPIC_API_KEY` | 必須 | なし         | Anthropic API キー。Claude Code の動作に必要                      |
+| `CHECK_INTERVAL`    | 任意 | `60`         | Linear ポーリング間隔（秒）                                       |
+| `INTERVAL`          | 任意 | `3600`       | フォールバック実行間隔（秒）                                      |
+| `TZ`                | 任意 | システム依存 | ログや実行環境のタイムゾーン（例: `Asia/Tokyo`）                  |
 
 ### 秘密情報の管理
 
@@ -578,23 +582,23 @@ curl -X POST https://elitism-unnerving-gallstone.ngrok-free.dev/webhooks/linear 
 
 ### よくある失敗例
 
-| エラー / 症状 | 原因 | 対処 |
-|---|---|---|
-| `ERR_NGROK_8012` | localhost:3000 の Webhook サーバーが未起動 | `npm run start:webhook` を先に起動してから ngrok を起動するか、`npm run dev:webhook` で両方まとめて起動する |
-| ngrok は起動しているが POST が転送されない | Webhook サーバーが起動していない | `curl http://localhost:3000/webhooks/linear` でローカル疎通を先に確認する |
-| Linear Webhook が届かない | Linear 側の Webhook URL がルート URL になっている | Linear > Settings > API > Webhooks で URL が `/webhooks/linear` パス付きで登録されているか確認する |
-| 秘密情報がログに出力される | `.env` の値をログ出力している | `LINEAR_WEBHOOK_SECRET`・API キー等は絶対にログに出力しない |
-| `.env` がリポジトリに含まれてしまう | `.gitignore` に `.env` が追加されていない | `.gitignore` に `.env` が含まれていることを確認し、誤ってコミットした場合はすぐに値を無効化・再発行する |
+| エラー / 症状                              | 原因                                              | 対処                                                                                                        |
+| ------------------------------------------ | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `ERR_NGROK_8012`                           | localhost:3000 の Webhook サーバーが未起動        | `npm run start:webhook` を先に起動してから ngrok を起動するか、`npm run dev:webhook` で両方まとめて起動する |
+| ngrok は起動しているが POST が転送されない | Webhook サーバーが起動していない                  | `curl http://localhost:3000/webhooks/linear` でローカル疎通を先に確認する                                   |
+| Linear Webhook が届かない                  | Linear 側の Webhook URL がルート URL になっている | Linear > Settings > API > Webhooks で URL が `/webhooks/linear` パス付きで登録されているか確認する          |
+| 秘密情報がログに出力される                 | `.env` の値をログ出力している                     | `LINEAR_WEBHOOK_SECRET`・API キー等は絶対にログに出力しない                                                 |
+| `.env` がリポジトリに含まれてしまう        | `.gitignore` に `.env` が追加されていない         | `.gitignore` に `.env` が含まれていることを確認し、誤ってコミットした場合はすぐに値を無効化・再発行する     |
 
 ### 環境変数（Webhook モード）
 
-| 変数 | 必須 | デフォルト | 説明 |
-|------|------|-----------|------|
-| `WEBHOOK_MODE` | 任意 | `false` | `true` にするとポーリングを無効化 |
-| `PORT` | 任意 | `3000` | Webhook サーバーのポート番号 |
-| `LINEAR_WEBHOOK_SECRET` | 任意 | なし | Linear Webhook 署名検証用シークレット。未設定時は開発モードで動作（警告表示） |
-| `NGROK_COMMAND` | Webhook 使用時 | なし | ngrok 起動コマンド（例: `ngrok http --url=... 3000`） |
-| `NGROK_WEBHOOK_URL` | 任意 | なし | ngrok の公開 URL（確認用） |
+| 変数                    | 必須           | デフォルト | 説明                                                                          |
+| ----------------------- | -------------- | ---------- | ----------------------------------------------------------------------------- |
+| `WEBHOOK_MODE`          | 任意           | `false`    | `true` にするとポーリングを無効化                                             |
+| `PORT`                  | 任意           | `3000`     | Webhook サーバーのポート番号                                                  |
+| `LINEAR_WEBHOOK_SECRET` | 任意           | なし       | Linear Webhook 署名検証用シークレット。未設定時は開発モードで動作（警告表示） |
+| `NGROK_COMMAND`         | Webhook 使用時 | なし       | ngrok 起動コマンド（例: `ngrok http --url=... 3000`）                         |
+| `NGROK_WEBHOOK_URL`     | 任意           | なし       | ngrok の公開 URL（確認用）                                                    |
 
 ### Webhook サーバー常駐動作・停止・ログ確認
 
@@ -622,11 +626,11 @@ kill <PID>   # SIGTERM — サーバーが "Server received SIGTERM" をログ�
 
 #### ログの見方
 
-| ログプレフィックス | 意味 |
-|---|---|
+| ログプレフィックス | 意味                                         |
+| ------------------ | -------------------------------------------- |
 | `[WEBHOOK:PARENT]` | Webhook サーバー本体（親プロセス）のイベント |
-| `[RUN:<issueId>]` | 子プロセスの標準出力・エラー出力 |
-| `[WEBHOOK]` | Webhook 受信・処理ログ |
+| `[RUN:<issueId>]`  | 子プロセスの標準出力・エラー出力             |
+| `[WEBHOOK]`        | Webhook 受信・処理ログ                       |
 
 #### 子プロセス終了と親プロセス終了の切り分け
 
@@ -659,18 +663,20 @@ webhook 経由で起動した Claude Code が usage limit に達した場合、u
 
 ### 環境変数
 
-| 変数名 | デフォルト | 説明 |
-|--------|-----------|------|
-| `USAGE_LIMIT_RETRY_BUFFER_SECONDS` | `600` | usage 復活後の追加待機秒数 |
+| 変数名                             | デフォルト | 説明                       |
+| ---------------------------------- | ---------- | -------------------------- |
+| `USAGE_LIMIT_RETRY_BUFFER_SECONDS` | `600`      | usage 復活後の追加待機秒数 |
 
 ### 手動確認手順
 
 1. webhook server を起動する
+
    ```bash
    npm run start:webhook
    ```
 
 2. webhook エンドポイントにテストイベントを送信する（run_auto.sh が usage limit エラーを返す状況を用意する）
+
    ```bash
    curl -X POST http://localhost:3000/webhooks/linear \
      -H "Content-Type: application/json" \
@@ -678,12 +684,14 @@ webhook 経由で起動した Claude Code が usage limit に達した場合、u
    ```
 
 3. ログで再実行が予約されていることを確認する
+
    ```
    [RUN] issue=TEST-001 trigger=webhook usage limit detected
    [RETRY] issue=TEST-001 trigger=webhook scheduled retryAt=<ISO>
    ```
 
 4. 同じ issueId の webhook を連続送信しても二重実行されないことを確認する
+
    ```bash
    curl -X POST http://localhost:3000/webhooks/linear \
      -H "Content-Type: application/json" \
@@ -713,7 +721,7 @@ Firebase Authentication ユーザー管理と、Cloud Run への認証環境変�
 
 1. **Firebase プロジェクトを確認または作成**
    - https://console.firebase.google.com/
-   - プロジェクト ID を控えておく
+   - project name:sota-app-hub
 
 2. **Email/Password プロバイダを有効化**
    - Firebase Console > Authentication > Sign-in method
@@ -726,6 +734,12 @@ Firebase Authentication ユーザー管理と、Cloud Run への認証環境変�
      - `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
      - `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
      - `NEXT_PUBLIC_FIREBASE_APP_ID`
+
+4. **Authentication ユーザーを作成**
+   - Email/Password でログインするユーザーを作成する
+   - **方法A（推奨）**: `npm run auth:setup` → メニュー `1` を選択してターミナルから作成
+   - **方法B（手動）**: Firebase Console > Authentication > Users > ユーザーを追加
+   - 作成したユーザーのメールアドレスを `ALLOWED_USER_EMAILS` に追加すること
 
 ### セットアップ手順
 
@@ -741,6 +755,7 @@ npm run auth:setup
 ```
 
 セットアップメニュー:
+
 - `1` — Firebase ユーザー作成/更新（ターミナルでパスワードを入力）
 - `2` — Cloud Run 認証環境変数を同期（ALLOWED_USER_EMAILS + Firebase 設定）
 - `3` — 両方実行
@@ -758,13 +773,13 @@ Firebase Auth 移行済みのアプリのみ `"cloudRunSyncEnabled": true` に�
 
 各アプリの詳細な認証移行手順は [`docs/auth/migration-plan.md`](docs/auth/migration-plan.md) を参照してください。
 
-| アプリ | 現在の認証方式 | Firebase Auth 移行 | Cloud Run sync | 備考 |
-|--------|--------------|:-----------------:|:--------------:|------|
-| english-phrase-trainer | Firebase Auth + Cookie | ✅ 移行済み | ✅ | 基準実装 |
-| stock-signal-research | FastAPI OAuth2 + JWT | ⬜ 未移行 | ❌ | Cloud Run サービス名: `stock-signal-service` |
-| state-machine-simulator | FastAPI password + JWT | ⬜ 未移行 | ❌ | |
-| shrine-stair-trainer | Vite build-time パスワード（クライアントサイド） | ⬜ 未移行 | ❌ | 静的フロントのため移行パターンが異なる |
-| kindle-sale-monitor | Starlette session + パスワード | ⬜ 未移行 | ❌ | Cloud Scheduler 用エンドポイントは別認証を維持 |
-| booking-monitor | Flask session + パスワード | ⬜ 未移行 | ❌ | デフォルトブランチが `feat/SOT-274-booking-monitor` |
-| toddler-nas-photo-indexer | FastAPI OAuth2 + JWT | ⬜ 未移行 | ❌ | |
-| toddler-private-rag | FastAPI OAuth2 + JWT | ⬜ 未移行 | ❌ | |
+| アプリ                    | 現在の認証方式                                   | Firebase Auth 移行 | Cloud Run sync | 備考                                                |
+| ------------------------- | ------------------------------------------------ | :----------------: | :------------: | --------------------------------------------------- |
+| english-phrase-trainer    | Firebase Auth + Cookie                           |    ✅ 移行済み     |       ✅       | 基準実装                                            |
+| stock-signal-research     | FastAPI OAuth2 + JWT                             |     ⬜ 未移行      |       ❌       | Cloud Run サービス名: `stock-signal-service`        |
+| state-machine-simulator   | FastAPI password + JWT                           |     ⬜ 未移行      |       ❌       |                                                     |
+| shrine-stair-trainer      | Vite build-time パスワード（クライアントサイド） |     ⬜ 未移行      |       ❌       | 静的フロントのため移行パターンが異なる              |
+| kindle-sale-monitor       | Starlette session + パスワード                   |     ⬜ 未移行      |       ❌       | Cloud Scheduler 用エンドポイントは別認証を維持      |
+| booking-monitor           | Flask session + パスワード                       |     ⬜ 未移行      |       ❌       | デフォルトブランチが `feat/SOT-274-booking-monitor` |
+| toddler-nas-photo-indexer | FastAPI OAuth2 + JWT                             |     ⬜ 未移行      |       ❌       |                                                     |
+| toddler-private-rag       | FastAPI OAuth2 + JWT                             |     ⬜ 未移行      |       ❌       |                                                     |
