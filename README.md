@@ -243,6 +243,33 @@ ln -s /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-dev.yml  ~/.config/
 | 通常開発（Webhook + ngrok + 各 CLI） | `tmuxinator start ai-dev` |
 | パス直接指定で起動（リンク不要） | `tmuxinator start -p .config/tmuxinator/ai-auth.yml` |
 
+### 初期起動コマンド詳細
+
+#### `tmuxinator start ai-dev`（通常開発）
+
+| ウィンドウ | pane | 実行コマンド |
+|-----------|------|------------|
+| `webhook` | 左 | `npm run dev:webhook`（Webhook サーバー起動） |
+| `webhook` | 右 | `ngrok http 3000`（ngrok トンネル起動） |
+| `claude` | — | `claude` |
+| `codex` | — | `codex` |
+| `gemini` | — | `gemini` |
+| `status` | 上 | `git status && git log --oneline -5` |
+| `status` | 中 | `ps aux \| grep -E "node\|ngrok\|claude\|codex\|gemini"` |
+| `status` | 下 | `ls -la logs/` |
+
+#### `tmuxinator start ai-auth`（初回認証）
+
+| ウィンドウ | 実行コマンド |
+|-----------|------------|
+| `claude` | `claude`（起動後 `/mcp` → Linear を選択して MCP 設定） |
+| `gemini` | `gemini` |
+| `codex` | `codex` |
+| `codex-mcp` | `codex mcp login linear` |
+| `gh` | `gh auth login` |
+| `azure` | `az login --use-device-code` |
+| `gcloud` | `gcloud auth login` / `gcloud auth application-default login` |
+
 ### セッション操作
 
 | 操作 | コマンド |
