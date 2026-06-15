@@ -1,6 +1,5 @@
 const express = require('express');
 const path = require('path');
-const { spawn } = require('child_process');
 const crypto = require('crypto');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { DiscordNotifier } = require('./lib/discordNotifier');
@@ -25,7 +24,6 @@ if (_discordNotifier) {
   };
 }
 
-const { parseUsageLimitResetEpoch } = require('./lib/usageLimitParser');
 const runner = require('./runner');
 
 // Distinguish parent-received signals from child process signals
@@ -88,139 +86,6 @@ function verifyLinearSignature(req) {
 
 if (!LINEAR_WEBHOOK_SECRET) {
   console.warn('[WEBHOOK] WARNING: LINEAR_WEBHOOK_SECRET not set. Running in development mode without signature verification.');
-}
-
-function triggerRun(issueId) {
-  // SECURITY: Pass issueId only via environment variable, never as shell argument
-  const env = { ...process.env, WEBHOOK_ISSUE_ID: issueId };
-  const projectRoot = path.join(__dirname, '..');
-  const startedAt = new Date().toISOString();
-
-  // detached: true puts child in its own process group (POSIX).
-  // Signals sent to the webhook server's process group do NOT propagate to the child,
-  // and signals sent to the child's process group do NOT propagate to this server.
-  const child = spawn('bash', ['scripts/ai/run_auto.sh'], {
-    env,
-    cwd: projectRoot,
-    detached: true,
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-
-  runner.log('WEBHOOK', `Spawned run_auto.sh for issueId=${issueId} pid=${child.pid} startedAt=${startedAt}`, { issue: issueId });
-
-  let output = '';
-
-  child.stdout.on('data', (data) => {
-    const str = data.toString();
-    output += str;
-    runner.log('RUN', str.trim(), { issue: issueId, trigger: 'webhook' });
-    process.stdout.write(`[RUN:${issueId}] ${str}`);
-  });
-  child.stderr.on('data', (data) => {
-    const str = data.toString();
-    output += str;
-    runner.log('RUN', `stderr: ${str.trim()}`, { issue: issueId, trigger: 'webhook' });
-    process.stderr.write(`[RUN:${issueId}] ${str}`);
-  });
-
-  return new Promise((resolve) => {
-    child.on('close', (code, signal) => {
-      const endedAt = new Date().toISOString();
-      if (signal) {
-        // Child received a signal (e.g. SIGTERM from external kill).
-        // This is the CHILD's signal — the parent webhook server is still running.
-        runner.log('WEBHOOK', `run_auto.sh for issueId=${issueId} terminated by signal=${signal} pid=${child.pid} startedAt=${startedAt} endedAt=${endedAt}`, { issue: issueId });
-      } else {
-        runner.log('WEBHOOK', `run_auto.sh for issueId=${issueId} exited code=${code} pid=${child.pid} startedAt=${startedAt} endedAt=${endedAt}`, { issue: issueId });
-      }
-      resolve({ code: code ?? (signal ? 143 : 1), output });
-    });
-    child.on('error', (err) => {
-      const endedAt = new Date().toISOString();
-      runner.log('WEBHOOK', `Failed to spawn run_auto.sh for issueId=${issueId} error=${err.message} startedAt=${startedAt} endedAt=${endedAt}`, { issue: issueId });
-      resolve({ code: 1, output: err.message });
-    });
-  });
-}
-
-async function runItem(item) {
-  const { issueId } = item;
-
-  // Check current Linear state before executing
-  const eligibility = await runner.getIssueExecutionEligibility(issueId);
-  if (!eligibility.eligible) {
-    runner.log('RUN', `skipped: ${eligibility.reason}`, { trigger: item.trigger || 'queue', issue: issueId });
-    return;
-  }
-
-  runner.log('RUN', 'start', { trigger: item.trigger || 'queue', issue: issueId });
-  const { code, output } = await triggerRun(issueId);
-
-  if (code === 0) {
-    runner.log('RUN', 'completed successfully', { trigger: item.trigger || 'queue', issue: issueId });
-    runner.clearUsageLimitCooldown();
-    await runner.removeUsageLimitLabel(issueId).catch(() => {});
-  } else if (code === runner.SKIPPED_LOCKED) {
-    runner.log('WEBHOOK', 'SKIPPED_LOCKED received from run_auto.sh — re-enqueuing', { issue: issueId });
-    runner.enqueue(issueId, item.trigger || 'queue');
-  } else {
-    const resetEpoch = parseUsageLimitResetEpoch(output);
-    if (resetEpoch !== null) {
-      runner.log('RUN', 'usage limit detected', { trigger: item.trigger || 'queue', issue: issueId });
-      await runner.notifyUsageLimitToAllActiveIssues(resetEpoch).catch(() => {});
-      const retryAt = new Date(resetEpoch * 1000).toISOString();
-      runner.setUsageLimitCooldownUntil(retryAt, issueId);
-      runner.enqueue(issueId, item.trigger || 'queue', retryAt);
-      runner.log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt });
-
-      // backward compat: setTimeout retry
-      const delayMs = Math.max(0, resetEpoch * 1000 - Date.now());
-      setTimeout(async () => {
-        runner.log('RETRY', 'firing', { trigger: item.trigger || 'queue', issue: issueId });
-        runner.clearUsageLimitCooldown();
-        await drainQueue();
-      }, delayMs);
-
-    } else {
-      runner.log('RUN', `failed exit=${code}`, { trigger: item.trigger || 'queue', issue: issueId });
-    }
-  }
-}
-
-async function drainQueue() {
-  let item;
-  while ((item = runner.dequeue()) !== null) {
-    // Skip items whose retryAt is in the future
-    if (item.retryAt && new Date(item.retryAt) > new Date()) {
-      runner.enqueue(item.issueId, item.trigger, item.retryAt);
-      break;
-    }
-
-    // Check current Linear state before executing
-    const eligibility = await runner.getIssueExecutionEligibility(item.issueId);
-    if (!eligibility.eligible) {
-      runner.log('QUEUE', `drain: skipped issueId=${item.issueId} reason=${eligibility.reason}`, { issue: item.issueId });
-      continue;
-    }
-
-    const remaining = runner.loadQueue().length;
-    runner.log('QUEUE', `drain: starting issueId=${item.issueId}, queue remaining after this: ${remaining}`, { issue: item.issueId });
-
-    const locked = runner.acquireLock({ trigger: 'drain', issue: item.issueId });
-    if (!locked) {
-      runner.log('QUEUE', 'drain: SKIPPED_LOCKED — re-enqueuing', { issue: item.issueId });
-      runner.enqueue(item.issueId, item.trigger || 'drain');
-      break;
-    }
-    try {
-      await runItem(item);
-    } catch (err) {
-      runner.log('QUEUE', `drain error: ${err.message}`, { issue: item.issueId });
-    } finally {
-      runner.releaseLock();
-    }
-  }
-  runner.log('QUEUE', `drain complete — queue empty`);
 }
 
 app.get('/health', (req, res) => {
@@ -344,14 +209,14 @@ app.post('/webhooks/linear', (req, res) => {
       }
 
       try {
-        await runItem(item);
+        await runner.runItem(item);
       } finally {
         runner.releaseLock();
         // After main task: drain remaining queue
         const queueSize = runner.loadQueue().length;
         if (queueSize > 0) {
           runner.log('QUEUE', `main task done, draining ${queueSize} remaining item(s)`);
-          await drainQueue();
+          await runner.drainQueue();
         } else {
           runner.log('QUEUE', 'main task done, queue empty — no drain needed');
         }
