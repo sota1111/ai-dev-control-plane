@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const { spawn } = require('child_process');
-const { parseUsageLimitResetEpoch } = require('./lib/usageLimitParser');
+const { classifyUsageLimit } = require('./lib/usageLimitParser');
 
 const SKIPPED_LOCKED = 75;  // exit code when lock is not available
 const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
@@ -365,11 +365,13 @@ async function removeUsageLimitLabel(issueId) {
 }
 
 function setUsageLimitCooldownUntil(retryAt, issueIdOrOptions = null) {
-  // Accept both old signature (retryAt, issueId) and new (retryAt, { issueId, issueIdentifier, resetAt, bufferSeconds })
+  // Accept both old signature (retryAt, issueId) and new (retryAt, { issueId, issueIdentifier, resetAt, bufferSeconds, reason, limitType })
   let issueId = null;
   let issueIdentifier = null;
   let resetAt = null;
   let bufferSeconds = USAGE_LIMIT_RETRY_BUFFER_SECONDS;
+  let reason = 'usage_limit';
+  let limitType = 'session_limit';
 
   if (typeof issueIdOrOptions === 'string') {
     issueId = issueIdOrOptions; // backward compat
@@ -378,6 +380,8 @@ function setUsageLimitCooldownUntil(retryAt, issueIdOrOptions = null) {
     issueIdentifier = issueIdOrOptions.issueIdentifier || null;
     resetAt = issueIdOrOptions.resetAt || null;
     bufferSeconds = issueIdOrOptions.bufferSeconds != null ? issueIdOrOptions.bufferSeconds : USAGE_LIMIT_RETRY_BUFFER_SECONDS;
+    reason = issueIdOrOptions.reason || 'usage_limit';
+    limitType = issueIdOrOptions.limitType || 'session_limit';
   }
 
   try {
@@ -394,7 +398,9 @@ function setUsageLimitCooldownUntil(retryAt, issueIdOrOptions = null) {
       sourceIssueId: issueId,
       sourceIssueIdentifier: issueIdentifier,
       resetAt: resetAt,
-      bufferSeconds: bufferSeconds
+      bufferSeconds: bufferSeconds,
+      reason: reason,
+      limitType: limitType
     };
     const cooldownTmp = COOLDOWN_FILE + '.tmp';
     fs.writeFileSync(cooldownTmp, JSON.stringify(cooldownData, null, 2));
@@ -1122,19 +1128,25 @@ async function runItem(item) {
       queueGroupOrder: item.queueGroupOrder ?? null
     });
   } else {
-    const resetEpoch = parseUsageLimitResetEpoch(output);
-    if (resetEpoch !== null) {
-      log('RUN', 'usage limit detected', { trigger: item.trigger || 'queue', issue: issueId });
-      await notifyUsageLimitToAllActiveIssues(resetEpoch).catch(() => {});
-      const resetAt = new Date(resetEpoch * 1000).toISOString();
-      const retryAt = new Date((resetEpoch + USAGE_LIMIT_RETRY_BUFFER_SECONDS) * 1000).toISOString();
-      setUsageLimitCooldownUntil(retryAt, {
+    const classification = classifyUsageLimit(output);
+    if (classification.retryable && classification.retryAt) {
+      log('RUN', `retryable limit detected: ${classification.type}`, { trigger: item.trigger || 'queue', issue: issueId });
+      
+      // Notify for session limits or API rate limits
+      if (classification.type === 'session_limit' || classification.type === 'api_429') {
+        const retryEpoch = Math.floor(new Date(classification.retryAt).getTime() / 1000);
+        await notifyUsageLimitToAllActiveIssues(retryEpoch).catch(() => {});
+      }
+
+      setUsageLimitCooldownUntil(classification.retryAt, {
         issueId,
         issueIdentifier: item.issueIdentifier || null,
-        resetAt,
-        bufferSeconds: USAGE_LIMIT_RETRY_BUFFER_SECONDS
+        resetAt: classification.resetAt,
+        bufferSeconds: USAGE_LIMIT_RETRY_BUFFER_SECONDS,
+        reason: 'usage_limit',
+        limitType: classification.type
       });
-      enqueue(issueId, item.trigger || 'queue', retryAt, {
+      enqueue(issueId, item.trigger || 'queue', classification.retryAt, {
         issueIdentifier: item.issueIdentifier || null,
         reason: 'usage_limit',
         priority: item.priority ?? null,
@@ -1144,7 +1156,12 @@ async function runItem(item) {
         queueGroup: item.queueGroup ?? null,
         queueGroupOrder: item.queueGroupOrder ?? null
       });
-      log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt });
+      log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt: classification.retryAt });
+    } else if (classification.type !== 'unknown') {
+      log('RUN', `non-retryable limit: ${classification.type}`, { trigger: item.trigger || 'queue', issue: issueId });
+      if (classification.type === 'context_limit') {
+        log('RUN', 'summarization/compaction is required before resume', { issue: issueId });
+      }
     } else {
       log('RUN', `failed exit=${code}`, { trigger: item.trigger || 'queue', issue: issueId });
     }
