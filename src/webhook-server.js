@@ -164,20 +164,33 @@ app.post('/webhooks/linear', (req, res) => {
 
   setImmediate(async () => {
     try {
+      const issuePriority = body.data?.priority ?? null;
+      const issuePriorityLabel = body.data?.priorityLabel ?? null;
+      const parentIssueId = body.data?.parent?.id ?? null;
+      const parentIssueIdentifier = body.data?.parent?.identifier ?? null;
+      const isUrgent = issuePriority === 1;
+
       const cooldown = runner.getUsageLimitCooldownUntil();
       if (cooldown) {
         const cooldownRetryAt = cooldown.retryAt;
-        runner.enqueue(issueId, 'webhook', cooldownRetryAt);
+        runner.enqueue(issueId, 'webhook', cooldownRetryAt, {
+          priority: issuePriority,
+          priorityLabel: issuePriorityLabel,
+          parentIssueId,
+          parentIssueIdentifier
+        });
         runner.log('WEBHOOK', `usage limit cooldown active, queued until ${cooldownRetryAt}`, { issue: issueId });
         return;
       }
 
-      const issuePriority = body.data?.priority ?? 0;
-      const isUrgent = issuePriority === 1;
-
       if (!isUrgent && runner.isLocked()) {
         // Non-Urgent while locked: enqueue for later drain
-        runner.enqueue(issueId, 'webhook');
+        runner.enqueue(issueId, 'webhook', null, {
+          priority: issuePriority,
+          priorityLabel: issuePriorityLabel,
+          parentIssueId,
+          parentIssueIdentifier
+        });
         runner.log('WEBHOOK', `non-Urgent issue (priority=${issuePriority}) queued while locked, queue size=${runner.loadQueue().length}`, { issue: issueId });
         return;
       }
@@ -195,7 +208,12 @@ app.post('/webhooks/linear', (req, res) => {
       }
 
       // キューに追加してすぐ取り出す
-      runner.enqueue(issueId, 'webhook');
+      runner.enqueue(issueId, 'webhook', null, {
+        priority: issuePriority,
+        priorityLabel: issuePriorityLabel,
+        parentIssueId,
+        parentIssueIdentifier
+      });
       const item = runner.dequeue();
       if (!item) return;
       const queuedIssueId = item.issueId;
@@ -204,7 +222,12 @@ app.post('/webhooks/linear', (req, res) => {
       const locked = runner.acquireLock({ trigger: 'webhook', issue: queuedIssueId });
       if (!locked) {
         runner.log('WEBHOOK', 'SKIPPED_LOCKED — re-enqueuing', { issue: queuedIssueId });
-        runner.enqueue(queuedIssueId, 'webhook');
+        runner.enqueue(queuedIssueId, 'webhook', null, {
+          priority: item.priority ?? null,
+          priorityLabel: item.priorityLabel ?? null,
+          parentIssueId: item.parentIssueId ?? null,
+          parentIssueIdentifier: item.parentIssueIdentifier ?? null
+        });
         return;
       }
 

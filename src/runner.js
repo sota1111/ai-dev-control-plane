@@ -162,6 +162,54 @@ async function linearQuery(query, variables = {}) {
   });
 }
 
+function getPriorityRank(priority) {
+  if (priority === 1) return 1; // Urgent
+  if (priority === 2) return 2; // High
+  if (priority === 3) return 3; // Medium
+  if (priority === 4) return 4; // Low
+  return 5; // No priority (0), null, undefined, or invalid value
+}
+
+async function getIssueQueueMetadata(issueId) {
+  try {
+    const query = `
+      query($id: String!) {
+        issue(id: $id) {
+          id
+          identifier
+          priority
+          priorityLabel
+          archivedAt
+          createdAt
+          updatedAt
+          state { type name }
+          parent { id identifier }
+        }
+      }
+    `;
+    const data = await linearQuery(query, { id: issueId });
+    if (!data.issue) return null;
+    const issue = data.issue;
+    return {
+      id: issue.id,
+      identifier: issue.identifier,
+      priority: issue.priority ?? null,
+      priorityLabel: issue.priorityLabel ?? null,
+      priorityRank: getPriorityRank(issue.priority),
+      parentIssueId: issue.parent?.id ?? null,
+      parentIssueIdentifier: issue.parent?.identifier ?? null,
+      stateType: issue.state?.type ?? null,
+      stateName: issue.state?.name ?? null,
+      archivedAt: issue.archivedAt ?? null,
+      createdAt: issue.createdAt ?? null,
+      updatedAt: issue.updatedAt ?? null
+    };
+  } catch (err) {
+    log('RUNNER', `getIssueQueueMetadata failed: ${err.message}`, { issue: issueId });
+    return null;
+  }
+}
+
 async function hasPendingIssues() {
   try {
     const query = '{ issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: 1) { nodes { id } } }';
@@ -430,7 +478,14 @@ function saveQueue(queue) {
   }
 }
 
-function enqueue(issueId, trigger, retryAt = null, { issueIdentifier = null, reason = null } = {}) {
+function enqueue(issueId, trigger, retryAt = null, {
+  issueIdentifier = null,
+  reason = null,
+  priority = null,
+  priorityLabel = null,
+  parentIssueId = null,
+  parentIssueIdentifier = null
+} = {}) {
   try {
     const queue = loadQueue();
     const now = new Date().toISOString();
@@ -456,7 +511,19 @@ function enqueue(issueId, trigger, retryAt = null, { issueIdentifier = null, rea
         lastAttemptAt: now,
         attemptCount: (existing.attemptCount || 0) + 1,
         reason: reason || existing.reason || null,
-        ...(issueIdentifier && !existing.issueIdentifier ? { issueIdentifier } : {})
+        ...(issueIdentifier && !existing.issueIdentifier ? { issueIdentifier } : {}),
+        // Update priority if provided
+        ...(priority !== null ? {
+          priority,
+          priorityLabel: priorityLabel ?? existing.priorityLabel ?? null,
+          priorityRank: getPriorityRank(priority),
+          linearFetchedAt: now
+        } : {}),
+        // Update parent if provided
+        ...(parentIssueId !== null ? {
+          parentIssueId,
+          parentIssueIdentifier: parentIssueIdentifier ?? existing.parentIssueIdentifier ?? null
+        } : {})
       };
       saveQueue(queue);
       log('QUEUE', 'enqueue: updated existing item', { issue: issueId, trigger, retryAt: mergedRetryAt });
@@ -471,7 +538,13 @@ function enqueue(issueId, trigger, retryAt = null, { issueIdentifier = null, rea
       enqueuedAt: now,
       lastAttemptAt: null,
       attemptCount: 0,
-      reason: reason || null
+      reason: reason || null,
+      priority: priority !== null ? priority : null,
+      priorityLabel: priorityLabel ?? null,
+      priorityRank: priority !== null ? getPriorityRank(priority) : getPriorityRank(null),
+      linearFetchedAt: priority !== null ? now : null,
+      parentIssueId: parentIssueId ?? null,
+      parentIssueIdentifier: parentIssueIdentifier ?? null
     });
     saveQueue(queue);
     log('QUEUE', 'enqueued', { issue: issueId, trigger });
@@ -484,13 +557,49 @@ function dequeue() {
   try {
     const queue = loadQueue();
     const now = new Date();
-    const index = queue.findIndex(item => !item.retryAt || new Date(item.retryAt) <= now);
-    
-    if (index === -1) return null;
 
-    const [item] = queue.splice(index, 1);
+    // Filter to ready items (retryAt null or in the past)
+    const readyIndices = queue.reduce((acc, item, i) => {
+      if (!item.retryAt || new Date(item.retryAt) <= now) acc.push(i);
+      return acc;
+    }, []);
+
+    if (readyIndices.length === 0) return null;
+
+    // Select item with best priority (lowest rank), tie-break by retryAt then enqueuedAt
+    let bestIndex = readyIndices[0];
+    for (const i of readyIndices.slice(1)) {
+      const best = queue[bestIndex];
+      const candidate = queue[i];
+      const bestRank = best.priorityRank != null ? best.priorityRank : getPriorityRank(best.priority);
+      const candidateRank = candidate.priorityRank != null ? candidate.priorityRank : getPriorityRank(candidate.priority);
+
+      if (candidateRank < bestRank) {
+        bestIndex = i;
+        continue;
+      }
+      if (candidateRank > bestRank) continue;
+
+      // Same rank: compare retryAt (null = immediate = wins, treated as -Infinity)
+      const bestRetryMs = best.retryAt ? new Date(best.retryAt).getTime() : -Infinity;
+      const candidateRetryMs = candidate.retryAt ? new Date(candidate.retryAt).getTime() : -Infinity;
+      if (candidateRetryMs < bestRetryMs) {
+        bestIndex = i;
+        continue;
+      }
+      if (candidateRetryMs > bestRetryMs) continue;
+
+      // Same retryAt: compare enqueuedAt (earlier wins)
+      const bestEnqueuedMs = best.enqueuedAt ? new Date(best.enqueuedAt).getTime() : 0;
+      const candidateEnqueuedMs = candidate.enqueuedAt ? new Date(candidate.enqueuedAt).getTime() : 0;
+      if (candidateEnqueuedMs < bestEnqueuedMs) {
+        bestIndex = i;
+      }
+    }
+
+    const [item] = queue.splice(bestIndex, 1);
     saveQueue(queue);
-    log('QUEUE', 'dequeued', { issue: item.issueId });
+    log('QUEUE', 'dequeued', { issue: item.issueId, priorityRank: item.priorityRank != null ? item.priorityRank : 5 });
     return item;
   } catch (err) {
     log('QUEUE', `dequeue ERROR: ${err.message}`);
@@ -698,7 +807,11 @@ async function runItem(item) {
     log('RUNNER', 'SKIPPED_LOCKED received from run_auto.sh — re-enqueuing', { issue: issueId });
     enqueue(issueId, item.trigger || 'queue', null, {
       issueIdentifier: item.issueIdentifier || null,
-      reason: 'lock_conflict'
+      reason: 'lock_conflict',
+      priority: item.priority ?? null,
+      priorityLabel: item.priorityLabel ?? null,
+      parentIssueId: item.parentIssueId ?? null,
+      parentIssueIdentifier: item.parentIssueIdentifier ?? null
     });
   } else {
     const resetEpoch = parseUsageLimitResetEpoch(output);
@@ -715,7 +828,11 @@ async function runItem(item) {
       });
       enqueue(issueId, item.trigger || 'queue', retryAt, {
         issueIdentifier: item.issueIdentifier || null,
-        reason: 'usage_limit'
+        reason: 'usage_limit',
+        priority: item.priority ?? null,
+        priorityLabel: item.priorityLabel ?? null,
+        parentIssueId: item.parentIssueId ?? null,
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null
       });
       log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt });
     } else {
@@ -733,7 +850,11 @@ async function drainQueue() {
     if (item.retryAt && new Date(item.retryAt) > new Date()) {
       enqueue(item.issueId, item.trigger, item.retryAt, {
         issueIdentifier: item.issueIdentifier || null,
-        reason: item.reason || null
+        reason: item.reason || null,
+        priority: item.priority ?? null,
+        priorityLabel: item.priorityLabel ?? null,
+        parentIssueId: item.parentIssueId ?? null,
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null
       });
       log('QUEUE', `drain: item ${item.issueId} has future retryAt=${item.retryAt}, stopping drain`);
       break;
@@ -754,7 +875,11 @@ async function drainQueue() {
       log('QUEUE', 'drain: SKIPPED_LOCKED — re-enqueuing', { issue: item.issueId });
       enqueue(item.issueId, item.trigger || 'drain', null, {
         issueIdentifier: item.issueIdentifier || null,
-        reason: 'lock_conflict'
+        reason: 'lock_conflict',
+        priority: item.priority ?? null,
+        priorityLabel: item.priorityLabel ?? null,
+        parentIssueId: item.parentIssueId ?? null,
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null
       });
       break;
     }
@@ -805,6 +930,8 @@ module.exports = {
   loadQueue,
   saveQueue,
   enqueue,
+  getPriorityRank,
+  getIssueQueueMetadata,
   dequeue,
   removeFromQueue,
   isQueued,
