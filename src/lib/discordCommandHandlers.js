@@ -1,6 +1,7 @@
 'use strict';
 
 const runner = require('../runner');
+const queueOrdering = require('./queueOrdering');
 const { isPaused, setPaused, clearPause, getPauseInfo } = require('./discordPauseState');
 const sessionContinue = require('./sessionContinue');
 
@@ -70,26 +71,18 @@ async function handleStatus() {
 
 async function handleQueue() {
   try {
-    const queue = runner.loadQueue();
-    if (queue.length === 0) {
+    const rawQueue = runner.loadQueue();
+    if (rawQueue.length === 0) {
       return { content: '## 実行キュー\nキューは空です。' };
     }
 
-    function parentKeys(item) {
-      return [item.issueId, item.issueIdentifier].filter(Boolean);
-    }
-
-    function belongsToParent(item, parent) {
-      const keys = parentKeys(parent);
-      return keys.includes(item.queueGroup)
-        || keys.includes(item.parentIssueId)
-        || keys.includes(item.parentIssueIdentifier);
-    }
+    // Use shared logic to determine real execution order
+    const { ready, waiting } = queueOrdering.previewQueueOrder(rawQueue);
 
     function formatItem(item, index, indent = '') {
       const at = item.enqueuedAt ? new Date(item.enqueuedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
       const priorityStr = item.priorityLabel ? `[${item.priorityLabel}]` : '[No priority]';
-      const rank = item.priorityRank != null ? item.priorityRank : 5;
+      const rank = queueOrdering.effectiveRank(item);
       const groupStr = item.queueGroup
         ? `  ↳ 親: ${item.parentIssueIdentifier || item.parentIssueId || item.queueGroup}`
         : '';
@@ -97,27 +90,24 @@ async function handleQueue() {
       return `${indent}${index}. **${item.issueIdentifier || item.issueId}** ${priorityStr} (rank ${rank}) — ${item.trigger || 'unknown'} (${at})${retryStr}${groupStr}`;
     }
 
-    const groupedChildIndexes = new Set();
     const lines = [];
-    queue.forEach((item, index) => {
-      if (item.queueGroup) return;
-
-      lines.push(formatItem(item, index + 1));
-      queue.forEach((candidate, childIndex) => {
-        if (!candidate.queueGroup || groupedChildIndexes.has(childIndex)) return;
-        if (belongsToParent(candidate, item)) {
-          groupedChildIndexes.add(childIndex);
-          lines.push(formatItem(candidate, childIndex + 1, '  ↳ '));
-        }
+    if (ready.length > 0) {
+      lines.push('### 実行待ち (Ready)');
+      ready.forEach((item, index) => {
+        lines.push(formatItem(item, index + 1));
       });
-    });
+    }
 
-    queue.forEach((item, index) => {
-      if (!item.queueGroup || groupedChildIndexes.has(index)) return;
-      lines.push(formatItem(item, index + 1));
-    });
+    if (waiting.length > 0) {
+      if (lines.length > 0) lines.push('');
+      lines.push('### 待機中 (Waiting)');
+      waiting.forEach((item, index) => {
+        // For waiting items, we list them in order of retryAt
+        lines.push(formatItem(item, index + 1));
+      });
+    }
 
-    const content = `## 実行キュー (${queue.length}件)\n` + lines.join('\n');
+    const content = `## 実行キュー (${rawQueue.length}件)\n` + lines.join('\n');
     return { content: truncate(content) };
   } catch (err) {
     runner.log('DISCORD', `handleQueue error: ${err.message}`);
