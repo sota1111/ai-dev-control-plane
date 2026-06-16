@@ -1,8 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const { classifyUsageLimit } = require('./lib/usageLimitParser');
+const { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } = require('./lib/resumeMetadata');
 
 const SKIPPED_LOCKED = 75;  // exit code when lock is not available
 const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
@@ -95,6 +96,19 @@ function releaseLock() {
   } catch (err) {
     log('LOCK', `release ERROR: ${err.message}`);
   }
+}
+
+function getGitCheckpointInfo() {
+  const root = path.join(__dirname, '..');
+  const result = { branch: '', lastCommit: '', gitStatus: '' };
+  try {
+    result.branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8', cwd: root }).trim();
+    result.lastCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf8', cwd: root }).trim();
+    result.gitStatus = execSync('git status --short', { encoding: 'utf8', cwd: root }).trim();
+  } catch (err) {
+    // Silence errors, return empty strings as requested
+  }
+  return result;
 }
 
 function isLocked() {
@@ -1146,6 +1160,31 @@ async function runItem(item) {
         reason: 'usage_limit',
         limitType: classification.type
       });
+
+      const gitInfo = getGitCheckpointInfo();
+      const metadata = buildIssueRerunMetadata({
+        issueId,
+        stoppedReason: 'usage_limit',
+        stoppedAt: new Date().toISOString(),
+        resetAt: classification.resetAt,
+        retryAt: classification.retryAt,
+        branch: gitInfo.branch,
+        lastCommit: gitInfo.lastCommit,
+        gitStatus: gitInfo.gitStatus,
+        previousRunLog: LOG_FILE,
+        previousExitCode: code,
+        nextActionHint: null
+      });
+      try {
+        saveResumeMetadata(metadata);
+      } catch (e) {
+        log('ERROR', `saveResumeMetadata failed: ${e.message}`, { issue: issueId });
+      }
+      const queueLength = (loadQueue() || []).length;
+      for (const line of formatResumeLogLines(metadata, { queueLength })) {
+        log('RESUME', line.replace(/^\[RESUME\]\s*/, ''), { issue: issueId });
+      }
+
       enqueue(issueId, item.trigger || 'queue', classification.retryAt, {
         issueIdentifier: item.issueIdentifier || null,
         reason: 'usage_limit',
