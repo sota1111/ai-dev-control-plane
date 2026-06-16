@@ -41,7 +41,7 @@ const { spawn } = require('child_process');
 const originalSecret = process.env.LINEAR_WEBHOOK_SECRET;
 process.env.LINEAR_WEBHOOK_SECRET = '';
 
-const app = require('../webhook-server');
+const { app } = require('../webhook-server');
 
 // Helper: create a mock spawn child that emits given stdout, stderr, then closes
 function mockSpawnChild({ stdout = '', stderr = '', exitCode = 0 } = {}) {

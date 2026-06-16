@@ -286,10 +286,86 @@ app.post('/webhooks/discord', (req, res) => {
     });
 });
 
+async function runBootstrapScan() {
+  const enabled = process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED === 'true';
+  if (!enabled) {
+    runner.log('BOOTSTRAP', 'startup scan disabled (WEBHOOK_BOOTSTRAP_SCAN_ENABLED != true)');
+    return;
+  }
+
+  if (!process.env.LINEAR_API_KEY) {
+    runner.log('BOOTSTRAP', 'startup scan skipped: LINEAR_API_KEY not set');
+    return;
+  }
+
+  const startedAt = new Date().toISOString();
+  runner.log('BOOTSTRAP', `startup scan started at ${startedAt}`);
+
+  let issues = [];
+  try {
+    issues = await runner.fetchActiveIssues(50);
+  } catch (err) {
+    runner.log('BOOTSTRAP', `fetchActiveIssues error: ${err.message}`);
+    return;
+  }
+
+  runner.log('BOOTSTRAP', `startup scan: found ${issues.length} active issue(s)`);
+
+  if (issues.length === 0) {
+    runner.log('BOOTSTRAP', 'startup scan: no issues to enqueue');
+    return;
+  }
+
+  const cooldown = runner.getUsageLimitCooldownUntil();
+  const cooldownRetryAt = cooldown ? cooldown.retryAt : null;
+
+  let enqueuedCount = 0;
+  let skippedCount = 0;
+
+  for (const issue of issues) {
+    const { identifier, priority, priorityLabel, parentIssueId, parentIssueIdentifier } = issue;
+
+    if (runner.isQueued(identifier)) {
+      runner.log('BOOTSTRAP', `startup scan: skip ${identifier} (already queued)`);
+      skippedCount++;
+      continue;
+    }
+
+    const retryAt = cooldownRetryAt || null;
+    runner.enqueue(identifier, 'webhook-bootstrap', retryAt, {
+      priority,
+      priorityLabel,
+      parentIssueId,
+      parentIssueIdentifier
+    });
+    runner.log('BOOTSTRAP', `startup scan: enqueued ${identifier}${retryAt ? ` retryAt=${retryAt}` : ''}`);
+    enqueuedCount++;
+  }
+
+  runner.log('BOOTSTRAP', `startup scan complete: enqueued=${enqueuedCount} skipped=${skippedCount}`);
+
+  if (enqueuedCount > 0) {
+    runner.log('BOOTSTRAP', 'startup scan: starting drainQueue');
+    try {
+      await runner.drainQueue();
+      runner.log('BOOTSTRAP', 'startup scan: drainQueue complete');
+    } catch (err) {
+      runner.log('BOOTSTRAP', `startup scan: drainQueue error: ${err.message}`);
+    }
+  } else {
+    runner.log('BOOTSTRAP', 'startup scan: no new items enqueued, drain skipped');
+  }
+}
+
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`[WEBHOOK] Server listening on port ${PORT}`);
+    setImmediate(() => {
+      runBootstrapScan().catch((err) => {
+        runner.log('BOOTSTRAP', `startup scan uncaught error: ${err.message}`);
+      });
+    });
   });
 }
 
-module.exports = app;
+module.exports = { app, runBootstrapScan };
