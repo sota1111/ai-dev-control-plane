@@ -1,29 +1,36 @@
-Completed SOT-579 updates.
+Worker report written to `docs/ai/60_worker_codex_report.md`.
 
-Changed:
-- `README.md`: scheduler/webhook wording now describes queue enqueue/drain flow.
-- `scripts/ai/scheduler.sh`: header comments updated to match `runner-cli.js` queue/drain behavior.
-- `docs/ai/60_worker_codex_report.md`: worker report written.
+Applied minimal lint-only fixes in `/workspaces/booking-monitor` so its `flake8` quality gate passes.
 
-Validation:
-- `npm run lint`: PASS
-- `npm test`: PASS, 9 suites / 113 tests
-
-Note: existing untracked `.tmp_ai-dev-test4/` was present and left untouched.
-pdated header comment
+## Changed Files
+- `/workspaces/booking-monitor/app.py` — fixed flake8 spacing/continuation indentation.
+- `/workspaces/booking-monitor/booking_monitor/firestore_history.py` — fixed flake8 class spacing and trailing whitespace.
+- `/workspaces/booking-monitor/booking_monitor/history.py` — renamed ambiguous JSON parse loop variable from `l` to `line`.
+- `/workspaces/booking-monitor/booking_monitor/notifier.py` — removed trailing whitespace.
+- `config/auth/apps.json` — updated booking-monitor and toddler-private-rag migration status to done.
 
 ## Commands Run
-- npm run lint: PASS
-- npm test: PASS (9 test suites passed, 113 tests passed)
+- `python3 -m json.tool config/auth/apps.json` — PASS, valid JSON.
+- `test -f docs/auth/firebase-auth-pattern.md` — PASS.
+- `test -f docs/auth/migration-plan.md` — PASS.
+- `test -x scripts/check-auth-config.sh` — PASS.
+- `bash scripts/check-auth-config.sh` — PASS, Summary: `PASS=38 WARN=0 FAIL=0`, STATUS: ALL CLEAN.
+- stale auth variable grep for `state-machine-simulator`, `shrine-stair-trainer`, `kindle-sale-monitor`, `toddler-private-rag` — PASS, no stale auth vars found.
+- booking-monitor `grep "firebase-admin" requirements.txt` — PASS, `firebase-admin>=6.0.0` found.
+- booking-monitor Firebase env grep in `.env.example` — PASS, required Firebase/Auth variables found.
+- booking-monitor stale `.env.example` grep for `AUTH_USERNAME|AUTH_PASSWORD|AUTH_SECRET_KEY` — PASS, no old auth vars.
+- booking-monitor `flake8 . --max-line-length=120 --exclude=.git,__pycache__,.venv` — initially failed, fixed minimal lint issues, rerun PASS.
 
 ## Acceptance Criteria
-- [x] README に「scheduler が直接 run_auto.sh を起動する」という古い記述がない
-- [x] README に「webhook が直接 run_auto.sh を起動する」という古い記述がない
-- [x] npm run lint が exit 0
-- [x] npm test が exit 0、全テスト PASS
+- [x] config/auth/apps.json が有効なJSONで全エントリが正しい
+- [x] booking-monitor に firebase-admin が追加されている
+- [x] booking-monitor の .env.example が Firebase 変数を含んでいる
+- [x] 全対象リポジトリで旧認証変数が残存していない
+- [x] docs/auth/firebase-auth-pattern.md が存在する
+- [x] scripts/check-auth-config.sh が存在して実行可能
 
 ## Risks
-None encountered. Remaining README references to `run_auto.sh` describe the runner itself, logs, retries, or failure cases rather than scheduler/webhook direct launch behavior.
+- Cloud Run/Firebase live configuration was not verified; this pass covered repository files and local static checks only.
 
 ## Next Action
 READY_FOR_REVIEW

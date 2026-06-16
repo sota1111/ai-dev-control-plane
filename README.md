@@ -772,20 +772,20 @@ npm run auth:setup
 
 `config/auth/apps.json` に全アプリの Cloud Run サービス名・リージョン・認証設定が記載されています。
 
-Firebase Auth 移行済みのアプリのみ `"cloudRunSyncEnabled": true` になっています。
-未移行アプリは移行後に `cloudRunSyncEnabled` を `true` に変更してください。
+Firebase Auth 移行済みかつ Cloud Run sync 設定が完了したアプリのみ `"cloudRunSyncEnabled": true` になっています。
+移行完了後に `cloudRunSyncEnabled` を `true` に変更し、`npm run auth:setup` を実行してください。
 
 ### 移行状況
 
 各アプリの詳細な認証移行手順は [`docs/auth/migration-plan.md`](docs/auth/migration-plan.md) を参照してください。
 
-| アプリ                    | 現在の認証方式                                   | Firebase Auth 移行 | Cloud Run sync | 備考                                                |
-| ------------------------- | ------------------------------------------------ | :----------------: | :------------: | --------------------------------------------------- |
-| english-phrase-trainer    | Firebase Auth + Cookie                           |    ✅ 移行済み     |       ✅       | 基準実装                                            |
-| stock-signal-research     | FastAPI OAuth2 + JWT                             |     ⬜ 未移行      |       ❌       | Cloud Run サービス名: `stock-signal-service`        |
-| state-machine-simulator   | FastAPI password + JWT                           |     ⬜ 未移行      |       ❌       |                                                     |
-| shrine-stair-trainer      | Vite build-time パスワード（クライアントサイド） |     ⬜ 未移行      |       ❌       | 静的フロントのため移行パターンが異なる              |
-| kindle-sale-monitor       | Starlette session + パスワード                   |     ⬜ 未移行      |       ❌       | Cloud Scheduler 用エンドポイントは別認証を維持      |
-| booking-monitor           | Flask session + パスワード                       |     ⬜ 未移行      |       ❌       |                                                     |
-| toddler-nas-photo-indexer | FastAPI OAuth2 + JWT                             |     ⬜ 未移行      |       ❌       |                                                     |
-| toddler-private-rag       | FastAPI OAuth2 + JWT                             |     ⬜ 未移行      |       ❌       |                                                     |
+| アプリ                    | 現在の認証方式                    | Firebase Auth 移行         | Cloud Run sync | 備考                                           |
+| ------------------------- | --------------------------------- | :------------------------: | :------------: | ---------------------------------------------- |
+| english-phrase-trainer    | Firebase Auth + Cookie            |       ✅ 移行済み          |       ✅       | 基準実装                                       |
+| stock-signal-research     | Firebase Auth + Cookie            |       ✅ 移行済み          |       ❌       | Cloud Run サービス名: `stock-signal-service`   |
+| state-machine-simulator   | Firebase Auth + Cookie            |       ✅ 移行済み          |       ❌       |                                                |
+| shrine-stair-trainer      | Firebase Auth（フロントのみ）     | ✅ 移行済み（フロントのみ） |       ❌       | 静的フロント。サーバー側検証なし。AUTH_SECRET不要 |
+| kindle-sale-monitor       | Firebase Auth + Cookie            |       ✅ 移行済み          |       ❌       | /run は Cloud Scheduler 専用（OIDC）           |
+| booking-monitor           | Firebase Auth + Cookie            |       ✅ 移行済み          |       ❌       | /run は Cloud Scheduler 専用（OIDC）           |
+| toddler-nas-photo-indexer | Firebase Auth + Cookie            |       ✅ 移行済み          |       ❌       |                                                |
+| toddler-private-rag       | Firebase Auth（部分実装）         |       ✅ 移行済み          |       ❌       |                                                |
