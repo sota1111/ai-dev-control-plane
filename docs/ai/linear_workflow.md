@@ -54,7 +54,7 @@ Examples:
 
 ## Issue Title Convention
 
-Recommended title prefixes:
+Recommended title prefixes (for parent / classification context):
 
 ```text
 [PLAN]      計画・設計
@@ -64,6 +64,8 @@ Recommended title prefixes:
 [URGENT]    優先対応
 [QUESTION]  確認依頼
 ```
+
+Note: Generated child Issues use feature-outcome titles (e.g. `...を追加する`), not these process prefixes.
 
 ## Status Convention
 

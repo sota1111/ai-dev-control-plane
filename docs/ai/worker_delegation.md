@@ -32,7 +32,7 @@ Humans interact only with Claude Code — never directly with workers.
 
 ### Gemini CLI (Implementation Worker)
 
-**Trigger:** All `[IMPLEMENT]` tasks, new features, multi-file changes, large doc rewrites
+**Trigger:** Implementation work inside any feature/commit Issue — new features, multi-file changes, large doc rewrites (worker role is a step inside the Issue, not a separate Issue)
 
 **Receives:** `prompts/gemini/implement.md` (written by Claude Code)
 
@@ -57,7 +57,7 @@ Humans interact only with Claude Code — never directly with workers.
 
 ### Codex CLI (Verification Worker)
 
-**Trigger:** After Gemini implementation, all `[DEBUG]` tasks, test failures, lint failures, security checks, PR diff reviews
+**Trigger:** Verification work inside any feature/commit Issue — after Gemini implementation, test/lint failures, security checks, PR diff reviews (worker role is a step inside the Issue, not a separate Issue)
 
 **Receives:** `prompts/codex/debug.md` (written by Claude Code)
 
@@ -76,6 +76,8 @@ Humans interact only with Claude Code — never directly with workers.
 - Fix applied (if any)
 - Pre-PR checklist
 - Next action
+
+> Note: Task types route work INSIDE a feature/commit Issue. They do NOT define child-Issue decomposition boundaries — child Issues are feature/commit units, not `[IMPLEMENT]`/`[DEBUG]` phases.
 
 ## Task Type → Worker Mapping
 
@@ -141,13 +143,14 @@ Humans interact only with Claude Code — never directly with workers.
 
 ```
 1. Claude Code: Read & classify Linear Issue
-2. Claude Code: Write prompts/gemini/implement.md
-3. run_gemini.sh → Gemini implements
-4. Claude Code: Read docs/ai/50_worker_gemini_report.md
-5. Claude Code: Write prompts/codex/debug.md
-6. run_codex.sh → Codex verifies
-7. Claude Code: Read docs/ai/60_worker_codex_report.md
-8. Claude Code: Quality gate check
-9. Claude Code: git add/commit, push, create PR, merge
-10. Claude Code: Update Linear status, post Completion Report
+2. Claude Code: Decompose into feature/commit units (only if needed)
+3. For each feature/commit Issue (worker roles are steps inside the Issue):
+   a. Claude Code: plan scope, write prompts/gemini/implement.md
+   b. run_gemini.sh → Gemini implements → read docs/ai/50_worker_gemini_report.md
+   c. Claude Code: write prompts/codex/debug.md
+   d. run_codex.sh → Codex verifies/debugs → read docs/ai/60_worker_codex_report.md
+   e. Claude Code: git add/commit (1+ meaningful commits for this Issue)
+4. Claude Code: Quality gate check
+5. Claude Code: git push, create PR, merge
+6. Claude Code: Update Linear status, post Completion Report
 ```

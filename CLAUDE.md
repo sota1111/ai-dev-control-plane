@@ -60,7 +60,7 @@ Claude Code focuses on **judgment, delegation, and final approval** — not dire
 
 ## When to Use Gemini CLI
 
-**MANDATORY**: Claude Code must ALWAYS invoke `scripts/ai/run_gemini.sh` for ALL `[IMPLEMENT]` child Issues, without exception.
+**MANDATORY**: Claude Code must ALWAYS invoke `scripts/ai/run_gemini.sh` for ALL implementation work (within any feature Issue), without exception.
 
 Claude Code must NEVER write implementation code directly. All file creation, editing, and feature implementation must go through Gemini CLI.
 
@@ -70,7 +70,7 @@ Before running, write the full instruction into `prompts/gemini/implement.md`.
 
 ## When to Use Codex CLI
 
-**MANDATORY**: Claude Code must ALWAYS invoke `scripts/ai/run_codex.sh` for ALL `[DEBUG]` child Issues, without exception.
+**MANDATORY**: Claude Code must ALWAYS invoke `scripts/ai/run_codex.sh` for ALL verification/debug work (within any feature Issue), without exception.
 
 Claude Code must NEVER run lint / typecheck / tests or apply fixes directly. All verification and debugging must go through Codex CLI.
 
@@ -403,8 +403,8 @@ It should comment on Linear with the conflict and proposed action.
 
 **MANDATORY**: Claude Code must always delegate to the appropriate worker CLI. Direct implementation or verification by Claude Code is prohibited.
 
-- **ALL `[IMPLEMENT]` tasks** → MUST use Gemini CLI (`scripts/ai/run_gemini.sh`)
-- **ALL `[DEBUG]` tasks** → MUST use Codex CLI (`scripts/ai/run_codex.sh`)
+- **ALL implementation work (inside any feature Issue)** → MUST use Gemini CLI (`scripts/ai/run_gemini.sh`)
+- **ALL verification/debug work (inside any feature Issue)** → MUST use Codex CLI (`scripts/ai/run_codex.sh`)
 
 Claude Code must NEVER implement code or run tests directly, regardless of task complexity.
 
@@ -480,12 +480,12 @@ Claude Code must explicitly judge at the start of each Issue and post the judgme
 ### When to Decompose (child Issues recommended)
 
 - Multiple independent features or domains are involved
-- Work types are clearly separated (implementation, testing, docs, config)
+- Different rollback unit / deploy impact / risk level
+- Significantly different review focus / different responsibility file group
 - Progress and responsibility are hard to track in a single Issue
 - Multiple PRs would be safer
 - Work volume is large; one auto-run session cannot complete it
 - Tasks have sequential dependencies
-- Separate Gemini/Codex delegation units would be clearer
 - Acceptance criteria map to multiple independent deliverables
 
 ### When NOT to Decompose (handle parent Issue directly)
@@ -497,50 +497,48 @@ Claude Code must explicitly judge at the start of each Issue and post the judgme
 - Creating child Issues adds more overhead than value
 - Investigations, wording fixes, comment edits, minor refactoring
 - Single bug fix with clear reproduction conditions and fix location
+- A single feature whose implementation, tests, and docs belong together (keep them in one feature Issue)
 
 ### Child Issue Naming Convention
 
-```text
-[IMPLEMENT] <親Issue ID> - <具体的タスク名>
-[DEBUG]     <親Issue ID> - <検証内容>
-[PLAN]      <親Issue ID> - <設計内容>
-```
+子Issueタイトルは、機能・成果（アウトカム）で始める。工程名（Implement/Debug/Test/Refactor や [IMPLEMENT]/[DEBUG]/[PLAN]）で始めない。
 
-Example:
-
-```text
-Parent: LC-100 宅配ボックス画面作成
-  → [PLAN] LC-100 - API設計
-  → [IMPLEMENT] LC-100 - 一覧画面コンポーネント実装
-  → [IMPLEMENT] LC-100 - APIエンドポイント実装
-  → [DEBUG] LC-100 - E2Eテスト作成・実行
-```
+推奨例:
+- usage-limit後のresumeメタデータ保存を追加する
+- queueのdequeue順をLinear priority準拠にする
+- tmux pane監視によるsession-continueモードを追加する
+- Discordでcooldownとresume状態を確認できるようにする
 
 ### Child Issue Description Template
 
-Each child Issue must contain:
-
 ```markdown
-## Parent Issue
+## 目的
 
-<親Issue ID と Title>
+このIssueで達成する機能変更
 
-## Goal
-
-このタスクで達成すること
-
-## Scope
+## 変更範囲
 
 - 対象ファイル / コンポーネント
-- 変更内容
 
-## Acceptance Criteria
+## 実装内容
 
-- [ ] 具体的な完了条件
+- 実装する内容
 
-## Dependencies
+## 検証内容
 
-- 先行タスク（あれば）
+- このIssue内で行う検証（Debug・Testはここに含める。独立Issueにしない）
+
+## 想定commit
+
+- このIssueが対応する意味あるcommit（1つ以上）
+
+## 受け入れ条件
+
+- [ ] このIssue単独で確認できる完了条件
+
+## 関連する親Issue
+
+- 親Issue ID と Title
 ```
 
 ### Registration Procedure
@@ -555,14 +553,13 @@ Claude Code uses the MCP tool to register child Issues:
 
 ### Execution Order
 
-子Issue の実行順序:
+子Issue（機能単位）の実行順序:
 
-1. `[PLAN]` タスク（設計が必要な場合）
-2. `[IMPLEMENT]` タスク（依存関係順）
-3. `[DEBUG]` タスク（実装完了後）
+1. 依存関係順に機能Issueを実行する
+2. 各機能Issue内の作業手順: Claude（方針整理）→ Gemini（実装）→ Codex（テスト・不具合確認）
 
-各子Issue完了時に Status を `Done` に更新し、次の子Issueへ進む。
-全子Issue完了後、親Issue を `In Review` に変更。
+各機能Issue完了時に Status を `Done` に更新し、次の機能Issueへ進む。
+全機能Issue完了後、親Issue を `In Review` に変更。
 
 ### Local Tracking
 
@@ -661,7 +658,7 @@ git checkout -b feat/<issue-id>-<short-description>
 
 ### Commit Policy
 
-- 子Issue 完了ごとに commit する
+- 子Issue（機能単位）完了ごとに commit する（1 feature Issue → 1つ以上の意味あるcommit。1 Issue = 1巨大PR にしない）
 - commit message format: `<type>(<issue-id>): <summary>`
 
 ```text
