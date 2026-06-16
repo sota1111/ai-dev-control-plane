@@ -20,9 +20,14 @@ jest.mock('../lib/discordIntentHandlers', () => ({
   handleUnknownIntent: jest.fn(),
 }));
 
+jest.mock('../lib/discordInteractionFollowup', () => ({
+  editOriginalInteractionResponse: jest.fn().mockResolvedValue({ status: 200, body: '{}' }),
+}));
+
 const { handleAskCommand, handleAskModalSubmit } = require('../lib/discordAskHandler');
 const { classifyIntent } = require('../lib/discordIntentClassifier');
 const handlers = require('../lib/discordIntentHandlers');
+const { editOriginalInteractionResponse } = require('../lib/discordInteractionFollowup');
 
 describe('discordAskHandler', () => {
   beforeEach(() => {
@@ -46,8 +51,10 @@ describe('discordAskHandler', () => {
   });
 
   describe('handleAskModalSubmit', () => {
-    test('extracts value from type:18 Label payload (New Format)', async () => {
+    test('returns immediate ACK and extracts value from type:18 Label payload (New Format)', async () => {
       const interaction = {
+        application_id: 'app123',
+        token: 'token456',
         data: {
           custom_id: 'discord_ask_modal',
           components: [
@@ -70,12 +77,18 @@ describe('discordAskHandler', () => {
       const response = await handleAskModalSubmit(interaction);
       
       expect(response.body.type).toBe(4);
-      expect(response.body.data.content).toBe('Mock Status Response');
+      expect(response.body.data.content).toBe('🔄 リクエストを受け付けました。処理中です…');
+      
+      await response.followupPromise;
+      
       expect(classifyIntent).toHaveBeenCalledWith('今どのタスクを実行中？');
+      expect(editOriginalInteractionResponse).toHaveBeenCalledWith('app123', 'token456', 'Mock Status Response');
     });
 
     test('extracts value from type:1 Action Row payload (Legacy Format)', async () => {
       const interaction = {
+        application_id: 'app123',
+        token: 'token456',
         data: {
           custom_id: 'discord_ask_modal',
           components: [
@@ -99,11 +112,15 @@ describe('discordAskHandler', () => {
       const response = await handleAskModalSubmit(interaction);
       
       expect(response.body.type).toBe(4);
-      expect(response.body.data.content).toBe('Mock Log Summary');
+      expect(response.body.data.content).toBe('🔄 リクエストを受け付けました。処理中です…');
+
+      await response.followupPromise;
+
       expect(classifyIntent).toHaveBeenCalledWith('SOT-123 の最新ログを要約して');
+      expect(editOriginalInteractionResponse).toHaveBeenCalledWith('app123', 'token456', 'Mock Log Summary');
     });
 
-    test('returns error for empty input', async () => {
+    test('returns error for empty input (immediate)', async () => {
       const interaction = {
         data: {
           components: [
@@ -120,9 +137,10 @@ describe('discordAskHandler', () => {
 
       const response = await handleAskModalSubmit(interaction);
       expect(response.body.data.content).toContain('入力が空です');
+      expect(response.followupPromise).toBeUndefined();
     });
 
-    test('returns error for too long input', async () => {
+    test('returns error for too long input (immediate)', async () => {
       const interaction = {
         data: {
           components: [
@@ -139,10 +157,13 @@ describe('discordAskHandler', () => {
 
       const response = await handleAskModalSubmit(interaction);
       expect(response.body.data.content).toContain('入力が長すぎます');
+      expect(response.followupPromise).toBeUndefined();
     });
 
-    test('handles exceptions and logs them', async () => {
+    test('handles background exceptions and edits original response', async () => {
       const interaction = {
+        application_id: 'app123',
+        token: 'token456',
         data: {
           components: [
             {
@@ -160,8 +181,11 @@ describe('discordAskHandler', () => {
       classifyIntent.mockImplementation(() => { throw new Error('Test Error'); });
 
       const response = await handleAskModalSubmit(interaction);
+      expect(response.body.data.content).toBe('🔄 リクエストを受け付けました。処理中です…');
+
+      await response.followupPromise;
       
-      expect(response.body.data.content).toContain('エラーが発生しました');
+      expect(editOriginalInteractionResponse).toHaveBeenCalledWith('app123', 'token456', '❌ エラーが発生しました。');
       expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', expect.stringContaining('handler error: Test Error'));
     });
 
@@ -186,7 +210,8 @@ describe('discordAskHandler', () => {
         classifyIntent.mockReturnValue({ intent: 'STATUS_CHECK', issueId: null, originalText: 'test query' });
         handlers.handleStatusIntent.mockResolvedValue('ok');
 
-        await handleAskModalSubmit(interaction);
+        const response = await handleAskModalSubmit(interaction);
+        await response.followupPromise;
 
         expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'modal submit received', expect.objectContaining({
           interactionId: 'interaction-123',
@@ -205,7 +230,8 @@ describe('discordAskHandler', () => {
         classifyIntent.mockReturnValue({ intent: 'STATUS_CHECK', issueId: null, originalText: 'hello world' });
         handlers.handleStatusIntent.mockResolvedValue('ok');
 
-        await handleAskModalSubmit(interaction);
+        const response = await handleAskModalSubmit(interaction);
+        await response.followupPromise;
 
         expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'input extracted', expect.objectContaining({
           length: 11,
@@ -223,7 +249,8 @@ describe('discordAskHandler', () => {
         classifyIntent.mockReturnValue({ intent: 'UNKNOWN', issueId: null, originalText: 'わからない質問' });
         handlers.handleUnknownIntent.mockReturnValue('対応できない依頼です');
 
-        await handleAskModalSubmit(interaction);
+        const response = await handleAskModalSubmit(interaction);
+        await response.followupPromise;
 
         expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'intent classified', expect.objectContaining({
           intent: 'UNKNOWN',
@@ -241,7 +268,8 @@ describe('discordAskHandler', () => {
         classifyIntent.mockReturnValue({ intent: 'QUEUE_CHECK', issueId: null, originalText: 'キューは？' });
         handlers.handleQueueIntent.mockResolvedValue('queue info');
 
-        await handleAskModalSubmit(interaction);
+        const response = await handleAskModalSubmit(interaction);
+        await response.followupPromise;
 
         expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'intent classified', expect.objectContaining({
           intent: 'QUEUE_CHECK',
@@ -259,7 +287,8 @@ describe('discordAskHandler', () => {
         classifyIntent.mockReturnValue({ intent: 'ISSUE_STATUS', issueId: 'SOT-532', originalText: 'SOT-532 の状態は？' });
         handlers.handleIssueStatusIntent.mockResolvedValue('issue status');
 
-        await handleAskModalSubmit(interaction);
+        const response = await handleAskModalSubmit(interaction);
+        await response.followupPromise;
 
         expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'intent classified', expect.objectContaining({
           issueId: 'SOT-532',
@@ -277,7 +306,8 @@ describe('discordAskHandler', () => {
         classifyIntent.mockReturnValue({ intent: 'STATUS_CHECK', issueId: null, originalText: 'status?' });
         handlers.handleStatusIntent.mockResolvedValue('ok');
 
-        await handleAskModalSubmit(interaction);
+        const response = await handleAskModalSubmit(interaction);
+        await response.followupPromise;
 
         expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'handler selected', expect.objectContaining({
           handler: 'handleStatusIntent',
@@ -296,7 +326,8 @@ describe('discordAskHandler', () => {
         classifyIntent.mockReturnValue({ intent: 'STATUS_CHECK', issueId: null, originalText: 'status?' });
         handlers.handleStatusIntent.mockResolvedValue('現在実行中のタスク: なし');
 
-        await handleAskModalSubmit(interaction);
+        const response = await handleAskModalSubmit(interaction);
+        await response.followupPromise;
 
         expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'handler completed', expect.objectContaining({
           intent: 'STATUS_CHECK',
@@ -304,7 +335,7 @@ describe('discordAskHandler', () => {
         }));
       });
 
-      test('logs response sent', async () => {
+      test('logs response sent with mode: deferred', async () => {
         const interaction = {
           data: {
             components: [
@@ -318,11 +349,11 @@ describe('discordAskHandler', () => {
         await handleAskModalSubmit(interaction);
 
         expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'response sent', expect.objectContaining({
-          mode: 'direct',
+          mode: 'deferred',
         }));
       });
 
-      test('logs handler error on exception', async () => {
+      test('logs handler error on background exception', async () => {
         const interaction = {
           data: {
             components: [
@@ -333,7 +364,8 @@ describe('discordAskHandler', () => {
         classifyIntent.mockImplementation(() => { throw new Error('Test Error'); });
 
         const runner = require('../runner');
-        await handleAskModalSubmit(interaction);
+        const response = await handleAskModalSubmit(interaction);
+        await response.followupPromise;
 
         expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', expect.stringContaining('handler error: Test Error'));
       });
