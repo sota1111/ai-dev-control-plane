@@ -5,10 +5,12 @@ describe('classifyUsageLimit', () => {
 
   beforeEach(() => {
     delete process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS;
+    delete process.env.OVERLOAD_RETRY_BUFFER_SECONDS;
   });
 
   afterEach(() => {
     delete process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS;
+    delete process.env.OVERLOAD_RETRY_BUFFER_SECONDS;
   });
 
   it('classifies session limits with reset and retry timestamps', () => {
@@ -101,5 +103,35 @@ describe('classifyUsageLimit', () => {
     const retryMs = new Date(result.retryAt).getTime();
 
     expect((retryMs - resetMs) / 1000).toBe(45);
+  });
+
+  it('classifies 529 Overloaded as model_unavailable and retries 1 hour later', () => {
+    const result = classifyUsageLimit(
+      '[RUN:SOT-673] API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment.',
+      NOW_MS
+    );
+
+    expect(result).toMatchObject({
+      type: 'model_unavailable',
+      retryable: true,
+      confidence: 'medium',
+      retryAt: '2026-06-16T13:00:00.000Z'
+    });
+  });
+
+  it('honors OVERLOAD_RETRY_BUFFER_SECONDS override for overloaded errors', () => {
+    process.env.OVERLOAD_RETRY_BUFFER_SECONDS = '1800';
+
+    const result = classifyUsageLimit('Model is overloaded', NOW_MS);
+
+    expect(result.type).toBe('model_unavailable');
+    expect(result.retryAt).toBe('2026-06-16T12:30:00.000Z');
+  });
+
+  it('uses overload buffer for 503 errors as well', () => {
+    const result = classifyUsageLimit('503 Service Unavailable', NOW_MS);
+
+    expect(result.type).toBe('model_unavailable');
+    expect(result.retryAt).toBe('2026-06-16T13:00:00.000Z');
   });
 });
