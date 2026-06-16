@@ -6,6 +6,7 @@ jest.mock('../runner', () => ({
   acquireLock: jest.fn().mockReturnValue(true),
   releaseLock: jest.fn(),
   hasPendingIssues: jest.fn().mockResolvedValue(true),
+  fetchActiveIssues: jest.fn().mockResolvedValue([]),
   setIssueInProgress: jest.fn().mockResolvedValue(undefined),
   postUsageLimitComment: jest.fn().mockResolvedValue(undefined),
   addUsageLimitLabel: jest.fn().mockResolvedValue(undefined),
@@ -555,5 +556,100 @@ describe('pre-execution eligibility check', () => {
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
     expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
+  });
+});
+
+describe('runBootstrapScan', () => {
+  let runBootstrapScan;
+  const runner = require('../runner');
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // Reset env
+    delete process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED;
+    delete process.env.LINEAR_API_KEY;
+    // Get fresh reference
+    runBootstrapScan = require('../webhook-server').runBootstrapScan;
+  });
+
+  it('should skip scan when WEBHOOK_BOOTSTRAP_SCAN_ENABLED is not set', async () => {
+    await runBootstrapScan();
+    expect(runner.fetchActiveIssues).not.toHaveBeenCalled();
+    expect(runner.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('should skip scan when WEBHOOK_BOOTSTRAP_SCAN_ENABLED=false', async () => {
+    process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED = 'false';
+    await runBootstrapScan();
+    expect(runner.fetchActiveIssues).not.toHaveBeenCalled();
+    expect(runner.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('should skip scan when LINEAR_API_KEY is not set', async () => {
+    process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED = 'true';
+    // LINEAR_API_KEY not set
+    await runBootstrapScan();
+    expect(runner.fetchActiveIssues).not.toHaveBeenCalled();
+    expect(runner.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('should enqueue active issues when enabled and LINEAR_API_KEY is set', async () => {
+    process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED = 'true';
+    process.env.LINEAR_API_KEY = 'test-key';
+    runner.fetchActiveIssues.mockResolvedValue([
+      { identifier: 'SOT-100', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+      { identifier: 'SOT-101', priority: 3, priorityLabel: 'Medium', parentIssueId: null, parentIssueIdentifier: null },
+    ]);
+    runner.isQueued.mockReturnValue(false);
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+
+    await runBootstrapScan();
+
+    expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50);
+    expect(runner.enqueue).toHaveBeenCalledWith('SOT-100', 'webhook-bootstrap', null, expect.objectContaining({ priority: 2 }));
+    expect(runner.enqueue).toHaveBeenCalledWith('SOT-101', 'webhook-bootstrap', null, expect.objectContaining({ priority: 3 }));
+    expect(runner.drainQueue).toHaveBeenCalled();
+  });
+
+  it('should skip already-queued issues', async () => {
+    process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED = 'true';
+    process.env.LINEAR_API_KEY = 'test-key';
+    runner.fetchActiveIssues.mockResolvedValue([
+      { identifier: 'SOT-100', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+    ]);
+    runner.isQueued.mockReturnValue(true); // already queued
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+
+    await runBootstrapScan();
+
+    expect(runner.enqueue).not.toHaveBeenCalled();
+    expect(runner.drainQueue).not.toHaveBeenCalled();
+  });
+
+  it('should enqueue with retryAt when cooldown is active', async () => {
+    process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED = 'true';
+    process.env.LINEAR_API_KEY = 'test-key';
+    const retryAt = '2026-06-17T00:00:00.000Z';
+    runner.fetchActiveIssues.mockResolvedValue([
+      { identifier: 'SOT-100', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+    ]);
+    runner.isQueued.mockReturnValue(false);
+    runner.getUsageLimitCooldownUntil.mockReturnValue({ retryAt });
+
+    await runBootstrapScan();
+
+    expect(runner.enqueue).toHaveBeenCalledWith('SOT-100', 'webhook-bootstrap', retryAt, expect.any(Object));
+    expect(runner.drainQueue).toHaveBeenCalled();
+  });
+
+  it('should not call drainQueue when no new issues were enqueued', async () => {
+    process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED = 'true';
+    process.env.LINEAR_API_KEY = 'test-key';
+    runner.fetchActiveIssues.mockResolvedValue([]);
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+
+    await runBootstrapScan();
+
+    expect(runner.drainQueue).not.toHaveBeenCalled();
   });
 });

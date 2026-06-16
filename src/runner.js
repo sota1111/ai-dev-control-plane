@@ -221,6 +221,43 @@ async function hasPendingIssues() {
   }
 }
 
+async function fetchActiveIssues(first = 50) {
+  const query = `
+    query($first: Int!) {
+      issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: $first) {
+        nodes {
+          id
+          identifier
+          priority
+          priorityLabel
+          archivedAt
+          createdAt
+          updatedAt
+          state { type name }
+          parent { id identifier }
+        }
+      }
+    }
+  `;
+  const data = await linearQuery(query, { first });
+  return (data.issues?.nodes || [])
+    .filter(issue => !issue.archivedAt)
+    .map(issue => ({
+      id: issue.id,
+      identifier: issue.identifier,
+      priority: issue.priority ?? null,
+      priorityLabel: issue.priorityLabel ?? null,
+      priorityRank: getPriorityRank(issue.priority),
+      parentIssueId: issue.parent?.id ?? null,
+      parentIssueIdentifier: issue.parent?.identifier ?? null,
+      stateType: issue.state?.type ?? null,
+      stateName: issue.state?.name ?? null,
+      archivedAt: issue.archivedAt ?? null,
+      createdAt: issue.createdAt ?? null,
+      updatedAt: issue.updatedAt ?? null
+    }));
+}
+
 function buildUsageLimitCommentBody(resetEpoch) {
   const date = new Date(resetEpoch * 1000);
   const jstDate = new Date(date.getTime() + 9 * 60 * 60 * 1000);
@@ -983,51 +1020,6 @@ module.exports = {
   isLocked,
   hasPendingIssues,
   fetchActiveIssues,
-  postUsageLimitComment,
-  buildUsageLimitCommentBody,
-  addUsageLimitLabel,
-  removeUsageLimitLabel,
-  setUsageLimitCooldownUntil,
-  clearUsageLimitCooldown,
-  getUsageLimitCooldownUntil,
-  notifyUsageLimitToAllActiveIssues,
-  removeUsageLimitLabelFromAllIssues,
-  loadQueue,
-  saveQueue,
-  enqueue,
-  getPriorityRank,
-  getIssueQueueMetadata,
-  dequeue,
-  removeFromQueue,
-  isQueued,
-  setIssueInProgress,
-  getIssueExecutionEligibility,
-  triggerRun,
-  runItem,
-  drainQueue
-};
-complete');
-  }
-}
-
-module.exports = {
-  SKIPPED_LOCKED,
-  LOG_DIR,
-  LOCK_FILE,
-  QUEUE_FILE,
-  COOLDOWN_FILE,
-  USAGE_LIMIT_FILE,
-  LOG_FILE,
-  STALE_LOCK_MS,
-  LINEAR_API_URL,
-  USAGE_LIMIT_RETRY_BUFFER_SECONDS,
-  MAX_DRAIN_ITEMS,
-  log,
-  linearQuery,
-  acquireLock,
-  releaseLock,
-  isLocked,
-  hasPendingIssues,
   postUsageLimitComment,
   buildUsageLimitCommentBody,
   addUsageLimitLabel,
