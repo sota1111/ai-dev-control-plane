@@ -414,6 +414,32 @@ scheduler / webhook / Discord のすべての実行リクエストは共通キ�
 - 同一 Issue が複数回登録されても1件にまとめられ、retryAt は早い方が優先される
 - scheduler 起動時にキューに残件があれば自動で drain される（再起動復旧）
 
+### キュークリーンアップ
+
+キューには以下の自動クリーンアップ機能がある:
+
+- **normalizeQueue()**: `drainQueue()` 開始時に実行し、同一 `issueId` の重複エントリを1件に統合する（retryAt の早い方を優先）
+- **syncQueueWithLinear()**: 起動時 bootstrap scan の drain 前に実行し、Linear API でキュー内 issue の状態を確認し、terminal / archived / not-found の issue をキューから削除する（API 失敗時は fail-open で削除しない）
+- **pruneExpiredQueueItems()**: `drainQueue()` 開始時に実行し、`QUEUE_ITEM_TTL_DAYS`（デフォルト7日）を超えた古い item を対象に Linear で状態確認し、terminal / archived / not-found であれば削除する（active な issue は TTL を過ぎても削除しない）
+
+環境変数 `QUEUE_ITEM_TTL_DAYS` で TTL 日数を変更できる（デフォルト: `7`）。
+
+### in-flight tracking
+
+実行中の issue は `docs/ai/auto_logs/runner.inflight.json` に issueId のリストとして記録される。
+
+- `drainQueue()` が `runItem()` を呼ぶ前に `addInflight(issueId)` を実行し、finally で `removeInflight(issueId)` を実行する
+- Webhook 受信時の重複チェックは `isQueuedOrRunning(issueId)` で行い、キュー内 AND 実行中の両方を対象にする
+- プロセス再起動時に stale な inflight ファイルが残る場合があるが、キュー正規化・Linear 状態確認によりその issue の再実行可否を判断する
+
+### Webhook event dedupe
+
+Linear からの Webhook 再送を防ぐため、受信イベントを `docs/ai/auto_logs/linear.webhook-events.json` に記録する。
+
+- event key は `body.id`（Linear 付与のユニーク ID）を使用する。未設定の場合は `type + action + issueId + updatedAt` の SHA-256 hash を使用する
+- 同一 key を1時間以内に再受信した場合は `ignored: duplicate event` として処理をスキップする
+- 1時間を超えたエントリは次回読み込み時に自動的にパージされる
+
 ## Queue 処理順序
 
 webhook / startup-scan / Discord retry / scheduler の共通 queue は以下の優先順で処理されます。

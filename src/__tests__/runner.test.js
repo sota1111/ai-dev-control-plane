@@ -516,4 +516,257 @@ describe('runner', () => {
       expect(writtenBodies.some(b => b.includes('commentCreate'))).toBe(true);
     });
   });
+
+  describe('normalizeQueue', () => {
+    it('deduplicates items with same issueId and merges retryAt', () => {
+      const future1 = new Date(Date.now() + 10000).toISOString();
+      const future2 = new Date(Date.now() + 20000).toISOString();
+      const queue = [
+        { issueId: 'SOT-1', retryAt: future2, attemptCount: 1, enqueuedAt: '2026-06-16T00:00:00Z' },
+        { issueId: 'SOT-1', retryAt: future1, attemptCount: 1, enqueuedAt: '2026-06-16T00:01:00Z' }
+      ];
+      const normalized = runner.normalizeQueue(queue);
+      expect(normalized.length).toBe(1);
+      expect(normalized[0].issueId).toBe('SOT-1');
+      expect(normalized[0].retryAt).toBe(future1);
+      expect(normalized[0].attemptCount).toBe(2);
+      expect(normalized[0].enqueuedAt).toBe('2026-06-16T00:00:00Z');
+    });
+
+    it('immediate (null retryAt) beats future time', () => {
+      const future = new Date(Date.now() + 10000).toISOString();
+      const queue = [
+        { issueId: 'SOT-1', retryAt: future },
+        { issueId: 'SOT-1', retryAt: null }
+      ];
+      const normalized = runner.normalizeQueue(queue);
+      expect(normalized[0].retryAt).toBe(null);
+    });
+
+    it('keeps items with different issueIds unchanged', () => {
+      const queue = [
+        { issueId: 'SOT-1' },
+        { issueId: 'SOT-2' }
+      ];
+      const normalized = runner.normalizeQueue(queue);
+      expect(normalized.length).toBe(2);
+    });
+  });
+
+  describe('syncQueueWithLinear', () => {
+    let writeSpy;
+    beforeEach(() => {
+      writeSpy = jest.fn();
+    });
+
+    function setupLinearMocks(responses) {
+      let index = 0;
+      https.request.mockImplementation((options, callback) => {
+        const responseData = JSON.stringify({ data: responses[index++] });
+        const res = {
+          on: jest.fn((event, cb) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: writeSpy,
+          end: jest.fn(),
+          destroy: jest.fn()
+        };
+      });
+    }
+
+    it('removes not-found issue from queue', async () => {
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-NOTFOUND' }]));
+      setupLinearMocks([{ issue: null }]);
+
+      await runner.syncQueueWithLinear();
+
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.queue.json.tmp'),
+        expect.stringContaining('[]')
+      );
+    });
+
+    it('removes archived issue from queue', async () => {
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-ARCHIVED' }]));
+      setupLinearMocks([{ issue: { id: 'SOT-ARCHIVED', archivedAt: '2026-06-01T00:00:00Z' } }]);
+
+      await runner.syncQueueWithLinear();
+
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.queue.json.tmp'),
+        expect.stringContaining('[]')
+      );
+    });
+
+    it('removes terminal issue from queue', async () => {
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-DONE' }]));
+      setupLinearMocks([{ issue: { id: 'SOT-DONE', state: { type: 'completed', name: 'Done' } } }]);
+
+      await runner.syncQueueWithLinear();
+
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.queue.json.tmp'),
+        expect.stringContaining('[]')
+      );
+    });
+
+    it('keeps active issue in queue', async () => {
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-ACTIVE' }]));
+      setupLinearMocks([{ issue: { id: 'SOT-ACTIVE', state: { type: 'started', name: 'In Progress' } } }]);
+
+      await runner.syncQueueWithLinear();
+
+      // No writeFileSync with empty queue should be called if only active items
+      const writeCalls = fs.writeFileSync.mock.calls.filter(c => c[0].includes('runner.queue.json.tmp'));
+      // If writeFileSync was called, it should still contain SOT-ACTIVE
+      if (writeCalls.length > 0) {
+        expect(writeCalls[writeCalls.length - 1][1]).toContain('SOT-ACTIVE');
+      }
+    });
+
+    it('fail-open: keeps item on API error', async () => {
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-ERROR' }]));
+      https.request.mockImplementation((options, callback) => {
+        const req = new EventEmitter();
+        req.write = jest.fn();
+        req.end = jest.fn();
+        process.nextTick(() => req.emit('error', new Error('API down')));
+        return req;
+      });
+
+      await runner.syncQueueWithLinear();
+
+      const writeCalls = fs.writeFileSync.mock.calls.filter(c => c[0].includes('runner.queue.json.tmp'));
+      expect(writeCalls.length).toBe(0); // Should not save cleaned queue
+    });
+  });
+
+  describe('in-flight tracking', () => {
+    it('addInflight and isInflight work', () => {
+      fs.existsSync.mockReturnValue(false);
+      runner.addInflight('SOT-1');
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.inflight.json.tmp'),
+        expect.stringContaining('SOT-1')
+      );
+      
+      fs.existsSync.mockImplementation((path) => path === runner.INFLIGHT_FILE);
+      fs.readFileSync.mockReturnValue(JSON.stringify(['SOT-1']));
+      expect(runner.isInflight('SOT-1')).toBe(true);
+    });
+
+    it('removeInflight works', () => {
+      fs.existsSync.mockImplementation((path) => path === runner.INFLIGHT_FILE);
+      fs.readFileSync.mockReturnValue(JSON.stringify(['SOT-1', 'SOT-2']));
+      
+      runner.removeInflight('SOT-1');
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.inflight.json.tmp'),
+        expect.stringContaining('SOT-2')
+      );
+    });
+
+    it('isQueuedOrRunning returns true if queued', () => {
+      fs.existsSync.mockImplementation((path) => path === runner.QUEUE_FILE);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-1' }]));
+      expect(runner.isQueuedOrRunning('SOT-1')).toBe(true);
+    });
+
+    it('isQueuedOrRunning returns true if inflight', () => {
+      fs.existsSync.mockImplementation((path) => path === runner.INFLIGHT_FILE);
+      fs.readFileSync.mockReturnValue(JSON.stringify(['SOT-1']));
+      expect(runner.isQueuedOrRunning('SOT-1')).toBe(true);
+    });
+  });
+
+  describe('pruneExpiredQueueItems', () => {
+    let writeSpy;
+    beforeEach(() => {
+      writeSpy = jest.fn();
+    });
+
+    function setupLinearMocks(responses) {
+      let index = 0;
+      https.request.mockImplementation((options, callback) => {
+        const responseData = JSON.stringify({ data: responses[index++] });
+        const res = {
+          on: jest.fn((event, cb) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: writeSpy,
+          end: jest.fn(),
+          destroy: jest.fn()
+        };
+      });
+    }
+
+    it('removes expired terminal issue', async () => {
+      const oldDate = new Date(Date.now() - (runner.QUEUE_ITEM_TTL_DAYS + 1) * 24 * 60 * 60 * 1000).toISOString();
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-OLD', enqueuedAt: oldDate }]));
+      setupLinearMocks([{ issue: { id: 'SOT-OLD', state: { type: 'completed' } } }]);
+
+      await runner.pruneExpiredQueueItems();
+
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.queue.json.tmp'),
+        expect.stringContaining('[]')
+      );
+    });
+
+    it('keeps expired active issue', async () => {
+      const oldDate = new Date(Date.now() - (runner.QUEUE_ITEM_TTL_DAYS + 1) * 24 * 60 * 60 * 1000).toISOString();
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-OLD-ACTIVE', enqueuedAt: oldDate }]));
+      setupLinearMocks([{ issue: { id: 'SOT-OLD-ACTIVE', state: { type: 'started' } } }]);
+
+      await runner.pruneExpiredQueueItems();
+
+      const writeCalls = fs.writeFileSync.mock.calls.filter(c => c[0].includes('runner.queue.json.tmp'));
+      expect(writeCalls.length).toBe(0);
+    });
+
+    it('does not check recent issues', async () => {
+      const recentDate = new Date().toISOString();
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-RECENT', enqueuedAt: recentDate }]));
+
+      await runner.pruneExpiredQueueItems();
+
+      expect(https.request).not.toHaveBeenCalled();
+    });
+
+    it('cleanup failure does not drop queue', async () => {
+      const oldDate = new Date(Date.now() - (runner.QUEUE_ITEM_TTL_DAYS + 1) * 24 * 60 * 60 * 1000).toISOString();
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-KEEP', enqueuedAt: oldDate }]));
+      https.request.mockImplementation(() => {
+        const req = new EventEmitter();
+        req.write = jest.fn();
+        req.end = jest.fn();
+        process.nextTick(() => req.emit('error', new Error('Linear unavailable')));
+        return req;
+      });
+
+      await runner.pruneExpiredQueueItems();
+
+      const writeCalls = fs.writeFileSync.mock.calls.filter(c => c[0].includes('runner.queue.json.tmp'));
+      expect(writeCalls.length).toBe(0);
+    });
+  });
 });

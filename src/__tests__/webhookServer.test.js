@@ -1,4 +1,7 @@
 const request = require('supertest');
+const fs = require('fs');
+const path = require('path');
+const WEBHOOK_EVENTS_FILE = path.join('/tmp/test-logs', 'linear.webhook-events.json');
 
 jest.mock('../runner', () => ({
   SKIPPED_LOCKED: 75,
@@ -21,6 +24,8 @@ jest.mock('../runner', () => ({
   dequeue: jest.fn().mockReturnValue(null),
   removeFromQueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
+  isQueuedOrRunning: jest.fn().mockReturnValue(false),
+  syncQueueWithLinear: jest.fn().mockResolvedValue(undefined),
   isLocked: jest.fn().mockReturnValue(false),
   loadQueue: jest.fn().mockReturnValue([]),
   getIssueExecutionEligibility: jest.fn().mockResolvedValue({ eligible: true }),
@@ -77,9 +82,13 @@ describe('webhook usage limit retry', () => {
     });
 
     const runner = require('../runner');
+    if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
+      try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
+    }
     runner.acquireLock.mockReturnValue(true);
     runner.hasPendingIssues.mockResolvedValue(true);
     runner.isQueued.mockReturnValue(false);
+    runner.isQueuedOrRunning.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
     runner.runItem.mockResolvedValue(undefined);
@@ -88,7 +97,8 @@ describe('webhook usage limit retry', () => {
   });
 
 
-  afterEach(() => {
+  afterEach(async () => {
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
     jest.restoreAllMocks();
   });
 
@@ -122,6 +132,7 @@ describe('webhook usage limit retry', () => {
 
     // Same issueId can be ignored if already queued
     runner.isQueued.mockReturnValue(true);
+    runner.isQueuedOrRunning.mockReturnValue(true);
     const res2 = await request(app).post('/webhooks/linear').send(issuePayload(id));
     expect(res2.body.status).toBe('ignored');
   });
@@ -209,7 +220,11 @@ describe('webhook usage limit retry', () => {
     // After successful run, runner.runItem handles clearUsageLimitCooldown + removeUsageLimitLabel internally
 
     // Second webhook is accepted after first completes
+    if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
+      try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
+    }
     runner.isQueued.mockReturnValue(false);
+    runner.isQueuedOrRunning.mockReturnValue(false);
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
     const res2 = await request(app).post('/webhooks/linear').send(issuePayload(id));
     expect(res2.body.status).toBe('accepted');
@@ -307,9 +322,13 @@ describe('webhook issue filtering', () => {
     });
 
     const runner = require('../runner');
+    if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
+      try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
+    }
     runner.acquireLock.mockReturnValue(true);
     runner.hasPendingIssues.mockResolvedValue(true);
     runner.isQueued.mockReturnValue(false);
+    runner.isQueuedOrRunning.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
     runner.runItem.mockResolvedValue(undefined);
@@ -317,7 +336,8 @@ describe('webhook issue filtering', () => {
     runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
     jest.restoreAllMocks();
   });
 
@@ -489,9 +509,13 @@ describe('pre-execution eligibility check', () => {
     });
 
     const runner = require('../runner');
+    if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
+      try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
+    }
     runner.acquireLock.mockReturnValue(true);
     runner.hasPendingIssues.mockResolvedValue(true);
     runner.isQueued.mockReturnValue(false);
+    runner.isQueuedOrRunning.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
     runner.runItem.mockResolvedValue(undefined);
@@ -499,7 +523,8 @@ describe('pre-execution eligibility check', () => {
     runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await new Promise(resolve => originalSetTimeout(resolve, 50));
     jest.restoreAllMocks();
   });
 
@@ -651,5 +676,83 @@ describe('runBootstrapScan', () => {
     await runBootstrapScan();
 
     expect(runner.drainQueue).not.toHaveBeenCalled();
+  });
+});
+
+describe('webhook event dedupe', () => {
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
+      try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
+    }
+
+    const runner = require('../runner');
+    runner.isQueuedOrRunning.mockReturnValue(false);
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+    runner.hasPendingIssues.mockResolvedValue(true);
+    runner.dequeue.mockReturnValue(null);
+    runner.runItem.mockResolvedValue(undefined);
+    runner.drainQueue.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
+      try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
+    }
+  });
+
+  test('ignores duplicate event with same body.id', async () => {
+    const payload = {
+      id: 'evt-123',
+      type: 'Issue',
+      action: 'create',
+      data: { identifier: 'SOT-1', title: 'test' }
+    };
+
+    // First request
+    const res1 = await request(app).post('/webhooks/linear').send(payload);
+    expect(res1.status).toBe(200);
+    expect(res1.body.status).toBe('accepted');
+
+    // Second request (duplicate)
+    const res2 = await request(app).post('/webhooks/linear').send(payload);
+    expect(res2.status).toBe(200);
+    expect(res2.body.status).toBe('ignored');
+    expect(res2.body.reason).toBe('duplicate event');
+  });
+
+  test('deduplicates based on hash when body.id is missing', async () => {
+    const payload = {
+      type: 'Issue',
+      action: 'update',
+      data: { identifier: 'SOT-1', title: 'test', updatedAt: '2026-06-16T10:00:00Z' }
+    };
+
+    const res1 = await request(app).post('/webhooks/linear').send(payload);
+    expect(res1.body.status).toBe('accepted');
+
+    const res2 = await request(app).post('/webhooks/linear').send(payload);
+    expect(res2.body.status).toBe('ignored');
+  });
+
+  test('webhook resend while issue is in-flight is ignored', async () => {
+    const runner = require('../runner');
+    runner.isQueuedOrRunning.mockReturnValue(true);
+
+    const payload = {
+      id: 'evt-inflight-resend',
+      type: 'Issue',
+      action: 'update',
+      data: { identifier: 'SOT-INFLIGHT', title: 'test', state: { name: 'In Progress', type: 'started' }, labels: [] }
+    };
+
+    const res = await request(app).post('/webhooks/linear').send(payload);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ignored');
+    expect(res.body.reason).toBe('already queued or running: SOT-INFLIGHT');
+    expect(runner.enqueue).not.toHaveBeenCalled();
+    expect(runner.runItem).not.toHaveBeenCalled();
   });
 });
