@@ -15,6 +15,8 @@ const MAX_DRAIN_ITEMS = 20;  // safety guard against infinite drain loops
 const LOG_FILE = path.join(LOG_DIR, 'auto_runner.log');
 const STALE_LOCK_MS = 30 * 60 * 1000;  // 30 minutes
 const LINEAR_API_URL = 'https://api.linear.app/graphql';
+const QUEUE_ITEM_TTL_DAYS = parseInt(process.env.QUEUE_ITEM_TTL_DAYS || '7', 10);
+const INFLIGHT_FILE = path.join(LOG_DIR, 'runner.inflight.json');
 
 function log(tag, message, context = {}) {
   try {
@@ -502,6 +504,180 @@ function loadQueue() {
   }
 }
 
+function normalizeQueue(queue) {
+  if (!Array.isArray(queue) || queue.length === 0) return [];
+
+  const map = new Map();
+  for (const item of queue) {
+    const issueId = item.issueId;
+    if (!issueId) continue;
+
+    if (!map.has(issueId)) {
+      map.set(issueId, { ...item });
+      continue;
+    }
+
+    const existing = map.get(issueId);
+
+    // Merge retryAt: null (immediate) beats any future time; among two future times, earlier wins
+    const existingRetryMs = existing.retryAt ? new Date(existing.retryAt).getTime() : null;
+    const newRetryMs = item.retryAt ? new Date(item.retryAt).getTime() : null;
+    let mergedRetryAt;
+    if (newRetryMs === null || existingRetryMs === null) {
+      mergedRetryAt = null;
+    } else {
+      mergedRetryAt = new Date(Math.min(existingRetryMs, newRetryMs)).toISOString();
+    }
+
+    // priorityRank: take the lower rank value (higher urgency)
+    const existingRank = existing.priorityRank ?? getPriorityRank(existing.priority);
+    const newRank = item.priorityRank ?? getPriorityRank(item.priority);
+    const mergedRank = Math.min(existingRank, newRank);
+
+    // enqueuedAt: take the earlier timestamp
+    const existingEnqMs = existing.enqueuedAt ? new Date(existing.enqueuedAt).getTime() : Infinity;
+    const newEnqMs = item.enqueuedAt ? new Date(item.enqueuedAt).getTime() : Infinity;
+    const mergedEnqueuedAt = existingEnqMs <= newEnqMs ? existing.enqueuedAt : item.enqueuedAt;
+
+    // attemptCount: sum both counts
+    const mergedAttemptCount = (existing.attemptCount || 0) + (item.attemptCount || 0);
+
+    // lastAttemptAt: take the later timestamp
+    const existingLastMs = existing.lastAttemptAt ? new Date(existing.lastAttemptAt).getTime() : 0;
+    const newLastMs = item.lastAttemptAt ? new Date(item.lastAttemptAt).getTime() : 0;
+    const mergedLastAttemptAt = existingLastMs >= newLastMs ? existing.lastAttemptAt : item.lastAttemptAt;
+
+    map.set(issueId, {
+      ...existing,
+      ...item, // keep fields from the latest one by default
+      retryAt: mergedRetryAt,
+      priorityRank: mergedRank,
+      enqueuedAt: mergedEnqueuedAt,
+      attemptCount: mergedAttemptCount,
+      lastAttemptAt: mergedLastAttemptAt,
+      // Restore some fields from existing if they were null in item
+      issueIdentifier: item.issueIdentifier || existing.issueIdentifier || null,
+      trigger: item.trigger || existing.trigger || null,
+      reason: item.reason || existing.reason || null,
+      priority: item.priority !== null ? item.priority : existing.priority,
+      priorityLabel: item.priorityLabel || existing.priorityLabel || null,
+      parentIssueId: item.parentIssueId || existing.parentIssueId || null,
+      parentIssueIdentifier: item.parentIssueIdentifier || existing.parentIssueIdentifier || null,
+      queueGroup: item.queueGroup || existing.queueGroup || null,
+      queueGroupOrder: item.queueGroupOrder || existing.queueGroupOrder || null
+    });
+  }
+  return Array.from(map.values());
+}
+
+async function syncQueueWithLinear() {
+  const queue = loadQueue();
+  if (queue.length === 0) return;
+
+  const toRemove = [];
+  for (const item of queue) {
+    try {
+      const query = `
+        query($id: String!) {
+          issue(id: $id) {
+            id
+            archivedAt
+            state { type name }
+          }
+        }
+      `;
+      const data = await linearQuery(query, { id: item.issueId });
+
+      if (!data.issue) {
+        log('QUEUE', `syncQueueWithLinear: removing not-found issue`, { issue: item.issueId });
+        toRemove.push(item.issueId);
+        continue;
+      }
+
+      const { archivedAt, state } = data.issue;
+
+      if (archivedAt) {
+        log('QUEUE', `syncQueueWithLinear: removing archived issue`, { issue: item.issueId });
+        toRemove.push(item.issueId);
+        continue;
+      }
+
+      const isTerminal = ['completed', 'canceled', 'duplicate'].includes(state?.type)
+        || ['Done', 'Canceled', 'Cancelled', 'Duplicate'].includes(state?.name);
+
+      if (isTerminal) {
+        log('QUEUE', `syncQueueWithLinear: removing terminal issue state=${state?.name}`, { issue: item.issueId });
+        toRemove.push(item.issueId);
+      }
+    } catch (err) {
+      // Fail-open: API failure does not remove the item
+      log('QUEUE', `syncQueueWithLinear: API error for ${item.issueId}, skipping: ${err.message}`);
+    }
+  }
+
+  if (toRemove.length > 0) {
+    const cleaned = loadQueue().filter(item => !toRemove.includes(item.issueId));
+    saveQueue(cleaned);
+    log('QUEUE', `syncQueueWithLinear: removed ${toRemove.length} item(s)`, { removed: toRemove.join(',') });
+  }
+}
+
+async function pruneExpiredQueueItems() {
+  const queue = loadQueue();
+  if (queue.length === 0) return;
+
+  const now = Date.now();
+  const ttlMs = QUEUE_ITEM_TTL_DAYS * 24 * 60 * 60 * 1000;
+
+  const expired = queue.filter(item => {
+    if (!item.enqueuedAt) return false;
+    const age = now - new Date(item.enqueuedAt).getTime();
+    return age > ttlMs;
+  });
+
+  if (expired.length === 0) return;
+
+  const toRemove = [];
+  for (const item of expired) {
+    try {
+      const query = `
+        query($id: String!) {
+          issue(id: $id) {
+            id
+            archivedAt
+            state { type name }
+          }
+        }
+      `;
+      const data = await linearQuery(query, { id: item.issueId });
+
+      if (!data.issue) {
+        toRemove.push(item.issueId);
+        continue;
+      }
+      const { archivedAt, state } = data.issue;
+      if (archivedAt) {
+        toRemove.push(item.issueId);
+        continue;
+      }
+      const isTerminal = ['completed', 'canceled', 'duplicate'].includes(state?.type)
+        || ['Done', 'Canceled', 'Cancelled', 'Duplicate'].includes(state?.name);
+      if (isTerminal) {
+        toRemove.push(item.issueId);
+      }
+      // Active issues older than TTL: keep in queue (do not blindly remove active issues)
+    } catch (err) {
+      log('QUEUE', `pruneExpiredQueueItems: API error for ${item.issueId}, skip: ${err.message}`);
+    }
+  }
+
+  if (toRemove.length > 0) {
+    const cleaned = loadQueue().filter(item => !toRemove.includes(item.issueId));
+    saveQueue(cleaned);
+    log('QUEUE', `pruneExpiredQueueItems: removed ${toRemove.length} expired item(s)`, { removed: toRemove.join(',') });
+  }
+}
+
 function saveQueue(queue) {
   try {
     if (!fs.existsSync(LOG_DIR)) {
@@ -710,6 +886,49 @@ function removeFromQueue(issueId) {
 function isQueued(issueId) {
   const queue = loadQueue();
   return queue.some(item => item.issueId === issueId);
+}
+
+function loadInflight() {
+  try {
+    if (!fs.existsSync(INFLIGHT_FILE)) return [];
+    const content = fs.readFileSync(INFLIGHT_FILE, 'utf8');
+    const parsed = JSON.parse(content);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+function saveInflight(list) {
+  try {
+    if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+    const tmp = INFLIGHT_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(list, null, 2));
+    fs.renameSync(tmp, INFLIGHT_FILE);
+  } catch (err) {
+    log('RUNNER', `saveInflight ERROR: ${err.message}`);
+  }
+}
+
+function addInflight(issueId) {
+  const list = loadInflight();
+  if (!list.includes(issueId)) {
+    list.push(issueId);
+    saveInflight(list);
+  }
+}
+
+function removeInflight(issueId) {
+  const list = loadInflight().filter(id => id !== issueId);
+  saveInflight(list);
+}
+
+function isInflight(issueId) {
+  return loadInflight().includes(issueId);
+}
+
+function isQueuedOrRunning(issueId) {
+  return isQueued(issueId) || isInflight(issueId);
 }
 
 async function notifyUsageLimitToAllActiveIssues(epochSeconds) {
@@ -933,6 +1152,17 @@ async function runItem(item) {
 }
 
 async function drainQueue() {
+  // Normalize queue to eliminate any duplicate issueId entries
+  const normalizedQueue = normalizeQueue(loadQueue());
+  saveQueue(normalizedQueue);
+
+  // Prune expired items (TTL-based, with Linear confirmation)
+  try {
+    await pruneExpiredQueueItems();
+  } catch (err) {
+    log('QUEUE', `drainQueue: pruneExpiredQueueItems error (non-fatal): ${err.message}`);
+  }
+
   let processedCount = 0;
   let item;
   let lastProcessedGroup = null;
@@ -982,6 +1212,7 @@ async function drainQueue() {
       break;
     }
     try {
+      addInflight(item.issueId);
       await runItem(item);
       processedCount++;
       // Track this item's issueId as the last processed group anchor for child issues
@@ -990,6 +1221,7 @@ async function drainQueue() {
       log('QUEUE', `drain error: ${err.message}`, { issue: item.issueId });
       lastProcessedGroup = null;
     } finally {
+      removeInflight(item.issueId);
       releaseLock();
     }
   }
@@ -1013,6 +1245,8 @@ module.exports = {
   LINEAR_API_URL,
   USAGE_LIMIT_RETRY_BUFFER_SECONDS,
   MAX_DRAIN_ITEMS,
+  QUEUE_ITEM_TTL_DAYS,
+  INFLIGHT_FILE,
   log,
   linearQuery,
   acquireLock,
@@ -1031,12 +1265,21 @@ module.exports = {
   removeUsageLimitLabelFromAllIssues,
   loadQueue,
   saveQueue,
+  normalizeQueue,
+  syncQueueWithLinear,
+  pruneExpiredQueueItems,
   enqueue,
   getPriorityRank,
   getIssueQueueMetadata,
   dequeue,
   removeFromQueue,
   isQueued,
+  loadInflight,
+  saveInflight,
+  addInflight,
+  removeInflight,
+  isInflight,
+  isQueuedOrRunning,
   setIssueInProgress,
   getIssueExecutionEligibility,
   triggerRun,

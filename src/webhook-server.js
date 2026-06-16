@@ -25,6 +25,9 @@ if (_discordNotifier) {
 }
 
 const runner = require('./runner');
+const fs = require('fs');
+const WEBHOOK_EVENTS_FILE = path.join(runner.LOG_DIR, 'linear.webhook-events.json');
+const WEBHOOK_EVENT_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 // Distinguish parent-received signals from child process signals
 process.on('SIGTERM', () => {
@@ -68,6 +71,59 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 const LINEAR_WEBHOOK_SECRET = process.env.LINEAR_WEBHOOK_SECRET;
 
+function loadDedupeStore() {
+  try {
+    if (!fs.existsSync(WEBHOOK_EVENTS_FILE)) return {};
+    const content = fs.readFileSync(WEBHOOK_EVENTS_FILE, 'utf8');
+    const store = JSON.parse(content);
+    // Prune expired entries (older than 1 hour)
+    const now = Date.now();
+    const pruned = {};
+    for (const [key, receivedAt] of Object.entries(store)) {
+      if (now - new Date(receivedAt).getTime() < WEBHOOK_EVENT_TTL_MS) {
+        pruned[key] = receivedAt;
+      }
+    }
+    return pruned;
+  } catch (err) {
+    return {};
+  }
+}
+
+function saveDedupeStore(store) {
+  try {
+    if (!fs.existsSync(runner.LOG_DIR)) fs.mkdirSync(runner.LOG_DIR, { recursive: true });
+    const tmp = WEBHOOK_EVENTS_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(store, null, 2));
+    fs.renameSync(tmp, WEBHOOK_EVENTS_FILE);
+  } catch (err) {
+    runner.log('WEBHOOK', `saveDedupeStore ERROR: ${err.message}`);
+  }
+}
+
+function getEventKey(body, issueId) {
+  if (body.id) return body.id;
+  // Fallback: hash of type+action+issueId+updatedAt
+  const raw = JSON.stringify({
+    type: body.type || '',
+    action: body.action || '',
+    issueId: issueId || '',
+    updatedAt: body.data && body.data.updatedAt ? body.data.updatedAt : ''
+  });
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+function isDedupeEvent(key) {
+  const store = loadDedupeStore();
+  return !!store[key];
+}
+
+function markDedupeEvent(key) {
+  const store = loadDedupeStore();
+  store[key] = new Date().toISOString();
+  saveDedupeStore(store);
+}
+
 function verifyLinearSignature(req) {
   if (!LINEAR_WEBHOOK_SECRET) {
     return true; // development mode: skip verification
@@ -106,6 +162,14 @@ app.post('/webhooks/linear', (req, res) => {
   }
 
   runner.log('WEBHOOK', `Received event type=${body.type || 'unknown'} action=${body.action || 'unknown'} at ${new Date().toISOString()}`);
+
+  // Deduplicate: ignore retransmitted events
+  const eventKey = getEventKey(body, body.data && body.data.identifier ? body.data.identifier : body.data && body.data.id ? body.data.id : '');
+  if (isDedupeEvent(eventKey)) {
+    runner.log('WEBHOOK', `ignored: duplicate event key=${eventKey}`);
+    return res.status(200).json({ status: 'ignored', reason: 'duplicate event' });
+  }
+  markDedupeEvent(eventKey);
 
   if (body.type !== "Issue") {
     return res.status(200).json({ status: "ignored", reason: "not an issue event" });
@@ -156,8 +220,8 @@ app.post('/webhooks/linear', (req, res) => {
   }
 
   // 既に処理中またはキュー内にある場合はスキップ
-  if (runner.isQueued(issueId)) {
-    return res.status(200).json({ status: "ignored", reason: `already queued: ${issueId}` });
+  if (runner.isQueuedOrRunning(issueId)) {
+    return res.status(200).json({ status: "ignored", reason: `already queued or running: ${issueId}` });
   }
 
   res.status(200).json({ status: "accepted", issueId: issueId });
@@ -345,6 +409,12 @@ async function runBootstrapScan() {
   runner.log('BOOTSTRAP', `startup scan complete: enqueued=${enqueuedCount} skipped=${skippedCount}`);
 
   if (enqueuedCount > 0) {
+    runner.log('BOOTSTRAP', 'startup scan: running syncQueueWithLinear before drain');
+    try {
+      await runner.syncQueueWithLinear();
+    } catch (err) {
+      runner.log('BOOTSTRAP', `startup scan: syncQueueWithLinear error (non-fatal): ${err.message}`);
+    }
     runner.log('BOOTSTRAP', 'startup scan: starting drainQueue');
     try {
       await runner.drainQueue();
