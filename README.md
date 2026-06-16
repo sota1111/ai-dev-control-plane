@@ -393,26 +393,57 @@ scheduler と webhook は **同一のロックファイル** `docs/ai/auto_logs/
 - ロック取得失敗時は Issue をキューに残し（または再投入し）、後続の drain で実行する
 - SKIPPED_LOCKED は成功扱いしない
 - ロックファイルのプロセスが死んでいる場合、または 30分以上経過した場合は stale lock として自動削除・再取得する
-
 ## usage-limit 検知時の挙動
 
 `run_auto.sh` が usage-limit で失敗した場合:
 
-1. Linear の対象 Issue にコメントを投稿（次回実行予定時刻 JST 付き）。同一 Issue・同一 retry 時刻のコメントが既に存在する場合は投稿しない（重複防止）
-2. 対象 Issue に `usage-limit` ラベルを付与（既存ラベルは保持）
-3. リセット時刻 +10分後を Claude Code 全体の cooldown として `runner.cooldown.json` に永続化
-4. cooldown 中に届いたリクエスト（scheduler/webhook/Discord）は実行せず、同じ retry 時刻でキューに追加
-5. cooldown 解除後に自動で drain が実行され、キューの Issue が順次処理される
-6. 成功した場合は cooldown と `usage-limit` ラベルを除去
+1. **検知と分類**: エラー出力を解析し、以下のタイプに分類します:
+   - `session_limit`: セッションあたりの制限（リトライ可能）
+   - `api_429`: API レート制限（リトライ可能）
+   - `weekly_limit`: 週次制限（リトライ不可）
+   - `auth_error`: 認証エラー（リトライ不可）
+   - `network_error`: ネットワークエラー（リトライ可能）
+   - `model_unavailable`: モデル一時利用不可（リトライ可能）
+   - `context_limit`: コンテキスト長制限（リトライ不可・要要約）
+   - `unknown`: 分類不能（デフォルトはリトライ不可）
+2. **通知**: Linear の対象 Issue にコメントを投稿（次回実行予定時刻 JST 付き）。同一 Issue・同一 retry 時刻のコメントが既に存在する場合は投稿しない（重複防止）。対象 Issue に `usage-limit` ラベルを付与します。
+3. **Cooldown**: リセット時刻 +10分後を Claude Code 全体の cooldown として `runner.cooldown.json` に永続化します。ここには `reason` や `limitType` も記録されます。
+4. **自動リトライ**: リトライ可能なタイプの場合、cooldown 解除時刻を `retryAt` としてキューに再投入します。この際 `reason=usage_limit` が付与され、再開モードで実行されます。
+5. **解除**: 成功した場合は cooldown と `usage-limit` ラベルを除去します。
+
+---
+
+## Resume (Issue-Rerun)
+
+中途で中断（usage-limit 等）されたタスクを、前回までのコンテキストを保持して再開する仕組みです。
+
+- **実行**: `bash scripts/ai/run_auto.sh --resume` または Discord `/resume issue`
+- **専用プロンプト**: `prompts/claude/auto_resume.md` を使用し、無駄な重複作業を避けます
+- **メタデータ**: `docs/ai/auto_logs/resume/<issue>.json` に前回の終了理由、リセット時刻、Git 状態、ログの断片を記録します
+- **チェックポイント**: ログに `[RESUME]` タグで再開ポイントを記録し、トレーサビリティを確保します
+- **統合**: スケジューラー、Webhook、Discord、手動実行すべてがこの共通パスを使用します
+
+---
+
+## Session-Continue (Opt-in)
+
+既存の tmux pane で実行中の Claude Code セッションに `continue` を送信する補助機能です。
+
+- **実行**: `npm run resume:session -- --pane <pane> [--issue <id>]` または Discord `/resume session`
+- **検証**: 送信前に pane が存在し、フォアグラウンドで Claude Code が動作しているか確認します。
+- **待機状態**: usage-limit 中であれば `docs/ai/auto_logs/runner.session-continue.json` に `waiting` 状態を記録し、時刻まで待機します。
+- **補完**: Issue-Rerun (Resume) を置き換えるものではなく、人間が手動で pane を開いている場合の補助として機能します。
+
+---
 
 ## 共通実行キュー（runner.queue.json）
-
 scheduler / webhook / Discord のすべての実行リクエストは共通キュー `docs/ai/auto_logs/runner.queue.json` を経由する。
 
 - `runner.enqueue(issueId, trigger, retryAt)` でキューに追加（重複排除・更新）
 - `runner.drainQueue()` でキューを順次処理（MAX 20件/回）
 - キューはプロセス再起動後も永続化される
 - 同一 Issue が複数回登録されても1件にまとめられ、retryAt は早い方が優先される
+- `reason=usage_limit` で投入されたアイテムは、`run_auto.sh --resume` モードで実行されます
 - scheduler 起動時にキューに残件があれば自動で drain される（再起動復旧）
 
 ### キュークリーンアップ
@@ -553,16 +584,18 @@ https://discord.com/oauth2/authorize?client_id=<DISCORD_APPLICATION_ID>&permissi
 
 ### 利用可能なコマンド
 
-| コマンド                        | 説明                                              |
-| ------------------------------- | ------------------------------------------------- |
-| `/status`                       | 実行中Issue、ロック状態、キュー数、cooldownを表示 |
-| `/queue`                        | 実行キューの内容を表示                            |
-| `/cooldown`                     | usage-limit cooldown状態を表示                    |
-| `/pause`                        | 新規実行を一時停止                                |
-| `/resume`                       | 一時停止を解除                                    |
-| `/reply issue:SOT-xxx body:...` | 指定IssueへLinearコメントを投稿                   |
-| `/retry issue:SOT-xxx`          | 指定Issueを再実行キューへ投入                     |
-| `/ask`                          | 自然言語で質問・指示（モーダルが開く）            |
+| コマンド                                  | 説明                                                                     |
+| ----------------------------------------- | ------------------------------------------------------------------------ |
+| `/status`                                 | 実行中Issue、ロック、キュー、cooldown、**session-continue 待機状態**を表示 |
+| `/queue`                                  | 実行キューの内容を表示                                                   |
+| `/cooldown`                               | usage-limit cooldown状態（**種別含む**）を表示                          |
+| `/pause`                                  | 新規実行を一時停止                                                       |
+| `/resume pause`                           | 一時停止を解除（従来の `/resume`）                                       |
+| `/resume issue id:SOT-xxx`                | 指定 Issue を再開モードで再実行キューへ投入                              |
+| `/resume session pane:%1 [issue:SOT-xxx]` | tmux pane のセッションに continue を送信                                 |
+| `/reply issue:SOT-xxx body:...`           | 指定IssueへLinearコメントを投稿                                          |
+| `/retry issue:SOT-xxx`                    | 指定Issueを再実行キューへ投入                                            |
+| `/ask`                                    | 自然言語で質問・指示（モーダルが開く）                                    |
 
 ### ngrok URL が変わった場合の更新箇所
 

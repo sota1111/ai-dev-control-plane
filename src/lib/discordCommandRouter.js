@@ -83,7 +83,7 @@ async function handleSlashCommand(commandName, interaction) {
       result = await handlePause();
       break;
     case 'resume':
-      result = await handleResume();
+      result = await handleResume(interaction);
       break;
     case 'reply':
       result = await handleReply(interaction);

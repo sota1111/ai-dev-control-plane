@@ -466,6 +466,8 @@ function getUsageLimitCooldownUntil(nowMs = Date.now()) {
         retryAt,
         issueId: state.sourceIssueId || null,
         issueIdentifier: state.sourceIssueIdentifier || null,
+        reason: state.reason || null,
+        limitType: state.limitType || null,
         active: true
       };
     } catch (err) {

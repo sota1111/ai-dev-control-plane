@@ -31,7 +31,46 @@ const commands = [
   },
   {
     name: 'resume',
-    description: '一時停止を解除して新規実行を再開します',
+    description: '一時停止の解除、または中断されたセッションを再開します',
+    options: [
+      {
+        name: 'pause',
+        description: '一時停止を解除します（従来の /resume）',
+        type: 1, // SUB_COMMAND
+      },
+      {
+        name: 'issue',
+        description: '指定 Issue を usage-limit 後の再開モードで再実行します',
+        type: 1, // SUB_COMMAND
+        options: [
+          {
+            name: 'id',
+            description: 'Linear Issue ID (例: SOT-123)',
+            type: 3, // STRING
+            required: true,
+          },
+        ],
+      },
+      {
+        name: 'session',
+        description: 'tmux pane の Claude Code セッションに continue を送信します',
+        type: 1, // SUB_COMMAND
+        options: [
+          {
+            name: 'pane',
+            description: 'tmux pane ID (例: %1)',
+            type: 3, // STRING
+            required: true,
+          },
+          {
+            name: 'issue',
+            description: 'Linear Issue ID (例: SOT-123)',
+            type: 3, // STRING
+            required: false,
+          },
+        ],
+      },
+    ],
   },
   {
     name: 'reply',
