@@ -4,6 +4,7 @@ const https = require('https');
 const { spawn, execSync } = require('child_process');
 const { classifyUsageLimit } = require('./lib/usageLimitParser');
 const { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } = require('./lib/resumeMetadata');
+const queueOrdering = require('./lib/queueOrdering');
 
 const SKIPPED_LOCKED = 75;  // exit code when lock is not available
 const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
@@ -178,13 +179,7 @@ async function linearQuery(query, variables = {}) {
   });
 }
 
-function getPriorityRank(priority) {
-  if (priority === 1) return 1; // Urgent
-  if (priority === 2) return 2; // High
-  if (priority === 3) return 3; // Medium
-  if (priority === 4) return 4; // Low
-  return 5; // No priority (0), null, undefined, or invalid value
-}
+const getPriorityRank = queueOrdering.getPriorityRank;
 
 async function getIssueQueueMetadata(issueId) {
   try {
@@ -805,86 +800,29 @@ function dequeue(lastProcessedGroup = null) {
     const queue = loadQueue();
     const now = new Date();
 
-    // Filter to ready items (retryAt null or in the past)
-    const readyIndices = queue.reduce((acc, item, i) => {
-      if (!item.retryAt || new Date(item.retryAt) <= now) acc.push(i);
-      return acc;
-    }, []);
+    const bestIndex = queueOrdering.selectNextReadyIndex(queue, { lastProcessedGroup, now });
+    if (bestIndex === null) return null;
 
-    if (readyIndices.length === 0) return null;
+    const item = queue[bestIndex];
+    const rank = queueOrdering.effectiveRank(item);
 
-    // Helper: get effective priority rank for an item
-    function effectiveRank(item) {
-      return item.priorityRank != null ? item.priorityRank : getPriorityRank(item.priority);
+    // Determine which branch was taken for logging (Urgent > Group > Normal)
+    let logType = 'dequeued';
+    if (rank === 1) {
+      logType = 'dequeued (urgent)';
+    } else if (lastProcessedGroup && item.queueGroup === lastProcessedGroup) {
+      logType = 'dequeued (group priority)';
     }
 
-    // Helper: compare two candidate indices, returning the better one
-    function betterIndex(aIdx, bIdx, groupMode = false) {
-      const a = queue[aIdx];
-      const b = queue[bIdx];
-      const rankA = effectiveRank(a);
-      const rankB = effectiveRank(b);
-
-      if (rankA < rankB) return aIdx;
-      if (rankA > rankB) return bIdx;
-
-      if (groupMode) {
-        // Within group: compare queueGroupOrder first (lower/earlier wins, null last)
-        const orderA = a.queueGroupOrder != null ? new Date(a.queueGroupOrder).getTime() : Infinity;
-        const orderB = b.queueGroupOrder != null ? new Date(b.queueGroupOrder).getTime() : Infinity;
-        if (orderA < orderB) return aIdx;
-        if (orderA > orderB) return bIdx;
-      } else {
-        // Normal mode: compare retryAt (null = immediate = wins)
-        const retryA = a.retryAt ? new Date(a.retryAt).getTime() : -Infinity;
-        const retryB = b.retryAt ? new Date(b.retryAt).getTime() : -Infinity;
-        if (retryA < retryB) return aIdx;
-        if (retryA > retryB) return bIdx;
-      }
-
-      // Compare enqueuedAt (earlier wins)
-      const enqA = a.enqueuedAt ? new Date(a.enqueuedAt).getTime() : 0;
-      const enqB = b.enqueuedAt ? new Date(b.enqueuedAt).getTime() : 0;
-      return enqA <= enqB ? aIdx : bIdx;
-    }
-
-    // Step 1: Check for Urgent items (priorityRank === 1) — always highest priority
-    const urgentIndices = readyIndices.filter(i => effectiveRank(queue[i]) === 1);
-    if (urgentIndices.length > 0) {
-      let bestUrgent = urgentIndices[0];
-      for (const i of urgentIndices.slice(1)) {
-        bestUrgent = betterIndex(bestUrgent, i);
-      }
-      const [item] = queue.splice(bestUrgent, 1);
-      saveQueue(queue);
-      log('QUEUE', 'dequeued (urgent)', { issue: item.issueId, priorityRank: effectiveRank(item) });
-      return item;
-    }
-
-    // Step 2: If lastProcessedGroup is set, check for items in that group
-    if (lastProcessedGroup) {
-      const groupIndices = readyIndices.filter(i => queue[i].queueGroup === lastProcessedGroup);
-      if (groupIndices.length > 0) {
-        let bestGroup = groupIndices[0];
-        for (const i of groupIndices.slice(1)) {
-          bestGroup = betterIndex(bestGroup, i, true);
-        }
-        const [item] = queue.splice(bestGroup, 1);
-        saveQueue(queue);
-        log('QUEUE', 'dequeued (group priority)', { issue: item.issueId, queueGroup: item.queueGroup, priorityRank: effectiveRank(item) });
-        return item;
-      }
-    }
-
-    // Step 3: Normal priority order (priorityRank → retryAt → enqueuedAt)
-    let bestIndex = readyIndices[0];
-    for (const i of readyIndices.slice(1)) {
-      bestIndex = betterIndex(bestIndex, i);
-    }
-
-    const [item] = queue.splice(bestIndex, 1);
+    queue.splice(bestIndex, 1);
     saveQueue(queue);
-    log('QUEUE', 'dequeued', { issue: item.issueId, priorityRank: effectiveRank(item) });
+
+    if (logType === 'dequeued (group priority)') {
+      log('QUEUE', logType, { issue: item.issueId, queueGroup: item.queueGroup, priorityRank: rank });
+    } else {
+      log('QUEUE', logType, { issue: item.issueId, priorityRank: rank });
+    }
+
     return item;
   } catch (err) {
     log('QUEUE', `dequeue ERROR: ${err.message}`);

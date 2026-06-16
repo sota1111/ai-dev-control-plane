@@ -65,7 +65,7 @@ describe('handleQueue', () => {
     expect(result.content).toContain('(rank 2)');
   });
 
-  test('groups child issues under parent in queue output', async () => {
+  test('orders issues by real execution priority in queue output', async () => {
     runner.loadQueue.mockReturnValueOnce([
       {
         issueId: 'parent-uuid',
@@ -97,14 +97,40 @@ describe('handleQueue', () => {
     ]);
 
     const result = await handlers.handleQueue();
-    const parentIndex = result.content.indexOf('1. **SOT-200** [Medium] (rank 3)');
-    const childIndex = result.content.indexOf('  ↳ 3. **SOT-201** [Low] (rank 4)');
-    const unrelatedIndex = result.content.indexOf('2. **SOT-300** [High] (rank 2)');
+    // Execution order: SOT-300 (rank 2) -> SOT-200 (rank 3) -> SOT-201 (rank 4, group continuation)
+    expect(result.content).toContain('### 実行待ち (Ready)');
+    const unrelatedIndex = result.content.indexOf('1. **SOT-300** [High] (rank 2)');
+    const parentIndex = result.content.indexOf('2. **SOT-200** [Medium] (rank 3)');
+    const childIndex = result.content.indexOf('3. **SOT-201** [Low] (rank 4)');
 
-    expect(parentIndex).toBeGreaterThanOrEqual(0);
+    expect(unrelatedIndex).toBeGreaterThan(0);
+    expect(parentIndex).toBeGreaterThan(unrelatedIndex);
     expect(childIndex).toBeGreaterThan(parentIndex);
-    expect(unrelatedIndex).toBeGreaterThan(childIndex);
     expect(result.content).toContain('親: SOT-200');
+  });
+
+  test('separates waiting items in queue output', async () => {
+    const now = new Date();
+    const future = new Date(now.getTime() + 3600000).toISOString();
+    runner.loadQueue.mockReturnValueOnce([
+      {
+        issueId: 'ready-1',
+        priorityRank: 3,
+        enqueuedAt: now.toISOString()
+      },
+      {
+        issueId: 'waiting-1',
+        priorityRank: 1, // Urgent but waiting
+        retryAt: future,
+        enqueuedAt: now.toISOString()
+      },
+    ]);
+
+    const result = await handlers.handleQueue();
+    expect(result.content).toContain('### 実行待ち (Ready)');
+    expect(result.content).toContain('1. **ready-1**');
+    expect(result.content).toContain('### 待機中 (Waiting)');
+    expect(result.content).toContain('1. **waiting-1**');
   });
 });
 
