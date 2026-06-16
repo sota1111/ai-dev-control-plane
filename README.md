@@ -799,13 +799,14 @@ Claude Codeが `--dangerously-skip-permissions` で動作する場合、コン�
 
 ### 概要
 
-webhook 経由で起動した Claude Code が usage limit に達した場合、usage 復活時刻 + 10分後まで Claude Code 全体を cooldown にします。cooldown 中に届いた webhook は新規実行せず、同じ retry 時刻でキューに追加します。
+webhook 経由で起動した Claude Code が usage limit に達した場合、usage 復活時刻 + 10分後まで Claude Code 全体を cooldown にします。`529 Overloaded` 等の過負荷エラーは1時間後に再開します。cooldown 中に届いた webhook は新規実行せず、同じ retry 時刻でキューに追加します。
 
 ### 環境変数
 
-| 変数名                             | デフォルト | 説明                       |
-| ---------------------------------- | ---------- | -------------------------- |
-| `USAGE_LIMIT_RETRY_BUFFER_SECONDS` | `600`      | usage 復活後の追加待機秒数 |
+| 変数名                             | デフォルト | 説明                                                               |
+| ---------------------------------- | ---------- | ------------------------------------------------------------------ |
+| `USAGE_LIMIT_RETRY_BUFFER_SECONDS` | `600`      | usage 復活後の追加待機秒数                                         |
+| `OVERLOAD_RETRY_BUFFER_SECONDS`    | `3600`     | 529/overloaded 等のサーバ過負荷エラー後の再開待機秒数（既定1時間） |
 
 ### 手動確認手順
 

@@ -91,6 +91,7 @@ function parseUsageLimitResetEpoch(text, nowMs = Date.now()) {
  */
 function classifyUsageLimit(text, nowMs = Date.now()) {
   const buffer = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
+  const overloadBuffer = parseInt(process.env.OVERLOAD_RETRY_BUFFER_SECONDS || '3600', 10);
   const lowerText = text.toLowerCase();
   
   const result = {
@@ -162,11 +163,11 @@ function classifyUsageLimit(text, nowMs = Date.now()) {
 
   // Model Unavailable
   if (lowerText.includes('model is currently unavailable') || lowerText.includes('overloaded') || 
-      lowerText.includes('503') || lowerText.includes('service unavailable')) {
+      lowerText.includes('503') || lowerText.includes('529') || lowerText.includes('service unavailable')) {
     result.type = 'model_unavailable';
     result.retryable = true;
     result.confidence = 'medium';
-    result.retryAt = new Date(nowMs + (buffer * 1000)).toISOString();
+    result.retryAt = new Date(nowMs + (overloadBuffer * 1000)).toISOString();
     return result;
   }
 
