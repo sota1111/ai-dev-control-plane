@@ -15,6 +15,34 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 PROMPT_FILE="prompts/claude/auto_run.md"
+RESUME_MODE=false
+RESUME_ISSUE=""
+DRY_RUN=false
+
+# 簡易引数パース
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --resume)
+      RESUME_MODE=true
+      PROMPT_FILE="prompts/claude/auto_resume.md"
+      # 次の引数がフラグでなければ Issue ID とみなす
+      if [[ -n "${2:-}" && ! "$2" == --* ]]; then
+        RESUME_ISSUE="$2"
+        shift
+      fi
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    *)
+      # 未知の引数は無視またはエラー（ここでは一旦無視）
+      shift
+      ;;
+  esac
+done
+
 LOG_DIR="docs/ai/auto_logs"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/run_${TIMESTAMP}.log"
@@ -28,8 +56,8 @@ fi
 mkdir -p "$LOG_DIR"
 mkdir -p docs/ai/linear
 
-if [[ "${1:-}" == "--dry-run" ]]; then
-  echo "== Dry run: prompt contents =="
+if [[ "$DRY_RUN" == true ]]; then
+  echo "== Dry run: prompt contents ($PROMPT_FILE) =="
   cat "$PROMPT_FILE"
   exit 0
 fi
@@ -46,7 +74,38 @@ fi
 
 RUNTIME_PROMPT="$(cat "$PROMPT_FILE")"
 
-if [[ -n "${WEBHOOK_ISSUE_ID:-}" ]]; then
+if [[ "$RESUME_MODE" == true ]]; then
+  RESUME_ISSUE="${RESUME_ISSUE:-${WEBHOOK_ISSUE_ID:-}}"
+  if [[ -z "$RESUME_ISSUE" ]]; then
+    echo "Error: --resume requires an issue ID or WEBHOOK_ISSUE_ID environment variable." >&2
+    exit 1
+  fi
+  RUNTIME_PROMPT="## Issue-Rerun Resume Mode
+
+This is a usage-limit resume run for Issue: ${RESUME_ISSUE}
+
+Context:
+- Resume metadata file: docs/ai/auto_logs/resume/${RESUME_ISSUE}.json
+- This is a continuation of a previous run that hit a usage limit.
+- Process only ${RESUME_ISSUE}. Do not search for or select other Linear issues.
+- Treat this as a continuation of the existing work, not a new task.
+- When ${RESUME_ISSUE} reaches a terminal outcome, exit 0 or 1 and stop.
+
+Mandatory Resume Flow:
+1. Read the resume metadata JSON if it exists.
+2. Read the previous run log referenced in the metadata.
+3. Check the Linear issue's latest status, comments, and current git state.
+4. If the issue is already terminal (Completed/Canceled/Archived/Duplicate), stop and exit.
+5. If status is 'Todo', set it to 'In Progress'.
+6. Remove 'usage-limit' label if present.
+7. Post a resume-start comment on Linear.
+8. Continue the work from where it left off.
+
+---
+
+${RUNTIME_PROMPT}"
+
+elif [[ -n "${WEBHOOK_ISSUE_ID:-}" ]]; then
   RUNTIME_PROMPT="## Webhook Single-Issue Mode
 
 This run was triggered by Linear webhook for Issue: ${WEBHOOK_ISSUE_ID}

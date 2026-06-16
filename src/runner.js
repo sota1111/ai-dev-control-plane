@@ -1,8 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const { spawn } = require('child_process');
-const { parseUsageLimitResetEpoch } = require('./lib/usageLimitParser');
+const { spawn, execSync } = require('child_process');
+const { classifyUsageLimit } = require('./lib/usageLimitParser');
+const { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } = require('./lib/resumeMetadata');
 
 const SKIPPED_LOCKED = 75;  // exit code when lock is not available
 const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
@@ -95,6 +96,19 @@ function releaseLock() {
   } catch (err) {
     log('LOCK', `release ERROR: ${err.message}`);
   }
+}
+
+function getGitCheckpointInfo() {
+  const root = path.join(__dirname, '..');
+  const result = { branch: '', lastCommit: '', gitStatus: '' };
+  try {
+    result.branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8', cwd: root }).trim();
+    result.lastCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf8', cwd: root }).trim();
+    result.gitStatus = execSync('git status --short', { encoding: 'utf8', cwd: root }).trim();
+  } catch (err) {
+    // Silence errors, return empty strings as requested
+  }
+  return result;
 }
 
 function isLocked() {
@@ -365,11 +379,13 @@ async function removeUsageLimitLabel(issueId) {
 }
 
 function setUsageLimitCooldownUntil(retryAt, issueIdOrOptions = null) {
-  // Accept both old signature (retryAt, issueId) and new (retryAt, { issueId, issueIdentifier, resetAt, bufferSeconds })
+  // Accept both old signature (retryAt, issueId) and new (retryAt, { issueId, issueIdentifier, resetAt, bufferSeconds, reason, limitType })
   let issueId = null;
   let issueIdentifier = null;
   let resetAt = null;
   let bufferSeconds = USAGE_LIMIT_RETRY_BUFFER_SECONDS;
+  let reason = 'usage_limit';
+  let limitType = 'session_limit';
 
   if (typeof issueIdOrOptions === 'string') {
     issueId = issueIdOrOptions; // backward compat
@@ -378,6 +394,8 @@ function setUsageLimitCooldownUntil(retryAt, issueIdOrOptions = null) {
     issueIdentifier = issueIdOrOptions.issueIdentifier || null;
     resetAt = issueIdOrOptions.resetAt || null;
     bufferSeconds = issueIdOrOptions.bufferSeconds != null ? issueIdOrOptions.bufferSeconds : USAGE_LIMIT_RETRY_BUFFER_SECONDS;
+    reason = issueIdOrOptions.reason || 'usage_limit';
+    limitType = issueIdOrOptions.limitType || 'session_limit';
   }
 
   try {
@@ -394,7 +412,9 @@ function setUsageLimitCooldownUntil(retryAt, issueIdOrOptions = null) {
       sourceIssueId: issueId,
       sourceIssueIdentifier: issueIdentifier,
       resetAt: resetAt,
-      bufferSeconds: bufferSeconds
+      bufferSeconds: bufferSeconds,
+      reason: reason,
+      limitType: limitType
     };
     const cooldownTmp = COOLDOWN_FILE + '.tmp';
     fs.writeFileSync(cooldownTmp, JSON.stringify(cooldownData, null, 2));
@@ -446,6 +466,8 @@ function getUsageLimitCooldownUntil(nowMs = Date.now()) {
         retryAt,
         issueId: state.sourceIssueId || null,
         issueIdentifier: state.sourceIssueIdentifier || null,
+        reason: state.reason || null,
+        limitType: state.limitType || null,
         active: true
       };
     } catch (err) {
@@ -1043,21 +1065,26 @@ async function getIssueExecutionEligibility(issueId) {
   }
 }
 
-function triggerRun(issueId) {
+function triggerRun(issueId, options = {}) {
   // SECURITY: Pass issueId only via environment variable, never as shell argument
   const env = { ...process.env, WEBHOOK_ISSUE_ID: issueId };
   const projectRoot = path.join(__dirname, '..');
   const startedAt = new Date().toISOString();
 
+  const args = ['scripts/ai/run_auto.sh'];
+  if (options.resume) {
+    args.push('--resume');
+  }
+
   // detached: true puts child in its own process group (POSIX)
-  const child = spawn('bash', ['scripts/ai/run_auto.sh'], {
+  const child = spawn('bash', args, {
     env,
     cwd: projectRoot,
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
-  log('RUNNER', `Spawned run_auto.sh for issueId=${issueId} pid=${child.pid} startedAt=${startedAt}`, { issue: issueId });
+  log('RUNNER', `Spawned run_auto.sh for issueId=${issueId} pid=${child.pid} startedAt=${startedAt}${options.resume ? ' (resume)' : ''}`, { issue: issueId });
 
   let output = '';
 
@@ -1102,8 +1129,15 @@ async function runItem(item) {
     return;
   }
 
-  log('RUN', 'start', { trigger: item.trigger || 'queue', issue: issueId });
-  const { code, output } = await triggerRun(issueId);
+  const isResume = item.reason === 'usage_limit';
+  if (isResume) {
+    log('RESUME', 'issue-rerun start', { issue: issueId, retryAt: item.retryAt || null });
+    log('RUN', 'start (resume)', { trigger: item.trigger || 'queue', issue: issueId });
+  } else {
+    log('RUN', 'start', { trigger: item.trigger || 'queue', issue: issueId });
+  }
+
+  const { code, output } = await triggerRun(issueId, { resume: isResume });
 
   if (code === 0) {
     log('RUN', 'completed successfully', { trigger: item.trigger || 'queue', issue: issueId });
@@ -1122,19 +1156,50 @@ async function runItem(item) {
       queueGroupOrder: item.queueGroupOrder ?? null
     });
   } else {
-    const resetEpoch = parseUsageLimitResetEpoch(output);
-    if (resetEpoch !== null) {
-      log('RUN', 'usage limit detected', { trigger: item.trigger || 'queue', issue: issueId });
-      await notifyUsageLimitToAllActiveIssues(resetEpoch).catch(() => {});
-      const resetAt = new Date(resetEpoch * 1000).toISOString();
-      const retryAt = new Date((resetEpoch + USAGE_LIMIT_RETRY_BUFFER_SECONDS) * 1000).toISOString();
-      setUsageLimitCooldownUntil(retryAt, {
+    const classification = classifyUsageLimit(output);
+    if (classification.retryable && classification.retryAt) {
+      log('RUN', `retryable limit detected: ${classification.type}`, { trigger: item.trigger || 'queue', issue: issueId });
+      
+      // Notify for session limits or API rate limits
+      if (classification.type === 'session_limit' || classification.type === 'api_429') {
+        const retryEpoch = Math.floor(new Date(classification.retryAt).getTime() / 1000);
+        await notifyUsageLimitToAllActiveIssues(retryEpoch).catch(() => {});
+      }
+
+      setUsageLimitCooldownUntil(classification.retryAt, {
         issueId,
         issueIdentifier: item.issueIdentifier || null,
-        resetAt,
-        bufferSeconds: USAGE_LIMIT_RETRY_BUFFER_SECONDS
+        resetAt: classification.resetAt,
+        bufferSeconds: USAGE_LIMIT_RETRY_BUFFER_SECONDS,
+        reason: 'usage_limit',
+        limitType: classification.type
       });
-      enqueue(issueId, item.trigger || 'queue', retryAt, {
+
+      const gitInfo = getGitCheckpointInfo();
+      const metadata = buildIssueRerunMetadata({
+        issueId,
+        stoppedReason: 'usage_limit',
+        stoppedAt: new Date().toISOString(),
+        resetAt: classification.resetAt,
+        retryAt: classification.retryAt,
+        branch: gitInfo.branch,
+        lastCommit: gitInfo.lastCommit,
+        gitStatus: gitInfo.gitStatus,
+        previousRunLog: LOG_FILE,
+        previousExitCode: code,
+        nextActionHint: null
+      });
+      try {
+        saveResumeMetadata(metadata);
+      } catch (e) {
+        log('ERROR', `saveResumeMetadata failed: ${e.message}`, { issue: issueId });
+      }
+      const queueLength = (loadQueue() || []).length;
+      for (const line of formatResumeLogLines(metadata, { queueLength })) {
+        log('RESUME', line.replace(/^\[RESUME\]\s*/, ''), { issue: issueId });
+      }
+
+      enqueue(issueId, item.trigger || 'queue', classification.retryAt, {
         issueIdentifier: item.issueIdentifier || null,
         reason: 'usage_limit',
         priority: item.priority ?? null,
@@ -1144,7 +1209,12 @@ async function runItem(item) {
         queueGroup: item.queueGroup ?? null,
         queueGroupOrder: item.queueGroupOrder ?? null
       });
-      log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt });
+      log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt: classification.retryAt });
+    } else if (classification.type !== 'unknown') {
+      log('RUN', `non-retryable limit: ${classification.type}`, { trigger: item.trigger || 'queue', issue: issueId });
+      if (classification.type === 'context_limit') {
+        log('RUN', 'summarization/compaction is required before resume', { issue: issueId });
+      }
     } else {
       log('RUN', `failed exit=${code}`, { trigger: item.trigger || 'queue', issue: issueId });
     }

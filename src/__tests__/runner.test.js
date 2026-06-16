@@ -120,6 +120,8 @@ describe('runner', () => {
         retryAt,
         issueId: null,
         issueIdentifier: null,
+        reason: null,
+        limitType: null,
         active: true
       });
     });

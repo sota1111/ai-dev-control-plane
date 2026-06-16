@@ -1,15 +1,14 @@
 /**
- * Parses usage limit reset time from text and returns the Unix epoch (seconds) of the reset time + buffer.
+ * Internal helper to parse raw usage limit reset time from text and returns the Unix epoch (seconds).
+ * NO buffer added.
  * 
- * @param {string} text - Combined stdout/stderr from run_auto.sh
- * @param {number} [nowMs] - Optional current time in ms for testability
+ * @param {string} text - Combined stdout/stderr
+ * @param {number} nowMs - Current time in ms
  * @returns {number | null} - Unix epoch (seconds) or null if not applicable
  */
-function parseUsageLimitResetEpoch(text, nowMs = Date.now()) {
-  const buffer = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
-  
+function parseRawResetEpoch(text, nowMs) {
   const keywords = ['resets', 'reset at', 'resets at', 'will reset at', 'Your limit will reset'];
-  if (!keywords.some(k => text.includes(k))) return null;
+  if (!keywords.some(k => text.toLowerCase().includes(k.toLowerCase()))) return null;
 
   // Try to find timezone in ( )
   const tzMatch = text.match(/\(([^)]+)\)/);
@@ -19,7 +18,6 @@ function parseUsageLimitResetEpoch(text, nowMs = Date.now()) {
   const dateMatch = text.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)/i);
   
   // Extract time (e.g., 3:30pm, 15:30, 3pm, 7pm)
-  // We use a regex that requires am/pm or a colon to avoid matching day numbers
   const timeRegex = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b(\d{1,2}):(\d{2})\b/i;
   const timeMatch = text.match(timeRegex);
   
@@ -65,10 +63,125 @@ function parseUsageLimitResetEpoch(text, nowMs = Date.now()) {
       resultEpoch += 86400;
     }
 
-    return resultEpoch + buffer;
+    return resultEpoch;
   } catch (e) {
     return null;
   }
+}
+
+/**
+ * Parses usage limit reset time from text and returns the Unix epoch (seconds) of the reset time + buffer.
+ * 
+ * @param {string} text - Combined stdout/stderr from run_auto.sh
+ * @param {number} [nowMs] - Optional current time in ms for testability
+ * @returns {number | null} - Unix epoch (seconds) or null if not applicable
+ */
+function parseUsageLimitResetEpoch(text, nowMs = Date.now()) {
+  const buffer = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
+  const rawEpoch = parseRawResetEpoch(text, nowMs);
+  if (rawEpoch === null) return null;
+  return rawEpoch + buffer;
+}
+
+/**
+ * Classifies the type of limit encountered in the text.
+ * 
+ * @param {string} text 
+ * @param {number} nowMs 
+ */
+function classifyUsageLimit(text, nowMs = Date.now()) {
+  const buffer = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
+  const lowerText = text.toLowerCase();
+  
+  const result = {
+    type: 'unknown',
+    retryable: false,
+    resetAt: null,
+    retryAt: null,
+    confidence: 'low',
+    rawMessage: text.substring(0, 300)
+  };
+
+  // Weekly limit
+  if (lowerText.includes('weekly limit') || lowerText.includes('limit resets next week') || lowerText.includes('this week')) {
+    result.type = 'weekly_limit';
+    result.retryable = false;
+    result.confidence = 'high';
+    const rawEpoch = parseRawResetEpoch(text, nowMs);
+    if (rawEpoch) {
+      result.resetAt = new Date(rawEpoch * 1000).toISOString();
+    }
+    return result;
+  }
+
+  // Session limit
+  if (lowerText.includes('session limit') || lowerText.includes('usage limit') || 
+      lowerText.includes('your limit will reset') || lowerText.includes('resets at')) {
+    const rawEpoch = parseRawResetEpoch(text, nowMs);
+    if (rawEpoch) {
+      result.type = 'session_limit';
+      result.retryable = true;
+      result.confidence = 'high';
+      result.resetAt = new Date(rawEpoch * 1000).toISOString();
+      result.retryAt = new Date((rawEpoch + buffer) * 1000).toISOString();
+      return result;
+    }
+  }
+
+  // API 429
+  if (lowerText.includes('429') || lowerText.includes('too many requests') || lowerText.includes('rate limit')) {
+    result.type = 'api_429';
+    result.retryable = true;
+    result.confidence = 'high';
+    
+    // Look for retry-after in seconds
+    const retryAfterMatch = text.match(/retry-after:\s*(\d+)/i);
+    const retryAfterSeconds = retryAfterMatch ? parseInt(retryAfterMatch[1], 10) : buffer;
+    
+    result.retryAt = new Date(nowMs + (retryAfterSeconds * 1000)).toISOString();
+    return result;
+  }
+
+  // Auth Error
+  if (lowerText.includes('401') || lowerText.includes('403') || lowerText.includes('unauthorized') || 
+      lowerText.includes('authentication') || lowerText.includes('invalid api key') || lowerText.includes('credentials')) {
+    result.type = 'auth_error';
+    result.retryable = false;
+    result.confidence = 'high';
+    return result;
+  }
+
+  // Context Limit
+  if (lowerText.includes('context length') || lowerText.includes('maximum context') || 
+      lowerText.includes('too many tokens') || lowerText.includes('prompt is too long')) {
+    result.type = 'context_limit';
+    result.retryable = false;
+    result.confidence = 'high';
+    return result;
+  }
+
+  // Model Unavailable
+  if (lowerText.includes('model is currently unavailable') || lowerText.includes('overloaded') || 
+      lowerText.includes('503') || lowerText.includes('service unavailable')) {
+    result.type = 'model_unavailable';
+    result.retryable = true;
+    result.confidence = 'medium';
+    result.retryAt = new Date(nowMs + (buffer * 1000)).toISOString();
+    return result;
+  }
+
+  // Network Error
+  if (lowerText.includes('econnreset') || lowerText.includes('etimedout') || lowerText.includes('network') || 
+      lowerText.includes('fetch failed') || lowerText.includes('socket hang up')) {
+    result.type = 'network_error';
+    result.retryable = true;
+    result.confidence = 'medium';
+    const backoff = Math.min(buffer, 120);
+    result.retryAt = new Date(nowMs + (backoff * 1000)).toISOString();
+    return result;
+  }
+
+  return result;
 }
 
 /**
@@ -120,4 +233,4 @@ function getTimezoneOffsetMs(timeZone, date) {
   }
 }
 
-module.exports = { parseUsageLimitResetEpoch };
+module.exports = { parseUsageLimitResetEpoch, classifyUsageLimit };

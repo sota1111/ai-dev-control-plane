@@ -31,7 +31,8 @@
       "Bash(bash scripts/ai/run_auto.sh)",
       "Bash(git rm *)",
       "Read(//home/vscode/dev/2026/**)",
-      "Read(//home/vscode/dev/2026/ai-dev-test/**)"
+      "Read(//home/vscode/dev/2026/ai-dev-test/**)",
+      "Bash(pm2 list *)"
     ]
   },
   "enabledMcpjsonServers": [
