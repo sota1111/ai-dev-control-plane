@@ -123,4 +123,34 @@ function classifyIssue(issue) {
   return { type: TYPES.IMPLEMENT, worker: TYPE_TO_WORKER.IMPLEMENT, reason: 'Default classification' };
 }
 
-module.exports = { classifyIssue, TYPES, WORKERS, TYPE_TO_WORKER };
+// Returns true if a title starts with a process-phase prefix that should NOT be used for generated child Issues.
+const PROCESS_TITLE_PREFIXES = [
+  /^\[(implement|debug|plan|fix|review|refactor|test)\]/i,
+  /^(implement|debug|test|refactor|plan)\s*[:：]/i
+];
+
+/**
+ * @param {string} title
+ * @returns {boolean}
+ */
+function isProcessPrefixedTitle(title) {
+  if (!title) return false;
+  return PROCESS_TITLE_PREFIXES.some(regex => regex.test(title));
+}
+
+/**
+ * @param {string} title
+ * @returns {string}
+ */
+function suggestFeatureTitleHint(title) {
+  return 'Use a feature/commit-based title that starts with the outcome (例: "...を追加する"), not a process prefix.';
+}
+
+module.exports = {
+  classifyIssue,
+  isProcessPrefixedTitle,
+  suggestFeatureTitleHint,
+  TYPES,
+  WORKERS,
+  TYPE_TO_WORKER
+};

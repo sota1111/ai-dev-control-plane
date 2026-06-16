@@ -117,13 +117,14 @@ When you find an issue that has NO sub-issues and contains a high-level requirem
 
 Read the parent Issue description and all comments, then decide:
 
-**Decompose into child Issues when:**
+**Decompose into child Issues when (by feature / commit unit):**
 - Multiple independent features or domains are involved
-- Work types are clearly separated (implementation, testing, docs, config)
+- A change is a different rollback unit, deploy impact, or risk level
+- A change has a significantly different review focus or touches a different responsibility / file group
 - Work volume is large; one auto-run session is unlikely to complete it
-- Tasks have sequential dependencies
-- Separate Gemini/Codex delegation units would be clearer
-- Acceptance criteria map to multiple independent deliverables
+- Acceptance criteria map to multiple independent feature deliverables
+
+Do NOT decompose by work phase. Never create Debug-only / Implement-only / Test-only child Issues; each child Issue is one feature/commit unit that includes its own implementation, tests, and doc updates.
 
 **Do NOT decompose (handle parent Issue directly) when:**
 - Small README or documentation edits
@@ -145,13 +146,13 @@ Post your judgment as a Linear comment on the parent Issue:
 1. Decompose into child Issues (minimum necessary, typically 2–5; maximum 7 with clear justification)
 2. Use `mcp__linear-server__save_issue` to register each child Issue with:
    - parentId: the parent Issue ID
-   - Title format: `[IMPLEMENT] <parent-id> - <task name>` or `[DEBUG] <parent-id> - <verification>`
-   - Description: Goal, Scope, Acceptance Criteria, Dependencies
+   - Title: start with the feature/outcome (例: `queueのdequeue順をLinear priority準拠にする`). Do NOT use process prefixes ([IMPLEMENT]/[DEBUG]/[PLAN]/Debug:/Implement:/Test:/Refactor:).
+   - Description (child Issue body template): 目的 / 変更範囲 / 実装内容 / 検証内容（Debug・Testはここに含める） / 想定commit / 受け入れ条件 / 関連する親Issue
    - Status: Todo
    - Priority: inherit from parent
 3. Post a summary comment on the parent Issue listing all created child Issues
 4. Create local tracking file: `docs/ai/linear/<PARENT_ISSUE_ID>.md`
-5. Execute child Issues in order: [PLAN] → [IMPLEMENT] → [DEBUG]
+5. Execute child (feature) Issues in dependency order. Within each feature Issue, run the worker steps in order: Claude（方針整理）→ Gemini（実装）→ Codex（テスト・不具合確認）.
 
 ### Step 2b: If decomposition is NOT needed
 
@@ -166,31 +167,17 @@ Post your judgment as a Linear comment on the parent Issue:
 
 ## Child Issue Execution Loop
 
-For each child Issue (in order: [PLAN] → [IMPLEMENT] → [DEBUG]):
+For each child (feature/commit) Issue, in dependency order:
 
 1. Update child Issue status to `In Progress`
 2. Post a progress comment on the child Issue
+3. Claude Code: confirm scope/approach for this feature (write design notes to `docs/ai/20_design.md` only if non-trivial)
+4. Implementation (Gemini): write `prompts/gemini/implement.md`, run `scripts/ai/run_gemini.sh`, read `docs/ai/50_worker_gemini_report.md`
+5. Verification (Codex): write `prompts/codex/debug.md`, run `scripts/ai/run_codex.sh`, read `docs/ai/60_worker_codex_report.md`; if fixes were applied they are part of this same feature Issue
+6. Commit the feature: `git add -A && git commit -m "feat(<parent-id>): <feature summary>"` (1+ meaningful commits for this Issue)
+7. Mark the child Issue as `Done`
 
-### For [PLAN] child Issues:
-
-- Write design to `docs/ai/20_design.md`
-- Mark child Issue as `Done`
-
-### For [IMPLEMENT] child Issues:
-
-- Write Gemini instruction to `prompts/gemini/implement.md`
-- Run `scripts/ai/run_gemini.sh`
-- Read `docs/ai/50_worker_gemini_report.md`
-- Commit changes: `git add -A && git commit -m "feat(<parent-id>): <summary>"`
-- Mark child Issue as `Done`
-
-### For [DEBUG] child Issues:
-
-- Write Codex instruction to `prompts/codex/debug.md`
-- Run `scripts/ai/run_codex.sh`
-- Read `docs/ai/60_worker_codex_report.md`
-- If fixes were applied, commit: `git add -A && git commit -m "fix(<parent-id>): <summary>"`
-- Mark child Issue as `Done`
+Note: Debug and Test are NOT separate child Issues — they are the verification step (step 5) inside each feature Issue. Claude Code must still delegate all implementation to Gemini and all verification/fixes to Codex.
 
 ---
 
@@ -242,7 +229,7 @@ After merge:
 If ANY quality check fails:
 
 - Identify failing item
-- Create or reopen a [DEBUG] child Issue
+- Reopen the relevant feature/commit Issue (or add verification work to it) and re-run Gemini→Codex inside it
 - Re-run the fix cycle
 - If 3 consecutive failures, set parent Issue to `Blocked` with explanation
 

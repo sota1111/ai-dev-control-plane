@@ -40,7 +40,7 @@ READMEに記載の以下の認証は完了済みとみなします。再認証�
 - **一貫性の維持**: 既存の PR やブランチがある場合はそれを使用し、新しいものを無闇に作成しないでください。
 
 ## エージェントの責務境界 / Agent Responsibility Boundary
-- `auto_run.md` と同様の基準で Gemini (IMPLEMENT) / Codex (FIX/DEBUG) への委譲を行ってください。
+- `auto_run.md` と同様の基準で Gemini (実装) / Codex (検証/不具合修正) への委譲を行ってください。これらはひとつの feature/commit Issue 内のステップとして実行されます。
 - すでにタスクチェック (Codex) が完了している場合は、再度実行する必要はありません。
 
 ## 権限エラーの処理 / Permission Error Handling

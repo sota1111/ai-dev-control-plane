@@ -1,4 +1,4 @@
-const { classifyIssue } = require('../lib/issueClassifier');
+const { classifyIssue, isProcessPrefixedTitle, suggestFeatureTitleHint } = require('../lib/issueClassifier');
 
 describe('classifyIssue', () => {
   test('[IMPLEMENT] prefix → IMPLEMENT/gemini', () => {
@@ -70,4 +70,44 @@ describe('classifyIssue', () => {
     expect(r.worker).toBe('codex');
   });
 
+});
+
+describe('isProcessPrefixedTitle', () => {
+  test('returns true for [IMPLEMENT] prefix', () => {
+    expect(isProcessPrefixedTitle('[IMPLEMENT] SOT-100')).toBe(true);
+  });
+
+  test('returns true for [DEBUG] prefix', () => {
+    expect(isProcessPrefixedTitle('[DEBUG] SOT-100')).toBe(true);
+  });
+
+  test('returns true for [PLAN] prefix', () => {
+    expect(isProcessPrefixedTitle('[PLAN] SOT-100')).toBe(true);
+  });
+
+  test('returns true for [TEST] prefix', () => {
+    expect(isProcessPrefixedTitle('[TEST] SOT-100')).toBe(true);
+  });
+
+  test('returns true for Debug: prefix', () => {
+    expect(isProcessPrefixedTitle('Debug: SOT-100')).toBe(true);
+  });
+
+  test('returns true for Implement： prefix (full-width colon)', () => {
+    expect(isProcessPrefixedTitle('Implement： SOT-100')).toBe(true);
+  });
+
+  test('returns false for feature-outcome title', () => {
+    expect(isProcessPrefixedTitle('usage-limit後のresumeメタデータ保存を追加する')).toBe(false);
+  });
+
+  test('returns false for empty title', () => {
+    expect(isProcessPrefixedTitle('')).toBe(false);
+  });
+});
+
+describe('suggestFeatureTitleHint', () => {
+  test('returns expected hint string', () => {
+    expect(suggestFeatureTitleHint('any title')).toContain('feature/commit-based title');
+  });
 });
