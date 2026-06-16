@@ -168,9 +168,9 @@ cp .env.example .env
 | Linear（Codex 用 MCP）  | `codex mcp login linear`                                                  |
 | Gemini CLI              | `gemini` を起動して認証                                                   |
 | Codex CLI               | `codex` を起動して認証                                                    |
-| GitHub CLI              | `gh auth login`                                                           |
+| GitHub CLI              | `GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web` |
 | Azure CLI               | `az login --use-device-code`                                              |
-| gcloud                  | `gcloud auth login` &nbsp;/&nbsp; `gcloud auth application-default login` |
+| gcloud                  | `gcloud auth login --no-launch-browser` / `gcloud auth application-default login --no-launch-browser` |
 
 ### 4. 起動（いずれか1つ）
 
@@ -266,9 +266,10 @@ ln -s /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-dev.yml  ~/.config/
 | `gemini`    | `gemini`                                                      |
 | `codex`     | `codex`                                                       |
 | `codex-mcp` | `codex mcp login linear`                                      |
-| `gh`        | `gh auth login`                                               |
+| `gh`        | `GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web` |
 | `azure`     | `az login --use-device-code`                                  |
-| `gcloud`    | `gcloud auth login` / `gcloud auth application-default login` |
+| `gcloud`     | `gcloud auth login --no-launch-browser` |
+| `gcloud-adc` | `gcloud auth application-default login --no-launch-browser` |
 
 ### セッション操作
 
@@ -842,7 +843,7 @@ Firebase Authentication ユーザー管理と、Cloud Run への認証環境変�
 export FIREBASE_PROJECT_ID=your-firebase-project-id
 
 # 2. gcloud 認証（Cloud Run 更新に必要）
-gcloud auth application-default login
+gcloud auth application-default login --no-launch-browser
 
 # 3. 対話型セットアップを起動
 npm run auth:setup

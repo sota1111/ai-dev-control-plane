@@ -56,13 +56,14 @@ tmuxinator start -p .config/tmuxinator/ai-auth.yml
 2. **gemini**: `gemini` で認証
 3. **codex**: `codex` で認証
 4. **codex-mcp**: `codex mcp login linear` で Linear 認証
-5. **gh**: `gh auth login` で GitHub CLI 認証
+5. **gh**: `GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web` で GitHub CLI 認証
 6. **azure**: `az login --use-device-code` で Azure CLI 認証（ブラウザでコード入力）
-7. **gcloud**: `gcloud auth login` で認証
+7. **gcloud**: `gcloud auth login --no-launch-browser` で認証
+8. **gcloud-adc**: `gcloud auth application-default login --no-launch-browser` で ADC 認証（必要な場合のみ）
 
 ### gcloud ADC について
 
-`gcloud auth application-default login` は **毎回必要ではありません**。
+`gcloud auth application-default login --no-launch-browser` は **毎回必要ではありません**。
 
 以下のコマンドで ADC が有効か確認できます:
 

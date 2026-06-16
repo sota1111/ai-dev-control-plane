@@ -1,26 +1,28 @@
 name: ai-auth
 root: /workspaces/ai-dev-control-plane
 windows:
-  - name: claude
-    panes:
-      - echo "=== Claude 起動・MCP設定 ===" && echo "claudeを起動後、/mcp を実行してLinearを選択してください" && claude
-  - name: gemini
-    panes:
-      - echo "=== Gemini 認証 ===" && gemini
-  - name: codex
-    panes:
-      - echo "=== Codex 認証 ===" && codex
-  - name: codex-mcp
-    panes:
-      - echo "=== Codex MCP Linear 認証 ===" && codex mcp login linear
-  - name: gh
-    panes:
-      - echo "=== GitHub CLI 認証 ===" && gh auth login
-  - name: azure
-    panes:
-      - echo "=== Azure CLI 認証（デバイスコード） ===" && az login --use-device-code
-  - name: gcloud
-    layout: even-horizontal
-    panes:
-      - echo "=== gcloud 認証 ===" && gcloud auth login
-      - echo "=== gcloud ADC認証（ADCが失効・削除された場合のみ実行） ===" && echo "注意: ~/.config/gcloud/application_default_credentials.json が存在し有効な場合は実行不要" && gcloud auth application-default login
+  - claude:
+      panes:
+        - echo "=== Claude 起動・MCP設定 ===" && echo "claudeを起動後、/mcp を実行してLinearを選択してください" && claude
+  - gemini:
+      panes:
+        - echo "=== Gemini 認証 ===" && gemini
+  - codex:
+      panes:
+        - echo "=== Codex 認証 ===" && codex
+  - codex-mcp:
+      panes:
+        - echo "=== Codex MCP Linear 認証 ===" && codex mcp login linear
+  - gh:
+      panes:
+        - echo "=== GitHub CLI 認証 ===" && GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web
+  - azure:
+      panes:
+        - echo "=== Azure CLI 認証（デバイスコード） ===" && az login --use-device-code
+  - gcloud:
+      panes:
+        - echo "=== gcloud 認証 ===" && gcloud auth login --no-launch-browser
+  - gcloud-adc:
+      panes:
+        - >-
+          echo "=== gcloud ADC認証（ADCが失効・削除された場合のみ実行） ===" && echo "注意: ~/.config/gcloud/application_default_credentials.json が存在し有効な場合は実行不要" && gcloud auth application-default login --no-launch-browser
