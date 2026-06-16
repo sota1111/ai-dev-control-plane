@@ -64,7 +64,7 @@
     ],
     "authSecretName": "state-machine-auth-secret",
     "cloudRunSyncEnabled": false,
-    "notes": "READMEに旧認証変数 AUTH_PASSWORD/JWT_SECRET の記述が残存。SOT-581で修正予定。"
+    "notes": "Firebase Auth 移行済み。旧認証変数 AUTH_PASSWORD/JWT_SECRET は削除済み。"
   },
   {
     "name": "shrine-stair-trainer",
@@ -107,7 +107,7 @@
     ],
     "authSecretName": "kindle-monitor-auth-secret",
     "cloudRunSyncEnabled": false,
-    "notes": "管理画面は Firebase Auth。/run エンドポイントは Cloud Scheduler 専用（OIDC）。テストファイルに旧認証変数の参照が残存。SOT-581で修正予定。"
+    "notes": "管理画面は Firebase Auth。/run エンドポイントは Cloud Scheduler 専用（OIDC）。旧認証変数は削除済み。"
   },
   {
     "name": "booking-monitor",
@@ -117,9 +117,9 @@
     "region": "asia-northeast1",
     "gcpProject": "gen-lang-client-0243034020",
     "cloudRunConfirmed": false,
-    "authMigrationStatus": "todo",
+    "authMigrationStatus": "done",
     "frameworkType": "flask",
-    "notes": "Firebase Auth 未実装。GitHub origin/HEAD が feat/SOT-274-booking-monitor を指すが、ローカル main は最新。SOT-582で実装予定。",
+    "notes": "管理画面は Firebase Auth。/run エンドポイントは Cloud Scheduler 専用（OIDC）。GitHub origin/HEAD が feat/SOT-274-booking-monitor を指すが、ローカル main は最新。",
     "requiredEnvVars": [
       "FIREBASE_API_KEY",
       "FIREBASE_AUTH_DOMAIN",
@@ -162,9 +162,9 @@
     "region": "asia-northeast1",
     "gcpProject": "gen-lang-client-0243034020",
     "cloudRunConfirmed": false,
-    "authMigrationStatus": "partial",
+    "authMigrationStatus": "done",
     "frameworkType": "fastapi-react",
-    "notes": "Firebase Auth コード/環境変数あり。READMEは旧認証方式 (AUTH_USERNAME/AUTH_PASSWORD/AUTH_SECRET_KEY) の記述が残存。SOT-581で修正予定。保育園情報を扱うため未ログイン API アクセスを必ず拒否すること。",
+    "notes": "Firebase Auth 移行済み。旧認証変数は削除済み。保育園情報を扱うため未ログイン API アクセスを必ず拒否すること。",
     "requiredEnvVars": [
       "VITE_FIREBASE_API_KEY",
       "VITE_FIREBASE_AUTH_DOMAIN",
