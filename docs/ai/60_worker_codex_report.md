@@ -1,36 +1,31 @@
-Worker report written to `docs/ai/60_worker_codex_report.md`.
+Completed SOT-629 debug/verification work.
 
-Applied minimal lint-only fixes in `/workspaces/booking-monitor` so its `flake8` quality gate passes.
+Added the requested runner queue tests, updated `/queue` display coverage, made the minimal `/queue` grouping implementation change, and adjusted stale webhook test expectations for the current enqueue metadata signature.
 
-## Changed Files
-- `/workspaces/booking-monitor/app.py` — fixed flake8 spacing/continuation indentation.
-- `/workspaces/booking-monitor/booking_monitor/firestore_history.py` — fixed flake8 class spacing and trailing whitespace.
-- `/workspaces/booking-monitor/booking_monitor/history.py` — renamed ambiguous JSON parse loop variable from `l` to `line`.
-- `/workspaces/booking-monitor/booking_monitor/notifier.py` — removed trailing whitespace.
-- `config/auth/apps.json` — updated booking-monitor and toddler-private-rag migration status to done.
+Quality gate:
+- `npm run lint` passed
+- `npm test` passed: 9 suites, 125 tests
+
+Report written to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md). Unrelated `.tmp_ai-dev-test4/` was left untouched.
+src/__tests__/discordCommandHandlers.test.js` — added assertions for priority display and parent/child grouping in `/queue`.
+- `src/lib/discordCommandHandlers.js` — grouped child queue items under parent rows in `/queue` output.
+- `src/__tests__/webhookServer.test.js` — updated enqueue expectations for priority/parent metadata arguments.
+- `docs/ai/60_worker_codex_report.md` — this report.
 
 ## Commands Run
-- `python3 -m json.tool config/auth/apps.json` — PASS, valid JSON.
-- `test -f docs/auth/firebase-auth-pattern.md` — PASS.
-- `test -f docs/auth/migration-plan.md` — PASS.
-- `test -x scripts/check-auth-config.sh` — PASS.
-- `bash scripts/check-auth-config.sh` — PASS, Summary: `PASS=38 WARN=0 FAIL=0`, STATUS: ALL CLEAN.
-- stale auth variable grep for `state-machine-simulator`, `shrine-stair-trainer`, `kindle-sale-monitor`, `toddler-private-rag` — PASS, no stale auth vars found.
-- booking-monitor `grep "firebase-admin" requirements.txt` — PASS, `firebase-admin>=6.0.0` found.
-- booking-monitor Firebase env grep in `.env.example` — PASS, required Firebase/Auth variables found.
-- booking-monitor stale `.env.example` grep for `AUTH_USERNAME|AUTH_PASSWORD|AUTH_SECRET_KEY` — PASS, no old auth vars.
-- booking-monitor `flake8 . --max-line-length=120 --exclude=.git,__pycache__,.venv` — initially failed, fixed minimal lint issues, rerun PASS.
+- `npm run lint` — pass, exit 0
+- `npm test` — initially failed on parent/child test setup and stale webhook enqueue expectations; fixed minimally.
+- `npm run lint` — pass, exit 0
+- `npm test` — pass, exit 0 (`9` suites, `125` tests)
 
 ## Acceptance Criteria
-- [x] config/auth/apps.json が有効なJSONで全エントリが正しい
-- [x] booking-monitor に firebase-admin が追加されている
-- [x] booking-monitor の .env.example が Firebase 変数を含んでいる
-- [x] 全対象リポジトリで旧認証変数が残存していない
-- [x] docs/auth/firebase-auth-pattern.md が存在する
-- [x] scripts/check-auth-config.sh が存在して実行可能
+- [x] 上記テストケースがすべて pass (runner.test.js)
+- [x] /queue display tests pass (discordCommandHandlers.test.js)
+- [x] npm run lint exit 0
+- [x] npm test exit 0
 
 ## Risks
-- Cloud Run/Firebase live configuration was not verified; this pass covered repository files and local static checks only.
+`npm test` still prints the existing development warning for missing `LINEAR_WEBHOOK_SECRET` and Jest's `--forceExit` open-handle hint, but the command exits 0. An unrelated untracked `.tmp_ai-dev-test4/` directory exists and was left untouched.
 
 ## Next Action
 READY_FOR_REVIEW

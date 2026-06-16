@@ -136,7 +136,12 @@ describe('webhook usage limit retry', () => {
 
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
-    expect(runner.enqueue).toHaveBeenCalledWith('TEST-COOLDOWN', 'webhook', retryAt);
+    expect(runner.enqueue).toHaveBeenCalledWith('TEST-COOLDOWN', 'webhook', retryAt, expect.objectContaining({
+      priority: null,
+      priorityLabel: null,
+      parentIssueId: null,
+      parentIssueIdentifier: null
+    }));
     expect(runner.hasPendingIssues).not.toHaveBeenCalled();
     expect(runner.acquireLock).not.toHaveBeenCalled();
     expect(runner.runItem).not.toHaveBeenCalled();
@@ -227,7 +232,12 @@ describe('webhook usage limit retry', () => {
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
     // Should enqueue non-Urgent issue when locked
-    expect(runner.enqueue).toHaveBeenCalledWith('TEST-NON-URGENT', 'webhook');
+    expect(runner.enqueue).toHaveBeenCalledWith('TEST-NON-URGENT', 'webhook', null, expect.objectContaining({
+      priority: 2,
+      priorityLabel: null,
+      parentIssueId: null,
+      parentIssueIdentifier: null
+    }));
   });
 
   test('does not skip Urgent issue even when a run is locked', async () => {
@@ -249,7 +259,12 @@ describe('webhook usage limit retry', () => {
     await new Promise(resolve => originalSetTimeout(resolve, 50));
 
     // Urgent issue should be enqueued even when locked
-    expect(runner.enqueue).toHaveBeenCalledWith('TEST-URGENT', 'webhook');
+    expect(runner.enqueue).toHaveBeenCalledWith('TEST-URGENT', 'webhook', null, expect.objectContaining({
+      priority: 1,
+      priorityLabel: null,
+      parentIssueId: null,
+      parentIssueIdentifier: null
+    }));
   });
 
   test('drains queue after main task completes', async () => {
