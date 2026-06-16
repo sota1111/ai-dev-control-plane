@@ -64,10 +64,49 @@ async function handleQueue() {
     if (queue.length === 0) {
       return { content: '## 実行キュー\nキューは空です。' };
     }
-    const lines = queue.map((item, i) => {
+
+    function parentKeys(item) {
+      return [item.issueId, item.issueIdentifier].filter(Boolean);
+    }
+
+    function belongsToParent(item, parent) {
+      const keys = parentKeys(parent);
+      return keys.includes(item.queueGroup)
+        || keys.includes(item.parentIssueId)
+        || keys.includes(item.parentIssueIdentifier);
+    }
+
+    function formatItem(item, index, indent = '') {
       const at = item.enqueuedAt ? new Date(item.enqueuedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
-      return `${i + 1}. **${item.issueId}** — ${item.trigger || 'unknown'} (${at})`;
+      const priorityStr = item.priorityLabel ? `[${item.priorityLabel}]` : '[No priority]';
+      const rank = item.priorityRank != null ? item.priorityRank : 5;
+      const groupStr = item.queueGroup
+        ? `  ↳ 親: ${item.parentIssueIdentifier || item.parentIssueId || item.queueGroup}`
+        : '';
+      const retryStr = item.retryAt ? ` ⏳ ${new Date(item.retryAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}` : '';
+      return `${indent}${index}. **${item.issueIdentifier || item.issueId}** ${priorityStr} (rank ${rank}) — ${item.trigger || 'unknown'} (${at})${retryStr}${groupStr}`;
+    }
+
+    const groupedChildIndexes = new Set();
+    const lines = [];
+    queue.forEach((item, index) => {
+      if (item.queueGroup) return;
+
+      lines.push(formatItem(item, index + 1));
+      queue.forEach((candidate, childIndex) => {
+        if (!candidate.queueGroup || groupedChildIndexes.has(childIndex)) return;
+        if (belongsToParent(candidate, item)) {
+          groupedChildIndexes.add(childIndex);
+          lines.push(formatItem(candidate, childIndex + 1, '  ↳ '));
+        }
+      });
     });
+
+    queue.forEach((item, index) => {
+      if (!item.queueGroup || groupedChildIndexes.has(index)) return;
+      lines.push(formatItem(item, index + 1));
+    });
+
     const content = `## 実行キュー (${queue.length}件)\n` + lines.join('\n');
     return { content: truncate(content) };
   } catch (err) {

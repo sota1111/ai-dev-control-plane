@@ -162,6 +162,54 @@ async function linearQuery(query, variables = {}) {
   });
 }
 
+function getPriorityRank(priority) {
+  if (priority === 1) return 1; // Urgent
+  if (priority === 2) return 2; // High
+  if (priority === 3) return 3; // Medium
+  if (priority === 4) return 4; // Low
+  return 5; // No priority (0), null, undefined, or invalid value
+}
+
+async function getIssueQueueMetadata(issueId) {
+  try {
+    const query = `
+      query($id: String!) {
+        issue(id: $id) {
+          id
+          identifier
+          priority
+          priorityLabel
+          archivedAt
+          createdAt
+          updatedAt
+          state { type name }
+          parent { id identifier }
+        }
+      }
+    `;
+    const data = await linearQuery(query, { id: issueId });
+    if (!data.issue) return null;
+    const issue = data.issue;
+    return {
+      id: issue.id,
+      identifier: issue.identifier,
+      priority: issue.priority ?? null,
+      priorityLabel: issue.priorityLabel ?? null,
+      priorityRank: getPriorityRank(issue.priority),
+      parentIssueId: issue.parent?.id ?? null,
+      parentIssueIdentifier: issue.parent?.identifier ?? null,
+      stateType: issue.state?.type ?? null,
+      stateName: issue.state?.name ?? null,
+      archivedAt: issue.archivedAt ?? null,
+      createdAt: issue.createdAt ?? null,
+      updatedAt: issue.updatedAt ?? null
+    };
+  } catch (err) {
+    log('RUNNER', `getIssueQueueMetadata failed: ${err.message}`, { issue: issueId });
+    return null;
+  }
+}
+
 async function hasPendingIssues() {
   try {
     const query = '{ issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: 1) { nodes { id } } }';
@@ -430,8 +478,20 @@ function saveQueue(queue) {
   }
 }
 
-function enqueue(issueId, trigger, retryAt = null, { issueIdentifier = null, reason = null } = {}) {
+function enqueue(issueId, trigger, retryAt = null, {
+  issueIdentifier = null,
+  reason = null,
+  priority = null,
+  priorityLabel = null,
+  parentIssueId = null,
+  parentIssueIdentifier = null,
+  queueGroup = null,
+  queueGroupOrder = null
+} = {}) {
   try {
+    // Derive queueGroup from parentIssueId if not explicitly set
+    const resolvedQueueGroup = queueGroup ?? (parentIssueId || null);
+
     const queue = loadQueue();
     const now = new Date().toISOString();
     const existingIndex = queue.findIndex(item => item.issueId === issueId);
@@ -456,7 +516,24 @@ function enqueue(issueId, trigger, retryAt = null, { issueIdentifier = null, rea
         lastAttemptAt: now,
         attemptCount: (existing.attemptCount || 0) + 1,
         reason: reason || existing.reason || null,
-        ...(issueIdentifier && !existing.issueIdentifier ? { issueIdentifier } : {})
+        ...(issueIdentifier && !existing.issueIdentifier ? { issueIdentifier } : {}),
+        // Update priority if provided
+        ...(priority !== null ? {
+          priority,
+          priorityLabel: priorityLabel ?? existing.priorityLabel ?? null,
+          priorityRank: getPriorityRank(priority),
+          linearFetchedAt: now
+        } : {}),
+        // Update parent if provided
+        ...(parentIssueId !== null ? {
+          parentIssueId,
+          parentIssueIdentifier: parentIssueIdentifier ?? existing.parentIssueIdentifier ?? null
+        } : {}),
+        // Update queueGroup if provided or derivable
+        ...(resolvedQueueGroup !== null ? {
+          queueGroup: resolvedQueueGroup,
+          ...(queueGroupOrder !== null ? { queueGroupOrder } : {})
+        } : {})
       };
       saveQueue(queue);
       log('QUEUE', 'enqueue: updated existing item', { issue: issueId, trigger, retryAt: mergedRetryAt });
@@ -471,7 +548,15 @@ function enqueue(issueId, trigger, retryAt = null, { issueIdentifier = null, rea
       enqueuedAt: now,
       lastAttemptAt: null,
       attemptCount: 0,
-      reason: reason || null
+      reason: reason || null,
+      priority: priority !== null ? priority : null,
+      priorityLabel: priorityLabel ?? null,
+      priorityRank: priority !== null ? getPriorityRank(priority) : getPriorityRank(null),
+      linearFetchedAt: priority !== null ? now : null,
+      parentIssueId: parentIssueId ?? null,
+      parentIssueIdentifier: parentIssueIdentifier ?? null,
+      queueGroup: resolvedQueueGroup,
+      queueGroupOrder: queueGroupOrder ?? null
     });
     saveQueue(queue);
     log('QUEUE', 'enqueued', { issue: issueId, trigger });
@@ -480,17 +565,91 @@ function enqueue(issueId, trigger, retryAt = null, { issueIdentifier = null, rea
   }
 }
 
-function dequeue() {
+function dequeue(lastProcessedGroup = null) {
   try {
     const queue = loadQueue();
     const now = new Date();
-    const index = queue.findIndex(item => !item.retryAt || new Date(item.retryAt) <= now);
-    
-    if (index === -1) return null;
 
-    const [item] = queue.splice(index, 1);
+    // Filter to ready items (retryAt null or in the past)
+    const readyIndices = queue.reduce((acc, item, i) => {
+      if (!item.retryAt || new Date(item.retryAt) <= now) acc.push(i);
+      return acc;
+    }, []);
+
+    if (readyIndices.length === 0) return null;
+
+    // Helper: get effective priority rank for an item
+    function effectiveRank(item) {
+      return item.priorityRank != null ? item.priorityRank : getPriorityRank(item.priority);
+    }
+
+    // Helper: compare two candidate indices, returning the better one
+    function betterIndex(aIdx, bIdx, groupMode = false) {
+      const a = queue[aIdx];
+      const b = queue[bIdx];
+      const rankA = effectiveRank(a);
+      const rankB = effectiveRank(b);
+
+      if (rankA < rankB) return aIdx;
+      if (rankA > rankB) return bIdx;
+
+      if (groupMode) {
+        // Within group: compare queueGroupOrder first (lower/earlier wins, null last)
+        const orderA = a.queueGroupOrder != null ? new Date(a.queueGroupOrder).getTime() : Infinity;
+        const orderB = b.queueGroupOrder != null ? new Date(b.queueGroupOrder).getTime() : Infinity;
+        if (orderA < orderB) return aIdx;
+        if (orderA > orderB) return bIdx;
+      } else {
+        // Normal mode: compare retryAt (null = immediate = wins)
+        const retryA = a.retryAt ? new Date(a.retryAt).getTime() : -Infinity;
+        const retryB = b.retryAt ? new Date(b.retryAt).getTime() : -Infinity;
+        if (retryA < retryB) return aIdx;
+        if (retryA > retryB) return bIdx;
+      }
+
+      // Compare enqueuedAt (earlier wins)
+      const enqA = a.enqueuedAt ? new Date(a.enqueuedAt).getTime() : 0;
+      const enqB = b.enqueuedAt ? new Date(b.enqueuedAt).getTime() : 0;
+      return enqA <= enqB ? aIdx : bIdx;
+    }
+
+    // Step 1: Check for Urgent items (priorityRank === 1) — always highest priority
+    const urgentIndices = readyIndices.filter(i => effectiveRank(queue[i]) === 1);
+    if (urgentIndices.length > 0) {
+      let bestUrgent = urgentIndices[0];
+      for (const i of urgentIndices.slice(1)) {
+        bestUrgent = betterIndex(bestUrgent, i);
+      }
+      const [item] = queue.splice(bestUrgent, 1);
+      saveQueue(queue);
+      log('QUEUE', 'dequeued (urgent)', { issue: item.issueId, priorityRank: effectiveRank(item) });
+      return item;
+    }
+
+    // Step 2: If lastProcessedGroup is set, check for items in that group
+    if (lastProcessedGroup) {
+      const groupIndices = readyIndices.filter(i => queue[i].queueGroup === lastProcessedGroup);
+      if (groupIndices.length > 0) {
+        let bestGroup = groupIndices[0];
+        for (const i of groupIndices.slice(1)) {
+          bestGroup = betterIndex(bestGroup, i, true);
+        }
+        const [item] = queue.splice(bestGroup, 1);
+        saveQueue(queue);
+        log('QUEUE', 'dequeued (group priority)', { issue: item.issueId, queueGroup: item.queueGroup, priorityRank: effectiveRank(item) });
+        return item;
+      }
+    }
+
+    // Step 3: Normal priority order (priorityRank → retryAt → enqueuedAt)
+    let bestIndex = readyIndices[0];
+    for (const i of readyIndices.slice(1)) {
+      bestIndex = betterIndex(bestIndex, i);
+    }
+
+    const [item] = queue.splice(bestIndex, 1);
     saveQueue(queue);
-    log('QUEUE', 'dequeued', { issue: item.issueId });
+    log('QUEUE', 'dequeued', { issue: item.issueId, priorityRank: effectiveRank(item) });
     return item;
   } catch (err) {
     log('QUEUE', `dequeue ERROR: ${err.message}`);
@@ -698,7 +857,13 @@ async function runItem(item) {
     log('RUNNER', 'SKIPPED_LOCKED received from run_auto.sh — re-enqueuing', { issue: issueId });
     enqueue(issueId, item.trigger || 'queue', null, {
       issueIdentifier: item.issueIdentifier || null,
-      reason: 'lock_conflict'
+      reason: 'lock_conflict',
+      priority: item.priority ?? null,
+      priorityLabel: item.priorityLabel ?? null,
+      parentIssueId: item.parentIssueId ?? null,
+      parentIssueIdentifier: item.parentIssueIdentifier ?? null,
+      queueGroup: item.queueGroup ?? null,
+      queueGroupOrder: item.queueGroupOrder ?? null
     });
   } else {
     const resetEpoch = parseUsageLimitResetEpoch(output);
@@ -715,7 +880,13 @@ async function runItem(item) {
       });
       enqueue(issueId, item.trigger || 'queue', retryAt, {
         issueIdentifier: item.issueIdentifier || null,
-        reason: 'usage_limit'
+        reason: 'usage_limit',
+        priority: item.priority ?? null,
+        priorityLabel: item.priorityLabel ?? null,
+        parentIssueId: item.parentIssueId ?? null,
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null,
+        queueGroup: item.queueGroup ?? null,
+        queueGroupOrder: item.queueGroupOrder ?? null
       });
       log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt });
     } else {
@@ -727,13 +898,20 @@ async function runItem(item) {
 async function drainQueue() {
   let processedCount = 0;
   let item;
+  let lastProcessedGroup = null;
 
-  while (processedCount < MAX_DRAIN_ITEMS && (item = dequeue()) !== null) {
+  while (processedCount < MAX_DRAIN_ITEMS && (item = dequeue(lastProcessedGroup)) !== null) {
     // Skip items whose retryAt is in the future — put back and stop drain
     if (item.retryAt && new Date(item.retryAt) > new Date()) {
       enqueue(item.issueId, item.trigger, item.retryAt, {
         issueIdentifier: item.issueIdentifier || null,
-        reason: item.reason || null
+        reason: item.reason || null,
+        priority: item.priority ?? null,
+        priorityLabel: item.priorityLabel ?? null,
+        parentIssueId: item.parentIssueId ?? null,
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null,
+        queueGroup: item.queueGroup ?? null,
+        queueGroupOrder: item.queueGroupOrder ?? null
       });
       log('QUEUE', `drain: item ${item.issueId} has future retryAt=${item.retryAt}, stopping drain`);
       break;
@@ -743,6 +921,8 @@ async function drainQueue() {
     const eligibility = await getIssueExecutionEligibility(item.issueId);
     if (!eligibility.eligible) {
       log('QUEUE', `drain: skipped issueId=${item.issueId} reason=${eligibility.reason}`, { issue: item.issueId });
+      // Reset group tracking if skipped
+      lastProcessedGroup = null;
       continue;
     }
 
@@ -754,15 +934,24 @@ async function drainQueue() {
       log('QUEUE', 'drain: SKIPPED_LOCKED — re-enqueuing', { issue: item.issueId });
       enqueue(item.issueId, item.trigger || 'drain', null, {
         issueIdentifier: item.issueIdentifier || null,
-        reason: 'lock_conflict'
+        reason: 'lock_conflict',
+        priority: item.priority ?? null,
+        priorityLabel: item.priorityLabel ?? null,
+        parentIssueId: item.parentIssueId ?? null,
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null,
+        queueGroup: item.queueGroup ?? null,
+        queueGroupOrder: item.queueGroupOrder ?? null
       });
       break;
     }
     try {
       await runItem(item);
       processedCount++;
+      // Track this item's issueId as the last processed group anchor for child issues
+      lastProcessedGroup = item.issueId || item.issueIdentifier || null;
     } catch (err) {
       log('QUEUE', `drain error: ${err.message}`, { issue: item.issueId });
+      lastProcessedGroup = null;
     } finally {
       releaseLock();
     }
@@ -805,6 +994,8 @@ module.exports = {
   loadQueue,
   saveQueue,
   enqueue,
+  getPriorityRank,
+  getIssueQueueMetadata,
   dequeue,
   removeFromQueue,
   isQueued,

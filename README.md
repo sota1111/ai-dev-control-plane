@@ -385,6 +385,39 @@ scheduler / webhook / Discord のすべての実行リクエストは共通キ�
 - 同一 Issue が複数回登録されても1件にまとめられ、retryAt は早い方が優先される
 - scheduler 起動時にキューに残件があれば自動で drain される（再起動復旧）
 
+## Queue 処理順序
+
+webhook / startup-scan / Discord retry / scheduler の共通 queue は以下の優先順で処理されます。
+
+### 優先順位ルール
+
+1. **実行対象**: `retryAt` 未設定、または `retryAt` が現在時刻以前の item のみ実行
+2. **Linear priority 順**（priorityRank 昇順）:
+   - Urgent (priority=1) → rank 1（最優先）
+   - High (priority=2) → rank 2
+   - Medium (priority=3) → rank 3
+   - Low (priority=4) → rank 4
+   - No priority (priority=0) → rank 5（最後）
+   - 未設定 (null/undefined) → rank 5（最後）
+   - **注意**: No priority (0) は最優先ではなく最後に処理されます
+3. **親子 group 優先**: 直前に処理した親Issueの子Issueが queue にある場合、次に優先して実行
+   - Urgent は子Issue group より常に優先
+   - 子Issue group 内では priorityRank → queueGroupOrder → enqueuedAt の順
+4. **同 priority 内**: retryAt (早い順・null 優先) → enqueuedAt (早い順)
+
+### 親Issue / 子Issue の関係
+
+- 親Issueの実行中または直後に作成・登録された子Issueは、`queueGroup = 親IssueId` で紐付けられます
+- 親Issue完了後、同じ `queueGroup` の子Issueが queue にあれば次の drain で優先的に選ばれます
+- 複数の子Issueがある場合は `queueGroupOrder` (Linear createdAt 順) → `enqueuedAt` 順で処理されます
+
+### その他のルール
+
+- 実行中タスクは強制中断しません（drain は完了後に次 item を選択）
+- `retryAt` 未到達の item は priority が高くても実行されません
+- completed / canceled / archived Issue は queue に入っていても実行されません
+- queue ファイル (`runner.queue.json`) の更新はアトミック書き込み (tmp → rename) で行います
+
 ## ロック取得失敗時の扱い
 
 scheduler / webhook / Discord のいずれも共通の挙動:

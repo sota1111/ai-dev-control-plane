@@ -50,10 +50,61 @@ describe('handleQueue', () => {
 
   test('returns queue contents when items exist', async () => {
     runner.loadQueue.mockReturnValueOnce([
-      { issueId: 'SOT-100', trigger: 'webhook', enqueuedAt: new Date().toISOString() },
+      {
+        issueId: 'SOT-100',
+        trigger: 'webhook',
+        enqueuedAt: new Date().toISOString(),
+        priority: 2,
+        priorityLabel: 'High',
+        priorityRank: 2
+      },
     ]);
     const result = await handlers.handleQueue();
     expect(result.content).toContain('SOT-100');
+    expect(result.content).toContain('[High]');
+    expect(result.content).toContain('(rank 2)');
+  });
+
+  test('groups child issues under parent in queue output', async () => {
+    runner.loadQueue.mockReturnValueOnce([
+      {
+        issueId: 'parent-uuid',
+        issueIdentifier: 'SOT-200',
+        trigger: 'webhook',
+        enqueuedAt: '2026-06-16T00:00:00.000Z',
+        priorityLabel: 'Medium',
+        priorityRank: 3
+      },
+      {
+        issueId: 'unrelated-uuid',
+        issueIdentifier: 'SOT-300',
+        trigger: 'webhook',
+        enqueuedAt: '2026-06-16T00:01:00.000Z',
+        priorityLabel: 'High',
+        priorityRank: 2
+      },
+      {
+        issueId: 'child-uuid',
+        issueIdentifier: 'SOT-201',
+        trigger: 'webhook',
+        enqueuedAt: '2026-06-16T00:02:00.000Z',
+        priorityLabel: 'Low',
+        priorityRank: 4,
+        parentIssueId: 'parent-uuid',
+        parentIssueIdentifier: 'SOT-200',
+        queueGroup: 'parent-uuid'
+      },
+    ]);
+
+    const result = await handlers.handleQueue();
+    const parentIndex = result.content.indexOf('1. **SOT-200** [Medium] (rank 3)');
+    const childIndex = result.content.indexOf('  ↳ 3. **SOT-201** [Low] (rank 4)');
+    const unrelatedIndex = result.content.indexOf('2. **SOT-300** [High] (rank 2)');
+
+    expect(parentIndex).toBeGreaterThanOrEqual(0);
+    expect(childIndex).toBeGreaterThan(parentIndex);
+    expect(unrelatedIndex).toBeGreaterThan(childIndex);
+    expect(result.content).toContain('親: SOT-200');
   });
 });
 
