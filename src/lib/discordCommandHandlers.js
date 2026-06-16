@@ -66,7 +66,13 @@ async function handleQueue() {
     }
     const lines = queue.map((item, i) => {
       const at = item.enqueuedAt ? new Date(item.enqueuedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
-      return `${i + 1}. **${item.issueId}** — ${item.trigger || 'unknown'} (${at})`;
+      const priorityStr = item.priorityLabel ? `[${item.priorityLabel}]` : '[No priority]';
+      const rank = item.priorityRank != null ? item.priorityRank : 5;
+      const groupStr = item.queueGroup
+        ? `  ↳ 親: ${item.parentIssueIdentifier || item.parentIssueId || item.queueGroup}`
+        : '';
+      const retryStr = item.retryAt ? ` ⏳ ${new Date(item.retryAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}` : '';
+      return `${i + 1}. **${item.issueId}** ${priorityStr} (rank ${rank}) — ${item.trigger || 'unknown'} (${at})${retryStr}${groupStr}`;
     });
     const content = `## 実行キュー (${queue.length}件)\n` + lines.join('\n');
     return { content: truncate(content) };
