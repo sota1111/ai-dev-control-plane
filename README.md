@@ -332,6 +332,35 @@ Linear Webhook の Issue create / update イベントを受信し、対象 Issue
 npm run start:webhook
 ```
 
+### 起動時 bootstrap scan
+
+`WEBHOOK_BOOTSTRAP_SCAN_ENABLED=true` を設定すると、webhook サーバー起動時に Linear の未処理 Issue を確認し、共通 runner queue に自動投入します。
+
+| 設定 | 説明 |
+|------|------|
+| `WEBHOOK_BOOTSTRAP_SCAN_ENABLED=true` | 起動時に Linear の Todo/In Progress Issue を scan して enqueue する |
+| `WEBHOOK_BOOTSTRAP_SCAN_ENABLED=false`（デフォルト） | scan を行わない |
+
+**動作詳細**:
+
+- `LINEAR_API_KEY` が未設定の場合は scan をスキップします
+- 取得対象: state が `unstarted`（Todo/Backlog）または `started`（In Progress）で、archived でない Issue（最大 50 件）
+- 取得した Issue を trigger=`webhook-bootstrap` で共通 queue に enqueue します
+- 既に queue にある Issue は重複登録しません
+- usage-limit cooldown 中の場合は `retryAt` を設定して enqueue します（即時実行しません）
+- enqueue 完了後に `drainQueue()` を呼び出し、lock が空いていれば処理を開始します
+- scan 結果は `docs/ai/auto_logs/auto_runner.log` に `[BOOTSTRAP]` タグで記録されます
+
+**ログ例**:
+```
+[2026-06-16 09:00:00] [BOOTSTRAP] startup scan started at 2026-06-16T00:00:00.000Z
+[2026-06-16 09:00:00] [BOOTSTRAP] startup scan: found 3 active issue(s)
+[2026-06-16 09:00:00] [BOOTSTRAP] startup scan: enqueued SOT-619
+[2026-06-16 09:00:00] [BOOTSTRAP] startup scan: skip SOT-618 (already queued)
+[2026-06-16 09:00:00] [BOOTSTRAP] startup scan complete: enqueued=2 skipped=1
+[2026-06-16 09:00:00] [BOOTSTRAP] startup scan: drainQueue complete
+```
+
 ## 共通ログ
 
 scheduler と webhook の両方が `docs/ai/auto_logs/auto_runner.log` へログを書き込む。
