@@ -1063,21 +1063,26 @@ async function getIssueExecutionEligibility(issueId) {
   }
 }
 
-function triggerRun(issueId) {
+function triggerRun(issueId, options = {}) {
   // SECURITY: Pass issueId only via environment variable, never as shell argument
   const env = { ...process.env, WEBHOOK_ISSUE_ID: issueId };
   const projectRoot = path.join(__dirname, '..');
   const startedAt = new Date().toISOString();
 
+  const args = ['scripts/ai/run_auto.sh'];
+  if (options.resume) {
+    args.push('--resume');
+  }
+
   // detached: true puts child in its own process group (POSIX)
-  const child = spawn('bash', ['scripts/ai/run_auto.sh'], {
+  const child = spawn('bash', args, {
     env,
     cwd: projectRoot,
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
-  log('RUNNER', `Spawned run_auto.sh for issueId=${issueId} pid=${child.pid} startedAt=${startedAt}`, { issue: issueId });
+  log('RUNNER', `Spawned run_auto.sh for issueId=${issueId} pid=${child.pid} startedAt=${startedAt}${options.resume ? ' (resume)' : ''}`, { issue: issueId });
 
   let output = '';
 
@@ -1122,8 +1127,15 @@ async function runItem(item) {
     return;
   }
 
-  log('RUN', 'start', { trigger: item.trigger || 'queue', issue: issueId });
-  const { code, output } = await triggerRun(issueId);
+  const isResume = item.reason === 'usage_limit';
+  if (isResume) {
+    log('RESUME', 'issue-rerun start', { issue: issueId, retryAt: item.retryAt || null });
+    log('RUN', 'start (resume)', { trigger: item.trigger || 'queue', issue: issueId });
+  } else {
+    log('RUN', 'start', { trigger: item.trigger || 'queue', issue: issueId });
+  }
+
+  const { code, output } = await triggerRun(issueId, { resume: isResume });
 
   if (code === 0) {
     log('RUN', 'completed successfully', { trigger: item.trigger || 'queue', issue: issueId });
