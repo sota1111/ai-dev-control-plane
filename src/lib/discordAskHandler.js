@@ -13,6 +13,7 @@ const {
   handleDangerousIntent,
   handleUnknownIntent,
 } = require('./discordIntentHandlers');
+const { editOriginalInteractionResponse } = require('./discordInteractionFollowup');
 
 const ASK_MODAL_CUSTOM_ID = 'discord_ask_modal';
 const ASK_INPUT_CUSTOM_ID = 'ask_input';
@@ -74,6 +75,71 @@ async function handleAskCommand() {
 }
 
 /**
+ * Background processing for /ask — classify intent, execute, and followup.
+ */
+async function processAskInBackground(interaction, inputText) {
+  try {
+    const { intent, issueId, originalText } = classifyIntent(inputText);
+    runner.log('DISCORD_ASK', 'intent classified', { intent, issueId: issueId || 'none' });
+
+    let responseContent;
+
+    const HANDLER_NAMES = {
+      STATUS_CHECK: 'handleStatusIntent',
+      QUEUE_CHECK: 'handleQueueIntent',
+      COOLDOWN_CHECK: 'handleCooldownIntent',
+      ISSUE_STATUS: 'handleIssueStatusIntent',
+      LOG_SUMMARY: 'handleLogSummaryIntent',
+      COMMENT_POST: 'handleCommentPostIntent',
+      RETRY_SUGGEST: 'handleRetrySuggestIntent',
+      DANGEROUS: 'handleDangerousIntent',
+      UNKNOWN: 'handleUnknownIntent',
+    };
+    const handlerName = HANDLER_NAMES[intent] || 'handleUnknownIntent';
+    runner.log('DISCORD_ASK', 'handler selected', { handler: handlerName, intent });
+
+    switch (intent) {
+      case 'STATUS_CHECK':
+        responseContent = await handleStatusIntent();
+        break;
+      case 'QUEUE_CHECK':
+        responseContent = await handleQueueIntent();
+        break;
+      case 'COOLDOWN_CHECK':
+        responseContent = await handleCooldownIntent();
+        break;
+      case 'ISSUE_STATUS':
+        responseContent = await handleIssueStatusIntent(issueId);
+        break;
+      case 'LOG_SUMMARY':
+        responseContent = await handleLogSummaryIntent(issueId);
+        break;
+      case 'COMMENT_POST':
+        responseContent = await handleCommentPostIntent(issueId, originalText);
+        break;
+      case 'RETRY_SUGGEST':
+        responseContent = await handleRetrySuggestIntent(issueId);
+        break;
+      case 'DANGEROUS':
+        responseContent = handleDangerousIntent();
+        break;
+      case 'UNKNOWN':
+      default:
+        responseContent = handleUnknownIntent(originalText);
+        break;
+    }
+
+    const responsePreview = sanitizeDiscordAskLogText(typeof responseContent === 'string' ? responseContent : '');
+    runner.log('DISCORD_ASK', 'handler completed', { intent, responsePreview: JSON.stringify(responsePreview) });
+
+    await editOriginalInteractionResponse(interaction.application_id, interaction.token, responseContent);
+  } catch (err) {
+    runner.log('DISCORD_ASK', `handler error: ${err.message}`);
+    await editOriginalInteractionResponse(interaction.application_id, interaction.token, '❌ エラーが発生しました。');
+  }
+}
+
+/**
  * Handle modal submit for /ask — classify intent and execute.
  */
 async function handleAskModalSubmit(interaction) {
@@ -129,67 +195,18 @@ async function handleAskModalSubmit(interaction) {
       };
     }
 
-    const { intent, issueId, originalText } = classifyIntent(inputText);
-    runner.log('DISCORD_ASK', 'intent classified', { intent, issueId: issueId || 'none' });
-
-    let responseContent;
-
-    const HANDLER_NAMES = {
-      STATUS_CHECK: 'handleStatusIntent',
-      QUEUE_CHECK: 'handleQueueIntent',
-      COOLDOWN_CHECK: 'handleCooldownIntent',
-      ISSUE_STATUS: 'handleIssueStatusIntent',
-      LOG_SUMMARY: 'handleLogSummaryIntent',
-      COMMENT_POST: 'handleCommentPostIntent',
-      RETRY_SUGGEST: 'handleRetrySuggestIntent',
-      DANGEROUS: 'handleDangerousIntent',
-      UNKNOWN: 'handleUnknownIntent',
-    };
-    const handlerName = HANDLER_NAMES[intent] || 'handleUnknownIntent';
-    runner.log('DISCORD_ASK', 'handler selected', { handler: handlerName, intent });
-
-    switch (intent) {
-      case 'STATUS_CHECK':
-        responseContent = await handleStatusIntent();
-        break;
-      case 'QUEUE_CHECK':
-        responseContent = await handleQueueIntent();
-        break;
-      case 'COOLDOWN_CHECK':
-        responseContent = await handleCooldownIntent();
-        break;
-      case 'ISSUE_STATUS':
-        responseContent = await handleIssueStatusIntent(issueId);
-        break;
-      case 'LOG_SUMMARY':
-        responseContent = await handleLogSummaryIntent(issueId);
-        break;
-      case 'COMMENT_POST':
-        responseContent = await handleCommentPostIntent(issueId, originalText);
-        break;
-      case 'RETRY_SUGGEST':
-        responseContent = await handleRetrySuggestIntent(issueId);
-        break;
-      case 'DANGEROUS':
-        responseContent = handleDangerousIntent();
-        break;
-      case 'UNKNOWN':
-      default:
-        responseContent = handleUnknownIntent(originalText);
-        break;
-    }
-
-    const responsePreview = sanitizeDiscordAskLogText(typeof responseContent === 'string' ? responseContent : '');
-    runner.log('DISCORD_ASK', 'handler completed', { intent, responsePreview: JSON.stringify(responsePreview) });
+    // Kick off background processing
+    const followupPromise = processAskInBackground(interaction, inputText);
 
     const result = {
       status: 200,
       body: {
         type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
-        data: { content: responseContent, flags: 64 },
+        data: { content: '🔄 リクエストを受け付けました。処理中です…', flags: 64 },
       },
+      followupPromise,
     };
-    runner.log('DISCORD_ASK', 'response sent', { mode: 'direct', status: result.status });
+    runner.log('DISCORD_ASK', 'response sent', { mode: 'deferred', status: result.status });
     return result;
   } catch (err) {
     runner.log('DISCORD_ASK', `handler error: ${err.message}`);
@@ -206,6 +223,8 @@ async function handleAskModalSubmit(interaction) {
 module.exports = {
   handleAskCommand,
   handleAskModalSubmit,
+  processAskInBackground,
   ASK_MODAL_CUSTOM_ID,
   sanitizeDiscordAskLogText,
 };
+
