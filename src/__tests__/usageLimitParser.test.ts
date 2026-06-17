@@ -82,4 +82,29 @@ describe('parseUsageLimitResetEpoch', () => {
     expect(result).toBe(1749742200 + 5);
     delete process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS;
   });
+
+  test('parses Codex "try again at Jun 21st, 2026 12:05 AM." message', () => {
+    const codexMsg =
+      "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), " +
+      "visit https://chatgpt.com/codex/settings/usage to purchase more credits or " +
+      "try again at Jun 21st, 2026 12:05 AM.";
+    const expectedReset = Math.floor(Date.UTC(2026, 5, 21, 0, 5, 0) / 1000);
+    const result = parseUsageLimitResetEpoch(codexMsg);
+    expect(result).toBe(expectedReset + BUFFER);
+    // URL in parentheses must not be mistaken for a timezone (falls back to UTC).
+    const d = new Date(((result as number) - BUFFER) * 1000);
+    expect(d.getUTCFullYear()).toBe(2026);
+    expect(d.getUTCMonth()).toBe(5);
+    expect(d.getUTCDate()).toBe(21);
+    expect(d.getUTCHours()).toBe(0);
+    expect(d.getUTCMinutes()).toBe(5);
+  });
+
+  test('honours explicit cross-year date "try again at Jan 2nd, 2027 9:00 PM"', () => {
+    const result = parseUsageLimitResetEpoch(
+      "You've hit your usage limit. ... try again at Jan 2nd, 2027 9:00 PM."
+    );
+    const expectedReset = Math.floor(Date.UTC(2027, 0, 2, 21, 0, 0) / 1000);
+    expect(result).toBe(expectedReset + BUFFER);
+  });
 });
