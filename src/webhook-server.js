@@ -25,6 +25,7 @@ if (_discordNotifier) {
 }
 
 const runner = require('./runner');
+const { isTerminalState } = require('./lib/issueState');
 const fs = require('fs');
 const WEBHOOK_EVENTS_FILE = path.join(runner.LOG_DIR, 'linear.webhook-events.json');
 const WEBHOOK_EVENT_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -191,10 +192,7 @@ app.post('/webhooks/linear', (req, res) => {
     return res.status(200).json({ status: "ignored", reason: "no issue id" });
   }
 
-  const isTerminalState = ["completed", "canceled", "duplicate"].includes(stateType)
-    || ["Done", "Canceled", "Cancelled", "Duplicate"].includes(stateName);
-
-  if (isTerminalState) {
+  if (isTerminalState({ type: stateType, name: stateName })) {
     runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=terminal state`, { issue: issueId });
     runner.removeFromQueue(issueId);
     return res.status(200).json({ status: "ignored", reason: `terminal state: ${stateName || stateType}` });
