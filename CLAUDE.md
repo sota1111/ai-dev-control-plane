@@ -60,9 +60,9 @@ Claude Code focuses on **judgment, delegation, and final approval** — not dire
 
 ## When to Use Gemini CLI
 
-**MANDATORY**: Claude Code must ALWAYS invoke `scripts/ai/run_gemini.sh` for ALL implementation work (within any feature Issue), without exception.
+**MANDATORY**: Claude Code must ALWAYS invoke `scripts/ai/run_gemini.sh` for ALL implementation work (within any feature Issue), without exception — except under the Worker Non-Response Fallback Policy below.
 
-Claude Code must NEVER write implementation code directly. All file creation, editing, and feature implementation must go through Gemini CLI.
+Claude Code must NEVER write implementation code directly — except under the Worker Non-Response Fallback Policy below. All file creation, editing, and feature implementation must go through Gemini CLI.
 
 Before running, write the full instruction into `prompts/gemini/implement.md`.
 
@@ -70,11 +70,25 @@ Before running, write the full instruction into `prompts/gemini/implement.md`.
 
 ## When to Use Codex CLI
 
-**MANDATORY**: Claude Code must ALWAYS invoke `scripts/ai/run_codex.sh` for ALL verification/debug work (within any feature Issue), without exception.
+**MANDATORY**: Claude Code must ALWAYS invoke `scripts/ai/run_codex.sh` for ALL verification/debug work (within any feature Issue), without exception — except under the Worker Non-Response Fallback Policy below.
 
-Claude Code must NEVER run lint / typecheck / tests or apply fixes directly. All verification and debugging must go through Codex CLI.
+Claude Code must NEVER run lint / typecheck / tests or apply fixes directly — except under the Worker Non-Response Fallback Policy below. All verification and debugging must go through Codex CLI.
 
 Before running, write the full instruction into `prompts/codex/debug.md`.
+
+---
+
+## Worker Non-Response Fallback Policy
+
+- **Definition of "non-response" (worker unavailable).** A worker run counts as non-responsive when ANY of these is true:
+  - the worker run script exits with the dedicated non-response code `75` (set by `scripts/ai/run_gemini.sh` / `scripts/ai/run_codex.sh`), or
+  - the worker CLI exits non-zero (crash, auth failure, usage-limit, etc.), or
+  - the worker invocation times out (exceeds the configured timeout), or
+  - the worker report file (`docs/ai/50_worker_gemini_report.md` for Gemini, `docs/ai/60_worker_codex_report.md` for Codex) is missing, empty, or lacks a `## Next Action` line after the run.
+- **Fallback rule.** Claude Code must FIRST attempt normal delegation. Only when a worker is non-responsive per the definition above, Claude Code MAY take over that worker's role and perform the implementation (Gemini's role) or verification/fix (Codex's role) directly, so the Issue is not blocked. This is an explicit, narrowly-scoped EXCEPTION to the otherwise-mandatory delegation rules.
+- **Bounded retry.** Retry a non-responsive worker AT MOST once before falling back. Never loop on a hung or failing worker.
+- **Quality unchanged.** All Quality Gates (lint / typecheck / test / diff review / acceptance criteria) apply identically whether the work was done by the worker or by Claude Code fallback.
+- **Disclosure / audit.** When Claude Code falls back, it MUST record (a) which worker was non-responsive, (b) the detected failure mode, and (c) that Claude Code performed the work directly — both in the relevant worker report file and as a Linear comment on the Issue.
 
 ---
 
@@ -402,12 +416,12 @@ It should comment on Linear with the conflict and proposed action.
 
 ### Worker Tool Use
 
-**MANDATORY**: Claude Code must always delegate to the appropriate worker CLI. Direct implementation or verification by Claude Code is prohibited.
+**MANDATORY**: Claude Code must always delegate to the appropriate worker CLI. Direct implementation or verification by Claude Code is prohibited — except under the Worker Non-Response Fallback Policy above.
 
 - **ALL implementation work (inside any feature Issue)** → MUST use Gemini CLI (`scripts/ai/run_gemini.sh`)
 - **ALL verification/debug work (inside any feature Issue)** → MUST use Codex CLI (`scripts/ai/run_codex.sh`)
 
-Claude Code must NEVER implement code or run tests directly, regardless of task complexity.
+Claude Code must NEVER implement code or run tests directly, regardless of task complexity — except under the Worker Non-Response Fallback Policy above.
 
 Do not expose Gemini CLI or Codex CLI as user-facing agents in Linear comments.
 From the user's perspective, Claude Code is handling the task.
