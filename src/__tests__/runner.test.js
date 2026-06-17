@@ -771,4 +771,157 @@ describe('runner', () => {
       expect(writeCalls.length).toBe(0);
     });
   });
+
+  describe('runItem completion verification', () => {
+    let writeSpy;
+    beforeEach(() => {
+      writeSpy = jest.fn();
+      process.env.LINEAR_API_KEY = 'test-key';
+      fs.existsSync.mockReturnValue(true);
+    });
+
+    function setupLinearMocks(responses) {
+      let index = 0;
+      https.request.mockImplementation((options, callback) => {
+        const responseData = JSON.stringify({ data: responses[index++] });
+        const res = {
+          on: jest.fn((event, cb) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: writeSpy,
+          end: jest.fn(),
+          destroy: jest.fn()
+        };
+      });
+    }
+
+    function queueItem(issueId, priority) {
+      return {
+        issueId,
+        trigger: 'webhook',
+        retryAt: null,
+        enqueuedAt: new Date().toISOString(),
+        priority,
+        priorityRank: runner.getPriorityRank(priority)
+      };
+    }
+
+    function mockRunAutoExit(code, output = '') {
+      spawn.mockImplementation(() => {
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.pid = 12345;
+        process.nextTick(() => {
+          if (output) child.stdout.emit('data', Buffer.from(output));
+          child.emit('close', code, null);
+        });
+        return child;
+      });
+    }
+
+    it('exits 0 but Linear state is In Progress: skips success cleanup', async () => {
+      const item = queueItem('SOT-101', 1);
+      mockRunAutoExit(0, 'some output');
+      setupLinearMocks([
+        { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } }, // eligibility
+        { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } }  // verification
+      ]);
+
+      const logSpy = jest.spyOn(fs, 'appendFileSync');
+
+      await runner.runItem(item);
+
+      const logs = logSpy.mock.calls.map(c => c[1]);
+      expect(logs.some(l => l.includes('completed successfully'))).toBe(false);
+      expect(logs.some(l => l.includes('task completion not verified: state is "In Progress"'))).toBe(true);
+    });
+
+    it('exits 0 and output contains COMPLETION_CONTRACT: INCOMPLETE: skips success cleanup', async () => {
+      const item = queueItem('SOT-101', 1);
+      mockRunAutoExit(0, '... COMPLETION_CONTRACT: INCOMPLETE reason=test-reason ...');
+      setupLinearMocks([
+        { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } } // eligibility
+      ]);
+
+      const logSpy = jest.spyOn(fs, 'appendFileSync');
+
+      await runner.runItem(item);
+
+      const logs = logSpy.mock.calls.map(c => c[1]);
+      expect(logs.some(l => l.includes('completed successfully'))).toBe(false);
+      expect(logs.some(l => l.includes('task completion not verified: test-reason'))).toBe(true);
+    });
+
+    it('exits 0 and Linear state is Done: performs success cleanup', async () => {
+      const item = queueItem('SOT-101', 1);
+      mockRunAutoExit(0, 'COMPLETION_CONTRACT: COMPLETED');
+      setupLinearMocks([
+        { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } }, // eligibility
+        { issue: { id: 'SOT-101', state: { type: 'completed', name: 'Done' } } }       // verification
+      ]);
+
+      const logSpy = jest.spyOn(fs, 'appendFileSync');
+
+      await runner.runItem(item);
+
+      const logs = logSpy.mock.calls.map(c => l => l.includes('completed successfully') ? true : false); // logSpy might have many calls
+      const logsFlat = logSpy.mock.calls.map(c => c[1]);
+      expect(logsFlat.some(l => l.includes('completed successfully'))).toBe(true);
+    });
+
+    it('exits 70 (COMPLETION_UNVERIFIED): skips success cleanup', async () => {
+      const item = queueItem('SOT-101', 1);
+      mockRunAutoExit(70, 'COMPLETION_CONTRACT: INCOMPLETE');
+      setupLinearMocks([
+        { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } } // eligibility
+      ]);
+
+      const logSpy = jest.spyOn(fs, 'appendFileSync');
+
+      await runner.runItem(item);
+
+      const logs = logSpy.mock.calls.map(c => c[1]);
+      expect(logs.some(l => l.includes('completed successfully'))).toBe(false);
+      expect(logs.some(l => l.includes('process exited 70 (COMPLETION_UNVERIFIED)'))).toBe(true);
+    });
+
+    it('Linear query fails during verification: fail-closed, skips success cleanup', async () => {
+      const item = queueItem('SOT-101', 1);
+      mockRunAutoExit(0, 'some output');
+      
+      let callCount = 0;
+      https.request.mockImplementation((options, callback) => {
+        callCount++;
+        if (callCount === 1) {
+          const responseData = JSON.stringify({ data: { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } } });
+          const res = { on: jest.fn((event, cb) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })};
+          callback(res);
+          return { on: jest.fn(), write: jest.fn(), end: jest.fn() };
+        } else {
+          const req = new EventEmitter();
+          req.write = jest.fn();
+          req.end = jest.fn();
+          process.nextTick(() => req.emit('error', new Error('Linear API Timeout')));
+          return req;
+        }
+      });
+
+      const logSpy = jest.spyOn(fs, 'appendFileSync');
+
+      await runner.runItem(item);
+
+      const logs = logSpy.mock.calls.map(c => c[1]);
+      expect(logs.some(l => l.includes('completed successfully'))).toBe(false);
+      expect(logs.some(l => l.includes('task completion not verified: verification unavailable: Linear API Timeout'))).toBe(true);
+    });
+  });
 });

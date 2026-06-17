@@ -7,6 +7,52 @@ const { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } = re
 const queueOrdering = require('./lib/queueOrdering');
 
 const SKIPPED_LOCKED = 75;  // exit code when lock is not available
+const COMPLETION_UNVERIFIED = 70; // exit code when process 0 but task not finished
+
+/**
+ * Verifies if the task is actually completed even if the process exited with 0.
+ * @param {string} issueId
+ * @param {string} output
+ * @returns {Promise<{completed: boolean, reason: string}>}
+ */
+async function verifyTaskCompletion(issueId, output) {
+  // 1. Check explicit marker from run_auto.sh
+  if (output && output.includes('COMPLETION_CONTRACT: INCOMPLETE')) {
+    const reasonMatch = output.match(/COMPLETION_CONTRACT: INCOMPLETE reason=(.+)/);
+    const reason = (reasonMatch ? reasonMatch[1] : 'run_auto marker: incomplete').trim();
+    return { completed: false, reason };
+  }
+
+  // 2. Query Linear for final state (Source of Truth)
+  try {
+    const query = `
+      query($id: String!) {
+        issue(id: $id) {
+          id
+          state { name type }
+        }
+      }
+    `;
+    const data = await linearQuery(query, { id: issueId });
+
+    if (!data.issue) {
+      return { completed: false, reason: 'verification unavailable: issue not found' };
+    }
+
+    const { state } = data.issue;
+    const isActuallyCompleted = state?.type === 'completed' || state?.name === 'Done';
+
+    if (isActuallyCompleted) {
+      return { completed: true };
+    } else {
+      return { completed: false, reason: `state is "${state?.name || 'unknown'}" (${state?.type || 'unknown'})` };
+    }
+  } catch (err) {
+    // Fail closed: if we can't confirm completion via API, assume it's incomplete
+    // to prevent premature cleanup of usage-limit states.
+    return { completed: false, reason: `verification unavailable: ${err.message}` };
+  }
+}
 const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
 const LOCK_FILE = path.join(LOG_DIR, 'runner.lock');
 const QUEUE_FILE = path.join(LOG_DIR, 'runner.queue.json');
@@ -1078,9 +1124,16 @@ async function runItem(item) {
   const { code, output } = await triggerRun(issueId, { resume: isResume });
 
   if (code === 0) {
-    log('RUN', 'completed successfully', { trigger: item.trigger || 'queue', issue: issueId });
-    clearUsageLimitCooldown();
-    await removeUsageLimitLabel(issueId).catch(() => {});
+    const completion = await verifyTaskCompletion(issueId, output);
+    if (completion.completed) {
+      log('RUN', 'completed successfully', { trigger: item.trigger || 'queue', issue: issueId });
+      clearUsageLimitCooldown();
+      await removeUsageLimitLabel(issueId).catch(() => {});
+    } else {
+      log('RUNNER', `process exited 0 but task completion not verified: ${completion.reason} — skipping success cleanup`, { issue: issueId });
+    }
+  } else if (code === COMPLETION_UNVERIFIED) {
+    log('RUNNER', `process exited ${COMPLETION_UNVERIFIED} (COMPLETION_UNVERIFIED) — skipping success cleanup`, { issue: issueId });
   } else if (code === SKIPPED_LOCKED) {
     log('RUNNER', 'SKIPPED_LOCKED received from run_auto.sh — re-enqueuing', { issue: issueId });
     enqueue(issueId, item.trigger || 'queue', null, {
