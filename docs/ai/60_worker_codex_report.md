@@ -1,40 +1,36 @@
-# Worker Report
+Verification complete. I wrote the required report to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md).
 
-## Summary
-Verified the Node scheduler port against the legacy Bash scheduler without starting daemon/watch/default-start paths and without making Linear or Discord network calls. Full quality gate passed. No code fixes were required.
+I made one minimal SOT-705-scoped fix in [scripts/register_discord_commands.js](/workspaces/ai-dev-control-plane/scripts/register_discord_commands.js): changed `catch (err)` to `catch` to remove the migration-introduced unused-var warning.
+
+Final results:
+- `npm run lint`: exit 0
+- `npm run typecheck`: exit 0
+- `npm test`: exit 0, 21 suites / 258 tests passed
+- `npm run lint:eslint`: exit 0, 39 remaining warnings reported as out of scope
+- Next action in report: `READY_FOR_REVIEW`
+` to remove the SOT-705-introduced ESLint unused-var warning.
+- `docs/ai/60_worker_codex_report.md` — wrote this verification report.
 
 ## Commands Run
-- npm run lint: 0
-- npm run typecheck: 0
-- npm test: 0, 242/242 passing across 19/19 suites; pre-existing tests still pass
-- smoke: schedulerCore require / `scheduler.js status`: `node -e "require('./src/lib/schedulerCore.js')"` exited 0; `node src/scheduler.js status` exited 0 and printed `Scheduler is not running`
-- e2e: N/A, no `e2e` script
-
-## Parity Review
-- `.env` loading uses `dotenv.config({ path: <repo>/.env, override: false })`, preserving existing environment values like the Bash loader.
-- Defaults match legacy: `INTERVAL=3600`, `CHECK_INTERVAL=60`, `WEBHOOK_MODE=false`.
-- Fixed paths match legacy: PID `/tmp/l-concierge-scheduler.pid`, logs under `docs/ai/auto_logs/`, `linear_state.txt`, and `runner.queue.json`.
-- Default command exits early for `WEBHOOK_MODE=true` with the same user-facing Japanese messages; `stop`, `status`, `--watch`, and `--foreground` bypass the top-level early exit. Foreground still performs the legacy foreground-specific webhook-mode log-and-exit path.
-- Scheduler log lines use `[YYYY-MM-DD HH:MM:SS] [SCHEDULER] <msg>` and append to both `auto_runner.log` and `scheduler.log`. Discord buffering is only enabled when `DISCORD_WEBHOOK_URL` is set; Node buffers complete newline-terminated lines similarly to Bash.
-- `stop` and `status` output wording matches the legacy user-facing messages, including stale PID wording.
-- `--foreground` writes the PID file, ignores SIGINT, handles SIGTERM cleanup, waits for an in-flight drain, drains pending queue on restart recovery when the queue JSON array has entries, and preserves Linear-polling versus fixed-interval fallback loops.
-- Drain is executed via `node src/runner-cli.js drain`. Linear polling enqueues active identifiers with trigger `scheduler` before draining.
-- Linear active issue query includes `state.type in ["unstarted", "started"]`, `orderBy: priority`, `first: 10`, and fetches identifiers.
-- Rollback wrapper is correct: `scripts/ai/scheduler.sh` execs Node by default and execs `scripts/ai/scheduler.legacy.sh` when `SCHEDULER_IMPL=bash`.
-- `scripts/ai/scheduler.legacy.sh` matches `origin/main:scripts/ai/scheduler.sh` exactly by diff.
-- Minor caveat: legacy restart recovery drains when `runner.queue.json` exists and is non-empty; Node drains when it parses as a non-empty JSON array. This is equivalent for the normal queue format used by `runner.js`, but corrupt non-empty queue content would no longer trigger a scheduler drain.
-- Minor caveat: legacy Linear enqueue uses `runner-cli.js enqueue` and appends that CLI output to `auto_runner.log`; Node calls `runner.enqueue()` directly. The queue trigger is preserved as `scheduler`, but CLI enqueue stdout is not reproduced.
-
-## Changed Files
-- `docs/ai/60_worker_codex_report.md` — verification report
+- `npm run lint` — exit 0. Node syntax checks passed for configured source/script files, including the migrated entrypoints and `src/config/secrets.js`.
+- `npm run typecheck` — exit 0. `tsc --noEmit` passed.
+- `npm test` — exit 0. Full Jest suite passed: 21 test suites, 258 tests. `webhookServer.test.js`, scheduler/session/runner coverage, and `secretsIntegration.test.js` all passed. Jest emitted the existing development-mode webhook warning when `LINEAR_WEBHOOK_SECRET` is unset.
+- `npm run lint:eslint` — exit 0. Reported 39 warnings after the minimal fix, all warnings only; no errors. Remaining warnings are pre-existing/out of scope unused-var warnings in other files and existing lines within changed files.
 
 ## Acceptance Criteria
-- [x] スケジューラの主要機能がNode/TSで再現されている
-- [x] 互換wrapperでロールバック可能 (SCHEDULER_IMPL=bash → legacy)
-- [x] 既存運用フロー（enqueue/drain/通知）が維持されている
+- [x] npm run lint exit 0
+- [x] npm run typecheck exit 0
+- [x] npm test exit 0 (full suite green)
+- [x] lint:eslint result reported
+- [x] no unintended behavior/text changes
 
 ## Risks
-Remaining risk is limited to unexercised daemon behavior because the instructions explicitly prohibited starting default, `--foreground`, or `--watch` modes. Static review found only the two minor parity caveats noted above.
+No unresolved SOT-705 blockers found.
+
+Notes:
+- `webhook-server.js` now reads `LINEAR_WEBHOOK_SECRET` dynamically through `getSecret`, so tests that modify `process.env.LINEAR_WEBHOOK_SECRET` must restore it at file scope. The existing file-scope `afterAll` covers this and the suite passes.
+- Remaining `process.env` reads in the inspected files are non-secret configuration/test setup reads, such as `PORT`, `WEBHOOK_BOOTSTRAP_SCAN_ENABLED`, queue/usage timing config, and test env mutation.
+- `npm run lint:eslint` still reports warnings, but it exits 0 and the only warning introduced by this SOT-705 migration was fixed.
 
 ## Next Action
 READY_FOR_REVIEW
