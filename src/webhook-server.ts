@@ -285,6 +285,15 @@ app.post('/webhooks/linear', (req: any, res: any) => {
         parentIssueId,
         parentIssueIdentifier
       });
+      // Refresh queued items' priority from Linear before selecting. Priority-only changes do not
+      // fire a webhook, so a recently-bumped Urgent/High issue would otherwise stay behind a lower
+      // priority item. Fail-open: never block execution on a refresh error.
+      try {
+        await runner.refreshQueuePriorities();
+      } catch (e: any) {
+        runner.log('WEBHOOK', `refreshQueuePriorities error (fail-open): ${e.message}`, { issue: issueId });
+      }
+
       const item = runner.dequeue();
       if (!item) return;
       const queuedIssueId = item.issueId;
