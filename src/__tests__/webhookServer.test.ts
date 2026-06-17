@@ -1,59 +1,59 @@
-const request = require('supertest');
-const fs = require('fs');
-const path = require('path');
+import { jest } from '@jest/globals';
+import request from 'supertest';
+import fs from 'fs';
+import path from 'path';
+import { EventEmitter } from 'events';
 const WEBHOOK_EVENTS_FILE = path.join('/tmp/test-logs', 'linear.webhook-events.json');
 
-jest.mock('../runner', () => ({
+const mockRunner = {
   SKIPPED_LOCKED: 75,
   log: jest.fn(),
   acquireLock: jest.fn().mockReturnValue(true),
   releaseLock: jest.fn(),
-  hasPendingIssues: jest.fn().mockResolvedValue(true),
-  fetchActiveIssues: jest.fn().mockResolvedValue([]),
-  setIssueInProgress: jest.fn().mockResolvedValue(undefined),
-  postUsageLimitComment: jest.fn().mockResolvedValue(undefined),
-  addUsageLimitLabel: jest.fn().mockResolvedValue(undefined),
-  notifyUsageLimitToAllActiveIssues: jest.fn().mockResolvedValue(undefined),
-  removeUsageLimitLabel: jest.fn().mockResolvedValue(undefined),
+  hasPendingIssues: (jest.fn() as any).mockResolvedValue(true),
+  fetchActiveIssues: (jest.fn() as any).mockResolvedValue([]),
+  setIssueInProgress: (jest.fn() as any).mockResolvedValue(undefined),
+  postUsageLimitComment: (jest.fn() as any).mockResolvedValue(undefined),
+  addUsageLimitLabel: (jest.fn() as any).mockResolvedValue(undefined),
+  notifyUsageLimitToAllActiveIssues: (jest.fn() as any).mockResolvedValue(undefined),
+  removeUsageLimitLabel: (jest.fn() as any).mockResolvedValue(undefined),
   setUsageLimitCooldownUntil: jest.fn(),
   clearUsageLimitCooldown: jest.fn(),
   getUsageLimitCooldownUntil: jest.fn().mockReturnValue(null),
   enqueue: jest.fn(),
-  runItem: jest.fn().mockResolvedValue(undefined),
-  drainQueue: jest.fn().mockResolvedValue(undefined),
+  runItem: (jest.fn() as any).mockResolvedValue(undefined),
+  drainQueue: (jest.fn() as any).mockResolvedValue(undefined),
   dequeue: jest.fn().mockReturnValue(null),
   removeFromQueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
   isQueuedOrRunning: jest.fn().mockReturnValue(false),
-  syncQueueWithLinear: jest.fn().mockResolvedValue(undefined),
+  syncQueueWithLinear: (jest.fn() as any).mockResolvedValue(undefined),
   isLocked: jest.fn().mockReturnValue(false),
   loadQueue: jest.fn().mockReturnValue([]),
-  getIssueExecutionEligibility: jest.fn().mockResolvedValue({ eligible: true }),
+  getIssueExecutionEligibility: (jest.fn() as any).mockResolvedValue({ eligible: true }),
   LOG_DIR: '/tmp/test-logs',
   LOCK_FILE: '/tmp/test-logs/runner.lock',
   QUEUE_FILE: '/tmp/test-logs/runner.queue.json',
   LOG_FILE: '/tmp/test-logs/auto_runner.log',
   STALE_LOCK_MS: 30 * 60 * 1000,
   LINEAR_API_URL: 'https://api.linear.app/graphql',
-}));
+};
+const mockCp = { spawn: jest.fn(), execSync: jest.fn() };
 
-// Mock child_process BEFORE requiring the server
-jest.mock('child_process', () => ({
-  spawn: jest.fn()
-}));
-const { spawn } = require('child_process');
+// Mock runner and child_process BEFORE importing the server
+jest.unstable_mockModule('../runner.js', () => ({ ...mockRunner, default: mockRunner }));
+jest.unstable_mockModule('node:child_process', () => ({ ...mockCp, default: mockCp }));
+const { spawn } = mockCp;
 
-// Disable signature verification BEFORE requiring the server
+// Disable signature verification BEFORE importing the server
 const originalSecret = process.env.LINEAR_WEBHOOK_SECRET;
 process.env.LINEAR_WEBHOOK_SECRET = '';
 
-const { app } = require('../webhook-server');
-
-export {};
+const webhookServer: any = await import('../webhook-server.js');
+const { app } = webhookServer;
 
 // Helper: create a mock spawn child that emits given stdout, stderr, then closes
 function mockSpawnChild({ stdout = '', stderr = '', exitCode = 0 } = {}) {
-  const EventEmitter = require('events');
   const child: any = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
@@ -83,7 +83,7 @@ describe('webhook usage limit retry', () => {
       return { unref: () => {} } as any; // block retry timeout
     });
 
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
       try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
     }
@@ -112,7 +112,7 @@ describe('webhook usage limit retry', () => {
 
   test('schedules retry when run_auto.sh outputs usage limit message', async () => {
     const id = 'TEST-RETRY';
-    const runner = require('../runner');
+    const runner: any = mockRunner;
 
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
 
@@ -135,7 +135,7 @@ describe('webhook usage limit retry', () => {
   });
 
   test('queues webhook without spawning while usage limit cooldown is active', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     const retryAt = new Date(Date.now() + 600000).toISOString();
     runner.getUsageLimitCooldownUntil.mockReturnValue({ retryAt, issueId: null });
 
@@ -159,7 +159,7 @@ describe('webhook usage limit retry', () => {
 
   test('does not retry when run_auto.sh fails without usage limit message', async () => {
     const id = 'TEST-NO-RETRY';
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
@@ -170,12 +170,12 @@ describe('webhook usage limit retry', () => {
     expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
 
     // No large setTimeout should be registered (runner.runItem is mocked, not actual retry logic)
-    const retryCall = (setTimeout as any as jest.Mock).mock.calls.find(call => call[1] > 1000);
+    const retryCall = (setTimeout as any as jest.Mock).mock.calls.find((call: any) => call[1] > 1000);
     expect(retryCall).toBeUndefined();
   });
 
   test("ignores terminal issue update events", async () => {
-    const runner = require("../runner");
+    const runner: any = mockRunner;
     const terminalPayload = {
       type: "Issue",
       action: "update",
@@ -193,7 +193,7 @@ describe('webhook usage limit retry', () => {
 
   test('does not call setIssueInProgress (Claude Code handles In Progress)', async () => {
     const id = 'TEST-IN-PROGRESS';
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
     (spawn as jest.Mock).mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
 
@@ -205,7 +205,7 @@ describe('webhook usage limit retry', () => {
 
   test('does not affect normal successful runs', async () => {
     const id = 'TEST-SUCCESS';
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
@@ -228,7 +228,7 @@ describe('webhook usage limit retry', () => {
   });
 
   test('enqueues non-Urgent issue when a run is locked', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     runner.isLocked.mockReturnValue(true); // simulate active run
     runner.isQueued.mockReturnValue(false);
 
@@ -254,7 +254,7 @@ describe('webhook usage limit retry', () => {
   });
 
   test('does not skip Urgent issue even when a run is locked', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     runner.isLocked.mockReturnValue(true); // simulate active run
     runner.isQueued.mockReturnValue(false);
     runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-URGENT', trigger: 'webhook', retryAt: null });
@@ -281,7 +281,7 @@ describe('webhook usage limit retry', () => {
   });
 
   test('drains queue after main task completes', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     runner.isLocked.mockReturnValue(false);
     runner.isQueued.mockReturnValue(false);
 
@@ -323,7 +323,7 @@ describe('webhook issue filtering', () => {
       return { unref: () => {} } as any;
     });
 
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
       try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
     }
@@ -358,7 +358,7 @@ describe('webhook issue filtering', () => {
   }
 
   test('completed issue update is ignored', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     const payload = makePayload('update', { name: 'Done', type: 'completed' });
     const res = await request(app).post('/webhooks/linear').send(payload);
     expect(res.status).toBe(200);
@@ -369,7 +369,7 @@ describe('webhook issue filtering', () => {
   });
 
   test('canceled issue update is ignored', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     const payload = makePayload('update', { name: 'Canceled', type: 'canceled' });
     const res = await request(app).post('/webhooks/linear').send(payload);
     expect(res.status).toBe(200);
@@ -380,7 +380,7 @@ describe('webhook issue filtering', () => {
   });
 
   test('duplicate issue update is ignored', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     const payload = makePayload('update', { name: 'Duplicate', type: 'duplicate' });
     const res = await request(app).post('/webhooks/linear').send(payload);
     expect(res.status).toBe(200);
@@ -391,7 +391,7 @@ describe('webhook issue filtering', () => {
   });
 
   test('archived issue update is ignored', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     const payload = {
       type: 'Issue',
       action: 'update',
@@ -412,7 +412,7 @@ describe('webhook issue filtering', () => {
   });
 
   test('active issue create is accepted', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-CREATE', trigger: 'webhook', retryAt: null });
     (spawn as jest.Mock).mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
 
@@ -435,7 +435,7 @@ describe('webhook issue filtering', () => {
   });
 
   test('active issue meaningful update is accepted', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-MEANINGFUL', trigger: 'webhook', retryAt: null });
     (spawn as jest.Mock).mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
 
@@ -459,7 +459,7 @@ describe('webhook issue filtering', () => {
   });
 
   test('completed queued issue is removed before execution', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     const payload = {
       type: 'Issue',
       action: 'update',
@@ -478,7 +478,7 @@ describe('webhook issue filtering', () => {
   });
 
   test('usage-limit cleanup update does not retrigger run', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     const payload = {
       type: 'Issue',
       action: 'update',
@@ -510,7 +510,7 @@ describe('pre-execution eligibility check', () => {
       return { unref: () => {} } as any;
     });
 
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
       try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
     }
@@ -538,7 +538,7 @@ describe('pre-execution eligibility check', () => {
   });
 
   test('queued completed issue is skipped before runItem', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     const id = 'TEST-QUEUED-COMPLETED';
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
 
@@ -550,7 +550,7 @@ describe('pre-execution eligibility check', () => {
   });
 
   test('retry completed issue is skipped before triggerRun', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     const id = 'TEST-RETRY-COMPLETED';
     // Issue is dequeued (would be in retry queue) but is now completed
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
@@ -563,7 +563,7 @@ describe('pre-execution eligibility check', () => {
   });
 
   test('archived queued issue is removed before execution', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     const id = 'TEST-ARCHIVED-QUEUED';
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
 
@@ -575,7 +575,7 @@ describe('pre-execution eligibility check', () => {
   });
 
   test('active queued issue still runs', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     const id = 'TEST-ACTIVE-RUNS';
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
 
@@ -588,7 +588,7 @@ describe('pre-execution eligibility check', () => {
 
 describe('runBootstrapScan', () => {
   let runBootstrapScan: any;
-  const runner = require('../runner');
+  const runner: any = mockRunner;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -596,7 +596,7 @@ describe('runBootstrapScan', () => {
     delete process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED;
     delete process.env.LINEAR_API_KEY;
     // Get fresh reference
-    runBootstrapScan = require('../webhook-server').runBootstrapScan;
+    runBootstrapScan = webhookServer.runBootstrapScan;
   });
 
   it('should skip scan when WEBHOOK_BOOTSTRAP_SCAN_ENABLED is not set', async () => {
@@ -689,7 +689,7 @@ describe('webhook event dedupe', () => {
       try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
     }
 
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     runner.isQueuedOrRunning.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.hasPendingIssues.mockResolvedValue(true);
@@ -739,7 +739,7 @@ describe('webhook event dedupe', () => {
   });
 
   test('webhook resend while issue is in-flight is ignored', async () => {
-    const runner = require('../runner');
+    const runner: any = mockRunner;
     runner.isQueuedOrRunning.mockReturnValue(true);
 
     const payload = {

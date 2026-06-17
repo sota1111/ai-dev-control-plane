@@ -1,15 +1,40 @@
+import { jest } from '@jest/globals';
+
+let DiscordNotifierMock: any;
+
+const mockRunner: any = {
+  SKIPPED_LOCKED: 75,
+  log: jest.fn(),
+  acquireLock: jest.fn().mockReturnValue(true),
+  releaseLock: jest.fn(),
+  hasPendingIssues: (jest.fn() as any).mockResolvedValue(true),
+  setIssueInProgress: (jest.fn() as any).mockResolvedValue(undefined),
+  notifyUsageLimitToAllActiveIssues: (jest.fn() as any).mockResolvedValue(undefined),
+  removeUsageLimitLabel: (jest.fn() as any).mockResolvedValue(undefined),
+  enqueue: jest.fn(),
+  dequeue: jest.fn().mockReturnValue(null),
+  isQueued: jest.fn().mockReturnValue(false),
+  isLocked: jest.fn().mockReturnValue(false),
+  loadQueue: jest.fn().mockReturnValue([]),
+  LOG_DIR: '/tmp/test-logs',
+};
+const mockCp = { spawn: jest.fn(), execSync: jest.fn() };
+
+jest.unstable_mockModule('../lib/discordNotifier.js', () => ({
+  DiscordNotifier: DiscordNotifierMock,
+}));
+jest.unstable_mockModule('../runner.js', () => ({ ...mockRunner, default: mockRunner }));
+jest.unstable_mockModule('node:child_process', () => ({ ...mockCp, default: mockCp }));
+
 describe('DiscordNotifier integration in webhook-server', () => {
   const webhookUrl = 'https://discord.com/api/webhooks/test/hook';
-  let DiscordNotifierMock: jest.Mock;
   let originalStdoutWrite: typeof process.stdout.write;
   let originalStderrWrite: typeof process.stderr.write;
   let originalEnv: NodeJS.ProcessEnv;
   let originalListeners: Record<string, any[]>;
 
-  function loadWebhookServer() {
-    jest.isolateModules(() => {
-      require('../webhook-server');
-    });
+  async function loadWebhookServer() {
+    await import('../webhook-server.js');
   }
 
   beforeEach(() => {
@@ -25,8 +50,8 @@ describe('DiscordNotifier integration in webhook-server', () => {
       unhandledRejection: process.listeners('unhandledRejection')
     };
 
-    process.stdout.write = jest.fn(() => true);
-    process.stderr.write = jest.fn(() => true);
+    process.stdout.write = jest.fn(() => true) as any;
+    process.stderr.write = jest.fn(() => true) as any;
     process.env.DISCORD_WEBHOOK_URL = webhookUrl;
     process.env.LINEAR_WEBHOOK_SECRET = 'test-secret';
 
@@ -34,32 +59,7 @@ describe('DiscordNotifier integration in webhook-server', () => {
       start: jest.fn(),
       stop: jest.fn(),
       add: jest.fn(),
-      flush: jest.fn().mockResolvedValue(undefined)
-    }));
-
-    jest.doMock('../lib/discordNotifier', () => ({
-      DiscordNotifier: DiscordNotifierMock
-    }));
-
-    jest.doMock('../runner', () => ({
-      SKIPPED_LOCKED: 75,
-      log: jest.fn(),
-      acquireLock: jest.fn().mockReturnValue(true),
-      releaseLock: jest.fn(),
-      hasPendingIssues: jest.fn().mockResolvedValue(true),
-      setIssueInProgress: jest.fn().mockResolvedValue(undefined),
-      notifyUsageLimitToAllActiveIssues: jest.fn().mockResolvedValue(undefined),
-      removeUsageLimitLabel: jest.fn().mockResolvedValue(undefined),
-      enqueue: jest.fn(),
-      dequeue: jest.fn().mockReturnValue(null),
-      isQueued: jest.fn().mockReturnValue(false),
-      isLocked: jest.fn().mockReturnValue(false),
-      loadQueue: jest.fn().mockReturnValue([]),
-      LOG_DIR: '/tmp/test-logs'
-    }));
-
-    jest.doMock('child_process', () => ({
-      spawn: jest.fn()
+      flush: (jest.fn() as any).mockResolvedValue(undefined)
     }));
   });
 
@@ -77,27 +77,24 @@ describe('DiscordNotifier integration in webhook-server', () => {
     for (const listener of originalListeners.unhandledRejection) process.on('unhandledRejection', listener);
 
     process.env = originalEnv;
-    jest.dontMock('../lib/discordNotifier');
-    jest.dontMock('../runner');
-    jest.dontMock('child_process');
     jest.restoreAllMocks();
   });
 
-  test('DiscordNotifier is constructed with DISCORD_WEBHOOK_URL', () => {
-    loadWebhookServer();
+  test('DiscordNotifier is constructed with DISCORD_WEBHOOK_URL', async () => {
+    await loadWebhookServer();
 
     expect(DiscordNotifierMock).toHaveBeenCalledWith(webhookUrl);
   });
 
-  test('start() is called on DiscordNotifier instance', () => {
-    loadWebhookServer();
+  test('start() is called on DiscordNotifier instance', async () => {
+    await loadWebhookServer();
     const instance = DiscordNotifierMock.mock.results[0].value;
 
     expect(instance.start).toHaveBeenCalled();
   });
 
-  test('stdout and stderr writes are forwarded to notifier.add()', () => {
-    loadWebhookServer();
+  test('stdout and stderr writes are forwarded to notifier.add()', async () => {
+    await loadWebhookServer();
     const instance = DiscordNotifierMock.mock.results[0].value;
 
     process.stdout.write('test stdout log message');
@@ -107,5 +104,3 @@ describe('DiscordNotifier integration in webhook-server', () => {
     expect(instance.add).toHaveBeenCalledWith(expect.stringContaining('test stderr log message'));
   });
 });
-
-export {};

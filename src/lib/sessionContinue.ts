@@ -1,12 +1,14 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
-const { classifyUsageLimit } = require('./usageLimitParser');
-const { buildSessionContinueMetadata, saveResumeMetadata, formatResumeLogLines } = require('./resumeMetadata');
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from "node:url";
+import { execSync } from 'node:child_process';
+import { classifyUsageLimit } from './usageLimitParser.js';
+import { buildSessionContinueMetadata, saveResumeMetadata, formatResumeLogLines } from './resumeMetadata.js';
 
-export {};
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 interface ExecResult {
   ok: boolean;
@@ -258,7 +260,7 @@ async function attemptSessionContinue({
   }
 }
 
-module.exports = {
+export {
   paneExists,
   getPaneInfo,
   capturePane,

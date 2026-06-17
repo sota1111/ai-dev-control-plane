@@ -1,8 +1,8 @@
 'use strict';
 
-const runner = require('../runner');
-const { classifyIntent } = require('./discordIntentClassifier');
-const {
+import * as runner from '../runner.js';
+import { classifyIntent } from './discordIntentClassifier.js';
+import {
   handleStatusIntent,
   handleQueueIntent,
   handleCooldownIntent,
@@ -12,10 +12,8 @@ const {
   handleRetrySuggestIntent,
   handleDangerousIntent,
   handleUnknownIntent,
-} = require('./discordIntentHandlers');
-const { editOriginalInteractionResponse } = require('./discordInteractionFollowup');
-
-export {};
+} from './discordIntentHandlers.js';
+import { editOriginalInteractionResponse } from './discordInteractionFollowup.js';
 
 const ASK_MODAL_CUSTOM_ID = 'discord_ask_modal';
 const ASK_INPUT_CUSTOM_ID = 'ask_input';
@@ -126,16 +124,16 @@ async function processAskInBackground(interaction: any, inputText: string): Prom
         responseContent = await handleCooldownIntent();
         break;
       case 'ISSUE_STATUS':
-        responseContent = await handleIssueStatusIntent(issueId);
+        responseContent = await handleIssueStatusIntent(issueId!);
         break;
       case 'LOG_SUMMARY':
-        responseContent = await handleLogSummaryIntent(issueId);
+        responseContent = await handleLogSummaryIntent(issueId!);
         break;
       case 'COMMENT_POST':
-        responseContent = await handleCommentPostIntent(issueId, originalText);
+        responseContent = await handleCommentPostIntent(issueId!, originalText);
         break;
       case 'RETRY_SUGGEST':
-        responseContent = await handleRetrySuggestIntent(issueId);
+        responseContent = await handleRetrySuggestIntent(issueId!);
         break;
       case 'DANGEROUS':
         responseContent = handleDangerousIntent();
@@ -237,7 +235,7 @@ async function handleAskModalSubmit(interaction: any): Promise<DiscordAskHandler
   }
 }
 
-module.exports = {
+export {
   handleAskCommand,
   handleAskModalSubmit,
   processAskInBackground,

@@ -1,6 +1,6 @@
 'use strict';
 
-const {
+import {
   handleStatus,
   handleQueue,
   handleCooldown,
@@ -8,10 +8,8 @@ const {
   handleResume,
   handleReply,
   handleRetry,
-} = require('./discordCommandHandlers');
-const { handleAskCommand, handleAskModalSubmit, ASK_MODAL_CUSTOM_ID } = require('./discordAskHandler');
-
-export {};
+} from './discordCommandHandlers.js';
+import { handleAskCommand, handleAskModalSubmit, ASK_MODAL_CUSTOM_ID } from './discordAskHandler.js';
 
 // Interaction types
 const InteractionType = {
@@ -150,7 +148,7 @@ async function handleMessageComponent(interaction: any): Promise<InteractionResp
   };
 }
 
-module.exports = {
+export {
   routeInteraction,
   InteractionType,
   InteractionResponseType,

@@ -1,7 +1,4 @@
-'use strict';
-const https = require('https');
-
-export {};
+import https from 'node:https';
 
 const MAX_LENGTH = 1990;
 
@@ -57,7 +54,7 @@ async function sendWithRetry(webhookUrl: string, content: string): Promise<void>
   }
 }
 
-class DiscordNotifier {
+export class DiscordNotifier {
   private _url: string | undefined;
   private _buffer: string[];
   private _timer: NodeJS.Timeout | null;
@@ -70,7 +67,7 @@ class DiscordNotifier {
 
   start(intervalMs: number = 5000): void {
     this._timer = setInterval(() => this.flush(), intervalMs);
-    if (this._timer && this._timer.unref) this._timer.unref();
+    if (this._timer && (this._timer as any).unref) (this._timer as any).unref();
   }
 
   stop(): Promise<void> {
@@ -96,5 +93,3 @@ class DiscordNotifier {
     }
   }
 }
-
-module.exports = { DiscordNotifier };

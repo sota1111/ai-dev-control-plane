@@ -1,10 +1,8 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const runner = require('../runner');
-
-export {};
+import fs from 'node:fs';
+import path from 'node:path';
+import * as runner from '../runner.js';
 
 const PAUSE_FILE: string = path.join(runner.LOG_DIR, 'runner.pause');
 
@@ -41,4 +39,4 @@ function getPauseInfo(): PauseInfo | null {
   }
 }
 
-module.exports = { isPaused, setPaused, clearPause, getPauseInfo, PAUSE_FILE };
+export { isPaused, setPaused, clearPause, getPauseInfo, PAUSE_FILE };

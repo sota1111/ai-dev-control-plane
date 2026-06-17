@@ -1,11 +1,29 @@
-'use strict';
+import { jest } from '@jest/globals';
 
-jest.mock('fs');
-jest.mock('../runner');
+const mockFs = {
+  existsSync: jest.fn(),
+  readFileSync: jest.fn(),
+  unlinkSync: jest.fn(),
+  mkdirSync: jest.fn(),
+  createWriteStream: jest.fn(),
+  appendFileSync: jest.fn(),
+  writeFileSync: jest.fn(),
+  realpathSync: jest.fn().mockImplementation(p => p),
+};
 
-const fs = require('fs');
-const core = require('../lib/schedulerCore');
-const scheduler = require('../scheduler');
+jest.unstable_mockModule('node:fs', () => ({
+  default: mockFs,
+  ...mockFs
+}));
+
+jest.unstable_mockModule('../runner.js', () => ({
+  linearQuery: jest.fn(),
+  enqueue: jest.fn(),
+}));
+
+const fs = await import('node:fs');
+const core = await import('../lib/schedulerCore.js');
+const scheduler = await import('../scheduler.js');
 
 describe('schedulerCore', () => {
   test('getConfig returns defaults', () => {

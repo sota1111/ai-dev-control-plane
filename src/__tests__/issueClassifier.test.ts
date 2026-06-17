@@ -1,6 +1,4 @@
-const { classifyIssue, isProcessPrefixedTitle, suggestFeatureTitleHint } = require('../lib/issueClassifier');
-
-export {};
+import { classifyIssue, isProcessPrefixedTitle, suggestFeatureTitleHint } from '../lib/issueClassifier.js';
 
 describe('classifyIssue', () => {
   test('[IMPLEMENT] prefix → IMPLEMENT/gemini', () => {

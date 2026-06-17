@@ -1,12 +1,12 @@
 'use strict';
 
-const https = require('https');
-const { EventEmitter } = require('events');
+import https from 'node:https';
+import { EventEmitter } from 'node:events';
 
 /**
  * Mocks https.request to intercept Discord API calls.
  */
-function installDiscordHttpMock() {
+export function installDiscordHttpMock() {
   const responses = [];
   const calls = [];
   const originalRequest = https.request;
@@ -85,7 +85,7 @@ function installDiscordHttpMock() {
 /**
  * Factory for Discord interaction bodies.
  */
-function makeInteraction({ type = 2, commandName, options = [], token = 'test-token', applicationId = 'app-123', customId } = {}) {
+export function makeInteraction({ type = 2, commandName, options = [], token = 'test-token', applicationId = 'app-123', customId } = {}) {
   const interaction = {
     id: 'int-123',
     application_id: applicationId,
@@ -113,5 +113,3 @@ function makeInteraction({ type = 2, commandName, options = [], token = 'test-to
 
   return interaction;
 }
-
-module.exports = { installDiscordHttpMock, makeInteraction };

@@ -1,14 +1,23 @@
 'use strict';
-const express = require('express');
-const path = require('path');
-const crypto = require('crypto');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-const { getSecret, initSecrets } = require('./config/secrets');
-const { DiscordNotifier } = require('./lib/discordNotifier');
-const { verifyDiscordSignature } = require('./lib/discordInteractions');
-const { routeInteraction } = require('./lib/discordCommandRouter');
 
-export {};
+import express from 'express';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+import dotenv from 'dotenv';
+import { getSecret, initSecrets } from './config/secrets.js';
+import { DiscordNotifier } from './lib/discordNotifier.js';
+import { verifyDiscordSignature } from './lib/discordInteractions.js';
+import { routeInteraction } from './lib/discordCommandRouter.js';
+import { isTerminalState } from './lib/issueState.js';
+import * as runner from './runner.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const _discordNotifier = getSecret('DISCORD_WEBHOOK_URL')
   ? new DiscordNotifier(getSecret('DISCORD_WEBHOOK_URL'))
@@ -28,9 +37,6 @@ if (_discordNotifier) {
   };
 }
 
-const runner = require('./runner');
-const { isTerminalState } = require('./lib/issueState');
-const fs = require('fs');
 const WEBHOOK_EVENTS_FILE = path.join(runner.LOG_DIR, 'linear.webhook-events.json');
 const WEBHOOK_EVENT_TTL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -138,7 +144,7 @@ function verifyLinearSignature(req: any): boolean {
     return false;
   }
   const expected = crypto
-    .createHmac('sha256', getSecret('LINEAR_WEBHOOK_SECRET'))
+    .createHmac('sha256', getSecret('LINEAR_WEBHOOK_SECRET') as string)
     .update(req.rawBody || '')
     .digest('hex');
   return signature === expected;
@@ -428,7 +434,9 @@ async function runBootstrapScan(): Promise<void> {
   }
 }
 
-if (require.main === module) {
+const isMain = fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isMain) {
   (async () => {
     await initSecrets(['LINEAR_WEBHOOK_SECRET', 'DISCORD_PUBLIC_KEY', 'LINEAR_API_KEY', 'DISCORD_WEBHOOK_URL']);
     app.listen(PORT, () => {
@@ -442,4 +450,4 @@ if (require.main === module) {
   })();
 }
 
-module.exports = { app, runBootstrapScan };
+export { app, runBootstrapScan };

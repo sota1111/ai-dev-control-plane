@@ -1,12 +1,12 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const {
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
   buildIssueRerunMetadata,
   buildSessionContinueMetadata,
   saveResumeMetadata,
   formatResumeLogLines
-} = require('../lib/resumeMetadata');
+} from '../lib/resumeMetadata.js';
 
 describe('resumeMetadata', () => {
   let tmpDir: string;

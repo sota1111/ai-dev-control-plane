@@ -1,12 +1,31 @@
-'use strict';
+import { jest } from '@jest/globals';
 
-jest.mock('https');
-jest.mock('fs');
+const mockHttps = {
+  request: jest.fn(),
+};
 
-const https = require('https');
-const fs = require('fs');
-const runner = require('../runner');
-const { installLinearHttpMock } = require('../__test_helpers__/linearMock');
+const mockFs = {
+  existsSync: jest.fn(),
+  mkdirSync: jest.fn(),
+  appendFileSync: jest.fn(),
+  writeFileSync: jest.fn(),
+  renameSync: jest.fn(),
+};
+
+jest.unstable_mockModule('node:https', () => ({
+  default: mockHttps,
+  ...mockHttps,
+}));
+
+jest.unstable_mockModule('node:fs', () => ({
+  default: mockFs,
+  ...mockFs,
+}));
+
+const https = await import('node:https');
+const fs = await import('node:fs');
+const runner = await import('../runner.js');
+const { installLinearHttpMock } = await import('../__test_helpers__/linearMock.js');
 
 describe('Linear Integration', () => {
   let linearMock;

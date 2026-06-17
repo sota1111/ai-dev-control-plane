@@ -1,7 +1,9 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from "node:url";
 
-export {};
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 interface IssueRerunMetadata {
   issueId: string;
@@ -37,7 +39,7 @@ type ResumeMetadata = IssueRerunMetadata | SessionContinueMetadata;
 /**
  * Builds metadata for rerunning an issue.
  */
-function buildIssueRerunMetadata({
+export function buildIssueRerunMetadata({
   issueId,
   stoppedReason,
   stoppedAt,
@@ -69,7 +71,7 @@ function buildIssueRerunMetadata({
 /**
  * Builds metadata for continuing a session.
  */
-function buildSessionContinueMetadata({
+export function buildSessionContinueMetadata({
   issueId,
   stoppedReason,
   stoppedAt,
@@ -99,7 +101,7 @@ function buildSessionContinueMetadata({
 /**
  * Returns the path for resume metadata JSON.
  */
-function resumeMetadataPath(issueId: string | null | undefined, baseDir?: string): string {
+export function resumeMetadataPath(issueId: string | null | undefined, baseDir?: string): string {
   const root = baseDir || path.join(__dirname, '..', '..', 'docs', 'ai', 'auto_logs');
   const sanitize = (id: string | null | undefined) => {
     if (!id) return 'session_' + Date.now().toString().slice(-6);
@@ -111,7 +113,7 @@ function resumeMetadataPath(issueId: string | null | undefined, baseDir?: string
 /**
  * Saves resume metadata to a JSON file atomically.
  */
-function saveResumeMetadata(metadata: ResumeMetadata, baseDir?: string): string {
+export function saveResumeMetadata(metadata: ResumeMetadata, baseDir?: string): string {
   const filePath = resumeMetadataPath(metadata.issueId, baseDir);
   const dir = path.dirname(filePath);
 
@@ -131,7 +133,7 @@ function saveResumeMetadata(metadata: ResumeMetadata, baseDir?: string): string 
 /**
  * Formats metadata into [RESUME] log lines.
  */
-function formatResumeLogLines(metadata: ResumeMetadata, extra: any = {}): string[] {
+export function formatResumeLogLines(metadata: ResumeMetadata, extra: any = {}): string[] {
   const lines: string[] = [];
   const { resumeMode } = metadata;
 
@@ -164,11 +166,3 @@ function formatResumeLogLines(metadata: ResumeMetadata, extra: any = {}): string
 
   return lines;
 }
-
-module.exports = {
-  buildIssueRerunMetadata,
-  buildSessionContinueMetadata,
-  resumeMetadataPath,
-  saveResumeMetadata,
-  formatResumeLogLines
-};

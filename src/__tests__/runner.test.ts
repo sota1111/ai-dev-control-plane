@@ -1,16 +1,26 @@
-jest.mock('fs');
-jest.mock('https');
-jest.mock('child_process', () => ({
-  spawn: jest.fn()
-}));
+import { jest } from '@jest/globals';
+import { EventEmitter } from 'events';
 
-const fs = require('fs');
-const https = require('https');
-const { EventEmitter } = require('events');
-const { spawn } = require('child_process');
-const runner = require('../runner');
+const mockFs = {
+  appendFileSync: jest.fn(),
+  existsSync: jest.fn(),
+  mkdirSync: jest.fn(),
+  readFileSync: jest.fn(),
+  renameSync: jest.fn(),
+  unlinkSync: jest.fn(),
+  writeFileSync: jest.fn(),
+};
+const mockHttps = { request: jest.fn() };
+const mockCp = { spawn: jest.fn(), execSync: jest.fn() };
 
-export {};
+jest.unstable_mockModule('node:fs', () => ({ ...mockFs, default: mockFs }));
+jest.unstable_mockModule('node:https', () => ({ ...mockHttps, default: mockHttps }));
+jest.unstable_mockModule('node:child_process', () => ({ ...mockCp, default: mockCp }));
+
+const fs: any = mockFs;
+const https: any = mockHttps;
+const { spawn } = mockCp;
+const runner: any = await import('../runner.js');
 
 describe('runner', () => {
   const mockLockFile = runner.LOCK_FILE;
@@ -453,7 +463,7 @@ describe('runner', () => {
       (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
         const responseData = JSON.stringify({ data: responses[index++] });
         const res: any = {
-          on: jest.fn((event, cb) => {
+          on: jest.fn((event: any, cb: any) => {
             if (event === 'data') cb(responseData);
             if (event === 'end') cb();
           })
@@ -483,8 +493,8 @@ describe('runner', () => {
       expect(https.request).toHaveBeenCalledTimes(2);
       
       // Verify no commentCreate mutation was sent in any of the write calls
-      const writtenBodies = writeSpy.mock.calls.map(c => c[0]);
-      expect(writtenBodies.some(b => b.includes('commentCreate'))).toBe(false);
+      const writtenBodies = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(writtenBodies.some((b: any) => b.includes('commentCreate'))).toBe(false);
     });
 
     it('posts comment when no existing comment matches', async () => {
@@ -499,8 +509,8 @@ describe('runner', () => {
       await runner.postUsageLimitComment('SOT-602', epoch);
 
       expect(https.request).toHaveBeenCalledTimes(3);
-      const writtenBodies = writeSpy.mock.calls.map(c => c[0]);
-      expect(writtenBodies.some(b => b.includes('commentCreate'))).toBe(true);
+      const writtenBodies = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(writtenBodies.some((b: any) => b.includes('commentCreate'))).toBe(true);
     });
 
     it('posts comment when existing comment has different body', async () => {
@@ -516,8 +526,8 @@ describe('runner', () => {
       await runner.postUsageLimitComment('SOT-602', epoch);
 
       expect(https.request).toHaveBeenCalledTimes(3);
-      const writtenBodies = writeSpy.mock.calls.map(c => c[0]);
-      expect(writtenBodies.some(b => b.includes('commentCreate'))).toBe(true);
+      const writtenBodies = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(writtenBodies.some((b: any) => b.includes('commentCreate'))).toBe(true);
     });
   });
 
@@ -568,7 +578,7 @@ describe('runner', () => {
       (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
         const responseData = JSON.stringify({ data: responses[index++] });
         const res: any = {
-          on: jest.fn((event, cb) => {
+          on: jest.fn((event: any, cb: any) => {
             if (event === 'data') cb(responseData);
             if (event === 'end') cb();
           })
@@ -704,7 +714,7 @@ describe('runner', () => {
       (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
         const responseData = JSON.stringify({ data: responses[index++] });
         const res: any = {
-          on: jest.fn((event, cb) => {
+          on: jest.fn((event: any, cb: any) => {
             if (event === 'data') cb(responseData);
             if (event === 'end') cb();
           })
@@ -787,7 +797,7 @@ describe('runner', () => {
       (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
         const responseData = JSON.stringify({ data: responses[index++] });
         const res: any = {
-          on: jest.fn((event, cb) => {
+          on: jest.fn((event: any, cb: any) => {
             if (event === 'data') cb(responseData);
             if (event === 'end') cb();
           })
@@ -901,7 +911,7 @@ describe('runner', () => {
         callCount++;
         if (callCount === 1) {
           const responseData = JSON.stringify({ data: { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } } });
-          const res: any = { on: jest.fn((event, cb) => {
+          const res: any = { on: jest.fn((event: any, cb: any) => {
             if (event === 'data') cb(responseData);
             if (event === 'end') cb();
           })};

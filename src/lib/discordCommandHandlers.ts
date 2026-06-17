@@ -1,11 +1,9 @@
 'use strict';
 
-const runner = require('../runner');
-const queueOrdering = require('./queueOrdering');
-const { isPaused, setPaused, clearPause, getPauseInfo } = require('./discordPauseState');
-const sessionContinue = require('./sessionContinue');
-
-export {};
+import * as runner from '../runner.js';
+import * as queueOrdering from './queueOrdering.js';
+import { isPaused, setPaused, clearPause, getPauseInfo } from './discordPauseState.js';
+import * as sessionContinue from './sessionContinue.js';
 
 const ISSUE_ID_PATTERN = /^SOT-\d+$/i;
 const MAX_BODY_LENGTH = 1000;
@@ -338,7 +336,7 @@ async function handleRetry(interaction: DiscordInteraction): Promise<CommandResu
   }
 }
 
-module.exports = {
+export {
   handleStatus,
   handleQueue,
   handleCooldown,

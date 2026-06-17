@@ -1,16 +1,16 @@
-const js = require("@eslint/js");
-const prettier = require("eslint-config-prettier");
-const globals = require("globals");
-const tseslint = require("typescript-eslint");
+import js from "@eslint/js";
+import prettier from "eslint-config-prettier";
+import globals from "globals";
+import tseslint from "typescript-eslint";
 
-module.exports = [
+export default [
   js.configs.recommended,
   prettier,
   {
     files: ["src/**/*.js", "scripts/**/*.js"],
     languageOptions: {
       ecmaVersion: 2022,
-      sourceType: "commonjs",
+      sourceType: "module",
       globals: {
         ...globals.node,
         ...globals.jest,
@@ -30,7 +30,7 @@ module.exports = [
     languageOptions: {
       parser: tseslint.parser,
       ecmaVersion: 2022,
-      sourceType: "commonjs",
+      sourceType: "module",
       globals: {
         ...globals.node,
         ...globals.jest,

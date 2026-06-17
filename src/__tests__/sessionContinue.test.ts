@@ -1,12 +1,11 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const {
+import { jest } from '@jest/globals';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import {
   attemptSessionContinue,
   isClaudeForeground
-} = require('../lib/sessionContinue');
-
-export {};
+} from '../lib/sessionContinue.js';
 
 describe('sessionContinue', () => {
   const PANE_ID = '%7';

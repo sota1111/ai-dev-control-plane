@@ -1,4 +1,4 @@
-const queueOrdering = require('../lib/queueOrdering');
+import * as queueOrdering from '../lib/queueOrdering.js';
 
 describe('queueOrdering', () => {
   const now = new Date('2023-01-01T12:00:00Z');

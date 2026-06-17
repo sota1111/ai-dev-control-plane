@@ -1,7 +1,6 @@
 /**
  * Internal helper to parse raw usage limit reset time from text and returns the Unix epoch (seconds).
  */
-export {};
 
 function parseRawResetEpoch(text: string, nowMs: number): number | null {
   const keywords = ['resets', 'reset at', 'resets at', 'will reset at', 'Your limit will reset'];
@@ -73,7 +72,7 @@ function parseRawResetEpoch(text: string, nowMs: number): number | null {
  * @param {number} [nowMs] - Optional current time in ms for testability
  * @returns {number | null} - Unix epoch (seconds) or null if not applicable
  */
-function parseUsageLimitResetEpoch(text: string, nowMs: number = Date.now()): number | null {
+export function parseUsageLimitResetEpoch(text: string, nowMs: number = Date.now()): number | null {
   const buffer = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
   const rawEpoch = parseRawResetEpoch(text, nowMs);
   if (rawEpoch === null) return null;
@@ -95,7 +94,7 @@ interface UsageLimitResult {
  * @param {string} text 
  * @param {number} nowMs 
  */
-function classifyUsageLimit(text: string, nowMs: number = Date.now()): UsageLimitResult {
+export function classifyUsageLimit(text: string, nowMs: number = Date.now()): UsageLimitResult {
   const buffer = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
   const overloadBuffer = parseInt(process.env.OVERLOAD_RETRY_BUFFER_SECONDS || '3600', 10);
   const lowerText = text.toLowerCase();
@@ -239,5 +238,3 @@ function getTimezoneOffsetMs(timeZone: string, date: Date): number {
     return 0;
   }
 }
-
-module.exports = { parseUsageLimitResetEpoch, classifyUsageLimit };

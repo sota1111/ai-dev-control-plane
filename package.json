@@ -2,7 +2,7 @@
   "name": "ai-dev-control-plane",
   "version": "1.0.0",
   "private": true,
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "lint": "node --check eslint.config.js && node --check src/scheduler.js && node --check src/lib/schedulerCore.js && node --check src/config/secrets.js && node --check scripts/register_discord_commands.js && node --check scripts/auth/firebase-user.js && node --check scripts/auth/cloudrun-sync.js && node --check scripts/auth/auth-setup.js",
     "lint:eslint": "eslint src scripts",
@@ -15,7 +15,7 @@
     "start:webhook": "tsx src/webhook-server.ts",
     "start:ngrok": "bash -c \"$NGROK_COMMAND\"",
     "dev:webhook": "concurrently --kill-others-on-fail=false \"npm run start:webhook\" \"npm run start:ngrok\"",
-    "test": "jest --forceExit"
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --forceExit"
   },
   "dependencies": {
     "dotenv": "^16.3.1",
@@ -41,8 +41,14 @@
     "typescript-eslint": "^8.61.1"
   },
   "jest": {
-    "preset": "ts-jest",
+    "preset": "ts-jest/presets/default-esm",
     "testEnvironment": "node",
+    "extensionsToTreatAsEsm": [
+      ".ts"
+    ],
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    },
     "moduleFileExtensions": [
       "ts",
       "js",

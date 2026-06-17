@@ -1,8 +1,6 @@
 'use strict';
 
-export {};
-
-const { classifyIntent, isDangerous, extractIssueId } = require('../lib/discordIntentClassifier');
+import { classifyIntent, isDangerous, extractIssueId } from '../lib/discordIntentClassifier.js';
 
 describe('isDangerous', () => {
   test('rejects .env mention', () => {

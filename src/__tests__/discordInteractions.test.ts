@@ -1,6 +1,6 @@
 'use strict';
 
-const { verifyDiscordSignature } = require('../lib/discordInteractions');
+import { verifyDiscordSignature } from '../lib/discordInteractions.js';
 
 describe('verifyDiscordSignature', () => {
   test('returns false for invalid signature format', () => {
@@ -15,6 +15,6 @@ describe('verifyDiscordSignature', () => {
 
   test('returns false for missing/empty inputs', () => {
     expect(verifyDiscordSignature('', '', '', '')).toBe(false);
-    expect(verifyDiscordSignature(null, null, null, null)).toBe(false);
+    expect(verifyDiscordSignature(null as any, null as any, null as any, null as any)).toBe(false);
   });
 });

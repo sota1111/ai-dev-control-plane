@@ -1,13 +1,20 @@
-'use strict';
+import { jest } from '@jest/globals';
 
-const https = require('https');
-const { editOriginalInteractionResponse } = require('../lib/discordInteractionFollowup');
-const runner = require('../runner');
+const mockHttps = { request: jest.fn() };
+const mockRunner = { log: jest.fn() };
 
-jest.mock('https');
-jest.mock('../runner', () => ({
-  log: jest.fn(),
+jest.unstable_mockModule('node:https', () => ({
+  ...mockHttps,
+  default: mockHttps,
 }));
+jest.unstable_mockModule('../runner.js', () => ({
+  ...mockRunner,
+  default: mockRunner,
+}));
+
+const https = ((await import('node:https')) as any).default;
+const { editOriginalInteractionResponse } = await import('../lib/discordInteractionFollowup.js');
+const runner = await import('../runner.js');
 
 describe('discordInteractionFollowup', () => {
   beforeEach(() => {
@@ -24,10 +31,10 @@ describe('discordInteractionFollowup', () => {
 
     const promise = editOriginalInteractionResponse('app123', 'token456', 'Hello');
 
-    const responseCallback = (https.request as jest.Mock).mock.calls[0][1];
+    const responseCallback = (https.request as jest.Mock).mock.calls[0][1] as any;
     const mockRes = {
       statusCode: 200,
-      on: jest.fn((event, cb) => {
+      on: jest.fn((event: any, cb: any) => {
         if (event === 'end') cb();
       }),
     };
@@ -53,11 +60,11 @@ describe('discordInteractionFollowup', () => {
     const longContent = 'a'.repeat(2000);
     const promise = editOriginalInteractionResponse('app', 'token', longContent);
 
-    const responseCallback = (https.request as jest.Mock).mock.calls[0][1];
+    const responseCallback = (https.request as jest.Mock).mock.calls[0][1] as any;
     responseCallback({ statusCode: 200, on: (event: string, cb: any) => { if (event === 'end') cb(); } });
 
     await promise;
-    const writtenBody = JSON.parse(mockReq.write.mock.calls[0][0]);
+    const writtenBody = JSON.parse(mockReq.write.mock.calls[0][0] as string);
     expect(writtenBody.content).toHaveLength(1991); // 1990 + '…'
     expect(writtenBody.content.endsWith('…')).toBe(true);
   });
@@ -69,10 +76,10 @@ describe('discordInteractionFollowup', () => {
     const promise = editOriginalInteractionResponse('app', 'token', 'test');
 
     // First call returns 429
-    const responseCallback1 = (https.request as jest.Mock).mock.calls[0][1];
+    const responseCallback1 = (https.request as jest.Mock).mock.calls[0][1] as any;
     const mockRes1 = {
       statusCode: 429,
-      on: jest.fn((event, cb) => {
+      on: jest.fn((event: any, cb: any) => {
         if (event === 'data') cb(JSON.stringify({ retry_after: 0.1 }));
         if (event === 'end') cb();
       }),
@@ -83,10 +90,10 @@ describe('discordInteractionFollowup', () => {
     await new Promise(r => setTimeout(r, 200));
 
     // Second call returns 200
-    const responseCallback2 = (https.request as jest.Mock).mock.calls[1][1];
+    const responseCallback2 = (https.request as jest.Mock).mock.calls[1][1] as any;
     const mockRes2 = {
       statusCode: 200,
-      on: jest.fn((event, cb) => {
+      on: jest.fn((event: any, cb: any) => {
         if (event === 'end') cb();
       }),
     };
@@ -100,7 +107,7 @@ describe('discordInteractionFollowup', () => {
 
   test('returns status 0 on request error', async () => {
     const mockReq = {
-      on: jest.fn((event, cb) => {
+      on: jest.fn((event: any, cb: any) => {
         if (event === 'error') cb(new Error('Network error'));
       }),
       write: jest.fn(),

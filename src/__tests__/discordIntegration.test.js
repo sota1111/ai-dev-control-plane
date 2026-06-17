@@ -1,15 +1,38 @@
-'use strict';
+import { jest } from '@jest/globals';
 
-jest.mock('https');
-jest.mock('fs');
-jest.mock('../lib/discordInteractions');
+const mockHttps = {
+  request: jest.fn(),
+};
 
-const request = require('supertest');
-const https = require('https');
-const fs = require('fs');
-const { app } = require('../webhook-server');
-const { installDiscordHttpMock, makeInteraction } = require('../__test_helpers__/discordMock');
-const { verifyDiscordSignature } = require('../lib/discordInteractions');
+const mockFs = {
+  existsSync: jest.fn(),
+  readFileSync: jest.fn(),
+  writeFileSync: jest.fn(),
+  renameSync: jest.fn(),
+  mkdirSync: jest.fn(),
+  appendFileSync: jest.fn(),
+};
+
+jest.unstable_mockModule('node:https', () => ({
+  default: mockHttps,
+  ...mockHttps,
+}));
+
+jest.unstable_mockModule('node:fs', () => ({
+  default: mockFs,
+  ...mockFs,
+}));
+
+jest.unstable_mockModule('../lib/discordInteractions.js', () => ({
+  verifyDiscordSignature: jest.fn(),
+}));
+
+const request = (await import('supertest')).default;
+const https = await import('node:https');
+const fs = await import('node:fs');
+const { app } = await import('../webhook-server.js');
+const { installDiscordHttpMock, makeInteraction } = await import('../__test_helpers__/discordMock.js');
+const { verifyDiscordSignature } = await import('../lib/discordInteractions.js');
 
 describe('Discord Integration', () => {
   let discordMock;

@@ -1,11 +1,9 @@
 'use strict';
 
-const path = require('path');
-const fs = require('fs');
-const runner = require('../runner');
-const { handleStatus, handleQueue, handleCooldown } = require('./discordCommandHandlers');
-
-export {};
+import path from 'node:path';
+import fs from 'node:fs';
+import * as runner from '../runner.js';
+import { handleStatus, handleQueue, handleCooldown } from './discordCommandHandlers.js';
 
 const ISSUE_ID_PATTERN = /^SOT-\d+$/i;
 const MAX_DISCORD_LENGTH = 1900;
@@ -158,7 +156,7 @@ function handleUnknownIntent(originalText: string): string {
   ].join('\n'));
 }
 
-module.exports = {
+export {
   handleStatusIntent,
   handleQueueIntent,
   handleCooldownIntent,

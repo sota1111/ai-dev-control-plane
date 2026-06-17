@@ -1,8 +1,4 @@
-'use strict';
-
-export {};
-
-const crypto = require('node:crypto');
+import crypto from 'node:crypto';
 
 /**
  * Converts a 32-byte hex public key to SubjectPublicKeyInfo (SPKI) DER format.
@@ -24,7 +20,7 @@ function hexPublicKeyToDer(hexKey: string): Buffer {
  * @param {string|Buffer} body - raw request body
  * @returns {boolean}
  */
-function verifyDiscordSignature(publicKey: string, signature: string, timestamp: string, body: string | Buffer): boolean {
+export function verifyDiscordSignature(publicKey: string, signature: string, timestamp: string, body: string | Buffer): boolean {
   try {
     const message = Buffer.concat([
       Buffer.from(timestamp, 'utf8'),
@@ -45,5 +41,3 @@ function verifyDiscordSignature(publicKey: string, signature: string, timestamp:
     return false;
   }
 }
-
-module.exports = { verifyDiscordSignature };

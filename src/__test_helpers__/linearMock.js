@@ -1,12 +1,12 @@
 'use strict';
 
-const https = require('https');
-const { EventEmitter } = require('events');
+import https from 'node:https';
+import { EventEmitter } from 'node:events';
 
 /**
  * Mocks https.request to intercept Linear GraphQL API calls.
  */
-function installLinearHttpMock() {
+export function installLinearHttpMock() {
   const responses = [];
   const calls = [];
   const originalRequest = https.request;
@@ -89,5 +89,3 @@ function installLinearHttpMock() {
     }
   };
 }
-
-module.exports = { installLinearHttpMock };

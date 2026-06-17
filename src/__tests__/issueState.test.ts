@@ -1,6 +1,4 @@
-const { isTerminalState } = require('../lib/issueState');
-
-export {};
+import { isTerminalState } from '../lib/issueState.js';
 
 describe('isTerminalState', () => {
   test('returns true for terminal types', () => {
