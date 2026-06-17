@@ -5,6 +5,7 @@ const { spawn, execSync } = require('child_process');
 const { classifyUsageLimit } = require('./lib/usageLimitParser');
 const { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } = require('./lib/resumeMetadata');
 const queueOrdering = require('./lib/queueOrdering');
+const { isTerminalState } = require('./lib/issueState');
 
 const SKIPPED_LOCKED = 75;  // exit code when lock is not available
 const COMPLETION_UNVERIFIED = 70; // exit code when process 0 but task not finished
@@ -665,8 +666,7 @@ async function syncQueueWithLinear() {
         continue;
       }
 
-      const isTerminal = ['completed', 'canceled', 'duplicate'].includes(state?.type)
-        || ['Done', 'Canceled', 'Cancelled', 'Duplicate'].includes(state?.name);
+      const isTerminal = isTerminalState(state);
 
       if (isTerminal) {
         log('QUEUE', `syncQueueWithLinear: removing terminal issue state=${state?.name}`, { issue: item.issueId });
@@ -723,8 +723,7 @@ async function pruneExpiredQueueItems() {
         toRemove.push(item.issueId);
         continue;
       }
-      const isTerminal = ['completed', 'canceled', 'duplicate'].includes(state?.type)
-        || ['Done', 'Canceled', 'Cancelled', 'Duplicate'].includes(state?.name);
+      const isTerminal = isTerminalState(state);
       if (isTerminal) {
         toRemove.push(item.issueId);
       }
@@ -1033,8 +1032,7 @@ async function getIssueExecutionEligibility(issueId) {
       return { eligible: false, reason: 'archived issue before run' };
     }
 
-    const isTerminal = ['completed', 'canceled', 'duplicate'].includes(state?.type)
-      || ['Done', 'Canceled', 'Cancelled', 'Duplicate'].includes(state?.name);
+    const isTerminal = isTerminalState(state);
 
     if (isTerminal) {
       removeFromQueue(issueId);

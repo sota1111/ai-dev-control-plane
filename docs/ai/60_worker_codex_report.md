@@ -1,29 +1,39 @@
 Verification complete. I wrote the report to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md).
 
-Results: `npm run lint` passed, `npm test` passed with 14/14 suites and 197/197 tests, direct retry timestamp checks matched exactly, and docs entries were present. No minimal fixes were needed.
-.md` and `.env.example` document `OVERLOAD_RETRY_BUFFER_SECONDS` default `3600`.
-
-## Changed Files
-- none
+Results:
+- `npm run lint`: passed, exit 0
+- `npm test`: passed, 15 suites / 208 tests
+- No implementation fixes needed
+- Next action recorded as `READY_FOR_REVIEW`
+/60_worker_codex_report.md` — added Codex verification report.
 
 ## Commands Run
-- `npm run lint` — PASS, exit code 0.
-- `npm test` — PASS, exit code 0. Test Suites: 14 passed, 14 total. Tests: 197 passed, 197 total. Snapshots: 0 total.
-- `node - <<'NODE' ... NODE` direct verification — PASS, exit code 0.
-  - First result: `{"type":"model_unavailable","retryable":true,"resetAt":null,"retryAt":"2026-06-16T13:00:00.000Z","confidence":"medium","rawMessage":"[RUN:SOT-673] API Error: 529 Overloaded."}`
-  - Second result: `{"type":"model_unavailable","retryable":true,"resetAt":null,"retryAt":"2026-06-16T12:30:00.000Z","confidence":"medium","rawMessage":"Model is overloaded"}`
-- `grep -n "OVERLOAD_RETRY_BUFFER_SECONDS" README.md .env.example` — PASS, exit code 0.
-  - `README.md:809:| \`OVERLOAD_RETRY_BUFFER_SECONDS\`    | \`3600\`     | 529/overloaded 等のサーバ過負荷エラー後の再開待機秒数（既定1時間） |`
-  - `.env.example:76:OVERLOAD_RETRY_BUFFER_SECONDS=3600`
+`npm run lint`
+- Result: PASS, exit 0.
+- Exact check executed by npm: `node --check` over configured source and script files.
+
+`npm test`
+- Result: PASS, exit 0.
+- Jest result: 15 test suites passed / 15 total; 208 tests passed / 208 total; 0 snapshots.
+- Baseline was 14 suites / 202 tests; new total includes `src/__tests__/issueState.test.js`.
+
+`grep -n "includes(state?.type)" src/runner.js src/webhook-server.js src/lib/issueState.js`
+- Result: only `src/lib/issueState.js:8` matched.
+
+`grep -n "isActuallyCompleted\\|state?.type === 'completed'\\|state?.name === 'Done'" src/runner.js`
+- Result: only `src/runner.js:44` and `src/runner.js:46` matched; predicate remains `state?.type === 'completed' || state?.name === 'Done'`.
+
+`rg -n "terminal.*(type|name)|completed.*canceled|canceled.*duplicate|Duplicate.*includes|Cancelled.*includes|isTerminalState" src/runner.js src/webhook-server.js src/lib/issueState.js src/__tests__`
+- Result: helper import/call sites only in `runner.js` and `webhook-server.js`; terminal arrays only in `src/lib/issueState.js` and tests.
 
 ## Acceptance Criteria
-- [x] AC1 529 Overloaded → model_unavailable / retryable / +3600s
-- [x] AC2 OVERLOAD_RETRY_BUFFER_SECONDS override 有効
-- [x] AC3 既存分類に回帰なし（全テスト pass）
-- [x] AC4 README/.env.example に env 記載
+- [x] 終端状態判定が単一ヘルパーに集約されている
+- [x] runner.js(3箇所)/webhook-server.js(1箇所)の重複が解消されている
+- [x] verifyTaskCompletion(狭義の成功完了判定)が変更されていない
+- [x] 既存のスキップ/再エンキュー挙動に回帰がない（テスト pass）
 
 ## Risks
-- No unresolved issues found. Jest emitted an existing development warning about `LINEAR_WEBHOOK_SECRET` being unset and the standard `--forceExit` open-handle note, but all tests passed.
+No unresolved issues found. `npm test` emits the existing development warning about `LINEAR_WEBHOOK_SECRET` not being set during `webhookServer.test.js`, but the suite passes.
 
 ## Next Action
 READY_FOR_REVIEW
