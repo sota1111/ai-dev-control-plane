@@ -72,6 +72,38 @@ if ! flock -n 9; then
 fi
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── 容量プリフライト（Issue追加不可検知 → 自動アーカイブ） ──────────────────────
+# Linear のワークスペース上限（無料プランは 250 Issue）に達すると新規 Issue を
+# 追加できなくなる。autonomous runner は子Issueを作成するため、上限に近づいたら
+# 自動でアーカイブを実行して容量を確保する。
+#   ISSUE_CAP_TRIGGER: この件数以上で「追加不可」とみなしアーカイブを実行（既定 245）
+# アーカイブは親150/全200を維持する archive_linear_issues.sh に委譲する。
+# 失敗（APIキー未設定・取得失敗・アーカイブ失敗）は警告のみで run は継続する。
+ISSUE_CAP_TRIGGER="${ISSUE_CAP_TRIGGER:-245}"
+if [ -z "${LINEAR_API_KEY:-}" ]; then
+  echo "[CAPACITY] WARN LINEAR_API_KEY unset; skipping capacity preflight"
+else
+  set +e
+  ISSUE_TOTAL="$(bash scripts/ai/archive_linear_issues.sh --print-total 2>/dev/null)"
+  PRINT_TOTAL_RC=$?
+  set -e
+  if [ "$PRINT_TOTAL_RC" -ne 0 ] || ! [[ "$ISSUE_TOTAL" =~ ^[0-9]+$ ]]; then
+    echo "[CAPACITY] WARN could not determine issue count (rc=${PRINT_TOTAL_RC}, value='${ISSUE_TOTAL}'); continuing"
+  elif [ "$ISSUE_TOTAL" -ge "$ISSUE_CAP_TRIGGER" ]; then
+    echo "[CAPACITY] Linear issues=${ISSUE_TOTAL} >= trigger=${ISSUE_CAP_TRIGGER}; running archive to free space"
+    set +e
+    bash scripts/ai/archive_linear_issues.sh --execute
+    ARCHIVE_RC=$?
+    set -e
+    if [ "$ARCHIVE_RC" -ne 0 ]; then
+      echo "[CAPACITY] WARN archive failed (rc=${ARCHIVE_RC}); continuing"
+    fi
+  else
+    echo "[CAPACITY] Linear issues=${ISSUE_TOTAL} < trigger=${ISSUE_CAP_TRIGGER}; ok"
+  fi
+fi
+# ─────────────────────────────────────────────────────────────────────────────
+
 RUNTIME_PROMPT="$(cat "$PROMPT_FILE")"
 
 if [[ "$RESUME_MODE" == true ]]; then

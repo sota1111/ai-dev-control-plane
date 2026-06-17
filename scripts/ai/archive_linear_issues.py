@@ -37,7 +37,7 @@ def call_linear_api(query, variables=None):
         print(f"URL Error: {e}")
         return None
 
-def fetch_all_issues():
+def fetch_all_issues(progress_stream=sys.stdout):
     query = """
     query Issues($after: String) {
       issues(first: 250, after: $after, includeArchived: false) {
@@ -61,23 +61,23 @@ def fetch_all_issues():
     all_nodes = []
     after = None
     
-    print("Linear から Issue を取得中...", end="", flush=True)
+    print("Linear から Issue を取得中...", end="", flush=True, file=progress_stream)
     while True:
         variables = {"after": after}
         data = call_linear_api(query, variables)
         if not data or "issues" not in data:
             break
-        
+
         issues_data = data["issues"]
         all_nodes.extend(issues_data["nodes"])
-        print(".", end="", flush=True)
-        
+        print(".", end="", flush=True, file=progress_stream)
+
         page_info = issues_data["pageInfo"]
         if not page_info["hasNextPage"]:
             break
         after = page_info["endCursor"]
-    
-    print(f" 完了 ({len(all_nodes)} 件)")
+
+    print(f" 完了 ({len(all_nodes)} 件)", file=progress_stream)
     return all_nodes
 
 def archive_issue_mutation(issue_id):
@@ -100,9 +100,17 @@ def main():
     parser.add_argument("--parent-target-count", type=int, default=150, help="Max number of parent Issues to keep on Linear")
     parser.add_argument("--total-target-count", type=int, default=200, help="Max total number of Issues to keep on Linear")
     parser.add_argument("--execute", action="store_true", help="Actually perform the archive operation")
-    
+    parser.add_argument("--print-total", action="store_true", help="Print only the current total Issue count to stdout and exit (no archiving)")
+
     args = parser.parse_args()
-    
+
+    # Count-only mode: print just the integer total to stdout and exit.
+    # Progress output is routed to stderr so callers can capture the number cleanly.
+    if args.print_total:
+        issues = fetch_all_issues(progress_stream=sys.stderr)
+        print(len(issues))
+        sys.exit(0)
+
     # If neither --dry-run nor --execute is provided, default to dry-run
     is_dry_run = args.dry_run or not args.execute
     parent_target_count = args.parent_target_count
