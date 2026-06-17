@@ -924,4 +924,105 @@ describe('runner', () => {
       expect(logs.some(l => l.includes('task completion not verified: verification unavailable: Linear API Timeout'))).toBe(true);
     });
   });
+
+  describe('classifyRunResult', () => {
+    const { RUN_RESULT, classifyRunResult } = runner;
+
+    it('returns TASK_COMPLETED when code is 0 and task is completed', () => {
+      const result = classifyRunResult({
+        code: 0,
+        output: 'done',
+        completion: { completed: true }
+      });
+      expect(result).toEqual({
+        kind: RUN_RESULT.TASK_COMPLETED,
+        code: 0,
+        completion: { completed: true }
+      });
+    });
+
+    it('returns COMPLETION_UNVERIFIED when code is 0 but task is NOT completed', () => {
+      const result = classifyRunResult({
+        code: 0,
+        output: 'not quite',
+        completion: { completed: false, reason: 'state is "In Progress"' }
+      });
+      expect(result).toEqual({
+        kind: RUN_RESULT.COMPLETION_UNVERIFIED,
+        code: 0,
+        reason: 'state is "In Progress"'
+      });
+    });
+
+    it('returns COMPLETION_UNVERIFIED when code is 70', () => {
+      const result = classifyRunResult({
+        code: 70,
+        output: 'some output',
+        completion: null
+      });
+      expect(result).toEqual({
+        kind: RUN_RESULT.COMPLETION_UNVERIFIED,
+        code: 70
+      });
+    });
+
+    it('returns LOCK_CONFLICT when code is 75', () => {
+      const result = classifyRunResult({
+        code: 75,
+        output: 'locked',
+        completion: null
+      });
+      expect(result).toEqual({
+        kind: RUN_RESULT.LOCK_CONFLICT,
+        code: 75
+      });
+    });
+
+    it('returns USAGE_LIMIT_RETRY for retryable limit output', () => {
+      const output = 'Your limit will reset at 11:59pm (UTC)';
+      const result = classifyRunResult({
+        code: 1,
+        output,
+        completion: null
+      });
+      expect(result.kind).toBe(RUN_RESULT.USAGE_LIMIT_RETRY);
+      expect(result.code).toBe(1);
+      expect(result.classification.type).toBe('session_limit');
+      expect(result.classification.retryable).toBe(true);
+      expect(result.classification.retryAt).toBeDefined();
+    });
+
+    it('returns NON_RETRYABLE_LIMIT for non-retryable limit output', () => {
+      const output = 'maximum context length reached';
+      const result = classifyRunResult({
+        code: 1,
+        output,
+        completion: null
+      });
+      expect(result).toEqual({
+        kind: RUN_RESULT.NON_RETRYABLE_LIMIT,
+        code: 1,
+        classification: expect.objectContaining({
+          type: 'context_limit',
+          retryable: false
+        })
+      });
+    });
+
+    it('returns FAILED for unknown error output', () => {
+      const result = classifyRunResult({
+        code: 1,
+        output: 'something went wrong',
+        completion: null
+      });
+      expect(result).toEqual({
+        kind: RUN_RESULT.FAILED,
+        code: 1,
+        classification: expect.objectContaining({
+          type: 'unknown',
+          retryable: false
+        })
+      });
+    });
+  });
 });

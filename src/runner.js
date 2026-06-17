@@ -10,6 +10,15 @@ const { isTerminalState } = require('./lib/issueState');
 const SKIPPED_LOCKED = 75;  // exit code when lock is not available
 const COMPLETION_UNVERIFIED = 70; // exit code when process 0 but task not finished
 
+const RUN_RESULT = {
+  TASK_COMPLETED: 'TASK_COMPLETED',
+  COMPLETION_UNVERIFIED: 'COMPLETION_UNVERIFIED',
+  LOCK_CONFLICT: 'LOCK_CONFLICT',
+  USAGE_LIMIT_RETRY: 'USAGE_LIMIT_RETRY',
+  NON_RETRYABLE_LIMIT: 'NON_RETRYABLE_LIMIT',
+  FAILED: 'FAILED'
+};
+
 /**
  * Verifies if the task is actually completed even if the process exited with 0.
  * @param {string} issueId
@@ -1101,6 +1110,37 @@ function triggerRun(issueId, options = {}) {
   });
 }
 
+/**
+ * triggerRun のプロセス結果(code/output)とタスク完了検証結果(completion)から、
+ * run result 種別を構造化して返す純粋関数。副作用なし。
+ * プロセス終了コードとタスク終端状態を明確に分離するための分類器。
+ * @param {{ code:number, output:string, completion:(object|null) }} args
+ *   completion は code===0 のとき verifyTaskCompletion の戻り値、それ以外は null。
+ * @returns {{ kind:string, code:number, completion?:object, classification?:object, reason?:string }}
+ */
+function classifyRunResult({ code, output, completion }) {
+  if (code === 0) {
+    if (completion && completion.completed) {
+      return { kind: RUN_RESULT.TASK_COMPLETED, code, completion };
+    }
+    return { kind: RUN_RESULT.COMPLETION_UNVERIFIED, code, reason: completion ? completion.reason : undefined };
+  }
+  if (code === COMPLETION_UNVERIFIED) {
+    return { kind: RUN_RESULT.COMPLETION_UNVERIFIED, code };
+  }
+  if (code === SKIPPED_LOCKED) {
+    return { kind: RUN_RESULT.LOCK_CONFLICT, code };
+  }
+  const classification = classifyUsageLimit(output);
+  if (classification.retryable && classification.retryAt) {
+    return { kind: RUN_RESULT.USAGE_LIMIT_RETRY, code, classification };
+  }
+  if (classification.type !== 'unknown') {
+    return { kind: RUN_RESULT.NON_RETRYABLE_LIMIT, code, classification };
+  }
+  return { kind: RUN_RESULT.FAILED, code, classification };
+}
+
 async function runItem(item) {
   const { issueId } = item;
 
@@ -1120,33 +1160,40 @@ async function runItem(item) {
   }
 
   const { code, output } = await triggerRun(issueId, { resume: isResume });
+  const completion = code === 0 ? await verifyTaskCompletion(issueId, output) : null;
+  const result = classifyRunResult({ code, output, completion });
 
-  if (code === 0) {
-    const completion = await verifyTaskCompletion(issueId, output);
-    if (completion.completed) {
+  switch (result.kind) {
+    case RUN_RESULT.TASK_COMPLETED:
       log('RUN', 'completed successfully', { trigger: item.trigger || 'queue', issue: issueId });
       clearUsageLimitCooldown();
       await removeUsageLimitLabel(issueId).catch(() => {});
-    } else {
-      log('RUNNER', `process exited 0 but task completion not verified: ${completion.reason} — skipping success cleanup`, { issue: issueId });
-    }
-  } else if (code === COMPLETION_UNVERIFIED) {
-    log('RUNNER', `process exited ${COMPLETION_UNVERIFIED} (COMPLETION_UNVERIFIED) — skipping success cleanup`, { issue: issueId });
-  } else if (code === SKIPPED_LOCKED) {
-    log('RUNNER', 'SKIPPED_LOCKED received from run_auto.sh — re-enqueuing', { issue: issueId });
-    enqueue(issueId, item.trigger || 'queue', null, {
-      issueIdentifier: item.issueIdentifier || null,
-      reason: 'lock_conflict',
-      priority: item.priority ?? null,
-      priorityLabel: item.priorityLabel ?? null,
-      parentIssueId: item.parentIssueId ?? null,
-      parentIssueIdentifier: item.parentIssueIdentifier ?? null,
-      queueGroup: item.queueGroup ?? null,
-      queueGroupOrder: item.queueGroupOrder ?? null
-    });
-  } else {
-    const classification = classifyUsageLimit(output);
-    if (classification.retryable && classification.retryAt) {
+      break;
+
+    case RUN_RESULT.COMPLETION_UNVERIFIED:
+      if (result.code === 0) {
+        log('RUNNER', `process exited 0 but task completion not verified: ${result.reason} — skipping success cleanup`, { issue: issueId });
+      } else {
+        log('RUNNER', `process exited ${COMPLETION_UNVERIFIED} (COMPLETION_UNVERIFIED) — skipping success cleanup`, { issue: issueId });
+      }
+      break;
+
+    case RUN_RESULT.LOCK_CONFLICT:
+      log('RUNNER', 'SKIPPED_LOCKED received from run_auto.sh — re-enqueuing', { issue: issueId });
+      enqueue(issueId, item.trigger || 'queue', null, {
+        issueIdentifier: item.issueIdentifier || null,
+        reason: 'lock_conflict',
+        priority: item.priority ?? null,
+        priorityLabel: item.priorityLabel ?? null,
+        parentIssueId: item.parentIssueId ?? null,
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null,
+        queueGroup: item.queueGroup ?? null,
+        queueGroupOrder: item.queueGroupOrder ?? null
+      });
+      break;
+
+    case RUN_RESULT.USAGE_LIMIT_RETRY: {
+      const { classification } = result;
       log('RUN', `retryable limit detected: ${classification.type}`, { trigger: item.trigger || 'queue', issue: issueId });
       
       // Notify for session limits or API rate limits
@@ -1175,7 +1222,7 @@ async function runItem(item) {
         lastCommit: gitInfo.lastCommit,
         gitStatus: gitInfo.gitStatus,
         previousRunLog: LOG_FILE,
-        previousExitCode: code,
+        previousExitCode: result.code,
         nextActionHint: null
       });
       try {
@@ -1199,14 +1246,20 @@ async function runItem(item) {
         queueGroupOrder: item.queueGroupOrder ?? null
       });
       log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt: classification.retryAt });
-    } else if (classification.type !== 'unknown') {
-      log('RUN', `non-retryable limit: ${classification.type}`, { trigger: item.trigger || 'queue', issue: issueId });
-      if (classification.type === 'context_limit') {
+      break;
+    }
+
+    case RUN_RESULT.NON_RETRYABLE_LIMIT:
+      log('RUN', `non-retryable limit: ${result.classification.type}`, { trigger: item.trigger || 'queue', issue: issueId });
+      if (result.classification.type === 'context_limit') {
         log('RUN', 'summarization/compaction is required before resume', { issue: issueId });
       }
-    } else {
-      log('RUN', `failed exit=${code}`, { trigger: item.trigger || 'queue', issue: issueId });
-    }
+      break;
+
+    case RUN_RESULT.FAILED:
+    default:
+      log('RUN', `failed exit=${result.code}`, { trigger: item.trigger || 'queue', issue: issueId });
+      break;
   }
 }
 
@@ -1343,5 +1396,7 @@ module.exports = {
   getIssueExecutionEligibility,
   triggerRun,
   runItem,
-  drainQueue
+  drainQueue,
+  RUN_RESULT,
+  classifyRunResult
 };
