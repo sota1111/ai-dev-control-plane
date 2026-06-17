@@ -1,14 +1,19 @@
 'use strict';
 
-const path = require('path');
-const fs = require('fs');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-const { getSecret, initSecrets } = require('./config/secrets');
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+import dotenv from 'dotenv';
 
-const { DiscordNotifier } = require('./lib/discordNotifier');
-const { attemptSessionContinue } = require('./lib/sessionContinue');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-export {};
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
+
+import { getSecret, initSecrets } from './config/secrets.js';
+import { DiscordNotifier } from './lib/discordNotifier.js';
+import { attemptSessionContinue } from './lib/sessionContinue.js';
 
 const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
 const LOG_FILE = path.join(LOG_DIR, 'auto_runner.log');

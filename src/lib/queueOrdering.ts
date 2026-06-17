@@ -1,17 +1,16 @@
 /**
  * Logic for determining the execution order of the queue.
  */
-export {};
 
 interface QueueItem {
-  priority?: number;
+  priority?: number | null;
   priorityRank?: number;
   retryAt?: string | null;
   enqueuedAt?: string | null;
   queueGroup?: string | null;
   queueGroupOrder?: string | null;
   issueId?: string;
-  issueIdentifier?: string;
+  issueIdentifier?: string | null;
 }
 
 interface SelectNextOptions {
@@ -23,7 +22,7 @@ interface SelectNextOptions {
  * Maps Linear priority to a numerical rank.
  * 1: Urgent, 2: High, 3: Medium, 4: Low, 5: None/Other
  */
-function getPriorityRank(priority: number | undefined): number {
+export function getPriorityRank(priority: number | null | undefined): number {
   if (priority === 1) return 1; // Urgent
   if (priority === 2) return 2; // High
   if (priority === 3) return 3; // Medium
@@ -34,7 +33,7 @@ function getPriorityRank(priority: number | undefined): number {
 /**
  * Gets the effective priority rank for an item, favoring priorityRank if set.
  */
-function effectiveRank(item: QueueItem): number {
+export function effectiveRank(item: QueueItem): number {
   return item.priorityRank != null ? item.priorityRank : getPriorityRank(item.priority);
 }
 
@@ -48,7 +47,7 @@ function effectiveRank(item: QueueItem): number {
  * 
  * Only items where retryAt is null/missing or in the past are eligible.
  */
-function selectNextReadyIndex(queue: QueueItem[], { lastProcessedGroup = null, now = new Date() }: SelectNextOptions = {}): number | null {
+export function selectNextReadyIndex(queue: QueueItem[], { lastProcessedGroup = null, now = new Date() }: SelectNextOptions = {}): number | null {
   // Filter to ready indices
   const readyIndices: number[] = queue.reduce((acc: number[], item, i) => {
     if (!item.retryAt || new Date(item.retryAt) <= now) acc.push(i);
@@ -122,7 +121,7 @@ function selectNextReadyIndex(queue: QueueItem[], { lastProcessedGroup = null, n
  * Previews the full execution order of the queue.
  * Returns { ready: [...items], waiting: [...items] }.
  */
-function previewQueueOrder(queue: QueueItem[], { lastProcessedGroup = null, now = new Date() }: SelectNextOptions = {}): { ready: QueueItem[], waiting: QueueItem[] } {
+export function previewQueueOrder(queue: QueueItem[], { lastProcessedGroup = null, now = new Date() }: SelectNextOptions = {}): { ready: QueueItem[], waiting: QueueItem[] } {
   const ready: QueueItem[] = [];
   const waiting: QueueItem[] = [];
 
@@ -161,10 +160,3 @@ function previewQueueOrder(queue: QueueItem[], { lastProcessedGroup = null, now 
 
   return { ready, waiting };
 }
-
-module.exports = {
-  getPriorityRank,
-  effectiveRank,
-  selectNextReadyIndex,
-  previewQueueOrder
-};

@@ -1,15 +1,19 @@
 'use strict';
-const fs = require('fs');
-const path = require('path');
-const https = require('https');
-const { getSecret } = require('./config/secrets');
-const { spawn, execSync } = require('child_process');
-const { classifyUsageLimit } = require('./lib/usageLimitParser');
-const { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } = require('./lib/resumeMetadata');
-const queueOrdering = require('./lib/queueOrdering');
-const { isTerminalState } = require('./lib/issueState');
 
-export {};
+import fs from 'node:fs';
+import path from 'node:path';
+import https from 'node:https';
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+import { getSecret } from './config/secrets.js';
+import { spawn, execSync } from 'node:child_process';
+import { classifyUsageLimit } from './lib/usageLimitParser.js';
+import { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } from './lib/resumeMetadata.js';
+import * as queueOrdering from './lib/queueOrdering.js';
+import { isTerminalState } from './lib/issueState.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 interface RunResultType {
   TASK_COMPLETED: string;
@@ -1454,7 +1458,7 @@ async function drainQueue(): Promise<void> {
   }
 }
 
-module.exports = {
+export {
   SKIPPED_LOCKED,
   LOG_DIR,
   LOCK_FILE,

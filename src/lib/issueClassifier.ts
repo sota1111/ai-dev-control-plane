@@ -1,9 +1,5 @@
-'use strict';
-
-export {};
-
 // Task types
-const TYPES = {
+export const TYPES = {
   IMPLEMENT: 'IMPLEMENT',
   FIX: 'FIX',
   DEBUG: 'DEBUG',
@@ -14,14 +10,14 @@ const TYPES = {
 } as const;
 
 // Worker assignments
-const WORKERS = {
+export const WORKERS = {
   gemini: 'gemini',
   codex: 'codex',
   claude: 'claude-code',
 } as const;
 
 // Worker selection per type
-const TYPE_TO_WORKER: Record<string, string> = {
+export const TYPE_TO_WORKER: Record<string, string> = {
   IMPLEMENT: WORKERS.gemini,
   FIX:       WORKERS.codex,
   DEBUG:     WORKERS.codex,
@@ -49,7 +45,7 @@ interface ClassificationResult {
  * @param {Issue} issue
  * @returns {ClassificationResult}
  */
-function classifyIssue(issue: Issue): ClassificationResult {
+export function classifyIssue(issue: Issue): ClassificationResult {
   const title = issue.title || '';
   const description = issue.description || '';
   const labels = issue.labels || [];
@@ -147,7 +143,7 @@ const PROCESS_TITLE_PREFIXES = [
  * @param {string} title
  * @returns {boolean}
  */
-function isProcessPrefixedTitle(title: string): boolean {
+export function isProcessPrefixedTitle(title: string): boolean {
   if (!title) return false;
   return PROCESS_TITLE_PREFIXES.some(regex => regex.test(title));
 }
@@ -156,15 +152,6 @@ function isProcessPrefixedTitle(title: string): boolean {
  * @param {string} title
  * @returns {string}
  */
-function suggestFeatureTitleHint(title: string): string {
+export function suggestFeatureTitleHint(title: string): string {
   return 'Use a feature/commit-based title that starts with the outcome (例: "...を追加する"), not a process prefix.';
 }
-
-module.exports = {
-  classifyIssue,
-  isProcessPrefixedTitle,
-  suggestFeatureTitleHint,
-  TYPES,
-  WORKERS,
-  TYPE_TO_WORKER
-};

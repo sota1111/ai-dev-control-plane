@@ -1,11 +1,17 @@
 'use strict';
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-const runner = require('./runner');
-const { parseUsageLimitResetEpoch } = require('./lib/usageLimitParser');
-const { classifyIssue } = require('./lib/issueClassifier');
+import path from 'node:path';
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+import dotenv from 'dotenv';
 
-export {};
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
+
+import * as runner from './runner.js';
+import { parseUsageLimitResetEpoch } from './lib/usageLimitParser.js';
+import { classifyIssue } from './lib/issueClassifier.js';
 
 const [,, command, ...args] = process.argv;
 

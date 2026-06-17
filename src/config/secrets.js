@@ -1,7 +1,5 @@
-'use strict';
-
-const http = require('http');
-const https = require('https');
+import http from 'node:http';
+import https from 'node:https';
 
 /** @type {Map<string, string>} */
 const cache = new Map();
@@ -14,7 +12,7 @@ let resolvedBackend = null;
  * @param {string} name
  * @returns {string|undefined}
  */
-function getSecret(name) {
+export function getSecret(name) {
   if (cache.has(name)) {
     return cache.get(name);
   }
@@ -26,7 +24,7 @@ function getSecret(name) {
  * @param {string} name
  * @returns {string}
  */
-function getRequiredSecret(name) {
+export function getRequiredSecret(name) {
   const val = getSecret(name);
   if (val === undefined || val === null || val === '') {
     throw new Error(`Missing required secret: ${name}`);
@@ -38,7 +36,7 @@ function getRequiredSecret(name) {
  * Resolves the backend from environment variables.
  * @returns {'secret-manager'|'dotenv'}
  */
-function getBackend() {
+export function getBackend() {
   if (resolvedBackend) return resolvedBackend;
 
   const envBackend = process.env.SECRETS_BACKEND;
@@ -161,7 +159,7 @@ const defaultClient = {
  * @param {string[]} names
  * @returns {Promise<void>}
  */
-async function initSecrets(names = []) {
+export async function initSecrets(names = []) {
   if (getBackend() !== 'secret-manager') {
     return;
   }
@@ -180,10 +178,12 @@ async function initSecrets(names = []) {
   }));
 }
 
+export const loadSecrets = initSecrets; // alias
+
 /**
  * Resets the secrets cache and backend for testing.
  */
-function resetSecretsForTest() {
+export function resetSecretsForTest() {
   cache.clear();
   injectedClient = null;
   resolvedBackend = null;
@@ -193,16 +193,6 @@ function resetSecretsForTest() {
  * Injects a fake Secret Manager client for testing.
  * @param {{ access: (secretId: string) => Promise<string> }} client
  */
-function setSecretManagerClientForTest(client) {
+export function setSecretManagerClientForTest(client) {
   injectedClient = client;
 }
-
-module.exports = {
-  getSecret,
-  getRequiredSecret,
-  initSecrets,
-  loadSecrets: initSecrets, // alias
-  getBackend,
-  resetSecretsForTest,
-  setSecretManagerClientForTest
-};

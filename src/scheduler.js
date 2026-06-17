@@ -1,18 +1,24 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const { spawn } = require('child_process');
-const core = require('./lib/schedulerCore');
-const runner = require('./runner');
-const { DiscordNotifier } = require('./lib/discordNotifier');
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import * as core from './lib/schedulerCore.js';
+import * as runner from './runner.js';
+import { DiscordNotifier } from './lib/discordNotifier.js';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+import dotenv from 'dotenv';
+import { getSecret, initSecrets } from './config/secrets.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Load .env from project root, matching scheduler.sh's behavior
-require('dotenv').config({
+dotenv.config({
   path: path.join(__dirname, '..', '.env'),
   override: false,
 });
-const { getSecret, initSecrets } = require('./config/secrets');
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -385,14 +391,17 @@ async function main() {
   }
 }
 
-if (require.main === module) {
+const nodePath = fs.realpathSync(process.argv[1]);
+const scriptPath = fs.realpathSync(__filename);
+
+if (nodePath === scriptPath) {
   main().catch((err) => {
     console.error(err);
     process.exit(1);
   });
 }
 
-module.exports = {
+export {
   getRunningPid,
   stop,
   status,

@@ -1,6 +1,10 @@
 'use strict';
 
-const path = require('path');
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const LOG_DIR = path.join(__dirname, '..', '..', 'docs', 'ai', 'auto_logs');
 const AUTO_RUNNER_LOG = path.join(LOG_DIR, 'auto_runner.log');
@@ -99,7 +103,7 @@ function formatStatusLines({
   return lines;
 }
 
-module.exports = {
+export {
   LOG_DIR,
   AUTO_RUNNER_LOG,
   SCHEDULER_LOG,

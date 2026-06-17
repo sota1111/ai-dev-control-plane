@@ -173,4 +173,4 @@ function classifyIntent(text: string): IntentResult {
   return { intent: 'UNKNOWN', issueId: null, originalText };
 }
 
-module.exports = { classifyIntent, isDangerous, extractIssueId };
+export { classifyIntent, isDangerous, extractIssueId };

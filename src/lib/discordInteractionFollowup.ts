@@ -1,9 +1,5 @@
-'use strict';
-
-const https = require('https');
-const runner = require('../runner');
-
-export {};
+import https from 'node:https';
+import * as runner from '../runner.js';
 
 const DISCORD_MAX_LENGTH = 1990;
 
@@ -24,7 +20,7 @@ interface FollowupResponse {
 /**
  * PATCH @original; resolves { status, body }. Never throws.
  */
-async function editOriginalInteractionResponse(applicationId: string | undefined, interactionToken: string | undefined, content: string): Promise<FollowupResponse> {
+export async function editOriginalInteractionResponse(applicationId: string | undefined, interactionToken: string | undefined, content: string): Promise<FollowupResponse> {
   if (!applicationId || !interactionToken) {
     runner.log('DISCORD_ASK', 'Missing applicationId or interactionToken for followup', { applicationId, interactionToken: !!interactionToken });
     return { status: 0, body: '' };
@@ -78,5 +74,3 @@ async function editOriginalInteractionResponse(applicationId: string | undefined
 
   return result;
 }
-
-module.exports = { editOriginalInteractionResponse };
