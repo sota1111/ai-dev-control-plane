@@ -566,6 +566,19 @@ Claude Code uses the MCP tool to register child Issues:
 4. 子Issueの Priority を親から継承
 5. 親Issue にコメントで分解結果を報告
 
+#### Issue上限到達時の復旧（cannot add issue）
+
+`create_issue` が Linear ワークスペースの Issue 上限（無料プランは 250 件）に達して失敗した
+場合（=「Issue を追加できない」状態）、Claude Code は次の手順で復旧する:
+
+1. `bash scripts/ai/archive_linear_issues.sh --execute` を実行して古い子Issueを退避し容量を確保する（親150/全200を維持）。
+2. 失敗した `create_issue` を1回だけリトライする。
+3. それでも失敗する場合は親Issueを `Blocked` にし、理由をコメントする。
+
+なお autonomous runner（`scripts/ai/run_auto.sh`）は実行開始時に容量プリフライトを行い、
+総Issue数が `ISSUE_CAP_TRIGGER`（既定245）以上なら自動でアーカイブを実行する。詳細は
+`docs/linear-issue-archive.md` を参照。
+
 ### Execution Order
 
 子Issue（機能単位）の実行順序:

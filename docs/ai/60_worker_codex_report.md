@@ -1,54 +1,46 @@
-# Worker Non-Response Fallback Disclosure (SOT-700 test-suite ESM migration)
+# Worker Report
 
-Per CLAUDE.md "Worker Non-Response Fallback Policy", Claude Code performed the test-suite
-ESM migration directly because both workers were non-responsive for that sub-task:
+## Summary
+INITIAL TASK CHECK for SOT-735 was NOT performed by Codex. Codex CLI is currently
+in a usage-limit cooldown (`docs/ai/auto_logs/codex.cooldown.json`, resumeAtEpoch
+1782000900 ≈ 2026-06-21). `scripts/ai/run_codex.sh` exited with the dedicated
+non-response code 75. Per the Worker Non-Response Fallback Policy, Claude Code
+performed the task check directly (fallback). Retry was skipped because the
+cooldown is deterministic and days away (looping would be pointless).
 
-- **Codex CLI (DEBUG worker): non-responsive — usage/rate limit.** It successfully converted
-  `src/webhook-server.ts` to ESM (verified below) but became rate-limited before migrating the
-  Jest test suite.
-- **Gemini CLI (IMPLEMENT worker): non-responsive across 2 passes.** First pass migrated the 6
-  `.js` test files + `tsconfig` `isolatedModules`; second pass produced an empty report and made
-  no further changes, leaving the 6 `jest.mock`-based suites unconverted.
-- **Claude Code fallback:** converted the remaining suites (`sessionContinue`,
-  `discordInteractionFollowup`, `discordAskHandler`, `runner`, `webhookServer`,
-  `discordNotifierIntegration`) to `jest.unstable_mockModule` + dynamic `import()`, and resolved
-  `@jest/globals` strict-typing issues. Final gate: `npm test` 21 suites / 258 tests pass,
-  `npm run typecheck` exit 0, `npm run lint` exit 0.
+Findings from Claude Code's fallback task check:
+- Issue SOT-735 "Issueアーカイブ機能の復活" — Status Todo→In Progress, Priority High,
+  no labels, no comments. Actionable.
+- Existing archive feature: `scripts/ai/archive_linear_issues.py` (+ `.sh` wrapper)
+  already implements parent-target=150 / total-target=200, dry-run + --execute modes.
+  Documented in `docs/linear-issue-archive.md`. Introduced in SOT-449, refined SOT-521.
+- It is invoked ONLY manually today. No auto-trigger has ever been wired into
+  `run_auto.sh` / scheduler (confirmed via git history).
+- There is NO programmatic Linear issue creation in `src/` — child issues are created
+  only by Claude Code via MCP during decomposition. So the natural deterministic hook
+  for "an Issue cannot be added" is a capacity preflight in `scripts/ai/run_auto.sh`.
+- Current Linear state (dry-run): 249 total issues (128 parents / 121 children) vs the
+  250 free-workspace cap — effectively full. Archiving brings it to 200 (49 oldest
+  children). LINEAR_API_KEY is present in env/.env.
 
----
-
-Implemented the ESM conversion and wrote the report to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md).
-
-Verification:
-- `npm run typecheck` exits 0
-- `npm run lint` exits 0
-- `timeout 15 npx tsx src/webhook-server.ts` reaches `[WEBHOOK] Server listening on port 3000`
-- `npm test` still exits 1 because the existing Jest suite uses CommonJS `require` / global `jest` under the current ESM Jest config
-
-Next action in the report is `NEEDS_DEBUG` due to the test-suite migration blocker.
-fic issue IDs.
-- `src/lib/discordCommandHandlers.ts` — converted imports to ESM.
-- `src/lib/discordPauseState.ts` — converted imports to ESM.
-- `src/lib/sessionContinue.ts` — converted imports to ESM.
-- `src/lib/discordIntentHandlers.ts` — converted imports to ESM.
-- `src/lib/discordInteractionFollowup.ts` — changed runner import to ESM namespace import.
-- `src/lib/queueOrdering.ts` — widened queue item typing to accept nullable priority and issue identifier fields used by `runner.ts`.
-- `src/lib/schedulerCore.js` — removed malformed duplicate export fragment blocking typecheck.
-- `src/types/express.d.ts` — added minimal ambient declaration for `express`, which has no installed `@types/express`.
-- `docs/ai/60_worker_codex_report.md` — worker report.
+## Changed Files
+- none (investigation only; Codex did not run)
 
 ## Commands Run
-- `npm run typecheck` — exit 0.
-- `npm run lint` — exit 0.
-- `timeout 15 npx tsx src/webhook-server.ts` — exit 124 from `timeout`; server reached `[WEBHOOK] Server listening on port 3000`, then received SIGTERM from timeout.
-- `npm test` — exit 1. All suites fail at startup because the Jest ESM configuration runs tests that still use CommonJS globals (`require`, global `jest`).
+- `bash scripts/ai/run_codex.sh` → exit 75 (CODEX_COOLDOWN_ACTIVE until epoch 1782000900)
+- `bash scripts/ai/archive_linear_issues.sh --dry-run` → total 249, would archive 49 children → 200
 
 ## Acceptance Criteria
-- [x] server starts without `require is not defined`
-- [ ] typecheck / lint / test pass
+- [ ] Archive auto-runs when the system detects it cannot add an Issue (workspace at/near cap)
+- [ ] The 150 parents / 200 total targets are preserved
+- [ ] One-off special-case execution performed for this issue (249 → 200)
+- [ ] Lint / typecheck / test green
 
 ## Risks
-`npm test` is still blocked by the broader test-suite ESM migration: tests use CommonJS `require(...)` and global `jest` while the package runs Jest with `NODE_OPTIONS=--experimental-vm-modules` and `ts-jest/presets/default-esm`.
+- Codex unavailable until ~2026-06-21; verification for this issue will also use Claude
+  fallback. Gemini is available (no cooldown) for implementation.
+- Archive --execute is a real Linear mutation (issues archived); explicitly authorized
+  by the issue text ("このissueでは特例で実行する"). Local backups + Linear archive are recoverable.
 
 ## Next Action
-NEEDS_DEBUG
+READY_FOR_REVIEW
