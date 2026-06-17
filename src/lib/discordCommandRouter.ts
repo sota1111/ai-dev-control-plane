@@ -11,6 +11,8 @@ const {
 } = require('./discordCommandHandlers');
 const { handleAskCommand, handleAskModalSubmit, ASK_MODAL_CUSTOM_ID } = require('./discordAskHandler');
 
+export {};
+
 // Interaction types
 const InteractionType = {
   PING: 1,
@@ -31,13 +33,24 @@ const InteractionResponseType = {
   MODAL: 9,
 };
 
+interface InteractionResponse {
+  status: number;
+  body: {
+    type: number;
+    data?: {
+      content?: string;
+      flags?: number;
+    };
+  };
+}
+
 /**
  * Route a Discord interaction to the appropriate handler.
  * Returns a response object { status, body }.
- * @param {object} interaction - parsed Discord interaction payload
- * @returns {Promise<{status: number, body: object}>}
+ * @param {any} interaction - parsed Discord interaction payload
+ * @returns {Promise<InteractionResponse>}
  */
-async function routeInteraction(interaction) {
+async function routeInteraction(interaction: any): Promise<InteractionResponse> {
   const { type, data } = interaction;
 
   if (type === InteractionType.PING) {
@@ -66,8 +79,8 @@ async function routeInteraction(interaction) {
   };
 }
 
-async function handleSlashCommand(commandName, interaction) {
-  let result;
+async function handleSlashCommand(commandName: string, interaction: any): Promise<InteractionResponse> {
+  let result: any;
 
   switch (commandName) {
     case 'status':
@@ -112,7 +125,7 @@ async function handleSlashCommand(commandName, interaction) {
   };
 }
 
-async function handleModalSubmit(interaction) {
+async function handleModalSubmit(interaction: any): Promise<InteractionResponse> {
   const customId = interaction.data && interaction.data.custom_id;
   if (customId === ASK_MODAL_CUSTOM_ID) {
     return await handleAskModalSubmit(interaction);
@@ -126,7 +139,7 @@ async function handleModalSubmit(interaction) {
   };
 }
 
-async function handleMessageComponent(interaction) {
+async function handleMessageComponent(interaction: any): Promise<InteractionResponse> {
   // Will be implemented in SOT-532
   return {
     status: 200,

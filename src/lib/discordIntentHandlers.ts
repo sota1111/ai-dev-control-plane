@@ -5,30 +5,32 @@ const fs = require('fs');
 const runner = require('../runner');
 const { handleStatus, handleQueue, handleCooldown } = require('./discordCommandHandlers');
 
+export {};
+
 const ISSUE_ID_PATTERN = /^SOT-\d+$/i;
 const MAX_DISCORD_LENGTH = 1900;
 
-function truncate(str, maxLen = MAX_DISCORD_LENGTH) {
+function truncate(str: string, maxLen: number = MAX_DISCORD_LENGTH): string {
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen - 3) + '...';
 }
 
-async function handleStatusIntent() {
+async function handleStatusIntent(): Promise<string> {
   const result = await handleStatus();
   return result.content;
 }
 
-async function handleQueueIntent() {
+async function handleQueueIntent(): Promise<string> {
   const result = await handleQueue();
   return result.content;
 }
 
-async function handleCooldownIntent() {
+async function handleCooldownIntent(): Promise<string> {
   const result = await handleCooldown();
   return result.content;
 }
 
-async function handleIssueStatusIntent(issueId) {
+async function handleIssueStatusIntent(issueId: string): Promise<string> {
   try {
     const query = `
       query($id: String!) {
@@ -52,16 +54,16 @@ async function handleIssueStatusIntent(issueId) {
       `**Status**: ${issue.state.name} (${issue.state.type})`,
       `**最終更新**: ${updatedAt}`,
     ].join('\n'));
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD', `handleIssueStatusIntent error: ${err.message}`);
-    if (err.message.includes('LINEAR_API_KEY')) {
+    if (err.message && err.message.includes('LINEAR_API_KEY')) {
       return '❌ Linear API キーが設定されていません。';
     }
     return `❌ Linear APIエラー: ${err.message}`;
   }
 }
 
-async function handleLogSummaryIntent(issueId) {
+async function handleLogSummaryIntent(issueId: string): Promise<string> {
   try {
     if (!ISSUE_ID_PATTERN.test(issueId)) {
       return `❌ Issue IDは SOT-xxx 形式で指定してください。`;
@@ -71,11 +73,11 @@ async function handleLogSummaryIntent(issueId) {
     const issueIdLower = issueId.toLowerCase();
 
     // Find log files related to this issue
-    let logFiles = [];
+    let logFiles: string[] = [];
     if (fs.existsSync(logsDir)) {
       const allFiles = fs.readdirSync(logsDir);
       logFiles = allFiles
-        .filter(f => f.toLowerCase().includes(issueIdLower) && (f.endsWith('.log') || f.endsWith('.txt') || f.endsWith('.md')))
+        .filter((f: string) => f.toLowerCase().includes(issueIdLower) && (f.endsWith('.log') || f.endsWith('.txt') || f.endsWith('.md')))
         .sort()
         .reverse()
         .slice(0, 3);
@@ -85,12 +87,12 @@ async function handleLogSummaryIntent(issueId) {
       return `ℹ **${issueId}** のログファイルが見つかりませんでした。\nログディレクトリ: \`${logsDir}\``;
     }
 
-    const summaries = [];
+    const summaries: string[] = [];
     for (const file of logFiles) {
       const filePath = path.join(logsDir, file);
       try {
         const content = fs.readFileSync(filePath, 'utf8');
-        const lines = content.split('\n').filter(l => l.trim());
+        const lines = content.split('\n').filter((l: string) => l.trim());
         // Get last 20 lines
         const lastLines = lines.slice(-20).join('\n');
         summaries.push(`**${file}**:\n\`\`\`\n${lastLines.slice(0, 500)}\n\`\`\``);
@@ -100,13 +102,13 @@ async function handleLogSummaryIntent(issueId) {
     }
 
     return truncate(`## ${issueId} 最新ログ\n\n` + summaries.join('\n\n'));
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD', `handleLogSummaryIntent error: ${err.message}`);
     return `❌ エラーが発生しました: ${err.message}`;
   }
 }
 
-async function handleCommentPostIntent(issueId, commentText) {
+async function handleCommentPostIntent(issueId: string, commentText: string): Promise<string> {
   // This is a read-only suggestion — actual posting requires explicit /reply command
   return truncate([
     `📝 **${issueId}** へのコメント投稿候補:`,
@@ -117,7 +119,7 @@ async function handleCommentPostIntent(issueId, commentText) {
   ].join('\n'));
 }
 
-async function handleRetrySuggestIntent(issueId) {
+async function handleRetrySuggestIntent(issueId: string): Promise<string> {
   try {
     const queued = runner.isQueued(issueId);
     if (queued) {
@@ -129,17 +131,17 @@ async function handleRetrySuggestIntent(issueId) {
       '実行するには `/retry` コマンドを使用してください:',
       `\`/retry issue:${issueId}\``,
     ].join('\n'));
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD', `handleRetrySuggestIntent error: ${err.message}`);
     return `❌ エラーが発生しました: ${err.message}`;
   }
 }
 
-function handleDangerousIntent() {
+function handleDangerousIntent(): string {
   return '🚫 **この操作は拒否されました。**\n秘密情報の表示、任意コマンドの実行、ファイル削除などの危険操作は許可されていません。';
 }
 
-function handleUnknownIntent(originalText) {
+function handleUnknownIntent(originalText: string): string {
   return truncate([
     '❓ **入力内容を理解できませんでした。**',
     '',

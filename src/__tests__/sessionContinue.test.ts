@@ -6,11 +6,13 @@ const {
   isClaudeForeground
 } = require('../lib/sessionContinue');
 
+export {};
+
 describe('sessionContinue', () => {
   const PANE_ID = '%7';
   const NOW_MS = Date.UTC(2026, 5, 16, 18, 0, 0);
   const PAST_LIMIT_TEXT = "You've hit your session limit. Your limit will reset at Jun 15, 3:30pm (UTC).";
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-continue-test-'));
@@ -21,8 +23,8 @@ describe('sessionContinue', () => {
   });
 
   function createExec({ panes = [PANE_ID], foreground = 'claude', capture = PAST_LIMIT_TEXT } = {}) {
-    const calls = [];
-    const exec = jest.fn((cmd) => {
+    const calls: string[] = [];
+    const exec = jest.fn((cmd: string) => {
       calls.push(cmd);
       if (cmd === 'tmux list-panes -a -F "#{pane_id}"') {
         return { ok: true, stdout: panes.join('\n') };
@@ -38,7 +40,7 @@ describe('sessionContinue', () => {
       }
       return { ok: false, error: new Error(`Unexpected command: ${cmd}`) };
     });
-    exec.calls = calls;
+    (exec as any).calls = calls;
     return exec;
   }
 
@@ -54,7 +56,7 @@ describe('sessionContinue', () => {
     });
 
     expect(result).toEqual({ status: 'pane_missing' });
-    expect(exec.calls.some(cmd => cmd.startsWith('tmux send-keys'))).toBe(false);
+    expect((exec as any).calls.some((cmd: string) => cmd.startsWith('tmux send-keys'))).toBe(false);
   });
 
   it('returns foreground_mismatch and does not send keys when foreground is not Claude', async () => {
@@ -69,7 +71,7 @@ describe('sessionContinue', () => {
     });
 
     expect(result).toEqual({ status: 'foreground_mismatch' });
-    expect(exec.calls.some(cmd => cmd.startsWith('tmux send-keys'))).toBe(false);
+    expect((exec as any).calls.some((cmd: string) => cmd.startsWith('tmux send-keys'))).toBe(false);
   });
 
   it('sends Escape, continue, and Enter when a past limit is detected in Claude', async () => {
@@ -84,7 +86,7 @@ describe('sessionContinue', () => {
     });
 
     expect(result).toEqual({ status: 'sent' });
-    expect(exec.calls.filter(cmd => cmd.startsWith('tmux send-keys'))).toEqual([
+    expect((exec as any).calls.filter((cmd: string) => cmd.startsWith('tmux send-keys'))).toEqual([
       `tmux send-keys -t ${PANE_ID} Escape`,
       `tmux send-keys -t ${PANE_ID} 'continue'`,
       `tmux send-keys -t ${PANE_ID} Enter`
@@ -103,13 +105,13 @@ describe('sessionContinue', () => {
     });
 
     expect(result).toEqual({ status: 'no_limit' });
-    expect(exec.calls.some(cmd => cmd.startsWith('tmux send-keys'))).toBe(false);
+    expect((exec as any).calls.some((cmd: string) => cmd.startsWith('tmux send-keys'))).toBe(false);
   });
 
   it('identifies Claude foreground processes', () => {
     expect(isClaudeForeground('claude')).toBe(true);
     expect(isClaudeForeground('vim')).toBe(false);
     expect(isClaudeForeground('bash')).toBe(false);
-    expect(isClaudeForeground('')).toBe(false);
+    expect(isClaudeForeground(undefined)).toBe(false);
   });
 });

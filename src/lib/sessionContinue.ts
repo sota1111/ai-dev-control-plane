@@ -6,10 +6,45 @@ const { execSync } = require('child_process');
 const { classifyUsageLimit } = require('./usageLimitParser');
 const { buildSessionContinueMetadata, saveResumeMetadata, formatResumeLogLines } = require('./resumeMetadata');
 
+export {};
+
+interface ExecResult {
+  ok: boolean;
+  stdout?: string;
+  error?: any;
+}
+
+type ExecFunction = (cmd: string) => ExecResult;
+
+interface PaneInfo {
+  session: string;
+  window: string;
+  pane: string;
+  foregroundProcess: string;
+}
+
+interface DetectionResult {
+  detected: boolean;
+  classification: any | null; // Using any for UsageLimitResult as it is not exported but defined in sibling
+  rawText: string;
+}
+
+interface SessionContinueState {
+  paneId: string;
+  issueId: string | null;
+  status: string;
+  resetAt: string | null;
+  retryAt: string | null;
+  tmuxSession: string;
+  tmuxWindow: string;
+  foregroundProcess: string;
+  updatedAt: string;
+}
+
 /**
  * Default command runner using child_process.execSync.
  */
-function defaultExec(cmd) {
+function defaultExec(cmd: string): ExecResult {
   try {
     const stdout = execSync(cmd, { encoding: 'utf8' }).trim();
     return { ok: true, stdout };
@@ -21,19 +56,19 @@ function defaultExec(cmd) {
 /**
  * Checks if a tmux pane exists.
  */
-function paneExists(paneId, exec = defaultExec) {
+function paneExists(paneId: string, exec: ExecFunction = defaultExec): boolean {
   const result = exec('tmux list-panes -a -F "#{pane_id}"');
   if (!result.ok) return false;
-  const panes = result.stdout.split('\n');
+  const panes = (result.stdout || '').split('\n');
   return panes.includes(paneId);
 }
 
 /**
  * Gets info about a tmux pane.
  */
-function getPaneInfo(paneId, exec = defaultExec) {
+function getPaneInfo(paneId: string, exec: ExecFunction = defaultExec): PaneInfo | null {
   const result = exec(`tmux display-message -p -t ${paneId} '#{session_name}|#{window_name}|#{pane_id}|#{pane_current_command}'`);
-  if (!result.ok) return null;
+  if (!result.ok || !result.stdout) return null;
   const [session, window, pane, foregroundProcess] = result.stdout.split('|');
   return { session, window, pane, foregroundProcess };
 }
@@ -41,16 +76,16 @@ function getPaneInfo(paneId, exec = defaultExec) {
 /**
  * Captures the content of a tmux pane.
  */
-function capturePane(paneId, exec = defaultExec) {
+function capturePane(paneId: string, exec: ExecFunction = defaultExec): string {
   const result = exec(`tmux capture-pane -p -t ${paneId}`);
   if (!result.ok) return '';
-  return result.stdout;
+  return result.stdout || '';
 }
 
 /**
  * Checks if the foreground process is Claude.
  */
-function isClaudeForeground(foregroundProcess) {
+function isClaudeForeground(foregroundProcess: string | undefined): boolean {
   if (!foregroundProcess) return false;
   const proc = foregroundProcess.toLowerCase();
   // Claude Code often runs as 'claude' or 'node' (if via npx/node)
@@ -61,7 +96,7 @@ function isClaudeForeground(foregroundProcess) {
 /**
  * Detects a usage limit in the pane output.
  */
-function detectLimitInPane(paneId, nowMs = Date.now(), exec = defaultExec) {
+function detectLimitInPane(paneId: string, nowMs: number = Date.now(), exec: ExecFunction = defaultExec): DetectionResult {
   const text = capturePane(paneId, exec);
   if (!text) return { detected: false, classification: null, rawText: '' };
   const classification = classifyUsageLimit(text, nowMs);
@@ -75,7 +110,7 @@ function detectLimitInPane(paneId, nowMs = Date.now(), exec = defaultExec) {
 /**
  * Sends the 'continue' command to a tmux pane.
  */
-function sendContinue(paneId, exec = defaultExec) {
+function sendContinue(paneId: string, exec: ExecFunction = defaultExec): { ok: boolean } {
   // Key sequence: Escape, 'continue', Enter
   const cmd1 = exec(`tmux send-keys -t ${paneId} Escape`);
   const cmd2 = exec(`tmux send-keys -t ${paneId} 'continue'`);
@@ -86,7 +121,7 @@ function sendContinue(paneId, exec = defaultExec) {
 /**
  * State file path helper.
  */
-function getSessionContinueStatePath(baseDir) {
+function getSessionContinueStatePath(baseDir?: string): string {
   const root = baseDir || path.join(__dirname, '..', '..');
   return path.join(root, 'docs', 'ai', 'auto_logs', 'runner.session-continue.json');
 }
@@ -94,7 +129,7 @@ function getSessionContinueStatePath(baseDir) {
 /**
  * Reads the session-continue state.
  */
-function readSessionContinueState(baseDir) {
+function readSessionContinueState(baseDir?: string): SessionContinueState | null {
   const filePath = getSessionContinueStatePath(baseDir);
   if (!fs.existsSync(filePath)) return null;
   try {
@@ -107,7 +142,7 @@ function readSessionContinueState(baseDir) {
 /**
  * Writes the session-continue state atomically.
  */
-function writeSessionContinueState(state, baseDir) {
+function writeSessionContinueState(state: SessionContinueState, baseDir?: string): void {
   const filePath = getSessionContinueStatePath(baseDir);
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
@@ -130,7 +165,15 @@ async function attemptSessionContinue({
   exec = defaultExec,
   notify = () => {},
   logger = () => {}
-}) {
+}: {
+  paneId: string;
+  issueId?: string | null;
+  nowMs?: number;
+  baseDir?: string;
+  exec?: ExecFunction;
+  notify?: (msg: string) => void;
+  logger?: (msg: string) => void;
+}): Promise<{ status: string }> {
   const projectRoot = baseDir || path.join(__dirname, '..', '..');
   const autoLogsDir = path.join(projectRoot, 'docs', 'ai', 'auto_logs');
 
@@ -144,7 +187,7 @@ async function attemptSessionContinue({
   const paneInfo = getPaneInfo(paneId, exec);
   const detection = detectLimitInPane(paneId, nowMs, exec);
 
-  if (!detection.detected) {
+  if (!detection.detected || !paneInfo) {
     return { status: 'no_limit' };
   }
 
@@ -164,7 +207,7 @@ async function attemptSessionContinue({
 
   saveResumeMetadata(metadata, autoLogsDir);
 
-  const state = {
+  const state: SessionContinueState = {
     paneId,
     issueId,
     status: 'waiting',
@@ -177,7 +220,7 @@ async function attemptSessionContinue({
   };
 
   const logLines = formatResumeLogLines(metadata, { action: 'send-continue' });
-  logLines.forEach(line => logger(line));
+  logLines.forEach((line: string) => logger(line));
 
   const nowIso = new Date(nowMs).toISOString();
   const isFuture = classification.retryAt && classification.retryAt > nowIso;

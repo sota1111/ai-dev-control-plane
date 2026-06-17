@@ -29,6 +29,8 @@ const { classifyIntent } = require('../lib/discordIntentClassifier');
 const handlers = require('../lib/discordIntentHandlers');
 const { editOriginalInteractionResponse } = require('../lib/discordInteractionFollowup');
 
+export {};
+
 describe('discordAskHandler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -190,7 +192,7 @@ describe('discordAskHandler', () => {
     });
 
     describe('logging', () => {
-      let runner;
+      let runner: any;
       
       beforeEach(() => {
         runner = require('../runner');

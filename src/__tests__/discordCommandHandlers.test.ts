@@ -23,6 +23,8 @@ const runner = require('../runner');
 const pauseState = require('../lib/discordPauseState');
 const handlers = require('../lib/discordCommandHandlers');
 
+export {};
+
 beforeEach(() => {
   jest.clearAllMocks();
 });

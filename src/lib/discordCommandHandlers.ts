@@ -5,23 +5,42 @@ const queueOrdering = require('./queueOrdering');
 const { isPaused, setPaused, clearPause, getPauseInfo } = require('./discordPauseState');
 const sessionContinue = require('./sessionContinue');
 
+export {};
+
 const ISSUE_ID_PATTERN = /^SOT-\d+$/i;
 const MAX_BODY_LENGTH = 1000;
 const MAX_DISCORD_LENGTH = 1900; // safe margin under Discord's 2000 char limit
 
-function truncate(str, maxLen = MAX_DISCORD_LENGTH) {
+interface DiscordInteractionOption {
+  name: string;
+  type: number;
+  value?: any;
+  options?: DiscordInteractionOption[];
+}
+
+interface DiscordInteraction {
+  data?: {
+    options?: DiscordInteractionOption[];
+  };
+}
+
+interface CommandResult {
+  content: string;
+}
+
+function truncate(str: string, maxLen: number = MAX_DISCORD_LENGTH): string {
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen - 3) + '...';
 }
 
-function validateIssueId(issueId) {
+function validateIssueId(issueId: string | null | undefined): { valid: boolean; error?: string; id?: string } {
   if (!issueId || !ISSUE_ID_PATTERN.test(issueId.trim())) {
     return { valid: false, error: `Issue IDは SOT-xxx 形式で指定してください（例: SOT-123）。` };
   }
   return { valid: true, id: issueId.trim().toUpperCase() };
 }
 
-async function handleStatus() {
+async function handleStatus(): Promise<CommandResult> {
   try {
     const locked = runner.isLocked();
     const queue = runner.loadQueue();
@@ -63,13 +82,13 @@ async function handleStatus() {
     ].join('\n');
 
     return { content: truncate(content) };
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD', `handleStatus error: ${err.message}`);
     return { content: `エラーが発生しました: ${err.message}` };
   }
 }
 
-async function handleQueue() {
+async function handleQueue(): Promise<CommandResult> {
   try {
     const rawQueue = runner.loadQueue();
     if (rawQueue.length === 0) {
@@ -79,7 +98,7 @@ async function handleQueue() {
     // Use shared logic to determine real execution order
     const { ready, waiting } = queueOrdering.previewQueueOrder(rawQueue);
 
-    function formatItem(item, index, indent = '') {
+    function formatItem(item: any, index: number, indent = '') {
       const at = item.enqueuedAt ? new Date(item.enqueuedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
       const priorityStr = item.priorityLabel ? `[${item.priorityLabel}]` : '[No priority]';
       const rank = queueOrdering.effectiveRank(item);
@@ -90,10 +109,10 @@ async function handleQueue() {
       return `${indent}${index}. **${item.issueIdentifier || item.issueId}** ${priorityStr} (rank ${rank}) — ${item.trigger || 'unknown'} (${at})${retryStr}${groupStr}`;
     }
 
-    const lines = [];
+    const lines: string[] = [];
     if (ready.length > 0) {
       lines.push('### 実行待ち (Ready)');
-      ready.forEach((item, index) => {
+      ready.forEach((item: any, index: number) => {
         lines.push(formatItem(item, index + 1));
       });
     }
@@ -101,7 +120,7 @@ async function handleQueue() {
     if (waiting.length > 0) {
       if (lines.length > 0) lines.push('');
       lines.push('### 待機中 (Waiting)');
-      waiting.forEach((item, index) => {
+      waiting.forEach((item: any, index: number) => {
         // For waiting items, we list them in order of retryAt
         lines.push(formatItem(item, index + 1));
       });
@@ -109,13 +128,13 @@ async function handleQueue() {
 
     const content = `## 実行キュー (${rawQueue.length}件)\n` + lines.join('\n');
     return { content: truncate(content) };
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD', `handleQueue error: ${err.message}`);
     return { content: `エラーが発生しました: ${err.message}` };
   }
 }
 
-async function handleCooldown() {
+async function handleCooldown(): Promise<CommandResult> {
   try {
     const cooldown = runner.getUsageLimitCooldownUntil();
     if (!cooldown) {
@@ -132,13 +151,13 @@ async function handleCooldown() {
       lines.push(`**種別**: ${cooldown.limitType}`);
     }
     return { content: lines.join('\n') };
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD', `handleCooldown error: ${err.message}`);
     return { content: `エラーが発生しました: ${err.message}` };
   }
 }
 
-async function handlePause() {
+async function handlePause(): Promise<CommandResult> {
   try {
     if (isPaused()) {
       return { content: '⏸ すでに一時停止中です。再開するには `/resume` を使用してください。' };
@@ -146,13 +165,13 @@ async function handlePause() {
     setPaused('Discord /pause command');
     runner.log('DISCORD', 'Runner paused via Discord /pause command');
     return { content: '⏸ **新規実行を一時停止しました。**\n実行中のプロセスは継続します。再開するには `/resume` を使用してください。' };
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD', `handlePause error: ${err.message}`);
     return { content: `エラーが発生しました: ${err.message}` };
   }
 }
 
-async function handleResume(interaction) {
+async function handleResume(interaction?: DiscordInteraction): Promise<CommandResult | undefined> {
   try {
     const opts = (interaction && interaction.data && interaction.data.options) || [];
     const sub = opts.find(o => o.type === 1); // SUB_COMMAND
@@ -165,17 +184,17 @@ async function handleResume(interaction) {
       runner.log('DISCORD', 'Runner resumed via Discord /resume command');
       return { content: '▶ **一時停止を解除しました。**\n新規実行が再開されます。' };
     } else if (sub.name === 'issue') {
-      return await handleResumeIssue(sub.options);
+      return await handleResumeIssue(sub.options || []);
     } else if (sub.name === 'session') {
-      return await handleResumeSession(sub.options);
+      return await handleResumeSession(sub.options || []);
     }
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD', `handleResume error: ${err.message}`);
     return { content: `エラーが発生しました: ${err.message}` };
   }
 }
 
-async function handleResumeIssue(subOptions) {
+async function handleResumeIssue(subOptions: DiscordInteractionOption[]): Promise<CommandResult> {
   const idOpt = subOptions.find(o => o.name === 'id');
   const issueIdRaw = idOpt && idOpt.value;
 
@@ -183,13 +202,13 @@ async function handleResumeIssue(subOptions) {
   if (!validation.valid) {
     return { content: `❌ ${validation.error}` };
   }
-  const issueId = validation.id;
+  const issueId = validation.id!;
 
   runner.enqueue(issueId, 'discord-resume', null, { reason: 'usage_limit' });
   runner.log('DISCORD', `${issueId} enqueued via Discord /resume issue`);
 
   setImmediate(() => {
-    runner.drainQueue().catch(err => {
+    runner.drainQueue().catch((err: any) => {
       runner.log('DISCORD', `drainQueue error after /resume issue: ${err.message}`);
     });
   });
@@ -197,7 +216,7 @@ async function handleResumeIssue(subOptions) {
   return { content: `✅ **${issueId}** を usage-limit 後の再開モードで実行キューへ投入しました。` };
 }
 
-async function handleResumeSession(subOptions) {
+async function handleResumeSession(subOptions: DiscordInteractionOption[]): Promise<CommandResult> {
   const paneOpt = subOptions.find(o => o.name === 'pane');
   const issueOpt = subOptions.find(o => o.name === 'issue');
 
@@ -212,7 +231,7 @@ async function handleResumeSession(subOptions) {
     paneId,
     issueId: issueId || null,
     notify: () => { },
-    logger: (m) => runner.log('DISCORD', m)
+    logger: (m: string) => runner.log('DISCORD', m)
   });
 
   let message = '';
@@ -239,7 +258,7 @@ async function handleResumeSession(subOptions) {
   return { content: message };
 }
 
-async function handleReply(interaction) {
+async function handleReply(interaction: DiscordInteraction): Promise<CommandResult> {
   try {
     const options = (interaction.data && interaction.data.options) || [];
     const issueOpt = options.find(o => o.name === 'issue');
@@ -252,7 +271,7 @@ async function handleReply(interaction) {
     if (!validation.valid) {
       return { content: `❌ ${validation.error}` };
     }
-    const issueId = validation.id;
+    const issueId = validation.id!;
 
     if (!body || body.trim().length === 0) {
       return { content: '❌ コメント本文が空です。' };
@@ -277,7 +296,7 @@ async function handleReply(interaction) {
     } else {
       return { content: `❌ コメントの投稿に失敗しました。` };
     }
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD', `handleReply error: ${err.message}`);
     if (err.message && err.message.includes('LINEAR_API_KEY')) {
       return { content: '❌ Linear API キーが設定されていません。' };
@@ -286,7 +305,7 @@ async function handleReply(interaction) {
   }
 }
 
-async function handleRetry(interaction) {
+async function handleRetry(interaction: DiscordInteraction): Promise<CommandResult> {
   try {
     const options = (interaction.data && interaction.data.options) || [];
     const issueOpt = options.find(o => o.name === 'issue');
@@ -296,7 +315,7 @@ async function handleRetry(interaction) {
     if (!validation.valid) {
       return { content: `❌ ${validation.error}` };
     }
-    const issueId = validation.id;
+    const issueId = validation.id!;
 
     const wasQueued = runner.isQueued(issueId);
     runner.enqueue(issueId, 'discord-retry');
@@ -304,7 +323,7 @@ async function handleRetry(interaction) {
 
     // Trigger drain asynchronously — do not block the Discord response
     setImmediate(() => {
-      runner.drainQueue().catch(err => {
+      runner.drainQueue().catch((err: any) => {
         runner.log('DISCORD', `drainQueue error after /retry: ${err.message}`);
       });
     });
@@ -313,7 +332,7 @@ async function handleRetry(interaction) {
       return { content: `ℹ **${issueId}** はすでにキューに存在します。ドレインを開始します。` };
     }
     return { content: `✅ **${issueId}** を実行キューへ投入しました。ドレインを開始します。` };
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD', `handleRetry error: ${err.message}`);
     return { content: `❌ エラーが発生しました: ${err.message}` };
   }

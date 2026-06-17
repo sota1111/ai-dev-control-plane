@@ -15,6 +15,8 @@ const {
 } = require('./discordIntentHandlers');
 const { editOriginalInteractionResponse } = require('./discordInteractionFollowup');
 
+export {};
+
 const ASK_MODAL_CUSTOM_ID = 'discord_ask_modal';
 const ASK_INPUT_CUSTOM_ID = 'ask_input';
 const MAX_INPUT_LENGTH = 500;
@@ -22,8 +24,23 @@ const MAX_INPUT_LENGTH = 500;
 const LOG_PREVIEW_LENGTH = 300;
 const SECRET_PATTERN = /(?:token|secret|api[_\s-]?key|password|webhook[_\s-]?url|bot[_\s-]?token|public[_\s-]?key|application[_\s-]?id)\s*[=:]\s*\S+/gi;
 
-function sanitizeDiscordAskLogText(text) {
-  if (typeof text !== 'string') return String(text ?? '');
+interface DiscordAskHandlerResponse {
+  status: number;
+  body: {
+    type: number;
+    data: {
+      custom_id?: string;
+      title?: string;
+      components?: any[];
+      content?: string;
+      flags?: number;
+    };
+  };
+  followupPromise?: Promise<void>;
+}
+
+function sanitizeDiscordAskLogText(text: string): string {
+  if (typeof text !== 'string') return String((text as any) ?? '');
   return text
     .replace(SECRET_PATTERN, (match) => {
       const eqIdx = match.search(/[=:]/);
@@ -35,7 +52,7 @@ function sanitizeDiscordAskLogText(text) {
 /**
  * Handle /ask slash command — returns a modal response.
  */
-async function handleAskCommand() {
+async function handleAskCommand(): Promise<DiscordAskHandlerResponse> {
   try {
     return {
       status: 200,
@@ -62,7 +79,7 @@ async function handleAskCommand() {
         },
       },
     };
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD', `handleAskCommand error: ${err.message}`);
     return {
       status: 200,
@@ -77,14 +94,14 @@ async function handleAskCommand() {
 /**
  * Background processing for /ask — classify intent, execute, and followup.
  */
-async function processAskInBackground(interaction, inputText) {
+async function processAskInBackground(interaction: any, inputText: string): Promise<void> {
   try {
     const { intent, issueId, originalText } = classifyIntent(inputText);
     runner.log('DISCORD_ASK', 'intent classified', { intent, issueId: issueId || 'none' });
 
-    let responseContent;
+    let responseContent: string;
 
-    const HANDLER_NAMES = {
+    const HANDLER_NAMES: { [key: string]: string } = {
       STATUS_CHECK: 'handleStatusIntent',
       QUEUE_CHECK: 'handleQueueIntent',
       COOLDOWN_CHECK: 'handleCooldownIntent',
@@ -133,7 +150,7 @@ async function processAskInBackground(interaction, inputText) {
     runner.log('DISCORD_ASK', 'handler completed', { intent, responsePreview: JSON.stringify(responsePreview) });
 
     await editOriginalInteractionResponse(interaction.application_id, interaction.token, responseContent);
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD_ASK', `handler error: ${err.message}`);
     await editOriginalInteractionResponse(interaction.application_id, interaction.token, '❌ エラーが発生しました。');
   }
@@ -142,7 +159,7 @@ async function processAskInBackground(interaction, inputText) {
 /**
  * Handle modal submit for /ask — classify intent and execute.
  */
-async function handleAskModalSubmit(interaction) {
+async function handleAskModalSubmit(interaction: any): Promise<DiscordAskHandlerResponse> {
   try {
     const interactionId = interaction && interaction.id ? interaction.id : 'unknown';
     const userId = interaction && interaction.member && interaction.member.user
@@ -151,7 +168,7 @@ async function handleAskModalSubmit(interaction) {
     runner.log('DISCORD_ASK', 'modal submit received', { interactionId, userId });
 
     // Extract input from modal components
-    const components = interaction.data && interaction.data.components || [];
+    const components = (interaction.data && interaction.data.components) || [];
     let inputText = '';
 
     for (const row of components) {
@@ -198,7 +215,7 @@ async function handleAskModalSubmit(interaction) {
     // Kick off background processing
     const followupPromise = processAskInBackground(interaction, inputText);
 
-    const result = {
+    const result: DiscordAskHandlerResponse = {
       status: 200,
       body: {
         type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
@@ -208,7 +225,7 @@ async function handleAskModalSubmit(interaction) {
     };
     runner.log('DISCORD_ASK', 'response sent', { mode: 'deferred', status: result.status });
     return result;
-  } catch (err) {
+  } catch (err: any) {
     runner.log('DISCORD_ASK', `handler error: ${err.message}`);
     return {
       status: 200,
@@ -227,4 +244,3 @@ module.exports = {
   ASK_MODAL_CUSTOM_ID,
   sanitizeDiscordAskLogText,
 };
-
