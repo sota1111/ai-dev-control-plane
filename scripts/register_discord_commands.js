@@ -3,14 +3,7 @@
 
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-
-const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const DISCORD_APPLICATION_ID = process.env.DISCORD_APPLICATION_ID;
-
-if (!DISCORD_BOT_TOKEN || !DISCORD_APPLICATION_ID) {
-  console.error('ERROR: DISCORD_BOT_TOKEN and DISCORD_APPLICATION_ID must be set in .env');
-  process.exit(1);
-}
+const { getRequiredSecret, initSecrets } = require('../src/config/secrets');
 
 const commands = [
   {
@@ -109,6 +102,15 @@ const commands = [
 ];
 
 async function registerCommands() {
+  await initSecrets(['DISCORD_BOT_TOKEN', 'DISCORD_APPLICATION_ID']);
+  let DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID;
+  try {
+    DISCORD_BOT_TOKEN = getRequiredSecret('DISCORD_BOT_TOKEN');
+    DISCORD_APPLICATION_ID = getRequiredSecret('DISCORD_APPLICATION_ID');
+  } catch {
+    console.error('ERROR: DISCORD_BOT_TOKEN and DISCORD_APPLICATION_ID must be set in .env');
+    process.exit(1);
+  }
   const url = `https://discord.com/api/v10/applications/${DISCORD_APPLICATION_ID}/commands`;
   const response = await fetch(url, {
     method: 'PUT',

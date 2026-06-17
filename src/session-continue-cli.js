@@ -3,6 +3,7 @@
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const { getSecret, initSecrets } = require('./config/secrets');
 
 const { DiscordNotifier } = require('./lib/discordNotifier');
 const { attemptSessionContinue } = require('./lib/sessionContinue');
@@ -25,6 +26,7 @@ function logger(message) {
 }
 
 async function main() {
+  await initSecrets(['DISCORD_WEBHOOK_URL']);
   const args = process.argv.slice(2);
   let paneId = null;
   let issueId = null;
@@ -44,7 +46,7 @@ async function main() {
     process.exit(1);
   }
 
-  const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+  const webhookUrl = getSecret('DISCORD_WEBHOOK_URL');
   const notifier = new DiscordNotifier(webhookUrl);
   if (webhookUrl) {
     notifier.start();

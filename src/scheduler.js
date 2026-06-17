@@ -12,6 +12,7 @@ require('dotenv').config({
   path: path.join(__dirname, '..', '.env'),
   override: false,
 });
+const { getSecret, initSecrets } = require('./config/secrets');
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -83,7 +84,7 @@ function status() {
     pid: pid || (fs.existsSync(core.PID_FILE) ? fs.readFileSync(core.PID_FILE, 'utf8').trim() : null),
     schedulerLog: core.SCHEDULER_LOG,
     linearState,
-    hasLinearKey: !!process.env.LINEAR_API_KEY,
+    hasLinearKey: !!getSecret('LINEAR_API_KEY'),
     checkInterval: config.checkInterval,
     interval: config.interval,
   });
@@ -202,8 +203,8 @@ async function foreground() {
 
   const config = core.getConfig(process.env);
   let notifier = null;
-  if (process.env.DISCORD_WEBHOOK_URL) {
-    notifier = new DiscordNotifier(process.env.DISCORD_WEBHOOK_URL);
+  if (getSecret('DISCORD_WEBHOOK_URL')) {
+    notifier = new DiscordNotifier(getSecret('DISCORD_WEBHOOK_URL'));
     notifier.start(5000);
   }
 
@@ -254,7 +255,7 @@ async function foreground() {
     /* Ignore SIGINT to match 'trap "" SIGINT' in Bash */
   });
 
-  if (process.env.LINEAR_API_KEY) {
+  if (getSecret('LINEAR_API_KEY')) {
     log(`Scheduler started (PID: ${process.pid}, mode: Linear polling, check_interval: ${config.checkInterval}s)`);
   } else {
     log(`Scheduler started (PID: ${process.pid}, mode: fixed interval fallback, interval: ${config.interval}s)`);
@@ -275,7 +276,7 @@ async function foreground() {
   }
 
   while (!isStopping) {
-    if (process.env.LINEAR_API_KEY) {
+    if (getSecret('LINEAR_API_KEY')) {
       log(`Next check in ${config.checkInterval}s`);
       await new Promise((resolve) => {
         sleepTimer = setTimeout(resolve, config.checkInterval * 1000);
@@ -352,7 +353,7 @@ async function start() {
       console.log(`Scheduler launched (log: ${core.SCHEDULER_LOG})`);
     }
 
-    if (process.env.LINEAR_API_KEY) {
+    if (getSecret('LINEAR_API_KEY')) {
       console.log(`Mode: Linear polling (CHECK_INTERVAL=${config.checkInterval}s)`);
     } else {
       console.log(`Mode: Fixed interval fallback (INTERVAL=${config.interval}s)`);
@@ -363,6 +364,7 @@ async function start() {
 }
 
 async function main() {
+  await initSecrets(['LINEAR_API_KEY', 'DISCORD_WEBHOOK_URL']);
   if (command === 'stop') {
     await stop();
   } else if (command === 'status') {

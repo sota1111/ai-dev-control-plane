@@ -1,46 +1,36 @@
-Verification complete. I wrote the report to `docs/ai/60_worker_codex_report.md`.
+Verification complete. I wrote the required report to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md).
 
-I made one scoped fix in `src/config/secrets.js`: removed the unused `results` assignment in `initSecrets`.
+I made one minimal SOT-705-scoped fix in [scripts/register_discord_commands.js](/workspaces/ai-dev-control-plane/scripts/register_discord_commands.js): changed `catch (err)` to `catch` to remove the migration-introduced unused-var warning.
 
-Results:
+Final results:
 - `npm run lint`: exit 0
 - `npm run typecheck`: exit 0
-- `npm test`: exit 0, including `src/__tests__/secrets.test.js`
-- `npm run lint:eslint`: exit 0, 39 remaining warnings outside SOT-704 files
-
-Next action in the report: `READY_FOR_REVIEW`.
- variables.
-
-Applied one minimal in-scope cleanup after ESLint reported an unused `results` assignment in `initSecrets`.
-
-## Changed Files
-- `src/config/secrets.js` — removed unused `results` assignment from `await Promise.allSettled(...)` in `initSecrets`.
+- `npm test`: exit 0, 21 suites / 258 tests passed
+- `npm run lint:eslint`: exit 0, 39 remaining warnings reported as out of scope
+- Next action in report: `READY_FOR_REVIEW`
+` to remove the SOT-705-introduced ESLint unused-var warning.
+- `docs/ai/60_worker_codex_report.md` — wrote this verification report.
 
 ## Commands Run
-`npm run lint` — exit 0
-- `node --check` chain completed successfully, including `src/config/secrets.js`.
-
-`npm run typecheck` — exit 0
-- `tsc --noEmit` completed successfully.
-
-`npm test` — exit 0
-- `src/__tests__/secrets.test.js` passed.
-- Full suite passed: 20 test suites, 256 tests.
-- Jest printed existing webhook warning logs for missing `LINEAR_WEBHOOK_SECRET` in development-mode tests and the existing `--forceExit` open-handle suggestion.
-
-`npm run lint:eslint` — exit 0
-- First run: 40 warnings, including `src/config/secrets.js:172:9 'results' is assigned a value but never used`.
-- Fixed the `src/config/secrets.js` warning.
-- Post-fix run: 39 warnings, 0 errors. Remaining warnings are outside the SOT-704 files and were left unchanged per scope.
+- `npm run lint` — exit 0. Node syntax checks passed for configured source/script files, including the migrated entrypoints and `src/config/secrets.js`.
+- `npm run typecheck` — exit 0. `tsc --noEmit` passed.
+- `npm test` — exit 0. Full Jest suite passed: 21 test suites, 258 tests. `webhookServer.test.js`, scheduler/session/runner coverage, and `secretsIntegration.test.js` all passed. Jest emitted the existing development-mode webhook warning when `LINEAR_WEBHOOK_SECRET` is unset.
+- `npm run lint:eslint` — exit 0. Reported 39 warnings after the minimal fix, all warnings only; no errors. Remaining warnings are pre-existing/out of scope unused-var warnings in other files and existing lines within changed files.
 
 ## Acceptance Criteria
 - [x] npm run lint exit 0
 - [x] npm run typecheck exit 0
-- [x] npm test exit 0 (secrets.test.js passing)
+- [x] npm test exit 0 (full suite green)
 - [x] lint:eslint result reported
+- [x] no unintended behavior/text changes
 
 ## Risks
-No blocking risks found for SOT-704. ESLint still reports unrelated pre-existing `no-unused-vars` warnings outside `src/config/secrets.js` and `src/__tests__/secrets.test.js`.
+No unresolved SOT-705 blockers found.
+
+Notes:
+- `webhook-server.js` now reads `LINEAR_WEBHOOK_SECRET` dynamically through `getSecret`, so tests that modify `process.env.LINEAR_WEBHOOK_SECRET` must restore it at file scope. The existing file-scope `afterAll` covers this and the suite passes.
+- Remaining `process.env` reads in the inspected files are non-secret configuration/test setup reads, such as `PORT`, `WEBHOOK_BOOTSTRAP_SCAN_ENABLED`, queue/usage timing config, and test env mutation.
+- `npm run lint:eslint` still reports warnings, but it exits 0 and the only warning introduced by this SOT-705 migration was fixed.
 
 ## Next Action
 READY_FOR_REVIEW

@@ -2,12 +2,13 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const { getSecret, initSecrets } = require('./config/secrets');
 const { DiscordNotifier } = require('./lib/discordNotifier');
 const { verifyDiscordSignature } = require('./lib/discordInteractions');
 const { routeInteraction } = require('./lib/discordCommandRouter');
 
-const _discordNotifier = process.env.DISCORD_WEBHOOK_URL
-  ? new DiscordNotifier(process.env.DISCORD_WEBHOOK_URL)
+const _discordNotifier = getSecret('DISCORD_WEBHOOK_URL')
+  ? new DiscordNotifier(getSecret('DISCORD_WEBHOOK_URL'))
   : null;
 
 if (_discordNotifier) {
@@ -70,7 +71,6 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-const LINEAR_WEBHOOK_SECRET = process.env.LINEAR_WEBHOOK_SECRET;
 
 function loadDedupeStore() {
   try {
@@ -126,7 +126,7 @@ function markDedupeEvent(key) {
 }
 
 function verifyLinearSignature(req) {
-  if (!LINEAR_WEBHOOK_SECRET) {
+  if (!getSecret('LINEAR_WEBHOOK_SECRET')) {
     return true; // development mode: skip verification
   }
   const signature = req.headers['linear-signature'];
@@ -135,13 +135,13 @@ function verifyLinearSignature(req) {
     return false;
   }
   const expected = crypto
-    .createHmac('sha256', LINEAR_WEBHOOK_SECRET)
+    .createHmac('sha256', getSecret('LINEAR_WEBHOOK_SECRET'))
     .update(req.rawBody || '')
     .digest('hex');
   return signature === expected;
 }
 
-if (!LINEAR_WEBHOOK_SECRET) {
+if (!getSecret('LINEAR_WEBHOOK_SECRET')) {
   console.warn('[WEBHOOK] WARNING: LINEAR_WEBHOOK_SECRET not set. Running in development mode without signature verification.');
 }
 
@@ -313,7 +313,7 @@ app.post('/webhooks/linear', (req, res) => {
 });
 
 app.post('/webhooks/discord', (req, res) => {
-  const publicKey = process.env.DISCORD_PUBLIC_KEY;
+  const publicKey = getSecret('DISCORD_PUBLIC_KEY');
   if (!publicKey) {
     runner.log('DISCORD', 'DISCORD_PUBLIC_KEY not configured — rejecting request');
     return res.status(401).json({ error: 'Discord public key not configured' });
@@ -355,7 +355,7 @@ async function runBootstrapScan() {
     return;
   }
 
-  if (!process.env.LINEAR_API_KEY) {
+  if (!getSecret('LINEAR_API_KEY')) {
     runner.log('BOOTSTRAP', 'startup scan skipped: LINEAR_API_KEY not set');
     return;
   }
@@ -426,14 +426,17 @@ async function runBootstrapScan() {
 }
 
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`[WEBHOOK] Server listening on port ${PORT}`);
-    setImmediate(() => {
-      runBootstrapScan().catch((err) => {
-        runner.log('BOOTSTRAP', `startup scan uncaught error: ${err.message}`);
+  (async () => {
+    await initSecrets(['LINEAR_WEBHOOK_SECRET', 'DISCORD_PUBLIC_KEY', 'LINEAR_API_KEY', 'DISCORD_WEBHOOK_URL']);
+    app.listen(PORT, () => {
+      console.log(`[WEBHOOK] Server listening on port ${PORT}`);
+      setImmediate(() => {
+        runBootstrapScan().catch((err) => {
+          runner.log('BOOTSTRAP', `startup scan uncaught error: ${err.message}`);
+        });
       });
     });
-  });
+  })();
 }
 
 module.exports = { app, runBootstrapScan };
