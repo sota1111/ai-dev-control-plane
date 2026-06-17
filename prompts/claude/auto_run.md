@@ -107,6 +107,12 @@ Before starting work on any Issue, classify it and post the classification as a 
 - Codex fix → specification mismatch: re-delegate to Gemini CLI as `IMPLEMENT` or `PLAN`
 - 2+ consecutive failures: set Issue to `Blocked`, post reason to Linear
 
+**PLAN task terminal state (重要):**
+- `PLAN` タスクは成果物（方針・一覧・設計メモ等）を作成したら、PR作成・merge・`Done` には進めない。
+- 成果物を提示したうえで対象Issueを **`In Review`** に設定し、人間のレビュー/選択を待って停止する。
+- PLANの成果物は Linear コメント、および必要に応じて `docs/ai/10_plan.md` / `docs/ai/20_design.md` に記録する。
+- IMPLEMENT / FIX / DEBUG など実装系タスクは従来どおり PR → merge → `Done` に進める（この例外の対象外）。
+
 ---
 
 ## Parent Issue Detection and Child Issue Decomposition
@@ -158,10 +164,13 @@ Post your judgment as a Linear comment on the parent Issue:
 
 1. Mark the parent Issue as `In Progress`
 2. Post a progress comment including the decomposition judgment
-3. Write Gemini or Codex instruction as appropriate for the task type
-4. Run the worker
-5. Commit, run quality gate, create PR, merge
-6. Mark parent Issue as `Done` and post Completion Report
+3. Branch by task type:
+   - **PLAN task**: write the planning artifact (方針・一覧・設計メモ) to the Linear issue (and `docs/ai/10_plan.md` / `docs/ai/20_design.md` if substantial). Do NOT create a PR, do NOT merge, do NOT set `Done`. Set the Issue to `In Review` and stop, awaiting human selection. Skip the Quality Gate and PR Creation section.
+   - **Implementation task (IMPLEMENT / FIX / DEBUG / DOC)**:
+     1. Write Gemini or Codex instruction as appropriate for the task type
+     2. Run the worker
+     3. Commit, run quality gate, create PR, merge
+     4. Mark parent Issue as `Done` and post Completion Report
 
 ---
 
@@ -196,6 +205,11 @@ All child Issue work happens on this branch.
 ---
 
 ## Quality Gate and PR Creation
+
+> **Scope note:** This section applies to implementation-producing tasks (IMPLEMENT / FIX / DEBUG / DOC).
+> **PLAN tasks do NOT enter this section** — they stop at `In Review` after producing their planning
+> artifact (see the PLAN terminal-state rule in Issue Classification). Do not create a PR, merge, or set
+> `Done` for a PLAN task.
 
 After ALL child Issues are Done:
 
@@ -279,6 +293,7 @@ Examples of permission errors that trigger this protocol:
 Terminate when ANY of the following is true:
 
 - All child Issues are Done, PR is merged, and parent Issue is set to `Done`
+- A PLAN task has produced its planning artifact and the Issue is set to `In Review` (no PR/merge/Done expected for PLAN)
 - A blocking condition cannot be resolved (parent set to Blocked with explanation)
 - No actionable issues remain in Linear
 - Continuing further will not produce new results

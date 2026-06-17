@@ -313,6 +313,7 @@ In Progress
 
 In Review
   実装または検証が完了し、確認待ち。
+  または PLAN タスクが成果物（方針・一覧）を作成し、人間のレビュー/選択を待って停止している状態。
 
 Blocked
   情報不足、外部要因、承認待ちで停止中。
@@ -605,6 +606,10 @@ Based on the classified task type, select the worker as follows:
 | `REVIEW` | Codex CLI (first pass) → Claude Code (final) | Codex does the diff; Claude Code makes the call |
 | `SECURITY` | Codex CLI (static check) → Claude Code (final) | Codex scans; Claude Code judges |
 
+> **PLAN terminal state:** PLAN タスクは成果物（方針・一覧・設計）を作成したら PR/merge/`Done` に進めず、
+> 対象Issueを `In Review` にして停止し、人間のレビュー/選択を待つ。実装系（IMPLEMENT/FIX/DEBUG）は
+> 従来どおり PR→merge→`Done`。
+
 ### Classification Comment
 
 Post the classification as a Linear comment at the start of each Issue:
@@ -670,6 +675,9 @@ test(LC-100): E2Eテスト追加
 ### PR Creation Conditions (Quality Gate)
 
 **MANDATORY**: Claude Code must ALWAYS create a Pull Request after all child Issues are Done. Pushing directly to `main` and skipping PR creation is strictly prohibited.
+
+> **PLAN タスクは例外:** PLAN タスクは PR を作成しない。成果物を作成したら Issue を `In Review` にして停止する。
+> 本ゲートおよび以降の Merge 手順は実装系タスク（IMPLEMENT/FIX/DEBUG/DOC）にのみ適用される。
 
 PR を作成してよい条件（すべて満たすこと）:
 

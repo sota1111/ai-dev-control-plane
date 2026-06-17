@@ -1,27 +1,33 @@
-Verification complete. `npm run lint` passed with exit 0, and `npm test` passed with 15 suites / 217 tests.
+検証完了しました。`docs/ai/60_worker_codex_report.md` に指定フォーマットでレポートを書きました。
 
-Wrote the required report to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md). No implementation fixes were needed.
-Files
-- `src/lib/issueClassifier.js` — Gemini implementation: added Japanese planning/refactor keywords to `planKeywords`.
-- `src/__tests__/issueClassifier.test.js` — Gemini implementation: added PLAN keyword coverage and UI list-screen regression coverage.
-- `docs/ai/60_worker_codex_report.md` — Codex verification report.
+結果:
+- PLAN終端状態の文書整合性: 問題なし
+- 変更範囲: `CLAUDE.md`, `prompts/claude/auto_run.md`, `docs/ai/60_worker_codex_report.md` のみ
+- `npm run lint`: PASS
+- `npm test`: PASS（15 suites / 217 tests）
+
+Next Action: `READY_FOR_REVIEW`
+ as PR -> merge -> `Done`, with the PLAN exception scoped away from IMPLEMENT/FIX/DEBUG/DOC work. Markdown headings, blockquotes, lists, and numbering remain structurally coherent.
+
+## Changed Files
+- `docs/ai/60_worker_codex_report.md` — wrote this verification report; no policy-doc fix applied
 
 ## Commands Run
-`npm run lint` — PASS, exit 0.
-
-`npm test` — PASS, exit 0.
-- Test Suites: 15 passed, 15 total
-- Tests: 217 passed, 217 total
-- Snapshots: 0 total
+- `git diff --name-status main...HEAD` — PASS, no committed diff output
+- `git diff --name-status main` — PASS, working tree changes limited to `CLAUDE.md`, `prompts/claude/auto_run.md`, and `docs/ai/60_worker_codex_report.md`
+- `git diff -- prompts/claude/auto_run.md CLAUDE.md docs/ai/50_worker_gemini_report.md docs/ai/60_worker_codex_report.md` — PASS, reviewed documentation/report diffs only
+- `rg -n "PLAN|PR|merge|Done|In Review|Quality Gate|GitHub Operations|PR MANDATORY|terminal state|Termination Conditions" prompts/claude/auto_run.md CLAUDE.md` — PASS, reviewed relevant cross-file statements
+- `npm run lint` — PASS, exit 0
+- `npm test` — PASS, exit 0; 15 test suites passed, 217 tests passed
 
 ## Acceptance Criteria
-- [x] 計画/リファクタ系の日本語Issueが PLAN に分類される
-- [x] UI一覧画面作成タスクは IMPLEMENT のまま（過剰マッチなし）
-- [x] 既存分類に回帰なし（全テスト pass）
-- [x] 変更は対象2ファイルに限定
+- [x] PLAN タスクが In Review で停止し、自動 merge/Done されないことが文書上明確
+- [x] 実装系タスクの従来フロー（PR→merge→Done）が維持されている
+- [x] auto_run.md と CLAUDE.md の記述が整合している（矛盾なし・Markdown崩れなし）
+- [x] 変更が対象ファイル（auto_run.md / CLAUDE.md / docs配下の報告）に限定されている
 
 ## Risks
-Implementation changes are limited to `src/lib/issueClassifier.js` and `src/__tests__/issueClassifier.test.js`. `docs/ai/60_worker_codex_report.md` is additionally changed as the required verification artifact.
+`git diff main...HEAD` produced no committed diff, so verification also checked the working tree diff against `main`. The working tree scope is valid for this docs-only change.
 
 ## Next Action
 READY_FOR_REVIEW
