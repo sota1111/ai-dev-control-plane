@@ -1,11 +1,11 @@
 'use strict';
 
+jest.mock('fs');
+jest.mock('../runner');
+
 const fs = require('fs');
 const core = require('../lib/schedulerCore');
 const scheduler = require('../scheduler');
-
-jest.mock('fs');
-jest.mock('../runner');
 
 describe('schedulerCore', () => {
   test('getConfig returns defaults', () => {

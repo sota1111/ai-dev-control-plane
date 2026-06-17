@@ -10,5 +10,5 @@ if [[ "${SCHEDULER_IMPL:-}" == "bash" ]]; then
   exec bash "$SCRIPT_DIR/scheduler.legacy.sh" "$@"
 else
   # Default to Node.js implementation
-  exec node "$REPO_ROOT/src/scheduler.js" "$@"
+  exec npx tsx "$REPO_ROOT/src/scheduler.js" "$@"
 fi

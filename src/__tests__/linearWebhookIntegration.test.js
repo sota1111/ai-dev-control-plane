@@ -1,5 +1,11 @@
 'use strict';
 
+jest.mock('https');
+jest.mock('fs');
+jest.mock('child_process', () => ({
+  spawn: jest.fn()
+}));
+
 const request = require('supertest');
 const https = require('https');
 const fs = require('fs');
@@ -11,12 +17,6 @@ process.env.LINEAR_WEBHOOK_SECRET = '';
 const { app } = require('../webhook-server');
 const { installLinearHttpMock } = require('../__test_helpers__/linearMock');
 const runner = require('../runner');
-
-jest.mock('https');
-jest.mock('fs');
-jest.mock('child_process', () => ({
-  spawn: jest.fn()
-}));
 
 describe('Linear Webhook Integration', () => {
   let linearMock;

@@ -123,7 +123,7 @@ function watch() {
 
   // Open log file in append mode
   const logStream = fs.createWriteStream(core.SCHEDULER_LOG, { flags: 'a' });
-  const child = spawn(process.execPath, [__filename, '--foreground'], {
+  const child = spawn('npx', ['tsx', __filename, '--foreground'], {
     detached: true,
     stdio: ['ignore', logStream, logStream],
   });
@@ -160,11 +160,11 @@ function watch() {
 let currentDrainChild = null;
 
 /**
- * Runs the 'drain' command via runner-cli.js and streams output.
+ * Runs the 'drain' command via runner-cli.ts and streams output.
  */
 async function runDrain(notifier) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(__dirname, 'runner-cli.js'), 'drain']);
+    const child = spawn('npx', ['tsx', path.join(__dirname, 'runner-cli.ts'), 'drain']);
     currentDrainChild = child;
 
     const handleOutput = (data) => {
@@ -337,7 +337,7 @@ async function start() {
   }
 
   const logStream = fs.createWriteStream(core.SCHEDULER_LOG, { flags: 'a' });
-  const child = spawn(process.execPath, [__filename, '--foreground'], {
+  const child = spawn('npx', ['tsx', __filename, '--foreground'], {
     detached: true,
     stdio: ['ignore', logStream, logStream],
   });

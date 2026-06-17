@@ -1,0 +1,349 @@
+'use strict';
+
+const runner = require('../runner');
+const queueOrdering = require('./queueOrdering');
+const { isPaused, setPaused, clearPause, getPauseInfo } = require('./discordPauseState');
+const sessionContinue = require('./sessionContinue');
+
+export {};
+
+const ISSUE_ID_PATTERN = /^SOT-\d+$/i;
+const MAX_BODY_LENGTH = 1000;
+const MAX_DISCORD_LENGTH = 1900; // safe margin under Discord's 2000 char limit
+
+interface DiscordInteractionOption {
+  name: string;
+  type: number;
+  value?: any;
+  options?: DiscordInteractionOption[];
+}
+
+interface DiscordInteraction {
+  data?: {
+    options?: DiscordInteractionOption[];
+  };
+}
+
+interface CommandResult {
+  content: string;
+}
+
+function truncate(str: string, maxLen: number = MAX_DISCORD_LENGTH): string {
+  if (str.length <= maxLen) return str;
+  return str.slice(0, maxLen - 3) + '...';
+}
+
+function validateIssueId(issueId: string | null | undefined): { valid: boolean; error?: string; id?: string } {
+  if (!issueId || !ISSUE_ID_PATTERN.test(issueId.trim())) {
+    return { valid: false, error: `Issue IDは SOT-xxx 形式で指定してください（例: SOT-123）。` };
+  }
+  return { valid: true, id: issueId.trim().toUpperCase() };
+}
+
+async function handleStatus(): Promise<CommandResult> {
+  try {
+    const locked = runner.isLocked();
+    const queue = runner.loadQueue();
+    const cooldown = runner.getUsageLimitCooldownUntil();
+    const paused = isPaused();
+    const pauseInfo = paused ? getPauseInfo() : null;
+    const sessionState = sessionContinue.readSessionContinueState();
+
+    let lockInfo = '🔓 ロックなし（アイドル状態）';
+    if (locked) {
+      lockInfo = '🔒 実行中（runner.lock 取得済み）';
+    }
+
+    let cooldownInfo = 'なし';
+    if (cooldown) {
+      const retryAt = new Date(cooldown.retryAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+      const issueRef = cooldown.issueIdentifier || cooldown.issueId || '不明';
+      cooldownInfo = `⏳ ${issueRef} — 復帰予定: ${retryAt}`;
+    }
+
+    let sessionInfo = 'なし';
+    if (sessionState && (sessionState.status === 'waiting' || sessionState.status === 'foreground_mismatch')) {
+      const resetAtJST = sessionState.resetAt ? new Date(sessionState.resetAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '不明';
+      const retryAtJST = sessionState.retryAt ? new Date(sessionState.retryAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '不明';
+      sessionInfo = `pane ${sessionState.paneId} — ${sessionState.status} (reset ${resetAtJST}, retry ${retryAtJST})`;
+    }
+
+    let pauseStatus = paused
+      ? `⏸ 一時停止中（${pauseInfo && pauseInfo.pausedAt ? new Date(pauseInfo.pausedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '不明'}）`
+      : '▶ 実行可能';
+
+    const content = [
+      '## 実行状態',
+      `**ロック**: ${lockInfo}`,
+      `**キュー**: ${queue.length} 件`,
+      `**Cooldown**: ${cooldownInfo}`,
+      `**Session-Continue**: ${sessionInfo}`,
+      `**Pause状態**: ${pauseStatus}`,
+    ].join('\n');
+
+    return { content: truncate(content) };
+  } catch (err: any) {
+    runner.log('DISCORD', `handleStatus error: ${err.message}`);
+    return { content: `エラーが発生しました: ${err.message}` };
+  }
+}
+
+async function handleQueue(): Promise<CommandResult> {
+  try {
+    const rawQueue = runner.loadQueue();
+    if (rawQueue.length === 0) {
+      return { content: '## 実行キュー\nキューは空です。' };
+    }
+
+    // Use shared logic to determine real execution order
+    const { ready, waiting } = queueOrdering.previewQueueOrder(rawQueue);
+
+    function formatItem(item: any, index: number, indent = '') {
+      const at = item.enqueuedAt ? new Date(item.enqueuedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
+      const priorityStr = item.priorityLabel ? `[${item.priorityLabel}]` : '[No priority]';
+      const rank = queueOrdering.effectiveRank(item);
+      const groupStr = item.queueGroup
+        ? `  ↳ 親: ${item.parentIssueIdentifier || item.parentIssueId || item.queueGroup}`
+        : '';
+      const retryStr = item.retryAt ? ` ⏳ ${new Date(item.retryAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}` : '';
+      return `${indent}${index}. **${item.issueIdentifier || item.issueId}** ${priorityStr} (rank ${rank}) — ${item.trigger || 'unknown'} (${at})${retryStr}${groupStr}`;
+    }
+
+    const lines: string[] = [];
+    if (ready.length > 0) {
+      lines.push('### 実行待ち (Ready)');
+      ready.forEach((item: any, index: number) => {
+        lines.push(formatItem(item, index + 1));
+      });
+    }
+
+    if (waiting.length > 0) {
+      if (lines.length > 0) lines.push('');
+      lines.push('### 待機中 (Waiting)');
+      waiting.forEach((item: any, index: number) => {
+        // For waiting items, we list them in order of retryAt
+        lines.push(formatItem(item, index + 1));
+      });
+    }
+
+    const content = `## 実行キュー (${rawQueue.length}件)\n` + lines.join('\n');
+    return { content: truncate(content) };
+  } catch (err: any) {
+    runner.log('DISCORD', `handleQueue error: ${err.message}`);
+    return { content: `エラーが発生しました: ${err.message}` };
+  }
+}
+
+async function handleCooldown(): Promise<CommandResult> {
+  try {
+    const cooldown = runner.getUsageLimitCooldownUntil();
+    if (!cooldown) {
+      return { content: '## Usage-Limit Cooldown\ncooldown中のIssueはありません。' };
+    }
+    const retryAt = new Date(cooldown.retryAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+    const issueRef = cooldown.issueIdentifier || cooldown.issueId || '不明';
+    const lines = [
+      '## Usage-Limit Cooldown',
+      `**Issue**: ${issueRef}`,
+      `**復帰予定時刻**: ${retryAt}`,
+    ];
+    if (cooldown.limitType) {
+      lines.push(`**種別**: ${cooldown.limitType}`);
+    }
+    return { content: lines.join('\n') };
+  } catch (err: any) {
+    runner.log('DISCORD', `handleCooldown error: ${err.message}`);
+    return { content: `エラーが発生しました: ${err.message}` };
+  }
+}
+
+async function handlePause(): Promise<CommandResult> {
+  try {
+    if (isPaused()) {
+      return { content: '⏸ すでに一時停止中です。再開するには `/resume` を使用してください。' };
+    }
+    setPaused('Discord /pause command');
+    runner.log('DISCORD', 'Runner paused via Discord /pause command');
+    return { content: '⏸ **新規実行を一時停止しました。**\n実行中のプロセスは継続します。再開するには `/resume` を使用してください。' };
+  } catch (err: any) {
+    runner.log('DISCORD', `handlePause error: ${err.message}`);
+    return { content: `エラーが発生しました: ${err.message}` };
+  }
+}
+
+async function handleResume(interaction?: DiscordInteraction): Promise<CommandResult | undefined> {
+  try {
+    const opts = (interaction && interaction.data && interaction.data.options) || [];
+    const sub = opts.find(o => o.type === 1); // SUB_COMMAND
+
+    if (!sub || sub.name === 'pause') {
+      const wasCleared = clearPause();
+      if (!wasCleared) {
+        return { content: '▶ 一時停止状態ではありません。' };
+      }
+      runner.log('DISCORD', 'Runner resumed via Discord /resume command');
+      return { content: '▶ **一時停止を解除しました。**\n新規実行が再開されます。' };
+    } else if (sub.name === 'issue') {
+      return await handleResumeIssue(sub.options || []);
+    } else if (sub.name === 'session') {
+      return await handleResumeSession(sub.options || []);
+    }
+  } catch (err: any) {
+    runner.log('DISCORD', `handleResume error: ${err.message}`);
+    return { content: `エラーが発生しました: ${err.message}` };
+  }
+}
+
+async function handleResumeIssue(subOptions: DiscordInteractionOption[]): Promise<CommandResult> {
+  const idOpt = subOptions.find(o => o.name === 'id');
+  const issueIdRaw = idOpt && idOpt.value;
+
+  const validation = validateIssueId(issueIdRaw);
+  if (!validation.valid) {
+    return { content: `❌ ${validation.error}` };
+  }
+  const issueId = validation.id!;
+
+  runner.enqueue(issueId, 'discord-resume', null, { reason: 'usage_limit' });
+  runner.log('DISCORD', `${issueId} enqueued via Discord /resume issue`);
+
+  setImmediate(() => {
+    runner.drainQueue().catch((err: any) => {
+      runner.log('DISCORD', `drainQueue error after /resume issue: ${err.message}`);
+    });
+  });
+
+  return { content: `✅ **${issueId}** を usage-limit 後の再開モードで実行キューへ投入しました。` };
+}
+
+async function handleResumeSession(subOptions: DiscordInteractionOption[]): Promise<CommandResult> {
+  const paneOpt = subOptions.find(o => o.name === 'pane');
+  const issueOpt = subOptions.find(o => o.name === 'issue');
+
+  const paneId = paneOpt && paneOpt.value;
+  const issueId = issueOpt && issueOpt.value;
+
+  if (!paneId) {
+    return { content: '❌ pane ID を指定してください。' };
+  }
+
+  const result = await sessionContinue.attemptSessionContinue({
+    paneId,
+    issueId: issueId || null,
+    notify: () => { },
+    logger: (m: string) => runner.log('DISCORD', m)
+  });
+
+  let message = '';
+  switch (result.status) {
+    case 'sent':
+      message = `▶ **${paneId}** に continue を送信しました。`;
+      break;
+    case 'waiting':
+      message = `⏳ **${paneId}** で usage-limit を検知。retryAt まで待機します。`;
+      break;
+    case 'foreground_mismatch':
+      message = `⚠ **${paneId}** の foreground が Claude Code ではありません。送信しません（人手対応）。`;
+      break;
+    case 'pane_missing':
+      message = `❌ pane **${paneId}** が見つかりません。`;
+      break;
+    case 'no_limit':
+      message = `ℹ **${paneId}** に usage-limit は検知されませんでした。`;
+      break;
+    default:
+      message = `ステータス: ${result.status}`;
+  }
+
+  return { content: message };
+}
+
+async function handleReply(interaction: DiscordInteraction): Promise<CommandResult> {
+  try {
+    const options = (interaction.data && interaction.data.options) || [];
+    const issueOpt = options.find(o => o.name === 'issue');
+    const bodyOpt = options.find(o => o.name === 'body');
+
+    const issueIdRaw = issueOpt && issueOpt.value;
+    const body = bodyOpt && bodyOpt.value;
+
+    const validation = validateIssueId(issueIdRaw);
+    if (!validation.valid) {
+      return { content: `❌ ${validation.error}` };
+    }
+    const issueId = validation.id!;
+
+    if (!body || body.trim().length === 0) {
+      return { content: '❌ コメント本文が空です。' };
+    }
+    if (body.length > MAX_BODY_LENGTH) {
+      return { content: `❌ コメント本文が長すぎます（最大${MAX_BODY_LENGTH}文字、現在${body.length}文字）。` };
+    }
+
+    const mutation = `
+      mutation CreateComment($issueId: String!, $body: String!) {
+        commentCreate(input: { issueId: $issueId, body: $body }) {
+          success
+          comment { id }
+        }
+      }
+    `;
+
+    const result = await runner.linearQuery(mutation, { issueId, body: body.trim() });
+    if (result && result.commentCreate && result.commentCreate.success) {
+      runner.log('DISCORD', `Reply posted to ${issueId} via Discord`);
+      return { content: `✅ **${issueId}** にコメントを投稿しました。` };
+    } else {
+      return { content: `❌ コメントの投稿に失敗しました。` };
+    }
+  } catch (err: any) {
+    runner.log('DISCORD', `handleReply error: ${err.message}`);
+    if (err.message && err.message.includes('LINEAR_API_KEY')) {
+      return { content: '❌ Linear API キーが設定されていません。' };
+    }
+    return { content: `❌ エラーが発生しました: ${err.message}` };
+  }
+}
+
+async function handleRetry(interaction: DiscordInteraction): Promise<CommandResult> {
+  try {
+    const options = (interaction.data && interaction.data.options) || [];
+    const issueOpt = options.find(o => o.name === 'issue');
+    const issueIdRaw = issueOpt && issueOpt.value;
+
+    const validation = validateIssueId(issueIdRaw);
+    if (!validation.valid) {
+      return { content: `❌ ${validation.error}` };
+    }
+    const issueId = validation.id!;
+
+    const wasQueued = runner.isQueued(issueId);
+    runner.enqueue(issueId, 'discord-retry');
+    runner.log('DISCORD', `${issueId} enqueued via Discord /retry (wasQueued=${wasQueued})`);
+
+    // Trigger drain asynchronously — do not block the Discord response
+    setImmediate(() => {
+      runner.drainQueue().catch((err: any) => {
+        runner.log('DISCORD', `drainQueue error after /retry: ${err.message}`);
+      });
+    });
+
+    if (wasQueued) {
+      return { content: `ℹ **${issueId}** はすでにキューに存在します。ドレインを開始します。` };
+    }
+    return { content: `✅ **${issueId}** を実行キューへ投入しました。ドレインを開始します。` };
+  } catch (err: any) {
+    runner.log('DISCORD', `handleRetry error: ${err.message}`);
+    return { content: `❌ エラーが発生しました: ${err.message}` };
+  }
+}
+
+module.exports = {
+  handleStatus,
+  handleQueue,
+  handleCooldown,
+  handlePause,
+  handleResume,
+  handleReply,
+  handleRetry,
+};

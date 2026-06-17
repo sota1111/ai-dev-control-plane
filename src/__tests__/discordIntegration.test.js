@@ -1,15 +1,15 @@
 'use strict';
 
+jest.mock('https');
+jest.mock('fs');
+jest.mock('../lib/discordInteractions');
+
 const request = require('supertest');
 const https = require('https');
 const fs = require('fs');
 const { app } = require('../webhook-server');
 const { installDiscordHttpMock, makeInteraction } = require('../__test_helpers__/discordMock');
 const { verifyDiscordSignature } = require('../lib/discordInteractions');
-
-jest.mock('https');
-jest.mock('fs');
-jest.mock('../lib/discordInteractions');
 
 describe('Discord Integration', () => {
   let discordMock;

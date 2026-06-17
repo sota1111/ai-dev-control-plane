@@ -1,0 +1,133 @@
+'use strict';
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const runner = require('./runner');
+const { parseUsageLimitResetEpoch } = require('./lib/usageLimitParser');
+const { classifyIssue } = require('./lib/issueClassifier');
+
+export {};
+
+const [,, command, ...args] = process.argv;
+
+async function main() {
+  switch (command) {
+    case 'classify-issue': {
+      const issueId = args[0];
+      if (!issueId) {
+        process.stderr.write('Usage: runner-cli.js classify-issue <issueIdentifier>\n');
+        process.exit(1);
+      }
+
+      const query = `
+        query($id: String!) {
+          issue(id: $id) {
+            id
+            identifier
+            title
+            description
+            state { name type }
+            labels { nodes { name } }
+          }
+        }
+      `;
+
+      const data: any = await runner.linearQuery(query, { id: issueId });
+      if (!data.issue) {
+        process.stderr.write(`Issue not found: ${issueId}\n`);
+        process.exit(1);
+      }
+
+      const issueData = {
+        id: data.issue.id,
+        title: data.issue.title,
+        description: data.issue.description,
+        labels: data.issue.labels.nodes.map((n: any) => n.name),
+        status: data.issue.state.name
+      };
+
+      const result = classifyIssue(issueData);
+
+      runner.log('CLASSIFY', `${issueId} → type=${result.type} worker=${result.worker}`, { issue: issueId, reason: result.reason });
+      process.stdout.write(JSON.stringify(result) + '\n');
+      process.exit(0);
+      break;
+    }
+    case 'parse-usage-limit-epoch': {
+      let input = '';
+      process.stdin.setEncoding('utf8');
+      for await (const chunk of process.stdin) {
+        input += chunk;
+      }
+      const epoch = parseUsageLimitResetEpoch(input);
+      if (epoch !== null) {
+        process.stdout.write(String(epoch));
+        process.exit(0);
+      } else {
+        process.exit(1);
+      }
+      break;
+    }
+    case 'notify-usage-limit': {
+      const epoch = parseInt(args[0], 10);
+      if (isNaN(epoch)) {
+        process.stderr.write('Usage: runner-cli.js notify-usage-limit <epochSeconds>\n');
+        process.exit(1);
+      }
+      await runner.notifyUsageLimitToAllActiveIssues(epoch);
+      break;
+    }
+    case 'remove-usage-limit-label': {
+      await runner.removeUsageLimitLabelFromAllIssues();
+      break;
+    }
+    case 'enqueue': {
+      const issueId = args[0];
+      const trigger = args[1] || 'manual';
+      const retryAt = args[2] || null;
+      if (!issueId) {
+        process.stderr.write('Usage: runner-cli.js enqueue <issueId> [trigger] [retryAt]\n');
+        process.exit(1);
+      }
+      runner.enqueue(issueId, trigger, retryAt, { reason: 'scheduler' });
+      runner.log('CLI', `enqueued issueId=${issueId} trigger=${trigger}`, { issue: issueId });
+      process.stdout.write(`[QUEUE] Enqueued: ${issueId} (trigger: ${trigger})\n`);
+      process.exit(0);
+      break;
+    }
+    case 'drain': {
+      await runner.drainQueue();
+      process.exit(0);
+      break;
+    }
+    case 'status': {
+      const queue = runner.loadQueue();
+      const locked = runner.isLocked();
+      const cooldown = runner.getUsageLimitCooldownUntil();
+      const status = {
+        locked,
+        queueSize: queue.length,
+        cooldown: cooldown || null,
+        queue
+      };
+      process.stdout.write(JSON.stringify(status, null, 2) + '\n');
+      process.exit(0);
+      break;
+    }
+    case 'cooldown-status': {
+      const cooldown = runner.getUsageLimitCooldownUntil();
+      process.stdout.write(JSON.stringify(cooldown || { active: false }, null, 2) + '\n');
+      process.exit(0);
+      break;
+    }
+    default: {
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status\n`);
+      process.exit(1);
+    }
+  }
+}
+
+main().catch(err => {
+  process.stderr.write(`runner-cli error: ${err.message}\n`);
+  process.exit(1);
+});
+

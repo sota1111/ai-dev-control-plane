@@ -10,7 +10,8 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "ignoreDeprecations": "6.0"
+    "ignoreDeprecations": "6.0",
+    "types": ["jest", "node"]
   },
-  "include": ["src/**/*.js", "scripts/**/*.js"]
+  "include": ["src/**/*.js", "src/**/*.ts", "scripts/**/*.js"]
 }

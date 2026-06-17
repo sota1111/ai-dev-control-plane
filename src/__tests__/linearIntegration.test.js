@@ -1,12 +1,12 @@
 'use strict';
 
+jest.mock('https');
+jest.mock('fs');
+
 const https = require('https');
 const fs = require('fs');
 const runner = require('../runner');
 const { installLinearHttpMock } = require('../__test_helpers__/linearMock');
-
-jest.mock('https');
-jest.mock('fs');
 
 describe('Linear Integration', () => {
   let linearMock;
