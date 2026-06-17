@@ -104,11 +104,6 @@ describe('webhook usage limit retry', () => {
     jest.restoreAllMocks();
   });
 
-  // Restore secret at the end of all tests in this file
-  afterAll(() => {
-    process.env.LINEAR_WEBHOOK_SECRET = originalSecret;
-  });
-
   const issuePayload = (id = 'TEST-001') => ({
     type: 'Issue',
     action: 'update',
@@ -309,6 +304,11 @@ describe('webhook usage limit retry', () => {
     // Verify runner.drainQueue was called after main task completed
     expect(runner.drainQueue).toHaveBeenCalled();
   });
+});
+
+// Restore secret at the end of all tests in this file
+afterAll(() => {
+  process.env.LINEAR_WEBHOOK_SECRET = originalSecret;
 });
 
 describe('webhook issue filtering', () => {

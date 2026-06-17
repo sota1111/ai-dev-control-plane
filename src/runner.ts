@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const { getSecret } = require('./config/secrets');
 const { spawn, execSync } = require('child_process');
 const { classifyUsageLimit } = require('./lib/usageLimitParser');
 const { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } = require('./lib/resumeMetadata');
@@ -210,7 +211,7 @@ function isLocked(): boolean {
 }
 
 async function linearQuery(query: string, variables: Record<string, any> = {}): Promise<any> {
-  const apiKey = process.env.LINEAR_API_KEY;
+  const apiKey = getSecret('LINEAR_API_KEY');
   if (!apiKey) throw new Error('LINEAR_API_KEY not set');
 
   const body = JSON.stringify({ query, variables });
