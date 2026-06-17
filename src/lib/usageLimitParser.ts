@@ -3,15 +3,22 @@
  */
 
 function parseRawResetEpoch(text: string, nowMs: number): number | null {
-  const keywords = ['resets', 'reset at', 'resets at', 'will reset at', 'Your limit will reset'];
+  // 'try again at' covers the Codex usage-limit phrasing
+  // ("...try again at Jun 21st, 2026 12:05 AM.").
+  const keywords = ['resets', 'reset at', 'resets at', 'will reset at', 'Your limit will reset', 'try again at'];
   if (!keywords.some(k => text.toLowerCase().includes(k.toLowerCase()))) return null;
 
-  // Try to find timezone in ( )
-  const tzMatch = text.match(/\(([^)]+)\)/);
-  const ianaTZ = tzMatch ? tzMatch[1] : 'UTC';
+  // Try to find an IANA timezone in ( ). Guard against capturing a URL in
+  // parentheses (e.g. Codex prints "(https://chatgpt.com/...)"): a valid tz has
+  // no whitespace and is not a URL. Fall back to UTC otherwise.
+  const tzCandidate = (text.match(/\(([^)]+)\)/) || [])[1];
+  const ianaTZ = tzCandidate && !/\s/.test(tzCandidate) && !tzCandidate.includes('http')
+    ? tzCandidate
+    : 'UTC';
 
-  // Extract date if present (e.g., Oct 6)
-  const dateMatch = text.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)/i);
+  // Extract date if present (e.g., "Oct 6", "Jun 21st, 2026").
+  // Optional ordinal suffix (st/nd/rd/th) and optional 4-digit year are supported.
+  const dateMatch = text.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?/i);
   
   // Extract time (e.g., 3:30pm, 15:30, 3pm, 7pm)
   const timeRegex = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b(\d{1,2}):(\d{2})\b/i;
@@ -46,6 +53,11 @@ function parseRawResetEpoch(text: string, nowMs: number): number | null {
     const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
     month = months.indexOf(dateMatch[1].toLowerCase());
     day = parseInt(dateMatch[2], 10);
+    // Use the explicit year when present (e.g. "Jun 21st, 2026"), so cross-year
+    // resets are not silently assumed to be the current year.
+    if (dateMatch[3]) {
+      year = parseInt(dateMatch[3], 10);
+    }
   }
 
   try {

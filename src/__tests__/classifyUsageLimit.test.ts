@@ -28,6 +28,22 @@ describe('classifyUsageLimit', () => {
     });
   });
 
+  it('classifies the Codex "try again at" usage-limit message as a retryable session limit', () => {
+    const codexMsg =
+      "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), " +
+      "visit https://chatgpt.com/codex/settings/usage to purchase more credits or " +
+      "try again at Jun 21st, 2026 12:05 AM.";
+    const result = classifyUsageLimit(codexMsg, NOW_MS);
+
+    expect(result).toMatchObject({
+      type: 'session_limit',
+      retryable: true,
+      confidence: 'high',
+      resetAt: '2026-06-21T00:05:00.000Z',
+      retryAt: '2026-06-21T00:15:00.000Z'
+    });
+  });
+
   it('classifies weekly limits as non-retryable', () => {
     const result = classifyUsageLimit(
       'Weekly limit reached. Your limit will reset at 3:30pm (UTC).',
