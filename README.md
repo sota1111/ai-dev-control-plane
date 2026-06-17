@@ -524,6 +524,7 @@ scheduler / webhook / Discord のいずれも共通の挙動:
 - `SKIPPED_LOCKED` としてログに出力
 - Issue はキューに残り（または再投入され）、ロック解放後の drain で自動実行される
 - `run_auto.sh` が処理を完了していない場合に "completed successfully" を出力しない
+- **完了コントラクト**: プロセスが exit 0 でも、Linear 上のステータスが `Done`/`completed` でない場合や、レポートに `NEEDS_DEBUG` 等が含まれる場合は未完了とみなします（`COMPLETION_UNVERIFIED=70`）。この場合、成功時のクリーンアップ（ラベル除去等）はスキップされます。
 
 ## retryAt の仕様
 

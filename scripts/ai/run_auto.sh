@@ -190,6 +190,31 @@ claude \
   2>&1 | python3 -u -c "$_STREAM_FILTER" | tee "$LOG_FILE"
 
 EXIT_CODE=${PIPESTATUS[0]}
+COMPLETION_UNVERIFIED=70
+
+# 完了検証ステップ
+if [ "$EXIT_CODE" -eq 0 ]; then
+  # worker レポートの ## Next Action を確認する
+  NEXT_ACTION=""
+  if [ -f "docs/ai/50_worker_gemini_report.md" ]; then
+    # 直近の Gemini レポート
+    NEXT_ACTION=$(grep "## Next Action" docs/ai/50_worker_gemini_report.md -A 1 | tail -n 1)
+  elif [ -f "docs/ai/60_worker_codex_report.md" ]; then
+    # Gemini がない場合は Codex レポート
+    NEXT_ACTION=$(grep "## Next Action" docs/ai/60_worker_codex_report.md -A 1 | tail -n 1)
+  fi
+
+  case "$NEXT_ACTION" in
+    *NEEDS_DEBUG*|*NEEDS_USER_INPUT*|*BLOCKED*)
+      echo "COMPLETION_CONTRACT: INCOMPLETE reason=report indicates $NEXT_ACTION"
+      EXIT_CODE=$COMPLETION_UNVERIFIED
+      ;;
+    *)
+      # 明示的に未完了でなければ完了とみなす
+      echo "COMPLETION_CONTRACT: COMPLETED"
+      ;;
+  esac
+fi
 
 echo ""
 echo "== Finished: $(date +"%Y%m%d_%H%M%S") (exit: ${EXIT_CODE}) =="
