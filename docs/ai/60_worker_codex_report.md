@@ -1,32 +1,25 @@
-# Worker Report
+Initial task check complete. Report written to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md).
 
-## Summary
-Verified SOT-695 tooling changes. No fixes were required. `npm run lint` remains the original `node --check ...` chain, runtime package type remains `commonjs`, ESLint/typecheck/test all exit 0, and tests report 217/217 passed. `git diff main...HEAD` is empty because these changes are currently uncommitted; working tree scope was checked and contains only tooling/package/docs changes plus the new config/CI files.
+Key baseline: `npm test` passes with 217 tests; `npm run typecheck` exits 0; `npm run lint` exits 1 due to stale `src/lib/discordCommandRouter.js` path.
+eline is not fully green because `npm run lint` fails before syntax checking completes: `package.json` still references `src/lib/discordCommandRouter.js`, but the repo contains `src/lib/discordCommandRouter.ts`. `npm test` and `npm run typecheck` pass.
 
-## Changed Files
-- `docs/ai/60_worker_codex_report.md` — verification report
+## Test Baseline
+- npm test: 217 passing / 0 failures; 15 test suites passed. Jest prints the existing `--forceExit` open-handle warning.
+- npm run lint: exit 1. Failure: `MODULE_NOT_FOUND` for `/workspaces/ai-dev-control-plane/src/lib/discordCommandRouter.js`.
+- npm run typecheck: exit 0.
 
-## Commands Run
-- `npm run lint` — exit 0; script output confirms `node --check src/runner.js && ... && node --check src/session-continue-cli.js`
-- `npm run lint:eslint` — exit 0; 0 errors, 27 warnings
-- `npm run typecheck` — exit 0
-- `npm test` — exit 0; 15 test suites passed, 217 tests passed, 217 total
-- `git diff main...HEAD --name-status` — exit 0; no committed diff
-- `git status --short --untracked-files=all` — exit 0; working tree contains `package.json`, `package-lock.json`, `docs/ai/60_worker_codex_report.md`, `.github/workflows/ci.yml`, `.prettierignore`, `.prettierrc`, `eslint.config.js`, `tsconfig.json`
-- `git diff -- src scripts` — exit 0; no output, no runtime/source changes
-- `ruby -e "require 'yaml'; YAML.load_file('.github/workflows/ci.yml'); puts 'valid yaml'"` — exit 0; valid yaml
-- `node -e "...ci steps present..."` — exit 0; CI includes Node 20, `npm ci`, `npm run lint`, `npm run lint:eslint`, `npm run typecheck`, `npm test`
-- `node -e "const p=require('./package.json'); if (p.type !== 'commonjs') process.exit(1); console.log('type commonjs')"` — exit 0
+## Integration Seam Survey
+- Linear GraphQL: Calls are centralized through `src/runner.js` `linearQuery()`, which uses `https.request` against `https://api.linear.app/graphql`. Major call sites include issue metadata fetching, active issue scanning, usage-limit comments/labels, queue sync/prune, execution eligibility, state transition to In Progress, completion verification, and all-active-issue notification. Discord-facing Linear calls also occur through `runner.linearQuery()` in `src/lib/discordCommandHandlers.ts` for `/reply` comment creation and `src/lib/discordIntentHandlers.ts` for issue status lookup. Current mock state: `src/__tests__/runner.test.js` mocks `https` directly for selected Linear flows; `src/__tests__/discordCommandHandlers.test.ts` mocks `runner.linearQuery`; `src/__tests__/webhookServer.test.js` mocks the whole runner, including Linear-related methods. Covered: several runner Linear flows and Discord `/reply`. Gap: no shared Linear GraphQL mock helper, limited assertion of GraphQL operation/variable shape, and no end-to-end mocked flow crossing webhook/runner/Linear without replacing the runner.
+- Discord notify/interaction: Notification calls are made in `src/lib/discordNotifier.ts` via `https.request` POST to the configured webhook URL; webhook-server wires this notifier at module load and forwards stdout/stderr to it. Interaction followups are made in `src/lib/discordInteractionFollowup.ts` via PATCH to `/api/v10/webhooks/{applicationId}/{interactionToken}/messages/@original`. Discord inbound interactions are handled by `src/webhook-server.js` `/webhooks/discord`, which verifies signatures via `src/lib/discordInteractions.ts` and routes through `src/lib/discordCommandRouter.ts`; command behavior lives in `src/lib/discordCommandHandlers.ts` and `/ask` behavior in `src/lib/discordAskHandler.ts` plus `src/lib/discordIntentHandlers.ts`. Current mock state: `src/__tests__/discordInteractionFollowup.test.ts` mocks `https`; `src/__tests__/discordNotifierIntegration.test.js` mocks `DiscordNotifier` and runner when loading webhook-server; `src/__tests__/discordInteractions.test.ts` covers signature verification; `src/__tests__/discordAskHandler.test.ts` mocks classifier, intent handlers, and followup; `src/__tests__/discordCommandHandlers.test.ts` mocks runner and pause state. Covered: handler unit behavior, followup HTTP behavior, notifier construction/stdout forwarding, signature utility. Gap: no route-level `/webhooks/discord` tests for signed Discord interactions through `webhook-server`, and no direct tests of `discordCommandRouter.ts` routing.
+- runner / webhook-server / Discord handlers: `src/__tests__/runner.test.js` covers lock, queue, cooldown, usage-limit comments, queue sync/prune, runItem completion checks, and mocked Linear HTTP in runner-level tests. `src/__tests__/webhookServer.test.js` covers Linear webhook filtering, dedupe, cooldown queuing, bootstrap scan, and delegation to runner with the runner fully mocked. Discord handlers have unit coverage in `discordCommandHandlers.test.ts`, `discordAskHandler.test.ts`, `discordIntentClassifier.test.ts`, `discordInteractions.test.ts`, and `discordInteractionFollowup.test.ts`. Gap: integration seams between Linear webhook -> real runner Linear GraphQL mock, and Discord webhook-server -> router -> handlers -> Linear/Discord followup remain mostly untested.
 
-## Acceptance Criteria
-- [x] `npm run lint` (node --check, unchanged) exit 0
-- [x] `npm run lint:eslint` exit 0
-- [x] `npm run typecheck` exit 0
-- [x] `npm test` 217/217 pass
-- [x] diff は設定/CI/package.json/docs のみ、ランタイム不変、`type` は commonjs のまま
+## Acceptance Criteria (assessment, not completion)
+- [ ] Linear/Discord連携部分のモック化された結合テストが追加されている: Not yet complete. Existing tests mock parts of Linear and Discord, but SOT-696 still has clear room for added integration tests and reusable mocks.
+- [ ] 全テストが pass する: Partially baseline-green. `npm test` passes, but `npm run lint` currently fails.
+- [ ] 既存テストへの破壊的変更が無い: Baseline established at 217 passing tests / 0 failures, with lint currently failing due to the stale JS path.
 
 ## Risks
-ESLint reports 27 warnings, but exits 0 as configured. `git diff main...HEAD` is empty because SOT-695 changes are uncommitted in the working tree; verification therefore used working tree status/diff in addition to the requested branch diff. ESLint 10 dependencies declare Node engines requiring recent Node 20.19+ or newer; CI uses `node-version: 20`, which should resolve to a current Node 20 release.
-
-## Next Action
-READY_FOR_REVIEW
+- Lint is already failing before implementation, so acceptance should either include fixing the stale lint path or explicitly separate that pre-existing failure from SOT-696 test work.
+- The repo is mid TS/JS transition: `package.json` lint script references `.js` files for modules that exist as `.ts`, which may also affect how new tests should import modules.
+- Current tests often mock whole modules (`runner`, Discord handlers) rather than exercising cross-module integration, so new tests need careful boundaries to avoid brittle implementation-only assertions.
+- No Linear comments exist on SOT-696, and `docs/ai/00_project_context.md` / `docs/ai/40_acceptance.md` are placeholders, so the issue description is the main source of acceptance detail.
