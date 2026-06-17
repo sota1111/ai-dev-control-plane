@@ -49,10 +49,12 @@ process.env.LINEAR_WEBHOOK_SECRET = '';
 
 const { app } = require('../webhook-server');
 
+export {};
+
 // Helper: create a mock spawn child that emits given stdout, stderr, then closes
 function mockSpawnChild({ stdout = '', stderr = '', exitCode = 0 } = {}) {
   const EventEmitter = require('events');
-  const child = new EventEmitter();
+  const child: any = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   
@@ -71,14 +73,14 @@ describe('webhook usage limit retry', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    spawn.mockReset();
+    (spawn as jest.Mock).mockReset();
     // Default mock behavior: successful run
-    spawn.mockImplementation(() => mockSpawnChild({ exitCode: 0 }));
+    (spawn as jest.Mock).mockImplementation(() => mockSpawnChild({ exitCode: 0 }));
     
     // Mock setTimeout to prevent long waits, but ALLOW it to run if we want
-    jest.spyOn(global, 'setTimeout').mockImplementation((fn, ms) => {
+    jest.spyOn(global, 'setTimeout').mockImplementation((fn: any, ms: any) => {
       if (ms <= 100) return originalSetTimeout(fn, ms); // allow mockSpawnChild and small waits
-      return { unref: () => {} }; // block retry timeout
+      return { unref: () => {} } as any; // block retry timeout
     });
 
     const runner = require('../runner');
@@ -173,7 +175,7 @@ describe('webhook usage limit retry', () => {
     expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
 
     // No large setTimeout should be registered (runner.runItem is mocked, not actual retry logic)
-    const retryCall = setTimeout.mock.calls.find(call => call[1] > 1000);
+    const retryCall = (setTimeout as any as jest.Mock).mock.calls.find(call => call[1] > 1000);
     expect(retryCall).toBeUndefined();
   });
 
@@ -198,7 +200,7 @@ describe('webhook usage limit retry', () => {
     const id = 'TEST-IN-PROGRESS';
     const runner = require('../runner');
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
-    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
+    (spawn as jest.Mock).mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
     await new Promise(resolve => originalSetTimeout(resolve, 50));
@@ -261,7 +263,7 @@ describe('webhook usage limit retry', () => {
     runner.isLocked.mockReturnValue(true); // simulate active run
     runner.isQueued.mockReturnValue(false);
     runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-URGENT', trigger: 'webhook', retryAt: null });
-    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
+    (spawn as jest.Mock).mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
 
     const urgentPayload = {
       type: 'Issue',
@@ -314,11 +316,11 @@ describe('webhook issue filtering', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    spawn.mockReset();
-    spawn.mockImplementation(() => mockSpawnChild({ exitCode: 0 }));
-    jest.spyOn(global, 'setTimeout').mockImplementation((fn, ms) => {
+    (spawn as jest.Mock).mockReset();
+    (spawn as jest.Mock).mockImplementation(() => mockSpawnChild({ exitCode: 0 }));
+    jest.spyOn(global, 'setTimeout').mockImplementation((fn: any, ms: any) => {
       if (ms <= 100) return originalSetTimeout(fn, ms);
-      return { unref: () => {} };
+      return { unref: () => {} } as any;
     });
 
     const runner = require('../runner');
@@ -341,7 +343,7 @@ describe('webhook issue filtering', () => {
     jest.restoreAllMocks();
   });
 
-  function makePayload(action, stateOverrides = {}, extra = {}) {
+  function makePayload(action: string, stateOverrides: any = {}, extra: any = {}) {
     return {
       type: 'Issue',
       action,
@@ -412,7 +414,7 @@ describe('webhook issue filtering', () => {
   test('active issue create is accepted', async () => {
     const runner = require('../runner');
     runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-CREATE', trigger: 'webhook', retryAt: null });
-    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
+    (spawn as jest.Mock).mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
 
     const payload = {
       type: 'Issue',
@@ -435,7 +437,7 @@ describe('webhook issue filtering', () => {
   test('active issue meaningful update is accepted', async () => {
     const runner = require('../runner');
     runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-MEANINGFUL', trigger: 'webhook', retryAt: null });
-    spawn.mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
+    (spawn as jest.Mock).mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
 
     const payload = {
       type: 'Issue',
@@ -501,11 +503,11 @@ describe('pre-execution eligibility check', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    spawn.mockReset();
-    spawn.mockImplementation(() => mockSpawnChild({ exitCode: 0 }));
-    jest.spyOn(global, 'setTimeout').mockImplementation((fn, ms) => {
+    (spawn as jest.Mock).mockReset();
+    (spawn as jest.Mock).mockImplementation(() => mockSpawnChild({ exitCode: 0 }));
+    jest.spyOn(global, 'setTimeout').mockImplementation((fn: any, ms: any) => {
       if (ms <= 100) return originalSetTimeout(fn, ms);
-      return { unref: () => {} };
+      return { unref: () => {} } as any;
     });
 
     const runner = require('../runner');
@@ -585,7 +587,7 @@ describe('pre-execution eligibility check', () => {
 });
 
 describe('runBootstrapScan', () => {
-  let runBootstrapScan;
+  let runBootstrapScan: any;
   const runner = require('../runner');
 
   beforeEach(() => {

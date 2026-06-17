@@ -4,14 +4,14 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "lint": "node --check src/runner.js && node --check src/runner-cli.js && node --check src/webhook-server.js && node --check src/lib/discordCommandRouter.js && node --check src/lib/discordCommandHandlers.js && node --check src/lib/discordAskHandler.js && node --check src/lib/discordIntentHandlers.js && node --check scripts/register_discord_commands.js && node --check scripts/auth/firebase-user.js && node --check scripts/auth/cloudrun-sync.js && node --check scripts/auth/auth-setup.js && node --check src/lib/sessionContinue.js && node --check src/session-continue-cli.js",
-    "lint:eslint": "eslint src scripts",
+    "lint": "node --check eslint.config.js && node --check scripts/register_discord_commands.js && node --check scripts/auth/firebase-user.js && node --check scripts/auth/cloudrun-sync.js && node --check scripts/auth/auth-setup.js",
+    "lint:eslint": "eslint \"src/**/*.ts\" \"scripts/**/*.js\"",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "resume:session": "tsx src/session-continue-cli.js",
+    "resume:session": "tsx src/session-continue-cli.ts",
     "auth:setup": "node scripts/auth/auth-setup.js",
-    "start:webhook": "tsx src/webhook-server.js",
+    "start:webhook": "tsx src/webhook-server.ts",
     "start:ngrok": "bash -c \"$NGROK_COMMAND\"",
     "dev:webhook": "concurrently --kill-others-on-fail=false \"npm run start:webhook\" \"npm run start:ngrok\"",
     "test": "jest --forceExit"

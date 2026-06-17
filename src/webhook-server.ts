@@ -1,3 +1,4 @@
+'use strict';
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
@@ -6,6 +7,8 @@ const { DiscordNotifier } = require('./lib/discordNotifier');
 const { verifyDiscordSignature } = require('./lib/discordInteractions');
 const { routeInteraction } = require('./lib/discordCommandRouter');
 
+export {};
+
 const _discordNotifier = process.env.DISCORD_WEBHOOK_URL
   ? new DiscordNotifier(process.env.DISCORD_WEBHOOK_URL)
   : null;
@@ -13,12 +16,12 @@ const _discordNotifier = process.env.DISCORD_WEBHOOK_URL
 if (_discordNotifier) {
   _discordNotifier.start();
   const _origStdoutWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = function(chunk, ...args) {
+  process.stdout.write = function(chunk: any, ...args: any[]) {
     _discordNotifier.add(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
     return _origStdoutWrite(chunk, ...args);
   };
   const _origStderrWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = function(chunk, ...args) {
+  process.stderr.write = function(chunk: any, ...args: any[]) {
     _discordNotifier.add(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
     return _origStderrWrite(chunk, ...args);
   };
@@ -56,14 +59,14 @@ process.on('unhandledRejection', (reason) => {
 
 const app = express();
 app.use(express.json({
-  verify: (req, res, buf) => {
+  verify: (req: any, res: any, buf: Buffer) => {
     req.rawBody = buf.toString('utf8');
   }
 }));
 
 // Error handler for JSON parsing errors
-app.use((err, req, res, next) => {
-  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+app.use((err: any, req: any, res: any, next: any) => {
+  if (err instanceof SyntaxError && (err as any).status === 400 && 'body' in err) {
     return res.status(400).json({ error: 'Invalid JSON' });
   }
   next(err);
@@ -72,17 +75,17 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 const LINEAR_WEBHOOK_SECRET = process.env.LINEAR_WEBHOOK_SECRET;
 
-function loadDedupeStore() {
+function loadDedupeStore(): Record<string, string> {
   try {
     if (!fs.existsSync(WEBHOOK_EVENTS_FILE)) return {};
     const content = fs.readFileSync(WEBHOOK_EVENTS_FILE, 'utf8');
     const store = JSON.parse(content);
     // Prune expired entries (older than 1 hour)
     const now = Date.now();
-    const pruned = {};
+    const pruned: Record<string, string> = {};
     for (const [key, receivedAt] of Object.entries(store)) {
-      if (now - new Date(receivedAt).getTime() < WEBHOOK_EVENT_TTL_MS) {
-        pruned[key] = receivedAt;
+      if (now - new Date(receivedAt as string).getTime() < WEBHOOK_EVENT_TTL_MS) {
+        pruned[key] = receivedAt as string;
       }
     }
     return pruned;
@@ -91,18 +94,18 @@ function loadDedupeStore() {
   }
 }
 
-function saveDedupeStore(store) {
+function saveDedupeStore(store: Record<string, string>): void {
   try {
     if (!fs.existsSync(runner.LOG_DIR)) fs.mkdirSync(runner.LOG_DIR, { recursive: true });
     const tmp = WEBHOOK_EVENTS_FILE + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(store, null, 2));
     fs.renameSync(tmp, WEBHOOK_EVENTS_FILE);
-  } catch (err) {
+  } catch (err: any) {
     runner.log('WEBHOOK', `saveDedupeStore ERROR: ${err.message}`);
   }
 }
 
-function getEventKey(body, issueId) {
+function getEventKey(body: any, issueId: string): string {
   if (body.id) return body.id;
   // Fallback: hash of type+action+issueId+updatedAt
   const raw = JSON.stringify({
@@ -114,18 +117,18 @@ function getEventKey(body, issueId) {
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
-function isDedupeEvent(key) {
+function isDedupeEvent(key: string): boolean {
   const store = loadDedupeStore();
   return !!store[key];
 }
 
-function markDedupeEvent(key) {
+function markDedupeEvent(key: string): void {
   const store = loadDedupeStore();
   store[key] = new Date().toISOString();
   saveDedupeStore(store);
 }
 
-function verifyLinearSignature(req) {
+function verifyLinearSignature(req: any): boolean {
   if (!LINEAR_WEBHOOK_SECRET) {
     return true; // development mode: skip verification
   }
@@ -145,11 +148,11 @@ if (!LINEAR_WEBHOOK_SECRET) {
   console.warn('[WEBHOOK] WARNING: LINEAR_WEBHOOK_SECRET not set. Running in development mode without signature verification.');
 }
 
-app.get('/health', (req, res) => {
+app.get('/health', (req: any, res: any) => {
   res.status(200).json({ status: 'ok' });
 });
 
-app.post('/webhooks/linear', (req, res) => {
+app.post('/webhooks/linear', (req: any, res: any) => {
   const body = req.body;
   
   // express.json() handles parsing, but we check if it succeeded
@@ -182,7 +185,7 @@ app.post('/webhooks/linear', (req, res) => {
   const stateType = body.data?.state?.type || "";
   const archivedAt = body.data?.archivedAt || null;
 
-  runner.log('WEBHOOK', `Issue event: identifier=${issueId || 'unknown'} action=${action} state.name=${stateName} state.type=${stateType} labels=${(body.data?.labels || []).map(l => l.name).join(',')}`);
+  runner.log('WEBHOOK', `Issue event: identifier=${issueId || 'unknown'} action=${action} state.name=${stateName} state.type=${stateType} labels=${(body.data?.labels || []).map((l: any) => l.name).join(',')}`);
 
   if (!["create", "update"].includes(action)) {
     return res.status(200).json({ status: "ignored", reason: "unhandled action" });
@@ -261,7 +264,7 @@ app.post('/webhooks/linear', (req, res) => {
       let hasPending = true;
       try {
         hasPending = await runner.hasPendingIssues();
-      } catch (e) {
+      } catch (e: any) {
         runner.log('WEBHOOK', `hasPendingIssues error (fail-open): ${e.message}`, { issue: issueId });
       }
       if (!hasPending) {
@@ -306,13 +309,13 @@ app.post('/webhooks/linear', (req, res) => {
           runner.log('QUEUE', 'main task done, queue empty — no drain needed');
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       runner.log('WEBHOOK', `processing error: ${err.message}`, { issue: issueId });
     }
   });
 });
 
-app.post('/webhooks/discord', (req, res) => {
+app.post('/webhooks/discord', (req: any, res: any) => {
   const publicKey = process.env.DISCORD_PUBLIC_KEY;
   if (!publicKey) {
     runner.log('DISCORD', 'DISCORD_PUBLIC_KEY not configured — rejecting request');
@@ -336,10 +339,10 @@ app.post('/webhooks/discord', (req, res) => {
   const interaction = req.body;
 
   routeInteraction(interaction)
-    .then(({ status, body }) => {
+    .then(({ status, body }: { status: number, body: any }) => {
       res.status(status).json(body);
     })
-    .catch((err) => {
+    .catch((err: any) => {
       runner.log('DISCORD', `Error handling interaction: ${err.message}`);
       res.status(200).json({
         type: 4,
@@ -348,7 +351,7 @@ app.post('/webhooks/discord', (req, res) => {
     });
 });
 
-async function runBootstrapScan() {
+async function runBootstrapScan(): Promise<void> {
   const enabled = process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED === 'true';
   if (!enabled) {
     runner.log('BOOTSTRAP', 'startup scan disabled (WEBHOOK_BOOTSTRAP_SCAN_ENABLED != true)');
@@ -363,10 +366,10 @@ async function runBootstrapScan() {
   const startedAt = new Date().toISOString();
   runner.log('BOOTSTRAP', `startup scan started at ${startedAt}`);
 
-  let issues = [];
+  let issues: any[] = [];
   try {
     issues = await runner.fetchActiveIssues(50);
-  } catch (err) {
+  } catch (err: any) {
     runner.log('BOOTSTRAP', `fetchActiveIssues error: ${err.message}`);
     return;
   }
@@ -410,14 +413,14 @@ async function runBootstrapScan() {
     runner.log('BOOTSTRAP', 'startup scan: running syncQueueWithLinear before drain');
     try {
       await runner.syncQueueWithLinear();
-    } catch (err) {
+    } catch (err: any) {
       runner.log('BOOTSTRAP', `startup scan: syncQueueWithLinear error (non-fatal): ${err.message}`);
     }
     runner.log('BOOTSTRAP', 'startup scan: starting drainQueue');
     try {
       await runner.drainQueue();
       runner.log('BOOTSTRAP', 'startup scan: drainQueue complete');
-    } catch (err) {
+    } catch (err: any) {
       runner.log('BOOTSTRAP', `startup scan: drainQueue error: ${err.message}`);
     }
   } else {
@@ -437,3 +440,4 @@ if (require.main === module) {
 }
 
 module.exports = { app, runBootstrapScan };
+

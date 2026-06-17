@@ -5,6 +5,8 @@ const runner = require('./runner');
 const { parseUsageLimitResetEpoch } = require('./lib/usageLimitParser');
 const { classifyIssue } = require('./lib/issueClassifier');
 
+export {};
+
 const [,, command, ...args] = process.argv;
 
 async function main() {
@@ -29,7 +31,7 @@ async function main() {
         }
       `;
 
-      const data = await runner.linearQuery(query, { id: issueId });
+      const data: any = await runner.linearQuery(query, { id: issueId });
       if (!data.issue) {
         process.stderr.write(`Issue not found: ${issueId}\n`);
         process.exit(1);
@@ -39,7 +41,7 @@ async function main() {
         id: data.issue.id,
         title: data.issue.title,
         description: data.issue.description,
-        labels: data.issue.labels.nodes.map(n => n.name),
+        labels: data.issue.labels.nodes.map((n: any) => n.name),
         status: data.issue.state.name
       };
 
@@ -128,3 +130,4 @@ main().catch(err => {
   process.stderr.write(`runner-cli error: ${err.message}\n`);
   process.exit(1);
 });
+

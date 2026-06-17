@@ -1,5 +1,7 @@
 const { classifyUsageLimit } = require('../lib/usageLimitParser');
 
+export {};
+
 describe('classifyUsageLimit', () => {
   const NOW_MS = Date.UTC(2026, 5, 16, 12, 0, 0);
 
@@ -86,8 +88,8 @@ describe('classifyUsageLimit', () => {
       "You've hit your session limit. Your limit will reset at 3:30pm (UTC).",
       NOW_MS
     );
-    const resetMs = new Date(result.resetAt).getTime();
-    const retryMs = new Date(result.retryAt).getTime();
+    const resetMs = new Date(result.resetAt!).getTime();
+    const retryMs = new Date(result.retryAt!).getTime();
 
     expect((retryMs - resetMs) / 1000).toBe(600);
   });
@@ -99,8 +101,8 @@ describe('classifyUsageLimit', () => {
       "You've hit your session limit. Your limit will reset at 3:30pm (UTC).",
       NOW_MS
     );
-    const resetMs = new Date(result.resetAt).getTime();
-    const retryMs = new Date(result.retryAt).getTime();
+    const resetMs = new Date(result.resetAt!).getTime();
+    const retryMs = new Date(result.retryAt!).getTime();
 
     expect((retryMs - resetMs) / 1000).toBe(45);
   });

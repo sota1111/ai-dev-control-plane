@@ -1,3 +1,4 @@
+'use strict';
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
@@ -7,10 +8,21 @@ const { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } = re
 const queueOrdering = require('./lib/queueOrdering');
 const { isTerminalState } = require('./lib/issueState');
 
+export {};
+
+interface RunResultType {
+  TASK_COMPLETED: string;
+  COMPLETION_UNVERIFIED: string;
+  LOCK_CONFLICT: string;
+  USAGE_LIMIT_RETRY: string;
+  NON_RETRYABLE_LIMIT: string;
+  FAILED: string;
+}
+
 const SKIPPED_LOCKED = 75;  // exit code when lock is not available
 const COMPLETION_UNVERIFIED = 70; // exit code when process 0 but task not finished
 
-const RUN_RESULT = {
+const RUN_RESULT: RunResultType = {
   TASK_COMPLETED: 'TASK_COMPLETED',
   COMPLETION_UNVERIFIED: 'COMPLETION_UNVERIFIED',
   LOCK_CONFLICT: 'LOCK_CONFLICT',
@@ -19,13 +31,15 @@ const RUN_RESULT = {
   FAILED: 'FAILED'
 };
 
+interface CompletionResult {
+  completed: boolean;
+  reason?: string;
+}
+
 /**
  * Verifies if the task is actually completed even if the process exited with 0.
- * @param {string} issueId
- * @param {string} output
- * @returns {Promise<{completed: boolean, reason: string}>}
  */
-async function verifyTaskCompletion(issueId, output) {
+async function verifyTaskCompletion(issueId: string, output: string): Promise<CompletionResult> {
   // 1. Check explicit marker from run_auto.sh
   if (output && output.includes('COMPLETION_CONTRACT: INCOMPLETE')) {
     const reasonMatch = output.match(/COMPLETION_CONTRACT: INCOMPLETE reason=(.+)/);
@@ -43,7 +57,7 @@ async function verifyTaskCompletion(issueId, output) {
         }
       }
     `;
-    const data = await linearQuery(query, { id: issueId });
+    const data: any = await linearQuery(query, { id: issueId });
 
     if (!data.issue) {
       return { completed: false, reason: 'verification unavailable: issue not found' };
@@ -57,7 +71,7 @@ async function verifyTaskCompletion(issueId, output) {
     } else {
       return { completed: false, reason: `state is "${state?.name || 'unknown'}" (${state?.type || 'unknown'})` };
     }
-  } catch (err) {
+  } catch (err: any) {
     // Fail closed: if we can't confirm completion via API, assume it's incomplete
     // to prevent premature cleanup of usage-limit states.
     return { completed: false, reason: `verification unavailable: ${err.message}` };
@@ -76,7 +90,7 @@ const LINEAR_API_URL = 'https://api.linear.app/graphql';
 const QUEUE_ITEM_TTL_DAYS = parseInt(process.env.QUEUE_ITEM_TTL_DAYS || '7', 10);
 const INFLIGHT_FILE = path.join(LOG_DIR, 'runner.inflight.json');
 
-function log(tag, message, context = {}) {
+function log(tag: string, message: string, context: Record<string, any> = {}) {
   try {
     if (!fs.existsSync(LOG_DIR)) {
       fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -88,12 +102,12 @@ function log(tag, message, context = {}) {
       .join(' ');
     const line = `[${timestamp}] [${tag}] ${contextStr ? contextStr + ' ' : ''}${message}\n`;
     fs.appendFileSync(LOG_FILE, line);
-  } catch (err) {
+  } catch (err: any) {
     console.error(`[RUNNER:LOG_ERROR] ${err.message}`);
   }
 }
 
-function acquireLock(context = {}) {
+function acquireLock(context: Record<string, any> = {}): boolean {
   try {
     if (!fs.existsSync(LOG_DIR)) {
       fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -115,7 +129,7 @@ function acquireLock(context = {}) {
     let isDead = false;
     try {
       process.kill(pid, 0);
-    } catch (e) {
+    } catch (e: any) {
       if (e.code === 'ESRCH') {
         isDead = true;
       }
@@ -134,13 +148,13 @@ function acquireLock(context = {}) {
 
     log('LOCK', `SKIPPED_LOCKED lock held by pid=${pid}`, context);
     return false;
-  } catch (err) {
+  } catch (err: any) {
     log('LOCK', `ERROR: ${err.message}`, context);
     return false;
   }
 }
 
-function releaseLock() {
+function releaseLock(): void {
   try {
     if (fs.existsSync(LOCK_FILE)) {
       const content = fs.readFileSync(LOCK_FILE, 'utf8');
@@ -150,14 +164,20 @@ function releaseLock() {
         log('LOCK', 'released');
       }
     }
-  } catch (err) {
+  } catch (err: any) {
     log('LOCK', `release ERROR: ${err.message}`);
   }
 }
 
-function getGitCheckpointInfo() {
+interface GitCheckpointInfo {
+  branch: string;
+  lastCommit: string;
+  gitStatus: string;
+}
+
+function getGitCheckpointInfo(): GitCheckpointInfo {
   const root = path.join(__dirname, '..');
-  const result = { branch: '', lastCommit: '', gitStatus: '' };
+  const result: GitCheckpointInfo = { branch: '', lastCommit: '', gitStatus: '' };
   try {
     result.branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8', cwd: root }).trim();
     result.lastCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf8', cwd: root }).trim();
@@ -168,7 +188,7 @@ function getGitCheckpointInfo() {
   return result;
 }
 
-function isLocked() {
+function isLocked(): boolean {
   try {
     if (!fs.existsSync(LOCK_FILE)) return false;
     const content = fs.readFileSync(LOCK_FILE, 'utf8');
@@ -181,7 +201,7 @@ function isLocked() {
     try {
       process.kill(pid, 0);
       return true;
-    } catch (e) {
+    } catch (e: any) {
       return e.code !== 'ESRCH';
     }
   } catch (err) {
@@ -189,7 +209,7 @@ function isLocked() {
   }
 }
 
-async function linearQuery(query, variables = {}) {
+async function linearQuery(query: string, variables: Record<string, any> = {}): Promise<any> {
   const apiKey = process.env.LINEAR_API_KEY;
   if (!apiKey) throw new Error('LINEAR_API_KEY not set');
 
@@ -208,9 +228,9 @@ async function linearQuery(query, variables = {}) {
       timeout: 10000
     };
 
-    const req = https.request(options, (res) => {
+    const req = https.request(options, (res: any) => {
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
+      res.on('data', (chunk: any) => { data += chunk; });
       res.on('end', () => {
         try {
           const json = JSON.parse(data);
@@ -219,13 +239,13 @@ async function linearQuery(query, variables = {}) {
           } else {
             resolve(json.data);
           }
-        } catch (e) {
+        } catch (e: any) {
           reject(new Error(`Failed to parse Linear API response: ${e.message}`));
         }
       });
     });
 
-    req.on('error', (err) => { reject(err); });
+    req.on('error', (err: any) => { reject(err); });
     req.on('timeout', () => {
       req.destroy();
       reject(new Error('Linear API timeout'));
@@ -237,7 +257,22 @@ async function linearQuery(query, variables = {}) {
 
 const getPriorityRank = queueOrdering.getPriorityRank;
 
-async function getIssueQueueMetadata(issueId) {
+interface IssueQueueMetadata {
+  id: string;
+  identifier: string;
+  priority: number | null;
+  priorityLabel: string | null;
+  priorityRank: number;
+  parentIssueId: string | null;
+  parentIssueIdentifier: string | null;
+  stateType: string | null;
+  stateName: string | null;
+  archivedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+async function getIssueQueueMetadata(issueId: string): Promise<IssueQueueMetadata | null> {
   try {
     const query = `
       query($id: String!) {
@@ -254,7 +289,7 @@ async function getIssueQueueMetadata(issueId) {
         }
       }
     `;
-    const data = await linearQuery(query, { id: issueId });
+    const data: any = await linearQuery(query, { id: issueId });
     if (!data.issue) return null;
     const issue = data.issue;
     return {
@@ -271,16 +306,16 @@ async function getIssueQueueMetadata(issueId) {
       createdAt: issue.createdAt ?? null,
       updatedAt: issue.updatedAt ?? null
     };
-  } catch (err) {
+  } catch (err: any) {
     log('RUNNER', `getIssueQueueMetadata failed: ${err.message}`, { issue: issueId });
     return null;
   }
 }
 
-async function hasPendingIssues() {
+async function hasPendingIssues(): Promise<boolean> {
   try {
     const query = '{ issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: 1) { nodes { id } } }';
-    const data = await linearQuery(query);
+    const data: any = await linearQuery(query);
     return !!(data.issues?.nodes?.length > 0);
   } catch (err) {
     // Fail safe: don't block execution
@@ -288,7 +323,7 @@ async function hasPendingIssues() {
   }
 }
 
-async function fetchActiveIssues(first = 50) {
+async function fetchActiveIssues(first: number = 50): Promise<IssueQueueMetadata[]> {
   const query = `
     query($first: Int!) {
       issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: $first) {
@@ -306,10 +341,10 @@ async function fetchActiveIssues(first = 50) {
       }
     }
   `;
-  const data = await linearQuery(query, { first });
+  const data: any = await linearQuery(query, { first });
   return (data.issues?.nodes || [])
-    .filter(issue => !issue.archivedAt)
-    .map(issue => ({
+    .filter((issue: any) => !issue.archivedAt)
+    .map((issue: any) => ({
       id: issue.id,
       identifier: issue.identifier,
       priority: issue.priority ?? null,
@@ -325,7 +360,7 @@ async function fetchActiveIssues(first = 50) {
     }));
 }
 
-function buildUsageLimitCommentBody(resetEpoch) {
+function buildUsageLimitCommentBody(resetEpoch: number): string {
   const date = new Date(resetEpoch * 1000);
   const jstDate = new Date(date.getTime() + 9 * 60 * 60 * 1000);
   const iso = jstDate.toISOString();
@@ -333,23 +368,23 @@ function buildUsageLimitCommentBody(resetEpoch) {
   return `usage-limit: Next auto run: ${jstTime}`;
 }
 
-async function postUsageLimitComment(issueId, resetEpoch) {
+async function postUsageLimitComment(issueId: string, resetEpoch: number): Promise<void> {
   try {
-    const getIssue = await linearQuery('query($id: String!) { issue(id: $id) { id } }', { id: issueId });
+    const getIssue: any = await linearQuery('query($id: String!) { issue(id: $id) { id } }', { id: issueId });
     if (!getIssue.issue) return;
     const uuid = getIssue.issue.id;
 
     const body = buildUsageLimitCommentBody(resetEpoch);
 
     // Check for duplicate comment before posting
-    let existingComments = [];
+    let existingComments: any[] = [];
     try {
-      const commentsData = await linearQuery(
+      const commentsData: any = await linearQuery(
         'query($id: String!) { issue(id: $id) { comments(first: 50) { nodes { body } } } }',
         { id: uuid }
       );
       existingComments = commentsData.issue?.comments?.nodes || [];
-    } catch (err) {
+    } catch (err: any) {
       log('WARN', `postUsageLimitComment: could not fetch comments, proceeding to post. ${err.message}`, { issue: issueId });
     }
 
@@ -365,23 +400,23 @@ async function postUsageLimitComment(issueId, resetEpoch) {
         }
       }
     `, { issueId: uuid, body });
-  } catch (err) {
+  } catch (err: any) {
     log('ERROR', `postUsageLimitComment failed: ${err.message}`, { issue: issueId });
   }
 }
 
-async function addUsageLimitLabel(issueId) {
+async function addUsageLimitLabel(issueId: string): Promise<void> {
   try {
-    const issueData = await linearQuery('query($id: String!) { issue(id: $id) { id labelIds team { id } } }', { id: issueId });
+    const issueData: any = await linearQuery('query($id: String!) { issue(id: $id) { id labelIds team { id } } }', { id: issueId });
     if (!issueData.issue) return;
     const { id: uuid, labelIds, team } = issueData.issue;
     const teamId = team.id;
 
-    const labelsData = await linearQuery('query { issueLabels(filter: { name: { eq: "usage-limit" } }) { nodes { id } } }');
+    const labelsData: any = await linearQuery('query { issueLabels(filter: { name: { eq: "usage-limit" } }) { nodes { id } } }');
     let labelId = labelsData.issueLabels.nodes[0]?.id;
 
     if (!labelId) {
-      const createLabelData = await linearQuery(`
+      const createLabelData: any = await linearQuery(`
         mutation($name: String!, $teamId: String!, $color: String!) {
           issueLabelCreate(input: { name: $name, teamId: $teamId, color: $color }) {
             issueLabel { id }
@@ -400,22 +435,22 @@ async function addUsageLimitLabel(issueId) {
         }
       `, { id: uuid, labelIds: [...labelIds, labelId] });
     }
-  } catch (err) {
+  } catch (err: any) {
     log('ERROR', `addUsageLimitLabel failed: ${err.message}`, { issue: issueId });
   }
 }
 
-async function removeUsageLimitLabel(issueId) {
+async function removeUsageLimitLabel(issueId: string): Promise<void> {
   try {
-    const issueData = await linearQuery('query($id: String!) { issue(id: $id) { id labelIds } }', { id: issueId });
+    const issueData: any = await linearQuery('query($id: String!) { issue(id: $id) { id labelIds } }', { id: issueId });
     if (!issueData.issue) return;
     const { id: uuid, labelIds } = issueData.issue;
 
-    const labelsData = await linearQuery('query { issueLabels(filter: { name: { eq: "usage-limit" } }) { nodes { id } } }');
+    const labelsData: any = await linearQuery('query { issueLabels(filter: { name: { eq: "usage-limit" } }) { nodes { id } } }');
     const labelId = labelsData.issueLabels.nodes[0]?.id;
 
     if (labelId && labelIds.includes(labelId)) {
-      const filteredIds = labelIds.filter(id => id !== labelId);
+      const filteredIds = labelIds.filter((id: string) => id !== labelId);
       await linearQuery(`
         mutation($id: String!, $labelIds: [String!]!) {
           issueUpdate(id: $id, input: { labelIds: $labelIds }) {
@@ -424,16 +459,34 @@ async function removeUsageLimitLabel(issueId) {
         }
       `, { id: uuid, labelIds: filteredIds });
     }
-  } catch (err) {
+  } catch (err: any) {
     log('ERROR', `removeUsageLimitLabel failed: ${err.message}`, { issue: issueId });
   }
 }
 
-function setUsageLimitCooldownUntil(retryAt, issueIdOrOptions = null) {
+interface CooldownState {
+  retryAt: string;
+  issueId: string | null;
+  issueIdentifier?: string | null;
+  reason?: string | null;
+  limitType?: string | null;
+  active?: boolean;
+}
+
+interface CooldownOptions {
+  issueId?: string | null;
+  issueIdentifier?: string | null;
+  resetAt?: string | null;
+  bufferSeconds?: number;
+  reason?: string;
+  limitType?: string;
+}
+
+function setUsageLimitCooldownUntil(retryAt: string, issueIdOrOptions: string | CooldownOptions | null = null): void {
   // Accept both old signature (retryAt, issueId) and new (retryAt, { issueId, issueIdentifier, resetAt, bufferSeconds, reason, limitType })
-  let issueId = null;
-  let issueIdentifier = null;
-  let resetAt = null;
+  let issueId: string | null = null;
+  let issueIdentifier: string | null = null;
+  let resetAt: string | null = null;
   let bufferSeconds = USAGE_LIMIT_RETRY_BUFFER_SECONDS;
   let reason = 'usage_limit';
   let limitType = 'session_limit';
@@ -478,12 +531,12 @@ function setUsageLimitCooldownUntil(retryAt, issueIdOrOptions = null) {
     fs.renameSync(legacyTmp, USAGE_LIMIT_FILE);
 
     log('RUNNER', 'usage limit cooldown set', { retryAt, issueId: issueId || undefined, issueIdentifier: issueIdentifier || undefined });
-  } catch (err) {
+  } catch (err: any) {
     log('ERROR', `setUsageLimitCooldownUntil failed: ${err.message}`);
   }
 }
 
-function clearUsageLimitCooldown() {
+function clearUsageLimitCooldown(): void {
   try {
     if (fs.existsSync(COOLDOWN_FILE)) {
       fs.unlinkSync(COOLDOWN_FILE);
@@ -492,12 +545,12 @@ function clearUsageLimitCooldown() {
       fs.unlinkSync(USAGE_LIMIT_FILE);
     }
     log('RUNNER', 'usage limit cooldown cleared');
-  } catch (err) {
+  } catch (err: any) {
     log('ERROR', `clearUsageLimitCooldown failed: ${err.message}`);
   }
 }
 
-function getUsageLimitCooldownUntil(nowMs = Date.now()) {
+function getUsageLimitCooldownUntil(nowMs: number = Date.now()): CooldownState | null {
   // Try new COOLDOWN_FILE first
   if (fs.existsSync(COOLDOWN_FILE)) {
     try {
@@ -521,7 +574,7 @@ function getUsageLimitCooldownUntil(nowMs = Date.now()) {
         limitType: state.limitType || null,
         active: true
       };
-    } catch (err) {
+    } catch (err: any) {
       log('ERROR', `getUsageLimitCooldownUntil: COOLDOWN_FILE parse failed: ${err.message}`);
       // Fall through to legacy file
     }
@@ -533,7 +586,8 @@ function getUsageLimitCooldownUntil(nowMs = Date.now()) {
     const content = fs.readFileSync(USAGE_LIMIT_FILE, 'utf8');
     const state = JSON.parse(content);
 
-    let retryAt, issueId;
+    let retryAt: string | null = null;
+    let issueId: string | null = null;
     if (typeof state === 'string') {
       retryAt = state;
     } else {
@@ -552,35 +606,54 @@ function getUsageLimitCooldownUntil(nowMs = Date.now()) {
       return null;
     }
     return { retryAt, issueId: issueId || null };
-  } catch (err) {
+  } catch (err: any) {
     log('ERROR', `getUsageLimitCooldownUntil failed: ${err.message}`);
     return null;
   }
 }
 
-function loadQueue() {
+interface QueueItem {
+  issueId: string;
+  issueIdentifier: string | null;
+  trigger: string | null;
+  retryAt: string | null;
+  enqueuedAt: string;
+  lastAttemptAt: string | null;
+  attemptCount: number;
+  reason: string | null;
+  priority: number | null;
+  priorityLabel: string | null;
+  priorityRank: number;
+  linearFetchedAt: string | null;
+  parentIssueId: string | null;
+  parentIssueIdentifier: string | null;
+  queueGroup: string | null;
+  queueGroupOrder: string | null;
+}
+
+function loadQueue(): QueueItem[] {
   try {
     if (!fs.existsSync(QUEUE_FILE)) return [];
     const content = fs.readFileSync(QUEUE_FILE, 'utf8');
     try {
       const queue = JSON.parse(content);
       return Array.isArray(queue) ? queue : [];
-    } catch (parseErr) {
+    } catch (parseErr: any) {
       const backupFile = QUEUE_FILE + '.corrupt.' + Date.now();
       try { fs.writeFileSync(backupFile, content); } catch (_) {}
       log('QUEUE', `loadQueue: JSON parse failed, backed up corrupt file to ${path.basename(backupFile)}: ${parseErr.message}`);
       return [];
     }
-  } catch (err) {
+  } catch (err: any) {
     log('QUEUE', `loadQueue ERROR: ${err.message}`);
     return [];
   }
 }
 
-function normalizeQueue(queue) {
+function normalizeQueue(queue: QueueItem[]): QueueItem[] {
   if (!Array.isArray(queue) || queue.length === 0) return [];
 
-  const map = new Map();
+  const map = new Map<string, QueueItem>();
   for (const item of queue) {
     const issueId = item.issueId;
     if (!issueId) continue;
@@ -590,12 +663,12 @@ function normalizeQueue(queue) {
       continue;
     }
 
-    const existing = map.get(issueId);
+    const existing = map.get(issueId)!;
 
     // Merge retryAt: null (immediate) beats any future time; among two future times, earlier wins
     const existingRetryMs = existing.retryAt ? new Date(existing.retryAt).getTime() : null;
     const newRetryMs = item.retryAt ? new Date(item.retryAt).getTime() : null;
-    let mergedRetryAt;
+    let mergedRetryAt: string | null;
     if (newRetryMs === null || existingRetryMs === null) {
       mergedRetryAt = null;
     } else {
@@ -643,11 +716,11 @@ function normalizeQueue(queue) {
   return Array.from(map.values());
 }
 
-async function syncQueueWithLinear() {
+async function syncQueueWithLinear(): Promise<void> {
   const queue = loadQueue();
   if (queue.length === 0) return;
 
-  const toRemove = [];
+  const toRemove: string[] = [];
   for (const item of queue) {
     try {
       const query = `
@@ -659,7 +732,7 @@ async function syncQueueWithLinear() {
           }
         }
       `;
-      const data = await linearQuery(query, { id: item.issueId });
+      const data: any = await linearQuery(query, { id: item.issueId });
 
       if (!data.issue) {
         log('QUEUE', `syncQueueWithLinear: removing not-found issue`, { issue: item.issueId });
@@ -681,7 +754,7 @@ async function syncQueueWithLinear() {
         log('QUEUE', `syncQueueWithLinear: removing terminal issue state=${state?.name}`, { issue: item.issueId });
         toRemove.push(item.issueId);
       }
-    } catch (err) {
+    } catch (err: any) {
       // Fail-open: API failure does not remove the item
       log('QUEUE', `syncQueueWithLinear: API error for ${item.issueId}, skipping: ${err.message}`);
     }
@@ -694,7 +767,7 @@ async function syncQueueWithLinear() {
   }
 }
 
-async function pruneExpiredQueueItems() {
+async function pruneExpiredQueueItems(): Promise<void> {
   const queue = loadQueue();
   if (queue.length === 0) return;
 
@@ -709,7 +782,7 @@ async function pruneExpiredQueueItems() {
 
   if (expired.length === 0) return;
 
-  const toRemove = [];
+  const toRemove: string[] = [];
   for (const item of expired) {
     try {
       const query = `
@@ -721,7 +794,7 @@ async function pruneExpiredQueueItems() {
           }
         }
       `;
-      const data = await linearQuery(query, { id: item.issueId });
+      const data: any = await linearQuery(query, { id: item.issueId });
 
       if (!data.issue) {
         toRemove.push(item.issueId);
@@ -737,7 +810,7 @@ async function pruneExpiredQueueItems() {
         toRemove.push(item.issueId);
       }
       // Active issues older than TTL: keep in queue (do not blindly remove active issues)
-    } catch (err) {
+    } catch (err: any) {
       log('QUEUE', `pruneExpiredQueueItems: API error for ${item.issueId}, skip: ${err.message}`);
     }
   }
@@ -749,7 +822,7 @@ async function pruneExpiredQueueItems() {
   }
 }
 
-function saveQueue(queue) {
+function saveQueue(queue: QueueItem[]): void {
   try {
     if (!fs.existsSync(LOG_DIR)) {
       fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -757,12 +830,23 @@ function saveQueue(queue) {
     const tmpFile = QUEUE_FILE + '.tmp';
     fs.writeFileSync(tmpFile, JSON.stringify(queue, null, 2));
     fs.renameSync(tmpFile, QUEUE_FILE);
-  } catch (err) {
+  } catch (err: any) {
     log('QUEUE', `save ERROR: ${err.message}`);
   }
 }
 
-function enqueue(issueId, trigger, retryAt = null, {
+interface EnqueueOptions {
+  issueIdentifier?: string | null;
+  reason?: string | null;
+  priority?: number | null;
+  priorityLabel?: string | null;
+  parentIssueId?: string | null;
+  parentIssueIdentifier?: string | null;
+  queueGroup?: string | null;
+  queueGroupOrder?: string | null;
+}
+
+function enqueue(issueId: string, trigger: string | null, retryAt: string | null = null, {
   issueIdentifier = null,
   reason = null,
   priority = null,
@@ -771,7 +855,7 @@ function enqueue(issueId, trigger, retryAt = null, {
   parentIssueIdentifier = null,
   queueGroup = null,
   queueGroupOrder = null
-} = {}) {
+}: EnqueueOptions = {}): void {
   try {
     // Derive queueGroup from parentIssueId if not explicitly set
     const resolvedQueueGroup = queueGroup ?? (parentIssueId || null);
@@ -786,7 +870,7 @@ function enqueue(issueId, trigger, retryAt = null, {
       // Merge retryAt: null (immediate) beats any future time; among two future times, earlier wins
       const existingRetryMs = existing.retryAt ? new Date(existing.retryAt).getTime() : null;
       const newRetryMs = retryAt ? new Date(retryAt).getTime() : null;
-      let mergedRetryAt;
+      let mergedRetryAt: string | null;
       if (newRetryMs === null || existingRetryMs === null) {
         mergedRetryAt = null; // immediate beats any future time
       } else {
@@ -844,12 +928,12 @@ function enqueue(issueId, trigger, retryAt = null, {
     });
     saveQueue(queue);
     log('QUEUE', 'enqueued', { issue: issueId, trigger });
-  } catch (err) {
+  } catch (err: any) {
     log('QUEUE', `enqueue ERROR: ${err.message}`, { issue: issueId });
   }
 }
 
-function dequeue(lastProcessedGroup = null) {
+function dequeue(lastProcessedGroup: string | null = null): QueueItem | null {
   try {
     const queue = loadQueue();
     const now = new Date();
@@ -878,13 +962,13 @@ function dequeue(lastProcessedGroup = null) {
     }
 
     return item;
-  } catch (err) {
+  } catch (err: any) {
     log('QUEUE', `dequeue ERROR: ${err.message}`);
     return null;
   }
 }
 
-function removeFromQueue(issueId) {
+function removeFromQueue(issueId: string): void {
   try {
     const queue = loadQueue();
     const filtered = queue.filter(item => item.issueId !== issueId);
@@ -892,17 +976,17 @@ function removeFromQueue(issueId) {
       saveQueue(filtered);
       log('QUEUE', 'removed', { issue: issueId });
     }
-  } catch (err) {
+  } catch (err: any) {
     log('QUEUE', `removeFromQueue ERROR: ${err.message}`, { issue: issueId });
   }
 }
 
-function isQueued(issueId) {
+function isQueued(issueId: string): boolean {
   const queue = loadQueue();
   return queue.some(item => item.issueId === issueId);
 }
 
-function loadInflight() {
+function loadInflight(): string[] {
   try {
     if (!fs.existsSync(INFLIGHT_FILE)) return [];
     const content = fs.readFileSync(INFLIGHT_FILE, 'utf8');
@@ -913,18 +997,18 @@ function loadInflight() {
   }
 }
 
-function saveInflight(list) {
+function saveInflight(list: string[]): void {
   try {
     if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
     const tmp = INFLIGHT_FILE + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(list, null, 2));
     fs.renameSync(tmp, INFLIGHT_FILE);
-  } catch (err) {
+  } catch (err: any) {
     log('RUNNER', `saveInflight ERROR: ${err.message}`);
   }
 }
 
-function addInflight(issueId) {
+function addInflight(issueId: string): void {
   const list = loadInflight();
   if (!list.includes(issueId)) {
     list.push(issueId);
@@ -932,22 +1016,22 @@ function addInflight(issueId) {
   }
 }
 
-function removeInflight(issueId) {
+function removeInflight(issueId: string): void {
   const list = loadInflight().filter(id => id !== issueId);
   saveInflight(list);
 }
 
-function isInflight(issueId) {
+function isInflight(issueId: string): boolean {
   return loadInflight().includes(issueId);
 }
 
-function isQueuedOrRunning(issueId) {
+function isQueuedOrRunning(issueId: string): boolean {
   return isQueued(issueId) || isInflight(issueId);
 }
 
-async function notifyUsageLimitToAllActiveIssues(epochSeconds) {
+async function notifyUsageLimitToAllActiveIssues(epochSeconds: number): Promise<void> {
   try {
-    const data = await linearQuery(
+    const data: any = await linearQuery(
       '{ issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: 50) { nodes { id } } }'
     );
     const issues = data.issues?.nodes || [];
@@ -956,14 +1040,14 @@ async function notifyUsageLimitToAllActiveIssues(epochSeconds) {
       await addUsageLimitLabel(issue.id).catch(() => {});
     }
     log('RUNNER', `notifyUsageLimitToAllActiveIssues done for ${issues.length} issue(s)`);
-  } catch (err) {
+  } catch (err: any) {
     log('ERROR', `notifyUsageLimitToAllActiveIssues failed: ${err.message}`);
   }
 }
 
-async function removeUsageLimitLabelFromAllIssues() {
+async function removeUsageLimitLabelFromAllIssues(): Promise<void> {
   try {
-    const labelsData = await linearQuery(
+    const labelsData: any = await linearQuery(
       'query { issueLabels(filter: { name: { eq: "usage-limit" } }) { nodes { id } } }'
     );
     const labelId = labelsData.issueLabels.nodes[0]?.id;
@@ -971,7 +1055,7 @@ async function removeUsageLimitLabelFromAllIssues() {
       log('RUNNER', 'removeUsageLimitLabelFromAllIssues: no usage-limit label found');
       return;
     }
-    const issueData = await linearQuery(
+    const issueData: any = await linearQuery(
       `{ issues(filter: { labels: { id: { eq: "${labelId}" } } }, first: 50) { nodes { id labelIds } } }`
     );
     const issues = issueData.issues?.nodes || [];
@@ -979,14 +1063,14 @@ async function removeUsageLimitLabelFromAllIssues() {
       await removeUsageLimitLabel(issue.id).catch(() => {});
     }
     log('RUNNER', `removeUsageLimitLabelFromAllIssues done for ${issues.length} issue(s)`);
-  } catch (err) {
+  } catch (err: any) {
     log('ERROR', `removeUsageLimitLabelFromAllIssues failed: ${err.message}`);
   }
 }
 
-async function setIssueInProgress(issueId) {
+async function setIssueInProgress(issueId: string): Promise<void> {
   try {
-    const issueData = await linearQuery(
+    const issueData: any = await linearQuery(
       'query($id: String!) { issue(id: $id) { id state { type } team { id } } }',
       { id: issueId }
     );
@@ -996,7 +1080,7 @@ async function setIssueInProgress(issueId) {
       return;
     }
     const { id: uuid, team } = issueData.issue;
-    const statesData = await linearQuery(
+    const statesData: any = await linearQuery(
       'query($teamId: String!) { workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "started" } }, first: 1) { nodes { id name } } }',
       { teamId: team.id }
     );
@@ -1010,12 +1094,17 @@ async function setIssueInProgress(issueId) {
       { id: uuid, stateId }
     );
     log('WEBHOOK', `setIssueInProgress: ${issueId} updated to In Progress`);
-  } catch (err) {
+  } catch (err: any) {
     log('ERROR', `setIssueInProgress failed: ${err.message}`, { issue: issueId });
   }
 }
 
-async function getIssueExecutionEligibility(issueId) {
+interface EligibilityResult {
+  eligible: boolean;
+  reason?: string;
+}
+
+async function getIssueExecutionEligibility(issueId: string): Promise<EligibilityResult> {
   try {
     const query = `
       query($id: String!) {
@@ -1027,7 +1116,7 @@ async function getIssueExecutionEligibility(issueId) {
         }
       }
     `;
-    const data = await linearQuery(query, { id: issueId });
+    const data: any = await linearQuery(query, { id: issueId });
 
     if (!data.issue) {
       removeFromQueue(issueId);
@@ -1049,14 +1138,23 @@ async function getIssueExecutionEligibility(issueId) {
     }
 
     return { eligible: true };
-  } catch (err) {
+  } catch (err: any) {
     // Fail open: if Linear API is unavailable, allow execution to proceed
     log('ERROR', `getIssueExecutionEligibility failed: ${err.message}`, { issue: issueId });
     return { eligible: true };
   }
 }
 
-function triggerRun(issueId, options = {}) {
+interface TriggerOptions {
+  resume?: boolean;
+}
+
+interface TriggerResult {
+  code: number;
+  output: string;
+}
+
+function triggerRun(issueId: string, options: TriggerOptions = {}): Promise<TriggerResult> {
   // SECURITY: Pass issueId only via environment variable, never as shell argument
   const env = { ...process.env, WEBHOOK_ISSUE_ID: issueId };
   const projectRoot = path.join(__dirname, '..');
@@ -1079,13 +1177,13 @@ function triggerRun(issueId, options = {}) {
 
   let output = '';
 
-  child.stdout.on('data', (data) => {
+  child.stdout.on('data', (data: any) => {
     const str = data.toString();
     output += str;
     log('RUN', str.trim(), { issue: issueId });
     process.stdout.write(`[RUN:${issueId}] ${str}`);
   });
-  child.stderr.on('data', (data) => {
+  child.stderr.on('data', (data: any) => {
     const str = data.toString();
     output += str;
     log('RUN', `stderr: ${str.trim()}`, { issue: issueId });
@@ -1093,7 +1191,7 @@ function triggerRun(issueId, options = {}) {
   });
 
   return new Promise((resolve) => {
-    child.on('close', (code, signal) => {
+    child.on('close', (code: number | null, signal: string | null) => {
       const endedAt = new Date().toISOString();
       if (signal) {
         log('RUNNER', `run_auto.sh terminated by signal=${signal} pid=${child.pid} startedAt=${startedAt} endedAt=${endedAt}`, { issue: issueId });
@@ -1102,7 +1200,7 @@ function triggerRun(issueId, options = {}) {
       }
       resolve({ code: code ?? (signal ? 143 : 1), output });
     });
-    child.on('error', (err) => {
+    child.on('error', (err: any) => {
       const endedAt = new Date().toISOString();
       log('RUNNER', `Failed to spawn run_auto.sh error=${err.message} startedAt=${startedAt} endedAt=${endedAt}`, { issue: issueId });
       resolve({ code: 1, output: err.message });
@@ -1110,15 +1208,25 @@ function triggerRun(issueId, options = {}) {
   });
 }
 
+interface ClassifyRunArgs {
+  code: number;
+  output: string;
+  completion: CompletionResult | null;
+}
+
+interface ClassifyRunResult {
+  kind: string;
+  code: number;
+  completion?: CompletionResult;
+  classification?: any;
+  reason?: string;
+}
+
 /**
  * triggerRun のプロセス結果(code/output)とタスク完了検証結果(completion)から、
  * run result 種別を構造化して返す純粋関数。副作用なし。
- * プロセス終了コードとタスク終端状態を明確に分離するための分類器。
- * @param {{ code:number, output:string, completion:(object|null) }} args
- *   completion は code===0 のとき verifyTaskCompletion の戻り値、それ以外は null。
- * @returns {{ kind:string, code:number, completion?:object, classification?:object, reason?:string }}
  */
-function classifyRunResult({ code, output, completion }) {
+function classifyRunResult({ code, output, completion }: ClassifyRunArgs): ClassifyRunResult {
   if (code === 0) {
     if (completion && completion.completed) {
       return { kind: RUN_RESULT.TASK_COMPLETED, code, completion };
@@ -1141,7 +1249,7 @@ function classifyRunResult({ code, output, completion }) {
   return { kind: RUN_RESULT.FAILED, code, classification };
 }
 
-async function runItem(item) {
+async function runItem(item: QueueItem): Promise<void> {
   const { issueId } = item;
 
   // Check current Linear state before executing
@@ -1227,7 +1335,7 @@ async function runItem(item) {
       });
       try {
         saveResumeMetadata(metadata);
-      } catch (e) {
+      } catch (e: any) {
         log('ERROR', `saveResumeMetadata failed: ${e.message}`, { issue: issueId });
       }
       const queueLength = (loadQueue() || []).length;
@@ -1263,7 +1371,7 @@ async function runItem(item) {
   }
 }
 
-async function drainQueue() {
+async function drainQueue(): Promise<void> {
   // Normalize queue to eliminate any duplicate issueId entries
   const normalizedQueue = normalizeQueue(loadQueue());
   saveQueue(normalizedQueue);
@@ -1271,13 +1379,13 @@ async function drainQueue() {
   // Prune expired items (TTL-based, with Linear confirmation)
   try {
     await pruneExpiredQueueItems();
-  } catch (err) {
+  } catch (err: any) {
     log('QUEUE', `drainQueue: pruneExpiredQueueItems error (non-fatal): ${err.message}`);
   }
 
   let processedCount = 0;
-  let item;
-  let lastProcessedGroup = null;
+  let item: QueueItem | null;
+  let lastProcessedGroup: string | null = null;
 
   while (processedCount < MAX_DRAIN_ITEMS && (item = dequeue(lastProcessedGroup)) !== null) {
     // Skip items whose retryAt is in the future — put back and stop drain
@@ -1329,7 +1437,7 @@ async function drainQueue() {
       processedCount++;
       // Track this item's issueId as the last processed group anchor for child issues
       lastProcessedGroup = item.issueId || item.issueIdentifier || null;
-    } catch (err) {
+    } catch (err: any) {
       log('QUEUE', `drain error: ${err.message}`, { issue: item.issueId });
       lastProcessedGroup = null;
     } finally {

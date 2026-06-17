@@ -7,10 +7,12 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { DiscordNotifier } = require('./lib/discordNotifier');
 const { attemptSessionContinue } = require('./lib/sessionContinue');
 
+export {};
+
 const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
 const LOG_FILE = path.join(LOG_DIR, 'auto_runner.log');
 
-function logger(message) {
+function logger(message: string): void {
   try {
     if (!fs.existsSync(LOG_DIR)) {
       fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -19,15 +21,15 @@ function logger(message) {
     const line = `[${timestamp}] [RESUME] ${message}\n`;
     fs.appendFileSync(LOG_FILE, line);
     console.log(`[RESUME] ${message}`);
-  } catch (err) {
+  } catch (err: any) {
     console.error(`[RESUME:LOG_ERROR] ${err.message}`);
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  let paneId = null;
-  let issueId = null;
+  let paneId: string | null = null;
+  let issueId: string | null = null;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--pane' && args[i + 1]) {
@@ -40,7 +42,7 @@ async function main() {
   }
 
   if (!paneId) {
-    console.error('Usage: node src/session-continue-cli.js --pane <paneId> [--issue <issueId>]');
+    console.error('Usage: node src/session-continue-cli.ts --pane <paneId> [--issue <issueId>]');
     process.exit(1);
   }
 
@@ -50,20 +52,14 @@ async function main() {
     notifier.start();
   }
 
-  const notify = (msg) => {
+  const notify = (msg: string) => {
     if (webhookUrl) {
       notifier.add(msg + '\n');
-    } else {
-      // The instructions say "otherwise console.log".
-      // Since logger() already console.logs with [RESUME] prefix,
-      // we only console.log here if it's NOT already being logged by logger.
-      // In attemptSessionContinue, both are often called with the same string.
-      // We'll just skip it here to avoid double console output if no webhook.
     }
   };
 
   try {
-    const result = await attemptSessionContinue({
+    const result: { status: string } = await attemptSessionContinue({
       paneId,
       issueId,
       notify,
@@ -87,7 +83,7 @@ async function main() {
       default:
         process.exit(0);
     }
-  } catch (err) {
+  } catch (err: any) {
     logger(`ERROR: ${err.message}`);
     await notifier.stop();
     process.exit(1);
@@ -98,3 +94,4 @@ main().catch(err => {
   console.error(err);
   process.exit(1);
 });
+

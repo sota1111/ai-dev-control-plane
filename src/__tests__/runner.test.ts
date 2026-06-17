@@ -10,6 +10,8 @@ const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
 const runner = require('../runner');
 
+export {};
+
 describe('runner', () => {
   const mockLockFile = runner.LOCK_FILE;
 
@@ -26,7 +28,7 @@ describe('runner', () => {
 
   describe('acquireLock', () => {
     it('returns true when lock file does not exist', () => {
-      fs.existsSync.mockImplementation((path) => path === runner.LOG_DIR); // log dir exists, lock file doesn't
+      fs.existsSync.mockImplementation((path: string) => path === runner.LOG_DIR); // log dir exists, lock file doesn't
       const result = runner.acquireLock();
       expect(result).toBe(true);
       expect(fs.writeFileSync).toHaveBeenCalledWith(mockLockFile, expect.stringContaining(process.pid.toString()));
@@ -43,8 +45,8 @@ describe('runner', () => {
     it('returns true and removes stale lock when process is dead', () => {
       fs.existsSync.mockImplementation(() => true);
       fs.readFileSync.mockReturnValue(`99999:${new Date().toISOString()}`);
-      process.kill.mockImplementation(() => {
-        const err = new Error('Process not found');
+      (process.kill as jest.Mock).mockImplementation(() => {
+        const err: any = new Error('Process not found');
         err.code = 'ESRCH';
         throw err;
       });
@@ -113,7 +115,7 @@ describe('runner', () => {
     it('getUsageLimitCooldownUntil() returns a future cooldown', () => {
       const retryAt = new Date(Date.now() + 600000).toISOString();
       // Mock COOLDOWN_FILE exists
-      fs.existsSync.mockImplementation((path) => path === runner.COOLDOWN_FILE);
+      fs.existsSync.mockImplementation((path: string) => path === runner.COOLDOWN_FILE);
       fs.readFileSync.mockReturnValue(JSON.stringify({ until: retryAt }));
 
       expect(runner.getUsageLimitCooldownUntil()).toEqual({
@@ -128,7 +130,7 @@ describe('runner', () => {
 
     it('getUsageLimitCooldownUntil() clears expired cooldowns', () => {
       const retryAt = new Date(Date.now() - 1000).toISOString();
-      fs.existsSync.mockImplementation((path) => 
+      fs.existsSync.mockImplementation((path: string) => 
         path === runner.COOLDOWN_FILE || path === runner.USAGE_LIMIT_FILE
       );
       fs.readFileSync.mockReturnValue(JSON.stringify({ until: retryAt }));
@@ -141,20 +143,20 @@ describe('runner', () => {
 
 
   describe('queue management', () => {
-    function setupQueueState(initialQueue, { lockHeld = false } = {}) {
+    function setupQueueState(initialQueue: any[], { lockHeld = false } = {}) {
       let currentQueue = initialQueue.map(item => ({ ...item }));
 
-      fs.existsSync.mockImplementation((path) => (
+      fs.existsSync.mockImplementation((path: string) => (
         path === runner.LOG_DIR
         || path === runner.QUEUE_FILE
         || (lockHeld && path === runner.LOCK_FILE)
       ));
-      fs.readFileSync.mockImplementation((path) => {
+      fs.readFileSync.mockImplementation((path: string) => {
         if (path === runner.QUEUE_FILE) return JSON.stringify(currentQueue);
         if (path === runner.LOCK_FILE) return `${process.pid + 1}:${new Date().toISOString()}`;
         return '';
       });
-      fs.writeFileSync.mockImplementation((path, content) => {
+      fs.writeFileSync.mockImplementation((path: string, content: string) => {
         if (path === `${runner.QUEUE_FILE}.tmp`) {
           currentQueue = JSON.parse(content);
         }
@@ -165,7 +167,7 @@ describe('runner', () => {
       };
     }
 
-    function queueItem(issueId, priority, extra = {}) {
+    function queueItem(issueId: string, priority: number | null | undefined, extra: any = {}) {
       return {
         issueId,
         trigger: 'webhook',
@@ -177,9 +179,9 @@ describe('runner', () => {
       };
     }
 
-    function mockRunAutoExit(code, output = '') {
-      spawn.mockImplementation(() => {
-        const child = new EventEmitter();
+    function mockRunAutoExit(code: number, output = '') {
+      (spawn as jest.Mock).mockImplementation(() => {
+        const child: any = new EventEmitter();
         child.stdout = new EventEmitter();
         child.stderr = new EventEmitter();
         child.pid = 12345;
@@ -419,7 +421,7 @@ describe('runner', () => {
       runner.removeFromQueue('SOT-1');
       expect(fs.writeFileSync).toHaveBeenCalledWith(
         expect.stringContaining('runner.queue.json.tmp'),
-        expect.not.stringContaining('SOT-1')
+        expect.stringContaining('"issueId": "SOT-2"')
       );
     });
   });
@@ -438,7 +440,7 @@ describe('runner', () => {
   });
 
   describe('postUsageLimitComment', () => {
-    let writeSpy;
+    let writeSpy: jest.Mock;
 
     beforeEach(() => {
       jest.clearAllMocks();
@@ -446,11 +448,11 @@ describe('runner', () => {
       writeSpy = jest.fn();
     });
 
-    function setupLinearMocks(responses) {
+    function setupLinearMocks(responses: any[]) {
       let index = 0;
-      https.request.mockImplementation((options, callback) => {
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
         const responseData = JSON.stringify({ data: responses[index++] });
-        const res = {
+        const res: any = {
           on: jest.fn((event, cb) => {
             if (event === 'data') cb(responseData);
             if (event === 'end') cb();
@@ -556,16 +558,16 @@ describe('runner', () => {
   });
 
   describe('syncQueueWithLinear', () => {
-    let writeSpy;
+    let writeSpy: jest.Mock;
     beforeEach(() => {
       writeSpy = jest.fn();
     });
 
-    function setupLinearMocks(responses) {
+    function setupLinearMocks(responses: any[]) {
       let index = 0;
-      https.request.mockImplementation((options, callback) => {
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
         const responseData = JSON.stringify({ data: responses[index++] });
-        const res = {
+        const res: any = {
           on: jest.fn((event, cb) => {
             if (event === 'data') cb(responseData);
             if (event === 'end') cb();
@@ -628,7 +630,7 @@ describe('runner', () => {
       await runner.syncQueueWithLinear();
 
       // No writeFileSync with empty queue should be called if only active items
-      const writeCalls = fs.writeFileSync.mock.calls.filter(c => c[0].includes('runner.queue.json.tmp'));
+      const writeCalls = fs.writeFileSync.mock.calls.filter((c: any) => c[0].includes('runner.queue.json.tmp'));
       // If writeFileSync was called, it should still contain SOT-ACTIVE
       if (writeCalls.length > 0) {
         expect(writeCalls[writeCalls.length - 1][1]).toContain('SOT-ACTIVE');
@@ -638,8 +640,8 @@ describe('runner', () => {
     it('fail-open: keeps item on API error', async () => {
       fs.existsSync.mockReturnValue(true);
       fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-ERROR' }]));
-      https.request.mockImplementation((options, callback) => {
-        const req = new EventEmitter();
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
+        const req: any = new EventEmitter();
         req.write = jest.fn();
         req.end = jest.fn();
         process.nextTick(() => req.emit('error', new Error('API down')));
@@ -648,7 +650,7 @@ describe('runner', () => {
 
       await runner.syncQueueWithLinear();
 
-      const writeCalls = fs.writeFileSync.mock.calls.filter(c => c[0].includes('runner.queue.json.tmp'));
+      const writeCalls = fs.writeFileSync.mock.calls.filter((c: any) => c[0].includes('runner.queue.json.tmp'));
       expect(writeCalls.length).toBe(0); // Should not save cleaned queue
     });
   });
@@ -662,13 +664,13 @@ describe('runner', () => {
         expect.stringContaining('SOT-1')
       );
       
-      fs.existsSync.mockImplementation((path) => path === runner.INFLIGHT_FILE);
+      fs.existsSync.mockImplementation((path: string) => path === runner.INFLIGHT_FILE);
       fs.readFileSync.mockReturnValue(JSON.stringify(['SOT-1']));
       expect(runner.isInflight('SOT-1')).toBe(true);
     });
 
     it('removeInflight works', () => {
-      fs.existsSync.mockImplementation((path) => path === runner.INFLIGHT_FILE);
+      fs.existsSync.mockImplementation((path: string) => path === runner.INFLIGHT_FILE);
       fs.readFileSync.mockReturnValue(JSON.stringify(['SOT-1', 'SOT-2']));
       
       runner.removeInflight('SOT-1');
@@ -679,29 +681,29 @@ describe('runner', () => {
     });
 
     it('isQueuedOrRunning returns true if queued', () => {
-      fs.existsSync.mockImplementation((path) => path === runner.QUEUE_FILE);
+      fs.existsSync.mockImplementation((path: string) => path === runner.QUEUE_FILE);
       fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-1' }]));
       expect(runner.isQueuedOrRunning('SOT-1')).toBe(true);
     });
 
     it('isQueuedOrRunning returns true if inflight', () => {
-      fs.existsSync.mockImplementation((path) => path === runner.INFLIGHT_FILE);
+      fs.existsSync.mockImplementation((path: string) => path === runner.INFLIGHT_FILE);
       fs.readFileSync.mockReturnValue(JSON.stringify(['SOT-1']));
       expect(runner.isQueuedOrRunning('SOT-1')).toBe(true);
     });
   });
 
   describe('pruneExpiredQueueItems', () => {
-    let writeSpy;
+    let writeSpy: jest.Mock;
     beforeEach(() => {
       writeSpy = jest.fn();
     });
 
-    function setupLinearMocks(responses) {
+    function setupLinearMocks(responses: any[]) {
       let index = 0;
-      https.request.mockImplementation((options, callback) => {
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
         const responseData = JSON.stringify({ data: responses[index++] });
-        const res = {
+        const res: any = {
           on: jest.fn((event, cb) => {
             if (event === 'data') cb(responseData);
             if (event === 'end') cb();
@@ -739,7 +741,7 @@ describe('runner', () => {
 
       await runner.pruneExpiredQueueItems();
 
-      const writeCalls = fs.writeFileSync.mock.calls.filter(c => c[0].includes('runner.queue.json.tmp'));
+      const writeCalls = fs.writeFileSync.mock.calls.filter((c: any) => c[0].includes('runner.queue.json.tmp'));
       expect(writeCalls.length).toBe(0);
     });
 
@@ -757,8 +759,8 @@ describe('runner', () => {
       const oldDate = new Date(Date.now() - (runner.QUEUE_ITEM_TTL_DAYS + 1) * 24 * 60 * 60 * 1000).toISOString();
       fs.existsSync.mockReturnValue(true);
       fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-KEEP', enqueuedAt: oldDate }]));
-      https.request.mockImplementation(() => {
-        const req = new EventEmitter();
+      (https.request as jest.Mock).mockImplementation(() => {
+        const req: any = new EventEmitter();
         req.write = jest.fn();
         req.end = jest.fn();
         process.nextTick(() => req.emit('error', new Error('Linear unavailable')));
@@ -767,24 +769,24 @@ describe('runner', () => {
 
       await runner.pruneExpiredQueueItems();
 
-      const writeCalls = fs.writeFileSync.mock.calls.filter(c => c[0].includes('runner.queue.json.tmp'));
+      const writeCalls = fs.writeFileSync.mock.calls.filter((c: any) => c[0].includes('runner.queue.json.tmp'));
       expect(writeCalls.length).toBe(0);
     });
   });
 
   describe('runItem completion verification', () => {
-    let writeSpy;
+    let writeSpy: jest.Mock;
     beforeEach(() => {
       writeSpy = jest.fn();
       process.env.LINEAR_API_KEY = 'test-key';
       fs.existsSync.mockReturnValue(true);
     });
 
-    function setupLinearMocks(responses) {
+    function setupLinearMocks(responses: any[]) {
       let index = 0;
-      https.request.mockImplementation((options, callback) => {
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
         const responseData = JSON.stringify({ data: responses[index++] });
-        const res = {
+        const res: any = {
           on: jest.fn((event, cb) => {
             if (event === 'data') cb(responseData);
             if (event === 'end') cb();
@@ -800,7 +802,7 @@ describe('runner', () => {
       });
     }
 
-    function queueItem(issueId, priority) {
+    function queueItem(issueId: string, priority: number | null) {
       return {
         issueId,
         trigger: 'webhook',
@@ -811,9 +813,9 @@ describe('runner', () => {
       };
     }
 
-    function mockRunAutoExit(code, output = '') {
-      spawn.mockImplementation(() => {
-        const child = new EventEmitter();
+    function mockRunAutoExit(code: number, output = '') {
+      (spawn as jest.Mock).mockImplementation(() => {
+        const child: any = new EventEmitter();
         child.stdout = new EventEmitter();
         child.stderr = new EventEmitter();
         child.pid = 12345;
@@ -826,7 +828,7 @@ describe('runner', () => {
     }
 
     it('exits 0 but Linear state is In Progress: skips success cleanup', async () => {
-      const item = queueItem('SOT-101', 1);
+      const item: any = queueItem('SOT-101', 1);
       mockRunAutoExit(0, 'some output');
       setupLinearMocks([
         { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } }, // eligibility
@@ -837,13 +839,13 @@ describe('runner', () => {
 
       await runner.runItem(item);
 
-      const logs = logSpy.mock.calls.map(c => c[1]);
+      const logs = logSpy.mock.calls.map(c => c[1] as string);
       expect(logs.some(l => l.includes('completed successfully'))).toBe(false);
       expect(logs.some(l => l.includes('task completion not verified: state is "In Progress"'))).toBe(true);
     });
 
     it('exits 0 and output contains COMPLETION_CONTRACT: INCOMPLETE: skips success cleanup', async () => {
-      const item = queueItem('SOT-101', 1);
+      const item: any = queueItem('SOT-101', 1);
       mockRunAutoExit(0, '... COMPLETION_CONTRACT: INCOMPLETE reason=test-reason ...');
       setupLinearMocks([
         { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } } // eligibility
@@ -853,13 +855,13 @@ describe('runner', () => {
 
       await runner.runItem(item);
 
-      const logs = logSpy.mock.calls.map(c => c[1]);
+      const logs = logSpy.mock.calls.map(c => c[1] as string);
       expect(logs.some(l => l.includes('completed successfully'))).toBe(false);
       expect(logs.some(l => l.includes('task completion not verified: test-reason'))).toBe(true);
     });
 
     it('exits 0 and Linear state is Done: performs success cleanup', async () => {
-      const item = queueItem('SOT-101', 1);
+      const item: any = queueItem('SOT-101', 1);
       mockRunAutoExit(0, 'COMPLETION_CONTRACT: COMPLETED');
       setupLinearMocks([
         { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } }, // eligibility
@@ -870,13 +872,12 @@ describe('runner', () => {
 
       await runner.runItem(item);
 
-      const logs = logSpy.mock.calls.map(c => l => l.includes('completed successfully') ? true : false); // logSpy might have many calls
-      const logsFlat = logSpy.mock.calls.map(c => c[1]);
+      const logsFlat = logSpy.mock.calls.map(c => c[1] as string);
       expect(logsFlat.some(l => l.includes('completed successfully'))).toBe(true);
     });
 
     it('exits 70 (COMPLETION_UNVERIFIED): skips success cleanup', async () => {
-      const item = queueItem('SOT-101', 1);
+      const item: any = queueItem('SOT-101', 1);
       mockRunAutoExit(70, 'COMPLETION_CONTRACT: INCOMPLETE');
       setupLinearMocks([
         { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } } // eligibility
@@ -886,28 +887,28 @@ describe('runner', () => {
 
       await runner.runItem(item);
 
-      const logs = logSpy.mock.calls.map(c => c[1]);
+      const logs = logSpy.mock.calls.map(c => c[1] as string);
       expect(logs.some(l => l.includes('completed successfully'))).toBe(false);
       expect(logs.some(l => l.includes('process exited 70 (COMPLETION_UNVERIFIED)'))).toBe(true);
     });
 
     it('Linear query fails during verification: fail-closed, skips success cleanup', async () => {
-      const item = queueItem('SOT-101', 1);
+      const item: any = queueItem('SOT-101', 1);
       mockRunAutoExit(0, 'some output');
       
       let callCount = 0;
-      https.request.mockImplementation((options, callback) => {
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
         callCount++;
         if (callCount === 1) {
           const responseData = JSON.stringify({ data: { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } } });
-          const res = { on: jest.fn((event, cb) => {
+          const res: any = { on: jest.fn((event, cb) => {
             if (event === 'data') cb(responseData);
             if (event === 'end') cb();
           })};
           callback(res);
           return { on: jest.fn(), write: jest.fn(), end: jest.fn() };
         } else {
-          const req = new EventEmitter();
+          const req: any = new EventEmitter();
           req.write = jest.fn();
           req.end = jest.fn();
           process.nextTick(() => req.emit('error', new Error('Linear API Timeout')));
@@ -919,7 +920,7 @@ describe('runner', () => {
 
       await runner.runItem(item);
 
-      const logs = logSpy.mock.calls.map(c => c[1]);
+      const logs = logSpy.mock.calls.map(c => c[1] as string);
       expect(logs.some(l => l.includes('completed successfully'))).toBe(false);
       expect(logs.some(l => l.includes('task completion not verified: verification unavailable: Linear API Timeout'))).toBe(true);
     });

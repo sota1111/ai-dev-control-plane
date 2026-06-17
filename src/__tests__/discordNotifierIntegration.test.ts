@@ -1,10 +1,10 @@
 describe('DiscordNotifier integration in webhook-server', () => {
   const webhookUrl = 'https://discord.com/api/webhooks/test/hook';
-  let DiscordNotifierMock;
-  let originalStdoutWrite;
-  let originalStderrWrite;
-  let originalEnv;
-  let originalListeners;
+  let DiscordNotifierMock: jest.Mock;
+  let originalStdoutWrite: typeof process.stdout.write;
+  let originalStderrWrite: typeof process.stderr.write;
+  let originalEnv: NodeJS.ProcessEnv;
+  let originalListeners: Record<string, any[]>;
 
   function loadWebhookServer() {
     jest.isolateModules(() => {
@@ -107,3 +107,5 @@ describe('DiscordNotifier integration in webhook-server', () => {
     expect(instance.add).toHaveBeenCalledWith(expect.stringContaining('test stderr log message'));
   });
 });
+
+export {};
