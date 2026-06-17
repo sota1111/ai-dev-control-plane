@@ -20,11 +20,11 @@ describe('discordInteractionFollowup', () => {
       write: jest.fn(),
       end: jest.fn(),
     };
-    https.request.mockReturnValue(mockReq);
+    (https.request as jest.Mock).mockReturnValue(mockReq);
 
     const promise = editOriginalInteractionResponse('app123', 'token456', 'Hello');
 
-    const responseCallback = https.request.mock.calls[0][1];
+    const responseCallback = (https.request as jest.Mock).mock.calls[0][1];
     const mockRes = {
       statusCode: 200,
       on: jest.fn((event, cb) => {
@@ -48,13 +48,13 @@ describe('discordInteractionFollowup', () => {
 
   test('truncates content to 1990 characters', async () => {
     const mockReq = { on: jest.fn(), write: jest.fn(), end: jest.fn() };
-    https.request.mockReturnValue(mockReq);
+    (https.request as jest.Mock).mockReturnValue(mockReq);
 
     const longContent = 'a'.repeat(2000);
     const promise = editOriginalInteractionResponse('app', 'token', longContent);
 
-    const responseCallback = https.request.mock.calls[0][1];
-    responseCallback({ statusCode: 200, on: (event, cb) => { if (event === 'end') cb(); } });
+    const responseCallback = (https.request as jest.Mock).mock.calls[0][1];
+    responseCallback({ statusCode: 200, on: (event: string, cb: any) => { if (event === 'end') cb(); } });
 
     await promise;
     const writtenBody = JSON.parse(mockReq.write.mock.calls[0][0]);
@@ -64,12 +64,12 @@ describe('discordInteractionFollowup', () => {
 
   test('retries once on 429', async () => {
     const mockReq = { on: jest.fn(), write: jest.fn(), end: jest.fn() };
-    https.request.mockReturnValue(mockReq);
+    (https.request as jest.Mock).mockReturnValue(mockReq);
 
     const promise = editOriginalInteractionResponse('app', 'token', 'test');
 
     // First call returns 429
-    const responseCallback1 = https.request.mock.calls[0][1];
+    const responseCallback1 = (https.request as jest.Mock).mock.calls[0][1];
     const mockRes1 = {
       statusCode: 429,
       on: jest.fn((event, cb) => {
@@ -83,7 +83,7 @@ describe('discordInteractionFollowup', () => {
     await new Promise(r => setTimeout(r, 200));
 
     // Second call returns 200
-    const responseCallback2 = https.request.mock.calls[1][1];
+    const responseCallback2 = (https.request as jest.Mock).mock.calls[1][1];
     const mockRes2 = {
       statusCode: 200,
       on: jest.fn((event, cb) => {
@@ -106,7 +106,7 @@ describe('discordInteractionFollowup', () => {
       write: jest.fn(),
       end: jest.fn(),
     };
-    https.request.mockReturnValue(mockReq);
+    (https.request as jest.Mock).mockReturnValue(mockReq);
 
     const result = await editOriginalInteractionResponse('app', 'token', 'test');
     expect(result.status).toBe(0);
@@ -114,7 +114,7 @@ describe('discordInteractionFollowup', () => {
   });
 
   test('logs and returns status 0 if applicationId or interactionToken is missing', async () => {
-    const result = await editOriginalInteractionResponse(null, 'token', 'test');
+    const result = await editOriginalInteractionResponse(undefined, 'token', 'test');
     expect(result.status).toBe(0);
     expect(runner.log).toHaveBeenCalledWith('DISCORD_ASK', 'Missing applicationId or interactionToken for followup', expect.any(Object));
   });

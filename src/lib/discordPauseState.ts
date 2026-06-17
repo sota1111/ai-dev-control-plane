@@ -4,20 +4,27 @@ const fs = require('fs');
 const path = require('path');
 const runner = require('../runner');
 
-const PAUSE_FILE = path.join(runner.LOG_DIR, 'runner.pause');
+export {};
 
-function isPaused() {
+const PAUSE_FILE: string = path.join(runner.LOG_DIR, 'runner.pause');
+
+interface PauseInfo {
+  pausedAt: string;
+  reason: string;
+}
+
+function isPaused(): boolean {
   return fs.existsSync(PAUSE_FILE);
 }
 
-function setPaused(reason = 'Discord /pause command') {
+function setPaused(reason: string = 'Discord /pause command'): void {
   fs.writeFileSync(PAUSE_FILE, JSON.stringify({
     pausedAt: new Date().toISOString(),
     reason,
   }), 'utf8');
 }
 
-function clearPause() {
+function clearPause(): boolean {
   if (fs.existsSync(PAUSE_FILE)) {
     fs.unlinkSync(PAUSE_FILE);
     return true;
@@ -25,7 +32,7 @@ function clearPause() {
   return false;
 }
 
-function getPauseInfo() {
+function getPauseInfo(): PauseInfo | null {
   if (!fs.existsSync(PAUSE_FILE)) return null;
   try {
     return JSON.parse(fs.readFileSync(PAUSE_FILE, 'utf8'));

@@ -1,13 +1,29 @@
 /**
  * Logic for determining the execution order of the queue.
- * Extracted from src/runner.js to be shared with Discord command handlers.
  */
+export {};
+
+interface QueueItem {
+  priority?: number;
+  priorityRank?: number;
+  retryAt?: string | null;
+  enqueuedAt?: string | null;
+  queueGroup?: string | null;
+  queueGroupOrder?: string | null;
+  issueId?: string;
+  issueIdentifier?: string;
+}
+
+interface SelectNextOptions {
+  lastProcessedGroup?: string | null;
+  now?: Date;
+}
 
 /**
  * Maps Linear priority to a numerical rank.
  * 1: Urgent, 2: High, 3: Medium, 4: Low, 5: None/Other
  */
-function getPriorityRank(priority) {
+function getPriorityRank(priority: number | undefined): number {
   if (priority === 1) return 1; // Urgent
   if (priority === 2) return 2; // High
   if (priority === 3) return 3; // Medium
@@ -18,7 +34,7 @@ function getPriorityRank(priority) {
 /**
  * Gets the effective priority rank for an item, favoring priorityRank if set.
  */
-function effectiveRank(item) {
+function effectiveRank(item: QueueItem): number {
   return item.priorityRank != null ? item.priorityRank : getPriorityRank(item.priority);
 }
 
@@ -32,9 +48,9 @@ function effectiveRank(item) {
  * 
  * Only items where retryAt is null/missing or in the past are eligible.
  */
-function selectNextReadyIndex(queue, { lastProcessedGroup = null, now = new Date() } = {}) {
-  // Filter to ready items (retryAt null or in the past)
-  const readyIndices = queue.reduce((acc, item, i) => {
+function selectNextReadyIndex(queue: QueueItem[], { lastProcessedGroup = null, now = new Date() }: SelectNextOptions = {}): number | null {
+  // Filter to ready indices
+  const readyIndices: number[] = queue.reduce((acc: number[], item, i) => {
     if (!item.retryAt || new Date(item.retryAt) <= now) acc.push(i);
     return acc;
   }, []);
@@ -42,7 +58,7 @@ function selectNextReadyIndex(queue, { lastProcessedGroup = null, now = new Date
   if (readyIndices.length === 0) return null;
 
   // Helper: compare two candidate indices, returning the better one
-  function betterIndex(aIdx, bIdx, groupMode = false) {
+  function betterIndex(aIdx: number, bIdx: number, groupMode: boolean = false): number {
     const a = queue[aIdx];
     const b = queue[bIdx];
     const rankA = effectiveRank(a);
@@ -106,13 +122,12 @@ function selectNextReadyIndex(queue, { lastProcessedGroup = null, now = new Date
  * Previews the full execution order of the queue.
  * Returns { ready: [...items], waiting: [...items] }.
  */
-function previewQueueOrder(queue, { lastProcessedGroup = null, now = new Date() } = {}) {
-  const ready = [];
-  const waiting = [];
+function previewQueueOrder(queue: QueueItem[], { lastProcessedGroup = null, now = new Date() }: SelectNextOptions = {}): { ready: QueueItem[], waiting: QueueItem[] } {
+  const ready: QueueItem[] = [];
+  const waiting: QueueItem[] = [];
 
-  // Separate waiting items first (to keep it simple and avoid repeated filtering)
-  const executable = [];
-  const notReady = [];
+  const executable: QueueItem[] = [];
+  const notReady: QueueItem[] = [];
 
   for (const item of queue) {
     if (!item.retryAt || new Date(item.retryAt) <= now) {
@@ -123,24 +138,24 @@ function previewQueueOrder(queue, { lastProcessedGroup = null, now = new Date() 
   }
 
   // Sort waiting items by retryAt ascending
-  waiting.push(...notReady.sort((a, b) => new Date(a.retryAt) - new Date(b.retryAt)));
+  waiting.push(...notReady.sort((a, b) => {
+    const timeA = a.retryAt ? new Date(a.retryAt).getTime() : 0;
+    const timeB = b.retryAt ? new Date(b.retryAt).getTime() : 0;
+    return timeA - timeB;
+  }));
 
   // Simulate selection for ready items
-  // We use a shallow copy of the executable items because we'll be splicing it
   let currentQueue = [...executable];
   let currentGroup = lastProcessedGroup;
 
   while (currentQueue.length > 0) {
     const nextIdx = selectNextReadyIndex(currentQueue, { lastProcessedGroup: currentGroup, now });
     if (nextIdx === null) {
-      // Should not happen if executable only contains ready items, 
-      // but as a safety measure we break and add remaining to waiting or just end.
       break;
     }
 
     const selected = currentQueue.splice(nextIdx, 1)[0];
     ready.push(selected);
-    // Update currentGroup for next iteration (mimics drainQueue setting lastProcessedGroup)
     currentGroup = selected.issueId || selected.issueIdentifier || null;
   }
 

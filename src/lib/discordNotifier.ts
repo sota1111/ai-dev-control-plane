@@ -1,10 +1,12 @@
 'use strict';
 const https = require('https');
 
+export {};
+
 const MAX_LENGTH = 1990;
 
-function splitChunks(text) {
-  const chunks = [];
+function splitChunks(text: string): string[] {
+  const chunks: string[] = [];
   while (text.length > 0) {
     chunks.push(text.slice(0, MAX_LENGTH));
     text = text.slice(MAX_LENGTH);
@@ -12,7 +14,12 @@ function splitChunks(text) {
   return chunks;
 }
 
-function postToDiscord(webhookUrl, content) {
+interface DiscordResponse {
+  status: number;
+  body: string;
+}
+
+function postToDiscord(webhookUrl: string, content: string): Promise<DiscordResponse> {
   return new Promise((resolve) => {
     const body = JSON.stringify({ content });
     const url = new URL(webhookUrl);
@@ -25,9 +32,9 @@ function postToDiscord(webhookUrl, content) {
         'Content-Length': Buffer.byteLength(body)
       }
     };
-    const req = https.request(options, (res) => {
+    const req = https.request(options, (res: any) => {
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
+      res.on('data', (chunk: string) => { data += chunk; });
       res.on('end', () => resolve({ status: res.statusCode, body: data }));
     });
     req.on('error', () => resolve({ status: 0, body: '' }));
@@ -36,7 +43,7 @@ function postToDiscord(webhookUrl, content) {
   });
 }
 
-async function sendWithRetry(webhookUrl, content) {
+async function sendWithRetry(webhookUrl: string, content: string): Promise<void> {
   const result = await postToDiscord(webhookUrl, content);
   if (result.status === 429) {
     try {
@@ -51,18 +58,22 @@ async function sendWithRetry(webhookUrl, content) {
 }
 
 class DiscordNotifier {
-  constructor(webhookUrl) {
+  private _url: string | undefined;
+  private _buffer: string[];
+  private _timer: NodeJS.Timeout | null;
+
+  constructor(webhookUrl: string | undefined) {
     this._url = webhookUrl;
     this._buffer = [];
     this._timer = null;
   }
 
-  start(intervalMs = 5000) {
+  start(intervalMs: number = 5000): void {
     this._timer = setInterval(() => this.flush(), intervalMs);
-    if (this._timer.unref) this._timer.unref();
+    if (this._timer && this._timer.unref) this._timer.unref();
   }
 
-  stop() {
+  stop(): Promise<void> {
     if (this._timer) {
       clearInterval(this._timer);
       this._timer = null;
@@ -70,11 +81,11 @@ class DiscordNotifier {
     return this.flush();
   }
 
-  add(text) {
+  add(text: string): void {
     if (text) this._buffer.push(text);
   }
 
-  async flush() {
+  async flush(): Promise<void> {
     if (this._buffer.length === 0) return;
     const text = this._buffer.join('');
     this._buffer = [];

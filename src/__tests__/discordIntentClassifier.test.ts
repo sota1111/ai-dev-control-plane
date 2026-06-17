@@ -1,5 +1,7 @@
 'use strict';
 
+export {};
+
 const { classifyIntent, isDangerous, extractIssueId } = require('../lib/discordIntentClassifier');
 
 describe('isDangerous', () => {

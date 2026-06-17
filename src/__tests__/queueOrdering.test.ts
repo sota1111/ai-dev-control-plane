@@ -99,8 +99,8 @@ describe('queueOrdering', () => {
       // 1. urgent1 (global urgent) -> lastProcessedGroup = urgent1
       // 2. normal1 (best of remaining ready) -> lastProcessedGroup = normal1
       // 3. group-item1 (group continuation)
-      expect(ready.map(i => i.issueId)).toEqual(['urgent1', 'normal1', 'group-item1']);
-      expect(waiting.map(i => i.issueId)).toEqual(['waiting1']);
+      expect(ready.map((i: any) => i.issueId)).toEqual(['urgent1', 'normal1', 'group-item1']);
+      expect(waiting.map((i: any) => i.issueId)).toEqual(['waiting1']);
     });
 
     test('waiting items are sorted by retryAt', () => {
@@ -110,7 +110,7 @@ describe('queueOrdering', () => {
       ];
       const { ready, waiting } = queueOrdering.previewQueueOrder(queue, { now });
       expect(ready).toHaveLength(0);
-      expect(waiting.map(i => i.issueId)).toEqual(['waiting-early', 'waiting-late']);
+      expect(waiting.map((i: any) => i.issueId)).toEqual(['waiting-early', 'waiting-late']);
     });
   });
 });

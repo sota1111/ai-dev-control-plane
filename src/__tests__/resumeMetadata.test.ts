@@ -9,7 +9,7 @@ const {
 } = require('../lib/resumeMetadata');
 
 describe('resumeMetadata', () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'resume-metadata-test-'));

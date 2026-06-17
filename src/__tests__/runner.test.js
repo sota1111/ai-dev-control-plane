@@ -1,14 +1,14 @@
-const fs = require('fs');
-const https = require('https');
-const { EventEmitter } = require('events');
-const { spawn } = require('child_process');
-const runner = require('../runner');
-
 jest.mock('fs');
 jest.mock('https');
 jest.mock('child_process', () => ({
   spawn: jest.fn()
 }));
+
+const fs = require('fs');
+const https = require('https');
+const { EventEmitter } = require('events');
+const { spawn } = require('child_process');
+const runner = require('../runner');
 
 describe('runner', () => {
   const mockLockFile = runner.LOCK_FILE;

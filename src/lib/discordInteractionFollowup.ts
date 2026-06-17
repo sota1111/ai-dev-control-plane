@@ -3,21 +3,28 @@
 const https = require('https');
 const runner = require('../runner');
 
+export {};
+
 const DISCORD_MAX_LENGTH = 1990;
 
 /**
  * Truncate text to Discord max length and append '…' if truncated.
  */
-function truncateContent(text) {
+function truncateContent(text: string): string {
   if (typeof text !== 'string') return '';
   if (text.length <= DISCORD_MAX_LENGTH) return text;
   return text.slice(0, DISCORD_MAX_LENGTH) + '…';
 }
 
+interface FollowupResponse {
+  status: number;
+  body: string;
+}
+
 /**
  * PATCH @original; resolves { status, body }. Never throws.
  */
-async function editOriginalInteractionResponse(applicationId, interactionToken, content) {
+async function editOriginalInteractionResponse(applicationId: string | undefined, interactionToken: string | undefined, content: string): Promise<FollowupResponse> {
   if (!applicationId || !interactionToken) {
     runner.log('DISCORD_ASK', 'Missing applicationId or interactionToken for followup', { applicationId, interactionToken: !!interactionToken });
     return { status: 0, body: '' };
@@ -27,7 +34,7 @@ async function editOriginalInteractionResponse(applicationId, interactionToken, 
     content: truncateContent(content)
   };
 
-  const executePatch = () => new Promise((resolve) => {
+  const executePatch = (): Promise<FollowupResponse> => new Promise((resolve) => {
     const body = JSON.stringify(payload);
     const options = {
       hostname: 'discord.com',
@@ -39,13 +46,13 @@ async function editOriginalInteractionResponse(applicationId, interactionToken, 
       }
     };
 
-    const req = https.request(options, (res) => {
+    const req = https.request(options, (res: any) => {
       let responseBody = '';
-      res.on('data', (chunk) => { responseBody += chunk; });
+      res.on('data', (chunk: string) => { responseBody += chunk; });
       res.on('end', () => resolve({ status: res.statusCode, body: responseBody }));
     });
 
-    req.on('error', (err) => {
+    req.on('error', (err: any) => {
       runner.log('DISCORD_ASK', `Followup request error: ${err.message}`);
       resolve({ status: 0, body: '' });
     });

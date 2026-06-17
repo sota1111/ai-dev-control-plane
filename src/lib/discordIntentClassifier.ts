@@ -1,5 +1,7 @@
 'use strict';
 
+export {};
+
 const ISSUE_ID_PATTERN = /\bSOT-\d+\b/i;
 
 // Dangerous patterns that must always be rejected
@@ -122,24 +124,30 @@ const INTENT_PATTERNS = [
 /**
  * Check if input contains dangerous patterns that should always be rejected.
  */
-function isDangerous(text) {
+function isDangerous(text: string): boolean {
   return DANGEROUS_PATTERNS.some(p => p.test(text));
 }
 
 /**
  * Extract SOT-xxx issue ID from text. Returns null if not found.
  */
-function extractIssueId(text) {
+function extractIssueId(text: string): string | null {
   const match = text.match(ISSUE_ID_PATTERN);
   return match ? match[0].toUpperCase() : null;
+}
+
+interface IntentResult {
+  intent: string;
+  issueId: string | null;
+  originalText: string;
 }
 
 /**
  * Classify natural language input into an intent.
  * @param {string} text - user input
- * @returns {{ intent: string, issueId: string|null, originalText: string }}
+ * @returns {IntentResult}
  */
-function classifyIntent(text) {
+function classifyIntent(text: string): IntentResult {
   const originalText = text;
   const issueId = extractIssueId(text);
 

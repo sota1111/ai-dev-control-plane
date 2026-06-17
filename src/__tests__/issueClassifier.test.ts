@@ -1,5 +1,7 @@
 const { classifyIssue, isProcessPrefixedTitle, suggestFeatureTitleHint } = require('../lib/issueClassifier');
 
+export {};
+
 describe('classifyIssue', () => {
   test('[IMPLEMENT] prefix → IMPLEMENT/gemini', () => {
     const r = classifyIssue({ id: '1', title: '[IMPLEMENT] SOT-100 - ○○実装' });
@@ -72,22 +74,22 @@ describe('classifyIssue', () => {
 
   test('Japanese PLAN keywords → PLAN/claude-code', () => {
     // 機能改善項目
-    expect(classifyIssue({ title: '機能改善項目の整理' }).type).toBe('PLAN');
+    expect(classifyIssue({ id: '11', title: '機能改善項目の整理' }).type).toBe('PLAN');
     // リファクタリング
-    expect(classifyIssue({ title: 'リファクタリング', description: '構造を見直す' }).type).toBe('PLAN');
+    expect(classifyIssue({ id: '12', title: 'リファクタリング', description: '構造を見直す' }).type).toBe('PLAN');
     // 方針
-    expect(classifyIssue({ title: '○○のリファクタ方針を決める' }).type).toBe('PLAN');
+    expect(classifyIssue({ id: '13', title: '○○のリファクタ方針を決める' }).type).toBe('PLAN');
     // 調査 (debugより優先されるか)
-    expect(classifyIssue({ title: '不具合の調査' }).type).toBe('PLAN');
+    expect(classifyIssue({ id: '14', title: '不具合の調査' }).type).toBe('PLAN');
     // 一覧を作成
-    expect(classifyIssue({ title: '一覧を作成する' }).type).toBe('PLAN');
+    expect(classifyIssue({ id: '15', title: '一覧を作成する' }).type).toBe('PLAN');
 
-    const r = classifyIssue({ title: 'リファクタリング' });
+    const r = classifyIssue({ id: '16', title: 'リファクタリング' });
     expect(r.worker).toBe('claude-code');
   });
 
   test('UI implementation tasks with "一覧" → IMPLEMENT/gemini (regression prevention)', () => {
-    const r = classifyIssue({ title: '宅配ボックス一覧画面作成' });
+    const r = classifyIssue({ id: '17', title: '宅配ボックス一覧画面作成' });
     expect(r.type).toBe('IMPLEMENT');
     expect(r.worker).toBe('gemini');
   });

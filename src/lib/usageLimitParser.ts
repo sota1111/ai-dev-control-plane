@@ -1,12 +1,9 @@
 /**
  * Internal helper to parse raw usage limit reset time from text and returns the Unix epoch (seconds).
- * NO buffer added.
- * 
- * @param {string} text - Combined stdout/stderr
- * @param {number} nowMs - Current time in ms
- * @returns {number | null} - Unix epoch (seconds) or null if not applicable
  */
-function parseRawResetEpoch(text, nowMs) {
+export {};
+
+function parseRawResetEpoch(text: string, nowMs: number): number | null {
   const keywords = ['resets', 'reset at', 'resets at', 'will reset at', 'Your limit will reset'];
   if (!keywords.some(k => text.toLowerCase().includes(k.toLowerCase()))) return null;
 
@@ -23,7 +20,7 @@ function parseRawResetEpoch(text, nowMs) {
   
   if (!timeMatch) return null;
 
-  let hours, minutes, ampm;
+  let hours: number, minutes: number, ampm: string | null;
   if (timeMatch[1]) {
     // Matched (\d{1,2})(?::(\d{2}))?\s*(am|pm)
     hours = parseInt(timeMatch[1], 10);
@@ -76,11 +73,20 @@ function parseRawResetEpoch(text, nowMs) {
  * @param {number} [nowMs] - Optional current time in ms for testability
  * @returns {number | null} - Unix epoch (seconds) or null if not applicable
  */
-function parseUsageLimitResetEpoch(text, nowMs = Date.now()) {
+function parseUsageLimitResetEpoch(text: string, nowMs: number = Date.now()): number | null {
   const buffer = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
   const rawEpoch = parseRawResetEpoch(text, nowMs);
   if (rawEpoch === null) return null;
   return rawEpoch + buffer;
+}
+
+interface UsageLimitResult {
+  type: string;
+  retryable: boolean;
+  resetAt: string | null;
+  retryAt: string | null;
+  confidence: string;
+  rawMessage: string;
 }
 
 /**
@@ -89,12 +95,12 @@ function parseUsageLimitResetEpoch(text, nowMs = Date.now()) {
  * @param {string} text 
  * @param {number} nowMs 
  */
-function classifyUsageLimit(text, nowMs = Date.now()) {
+function classifyUsageLimit(text: string, nowMs: number = Date.now()): UsageLimitResult {
   const buffer = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
   const overloadBuffer = parseInt(process.env.OVERLOAD_RETRY_BUFFER_SECONDS || '3600', 10);
   const lowerText = text.toLowerCase();
   
-  const result = {
+  const result: UsageLimitResult = {
     type: 'unknown',
     retryable: false,
     resetAt: null,
@@ -188,7 +194,7 @@ function classifyUsageLimit(text, nowMs = Date.now()) {
 /**
  * Calculates UTC epoch for a given local time in a specific timezone.
  */
-function getEpochForTZ(year, month, day, hours, minutes, timeZone) {
+function getEpochForTZ(year: number, month: number, day: number, hours: number, minutes: number, timeZone: string): number {
   let date = new Date(Date.UTC(year, month, day, hours, minutes));
   for (let i = 0; i < 2; i++) {
     const offsetMs = getTimezoneOffsetMs(timeZone, date);
@@ -204,7 +210,7 @@ function getEpochForTZ(year, month, day, hours, minutes, timeZone) {
 /**
  * Gets the difference between local time in timeZone and UTC for a given date.
  */
-function getTimezoneOffsetMs(timeZone, date) {
+function getTimezoneOffsetMs(timeZone: string, date: Date): number {
   try {
     const formatter = new Intl.DateTimeFormat('en-US', {
       timeZone,
@@ -217,7 +223,7 @@ function getTimezoneOffsetMs(timeZone, date) {
       hour12: false
     });
     const parts = formatter.formatToParts(date);
-    const p = {};
+    const p: any = {};
     parts.forEach(part => p[part.type] = part.value);
     
     const tzDate = new Date(Date.UTC(

@@ -1,6 +1,39 @@
 const fs = require('fs');
 const path = require('path');
 
+export {};
+
+interface IssueRerunMetadata {
+  issueId: string;
+  resumeMode: 'issue-rerun';
+  stoppedReason?: string;
+  stoppedAt: string;
+  resetAt: string | null;
+  retryAt: string | null;
+  branch: string | null;
+  lastCommit: string | null;
+  gitStatus: string | null;
+  previousRunLog: string | null;
+  previousExitCode: number | null;
+  nextActionHint: string;
+}
+
+interface SessionContinueMetadata {
+  issueId: string | null;
+  resumeMode: 'session-continue';
+  stoppedReason?: string;
+  stoppedAt: string;
+  resetAt: string | null;
+  retryAt: string | null;
+  tmuxSession: string | null;
+  tmuxWindow: string | null;
+  tmuxPane: string | null;
+  foregroundProcess: string | null;
+  lastDetectedLimitMessage: string | null;
+}
+
+type ResumeMetadata = IssueRerunMetadata | SessionContinueMetadata;
+
 /**
  * Builds metadata for rerunning an issue.
  */
@@ -16,7 +49,7 @@ function buildIssueRerunMetadata({
   previousRunLog,
   previousExitCode,
   nextActionHint
-}) {
+}: any): IssueRerunMetadata {
   return {
     issueId,
     resumeMode: 'issue-rerun',
@@ -47,7 +80,7 @@ function buildSessionContinueMetadata({
   tmuxPane,
   foregroundProcess,
   lastDetectedLimitMessage
-}) {
+}: any): SessionContinueMetadata {
   return {
     issueId: issueId || null,
     resumeMode: 'session-continue',
@@ -66,9 +99,9 @@ function buildSessionContinueMetadata({
 /**
  * Returns the path for resume metadata JSON.
  */
-function resumeMetadataPath(issueId, baseDir) {
+function resumeMetadataPath(issueId: string | null | undefined, baseDir?: string): string {
   const root = baseDir || path.join(__dirname, '..', '..', 'docs', 'ai', 'auto_logs');
-  const sanitize = (id) => {
+  const sanitize = (id: string | null | undefined) => {
     if (!id) return 'session_' + Date.now().toString().slice(-6);
     return id.replace(/[\\/:*?"<>|]/g, '_');
   };
@@ -78,7 +111,7 @@ function resumeMetadataPath(issueId, baseDir) {
 /**
  * Saves resume metadata to a JSON file atomically.
  */
-function saveResumeMetadata(metadata, baseDir) {
+function saveResumeMetadata(metadata: ResumeMetadata, baseDir?: string): string {
   const filePath = resumeMetadataPath(metadata.issueId, baseDir);
   const dir = path.dirname(filePath);
 
@@ -98,32 +131,34 @@ function saveResumeMetadata(metadata, baseDir) {
 /**
  * Formats metadata into [RESUME] log lines.
  */
-function formatResumeLogLines(metadata, extra = {}) {
-  const lines = [];
+function formatResumeLogLines(metadata: ResumeMetadata, extra: any = {}): string[] {
+  const lines: string[] = [];
   const { resumeMode } = metadata;
 
   if (resumeMode === 'issue-rerun') {
-    lines.push(`[RESUME] issue=${metadata.issueId || ''}`);
+    const m = metadata as IssueRerunMetadata;
+    lines.push(`[RESUME] issue=${m.issueId || ''}`);
     lines.push(`[RESUME] mode=${resumeMode}`);
-    lines.push(`[RESUME] reason=${metadata.stoppedReason || ''}`);
-    lines.push(`[RESUME] resetAt=${metadata.resetAt || ''}`);
-    lines.push(`[RESUME] retryAt=${metadata.retryAt || ''}`);
-    lines.push(`[RESUME] branch=${metadata.branch || ''}`);
-    const status = (metadata.gitStatus || '').replace(/\r?\n/g, '; ');
+    lines.push(`[RESUME] reason=${m.stoppedReason || ''}`);
+    lines.push(`[RESUME] resetAt=${m.resetAt || ''}`);
+    lines.push(`[RESUME] retryAt=${m.retryAt || ''}`);
+    lines.push(`[RESUME] branch=${m.branch || ''}`);
+    const status = (m.gitStatus || '').replace(/\r?\n/g, '; ');
     lines.push(`[RESUME] gitStatus=${status}`);
-    lines.push(`[RESUME] previousRunLog=${metadata.previousRunLog || ''}`);
+    lines.push(`[RESUME] previousRunLog=${m.previousRunLog || ''}`);
     if (extra.queueLength != null) {
       lines.push(`[RESUME] queueLength=${extra.queueLength}`);
     }
   } else if (resumeMode === 'session-continue') {
-    lines.push(`[RESUME] issue=${metadata.issueId || ''}`);
+    const m = metadata as SessionContinueMetadata;
+    lines.push(`[RESUME] issue=${m.issueId || ''}`);
     lines.push(`[RESUME] mode=${resumeMode}`);
-    lines.push(`[RESUME] tmuxSession=${metadata.tmuxSession || ''}`);
-    lines.push(`[RESUME] tmuxWindow=${metadata.tmuxWindow || ''}`);
-    lines.push(`[RESUME] tmuxPane=${metadata.tmuxPane || ''}`);
-    lines.push(`[RESUME] foregroundProcess=${metadata.foregroundProcess || ''}`);
-    lines.push(`[RESUME] resetAt=${metadata.resetAt || ''}`);
-    lines.push(`[RESUME] retryAt=${metadata.retryAt || ''}`);
+    lines.push(`[RESUME] tmuxSession=${m.tmuxSession || ''}`);
+    lines.push(`[RESUME] tmuxWindow=${m.tmuxWindow || ''}`);
+    lines.push(`[RESUME] tmuxPane=${m.tmuxPane || ''}`);
+    lines.push(`[RESUME] foregroundProcess=${m.foregroundProcess || ''}`);
+    lines.push(`[RESUME] resetAt=${m.resetAt || ''}`);
+    lines.push(`[RESUME] retryAt=${m.retryAt || ''}`);
     lines.push(`[RESUME] action=${extra.action || 'send-continue'}`);
   }
 

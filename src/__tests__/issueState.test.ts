@@ -1,5 +1,7 @@
 const { isTerminalState } = require('../lib/issueState');
 
+export {};
+
 describe('isTerminalState', () => {
   test('returns true for terminal types', () => {
     expect(isTerminalState({ type: 'completed' })).toBe(true);

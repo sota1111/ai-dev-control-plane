@@ -346,7 +346,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
     local _fifo
     _fifo=$(mktemp -u /tmp/scheduler-drain-fifo-XXXXXX)
     mkfifo "$_fifo"
-    node src/runner-cli.js drain > "$_fifo" 2>&1 &
+    npx tsx src/runner-cli.js drain > "$_fifo" 2>&1 &
     _DRAIN_PID=$!
     while IFS= read -r _drain_line; do
       echo "$_drain_line" >> "$AUTO_RUNNER_LOG"
@@ -397,7 +397,7 @@ if [[ "${1:-}" == "--foreground" ]]; then
         while IFS= read -r _issue_id; do
           [ -z "$_issue_id" ] && continue
           log "Enqueuing: ${_issue_id}"
-          node src/runner-cli.js enqueue "$_issue_id" scheduler >> "$AUTO_RUNNER_LOG" 2>&1 || true
+          npx tsx src/runner-cli.js enqueue "$_issue_id" scheduler >> "$AUTO_RUNNER_LOG" 2>&1 || true
         done <<< "$active_identifiers"
         _run_drain
         log "--- Drain complete ---"
