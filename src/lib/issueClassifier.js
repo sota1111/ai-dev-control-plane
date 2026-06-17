@@ -75,10 +75,13 @@ function classifyIssue(issue) {
   }
 
   // 3. Control-plane / orchestration detection → PLAN/claude-code
+  // 計画/リファクタ系の日本語表現も PLAN に寄せる
   const planKeywords = [
     'usage-limit', 'queue', 'lock', 'webhook', 'scheduler',
     'claude code', 'worker routing', '自動分類', 'ルーティング',
-    '委譲', 'orchestrat'
+    '委譲', 'orchestrat',
+    '機能改善項目', 'リファクタリング', 'リファクタ', '調査', '方針',
+    '一覧を作成', '一覧作成'
   ];
   if (planKeywords.some(k => text.includes(k.toLowerCase()))) {
     return { type: TYPES.PLAN, worker: TYPE_TO_WORKER.PLAN, reason: 'Control-plane / orchestration keyword detected' };

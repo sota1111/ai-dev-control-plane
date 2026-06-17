@@ -70,6 +70,28 @@ describe('classifyIssue', () => {
     expect(r.worker).toBe('codex');
   });
 
+  test('Japanese PLAN keywords → PLAN/claude-code', () => {
+    // 機能改善項目
+    expect(classifyIssue({ title: '機能改善項目の整理' }).type).toBe('PLAN');
+    // リファクタリング
+    expect(classifyIssue({ title: 'リファクタリング', description: '構造を見直す' }).type).toBe('PLAN');
+    // 方針
+    expect(classifyIssue({ title: '○○のリファクタ方針を決める' }).type).toBe('PLAN');
+    // 調査 (debugより優先されるか)
+    expect(classifyIssue({ title: '不具合の調査' }).type).toBe('PLAN');
+    // 一覧を作成
+    expect(classifyIssue({ title: '一覧を作成する' }).type).toBe('PLAN');
+
+    const r = classifyIssue({ title: 'リファクタリング' });
+    expect(r.worker).toBe('claude-code');
+  });
+
+  test('UI implementation tasks with "一覧" → IMPLEMENT/gemini (regression prevention)', () => {
+    const r = classifyIssue({ title: '宅配ボックス一覧画面作成' });
+    expect(r.type).toBe('IMPLEMENT');
+    expect(r.worker).toBe('gemini');
+  });
+
 });
 
 describe('isProcessPrefixedTitle', () => {

@@ -1,29 +1,27 @@
-Wrote the verification report to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md).
+Verification complete. `npm run lint` passed with exit 0, and `npm test` passed with 15 suites / 217 tests.
 
-Results:
-- `npm run lint`: passed, exit 0
-- `npm test`: passed, 15 suites / 215 tests
-- No implementation fixes were needed
-- Next action recorded as `READY_FOR_REVIEW`
-letion` を実行し、その結果を `classifyRunResult` に渡して `switch(result.kind)` で既存の副作用を実行する形になっていました。
-
-lint と full test はどちらも pass しました。失敗はなかったため、コード修正は行っていません。
-
-## Changed Files
-- `docs/ai/60_worker_codex_report.md` — Codex verification report added.
+Wrote the required report to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md). No implementation fixes were needed.
+Files
+- `src/lib/issueClassifier.js` — Gemini implementation: added Japanese planning/refactor keywords to `planKeywords`.
+- `src/__tests__/issueClassifier.test.js` — Gemini implementation: added PLAN keyword coverage and UI list-screen regression coverage.
+- `docs/ai/60_worker_codex_report.md` — Codex verification report.
 
 ## Commands Run
-- `npm run lint` — Passed, exit 0. `node --check` completed for all configured files.
-- `npm test` — Passed, exit 0. Test Suites: 15 passed, 15 total. Tests: 215 passed, 215 total. Snapshots: 0 total. Baseline 208 tests + classifyRunResult 7 tests = 215 tests.
+`npm run lint` — PASS, exit 0.
+
+`npm test` — PASS, exit 0.
+- Test Suites: 15 passed, 15 total
+- Tests: 217 passed, 217 total
+- Snapshots: 0 total
 
 ## Acceptance Criteria
-- [x] run result が状態を区別できる構造（RUN_RESULT + classifyRunResult）になっている
-- [x] プロセス成功とタスク完了が別々に判定されている
-- [x] 既存のリトライ/usage-limit/lock挙動・ログ文言に回帰がない（テスト pass）
-- [x] verifyTaskCompletion / triggerRun の返却shape は変更されていない
+- [x] 計画/リファクタ系の日本語Issueが PLAN に分類される
+- [x] UI一覧画面作成タスクは IMPLEMENT のまま（過剰マッチなし）
+- [x] 既存分類に回帰なし（全テスト pass）
+- [x] 変更は対象2ファイルに限定
 
 ## Risks
-No unresolved issues found. `npm test` still prints the existing webhook development warning and Jest `--forceExit` notice, but the suite passes cleanly.
+Implementation changes are limited to `src/lib/issueClassifier.js` and `src/__tests__/issueClassifier.test.js`. `docs/ai/60_worker_codex_report.md` is additionally changed as the required verification artifact.
 
 ## Next Action
 READY_FOR_REVIEW
