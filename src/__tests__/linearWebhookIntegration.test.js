@@ -109,11 +109,13 @@ describe('Linear Webhook Integration', () => {
 
     // Runner will call:
     // 1. hasPendingIssues (query { issues(...) })
-    // 2. runItem -> getIssueExecutionEligibility (query { issue(...) })
-    // 3. runItem -> triggerRun (spawn)
-    // 4. runItem -> verifyTaskCompletion (query { issue(...) })
-    
+    // 2. refreshQueuePriorities -> fetchActiveIssues (query { issues(...) })
+    // 3. runItem -> getIssueExecutionEligibility (query { issue(...) })
+    // 4. runItem -> triggerRun (spawn)
+    // 5. runItem -> verifyTaskCompletion (query { issue(...) })
+
     linearMock.enqueue({ data: { issues: { nodes: [{ id: 'uuid-123' }] } } }); // hasPendingIssues
+    linearMock.enqueue({ data: { issues: { nodes: [{ id: 'uuid-123', identifier: 'ENG-1', priority: 2, priorityLabel: 'High', state: { type: 'unstarted', name: 'Todo' } }] } } }); // refreshQueuePriorities -> fetchActiveIssues
     linearMock.enqueue({ data: { issue: { id: 'uuid-123', identifier: 'ENG-1', state: { name: 'Todo', type: 'unstarted' } } } }); // eligibility
     linearMock.enqueue({ data: { issue: { id: 'uuid-123', state: { name: 'Done', type: 'completed' } } } }); // verifyTaskCompletion
 

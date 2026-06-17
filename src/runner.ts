@@ -772,6 +772,55 @@ async function syncQueueWithLinear(): Promise<void> {
   }
 }
 
+/**
+ * Refreshes the priority of items already in the local queue from Linear's current state.
+ *
+ * Priority-only changes in Linear do NOT fire a webhook, so an issue bumped to High/Urgent after
+ * it was enqueued would otherwise stay ordered on its stale enqueue-time priority. This re-stamps
+ * each queued item's priority/priorityLabel/priorityRank with the latest Linear value so the next
+ * dequeue() selects the genuinely highest-priority issue.
+ *
+ * Fail-open: on any error (e.g. Linear API failure) the queue is left untouched and execution is
+ * never blocked. This only affects selection of the NEXT item — items already running under the
+ * lock are not touched.
+ */
+async function refreshQueuePriorities(): Promise<void> {
+  try {
+    const queue = loadQueue();
+    if (queue.length === 0) return;
+
+    const active = await fetchActiveIssues();
+    // Key by both identifier and id, since queue items store issueId as either.
+    const byKey = new Map<string, { priority: number | null; priorityLabel: string | null }>();
+    for (const issue of active) {
+      const entry = { priority: issue.priority ?? null, priorityLabel: issue.priorityLabel ?? null };
+      if (issue.identifier) byKey.set(issue.identifier, entry);
+      if (issue.id) byKey.set(issue.id, entry);
+    }
+
+    const changed: string[] = [];
+    for (const item of queue) {
+      const fresh = item.issueId ? byKey.get(item.issueId) : undefined;
+      if (!fresh) continue;
+      const newRank = getPriorityRank(fresh.priority);
+      const oldRank = item.priorityRank ?? getPriorityRank(item.priority);
+      if (newRank !== oldRank || fresh.priority !== item.priority) {
+        changed.push(`${item.issueId}:${oldRank}->${newRank}`);
+        item.priority = fresh.priority;
+        item.priorityLabel = fresh.priorityLabel;
+        item.priorityRank = newRank;
+      }
+    }
+
+    if (changed.length > 0) {
+      saveQueue(queue);
+      log('QUEUE', `refreshQueuePriorities: updated ${changed.length} item(s)`, { changed: changed.join(',') });
+    }
+  } catch (err: any) {
+    log('QUEUE', `refreshQueuePriorities: error (fail-open, queue unchanged): ${err.message}`);
+  }
+}
+
 async function pruneExpiredQueueItems(): Promise<void> {
   const queue = loadQueue();
   if (queue.length === 0) return;
@@ -1388,6 +1437,14 @@ async function drainQueue(): Promise<void> {
     log('QUEUE', `drainQueue: pruneExpiredQueueItems error (non-fatal): ${err.message}`);
   }
 
+  // Refresh queued items' priority from Linear before selecting — priority-only changes do not
+  // fire a webhook, so this ensures the highest-priority issue is dequeued first.
+  try {
+    await refreshQueuePriorities();
+  } catch (err: any) {
+    log('QUEUE', `drainQueue: refreshQueuePriorities error (non-fatal): ${err.message}`);
+  }
+
   let processedCount = 0;
   let item: QueueItem | null;
   let lastProcessedGroup: string | null = null;
@@ -1492,6 +1549,7 @@ export {
   saveQueue,
   normalizeQueue,
   syncQueueWithLinear,
+  refreshQueuePriorities,
   pruneExpiredQueueItems,
   enqueue,
   getPriorityRank,

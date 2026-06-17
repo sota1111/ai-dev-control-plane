@@ -665,6 +665,90 @@ describe('runner', () => {
     });
   });
 
+  describe('refreshQueuePriorities', () => {
+    let prevApiKey: string | undefined;
+    beforeEach(() => {
+      prevApiKey = process.env.LINEAR_API_KEY;
+      process.env.LINEAR_API_KEY = 'test-key';
+    });
+    afterEach(() => {
+      if (prevApiKey === undefined) delete process.env.LINEAR_API_KEY;
+      else process.env.LINEAR_API_KEY = prevApiKey;
+    });
+
+    function setupLinearMocks(responses: any[]) {
+      let index = 0;
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
+        const responseData = JSON.stringify({ data: responses[index++] });
+        const res: any = {
+          on: jest.fn((event: any, cb: any) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return { on: jest.fn(), write: jest.fn(), end: jest.fn(), destroy: jest.fn() };
+      });
+    }
+
+    function queueWriteCalls() {
+      return fs.writeFileSync.mock.calls.filter((c: any) => c[0].includes('runner.queue.json.tmp'));
+    }
+
+    it('updates stale priority from Linear (latest wins)', async () => {
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-1', priority: 3, priorityRank: 3 }]));
+      setupLinearMocks([{ issues: { nodes: [
+        { id: 'SOT-1', identifier: 'SOT-1', priority: 1, priorityLabel: 'Urgent', state: { type: 'started', name: 'In Progress' } }
+      ] } }]);
+
+      await runner.refreshQueuePriorities();
+
+      const writeCalls = queueWriteCalls();
+      expect(writeCalls.length).toBeGreaterThan(0);
+      const saved = writeCalls[writeCalls.length - 1][1];
+      expect(saved).toContain('"priorityRank": 1');
+      expect(saved).toContain('"priority": 1');
+    });
+
+    it('does not write when priority is unchanged', async () => {
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-1', priority: 2, priorityRank: 2 }]));
+      setupLinearMocks([{ issues: { nodes: [
+        { id: 'SOT-1', identifier: 'SOT-1', priority: 2, priorityLabel: 'High', state: { type: 'started', name: 'In Progress' } }
+      ] } }]);
+
+      await runner.refreshQueuePriorities();
+
+      expect(queueWriteCalls().length).toBe(0);
+    });
+
+    it('fail-open: does not write or throw on API error', async () => {
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-1', priority: 3, priorityRank: 3 }]));
+      (https.request as jest.Mock).mockImplementation(() => {
+        const req: any = new EventEmitter();
+        req.write = jest.fn();
+        req.end = jest.fn();
+        process.nextTick(() => req.emit('error', new Error('API down')));
+        return req;
+      });
+
+      await expect(runner.refreshQueuePriorities()).resolves.toBeUndefined();
+      expect(queueWriteCalls().length).toBe(0);
+    });
+
+    it('empty queue is a no-op (no fetch, no write)', async () => {
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([]));
+
+      await runner.refreshQueuePriorities();
+
+      expect(https.request).not.toHaveBeenCalled();
+      expect(queueWriteCalls().length).toBe(0);
+    });
+  });
+
   describe('in-flight tracking', () => {
     it('addInflight and isInflight work', () => {
       fs.existsSync.mockReturnValue(false);
