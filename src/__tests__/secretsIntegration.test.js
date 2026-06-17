@@ -1,7 +1,5 @@
-'use strict';
-
-const { getSecret, resetSecretsForTest } = require('../config/secrets');
-const runner = require('../runner');
+import { getSecret, resetSecretsForTest } from '../config/secrets.js';
+import * as runner from '../runner.js';
 
 describe('Secrets Integration', () => {
   const originalApiKey = process.env.LINEAR_API_KEY;

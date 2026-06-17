@@ -1,22 +1,48 @@
-'use strict';
+import { jest } from '@jest/globals';
 
-jest.mock('https');
-jest.mock('fs');
-jest.mock('child_process', () => ({
-  spawn: jest.fn()
+const mockHttps = {
+  request: jest.fn(),
+};
+
+const mockFs = {
+  existsSync: jest.fn(),
+  readFileSync: jest.fn(),
+  writeFileSync: jest.fn(),
+  mkdirSync: jest.fn(),
+  appendFileSync: jest.fn(),
+  renameSync: jest.fn(),
+};
+
+const mockChildProcess = {
+  spawn: jest.fn(),
+  execSync: jest.fn(),
+};
+
+jest.unstable_mockModule('node:https', () => ({
+  default: mockHttps,
+  ...mockHttps,
 }));
 
-const request = require('supertest');
-const https = require('https');
-const fs = require('fs');
-const { spawn } = require('child_process');
+jest.unstable_mockModule('node:fs', () => ({
+  default: mockFs,
+  ...mockFs,
+}));
 
-// Set env var BEFORE requiring the app to skip signature verification in development mode
+jest.unstable_mockModule('node:child_process', () => ({
+  default: mockChildProcess,
+  ...mockChildProcess,
+}));
+
+// Set env var BEFORE importing the app to skip signature verification
 process.env.LINEAR_WEBHOOK_SECRET = '';
 
-const { app } = require('../webhook-server');
-const { installLinearHttpMock } = require('../__test_helpers__/linearMock');
-const runner = require('../runner');
+const request = (await import('supertest')).default;
+const https = await import('node:https');
+const fs = await import('node:fs');
+const { spawn } = await import('node:child_process');
+const { app } = await import('../webhook-server.js');
+const { installLinearHttpMock } = await import('../__test_helpers__/linearMock.js');
+const runner = await import('../runner.js');
 
 describe('Linear Webhook Integration', () => {
   let linearMock;
@@ -30,22 +56,22 @@ describe('Linear Webhook Integration', () => {
     // Mock fs
     let queueContent = '[]';
     fs.existsSync.mockImplementation((path) => {
-      if (path.includes('runner.lock')) return false;
+      if (typeof path === 'string' && path.includes('runner.lock')) return false;
       return true;
     });
     fs.readFileSync.mockImplementation((path) => {
-      if (path.includes('runner.queue.json')) return queueContent;
+      if (typeof path === 'string' && path.includes('runner.queue.json')) return queueContent;
       return '{}';
     });
     fs.writeFileSync.mockImplementation((path, content) => {
-      if (path.includes('runner.queue.json')) queueContent = content;
+      if (typeof path === 'string' && path.includes('runner.queue.json')) queueContent = content;
     });
     fs.mkdirSync.mockReturnValue(undefined);
     fs.appendFileSync.mockReturnValue(undefined);
     fs.renameSync.mockImplementation((src, dest) => {
-      if (dest.includes('runner.queue.json')) {
+      if (typeof dest === 'string' && dest.includes('runner.queue.json')) {
         // Find the tmp file content in writeFileSync calls
-        const lastWrite = fs.writeFileSync.mock.calls.reverse().find(call => call[0].includes('runner.queue.json.tmp'));
+        const lastWrite = fs.writeFileSync.mock.calls.reverse().find(call => typeof call[0] === 'string' && call[0].includes('runner.queue.json.tmp'));
         if (lastWrite) queueContent = lastWrite[1];
       }
     });

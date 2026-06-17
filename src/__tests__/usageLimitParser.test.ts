@@ -1,6 +1,5 @@
-const { parseUsageLimitResetEpoch } = require('../lib/usageLimitParser');
-
-export {};
+import { jest } from '@jest/globals';
+import { parseUsageLimitResetEpoch } from '../lib/usageLimitParser.js';
 
 describe('parseUsageLimitResetEpoch', () => {
   const REF_MS = 1749722400000; // 2026-06-12T10:00:00Z

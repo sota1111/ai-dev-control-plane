@@ -1,14 +1,8 @@
-'use strict';
+import { jest } from '@jest/globals';
 
-jest.mock('../runner', () => ({
-  log: jest.fn(),
-}));
-
-jest.mock('../lib/discordIntentClassifier', () => ({
-  classifyIntent: jest.fn(),
-}));
-
-jest.mock('../lib/discordIntentHandlers', () => ({
+const mockRunner = { log: jest.fn() };
+const mockClassifier = { classifyIntent: jest.fn() };
+const mockHandlers = {
   handleStatusIntent: jest.fn(),
   handleQueueIntent: jest.fn(),
   handleCooldownIntent: jest.fn(),
@@ -18,18 +12,21 @@ jest.mock('../lib/discordIntentHandlers', () => ({
   handleRetrySuggestIntent: jest.fn(),
   handleDangerousIntent: jest.fn(),
   handleUnknownIntent: jest.fn(),
-}));
+};
+const mockFollowup = {
+  editOriginalInteractionResponse: (jest.fn() as any).mockResolvedValue({ status: 200, body: '{}' }),
+};
 
-jest.mock('../lib/discordInteractionFollowup', () => ({
-  editOriginalInteractionResponse: jest.fn().mockResolvedValue({ status: 200, body: '{}' }),
-}));
+jest.unstable_mockModule('../runner.js', () => ({ ...mockRunner, default: mockRunner }));
+jest.unstable_mockModule('../lib/discordIntentClassifier.js', () => ({ ...mockClassifier, default: mockClassifier }));
+jest.unstable_mockModule('../lib/discordIntentHandlers.js', () => ({ ...mockHandlers, default: mockHandlers }));
+jest.unstable_mockModule('../lib/discordInteractionFollowup.js', () => ({ ...mockFollowup, default: mockFollowup }));
 
-const { handleAskCommand, handleAskModalSubmit } = require('../lib/discordAskHandler');
-const { classifyIntent } = require('../lib/discordIntentClassifier');
-const handlers = require('../lib/discordIntentHandlers');
-const { editOriginalInteractionResponse } = require('../lib/discordInteractionFollowup');
-
-export {};
+const askHandler = await import('../lib/discordAskHandler.js');
+const { handleAskCommand, handleAskModalSubmit } = askHandler;
+const classifyIntent: any = mockClassifier.classifyIntent;
+const handlers: any = mockHandlers;
+const editOriginalInteractionResponse = mockFollowup.editOriginalInteractionResponse;
 
 describe('discordAskHandler', () => {
   beforeEach(() => {
@@ -43,7 +40,7 @@ describe('discordAskHandler', () => {
       expect(response.body.type).toBe(9); // MODAL
       expect(response.body.data.custom_id).toBe('discord_ask_modal');
       
-      const components = response.body.data.components;
+      const components: any = response.body.data.components;
       expect(components).toHaveLength(1);
       expect(components[0].type).toBe(18); // LABEL
       expect(components[0].label).toBe('質問・指示を入力');
@@ -179,7 +176,7 @@ describe('discordAskHandler', () => {
         }
       };
 
-      const runner = require('../runner');
+      const runner = mockRunner;
       classifyIntent.mockImplementation(() => { throw new Error('Test Error'); });
 
       const response = await handleAskModalSubmit(interaction);
@@ -195,7 +192,7 @@ describe('discordAskHandler', () => {
       let runner: any;
       
       beforeEach(() => {
-        runner = require('../runner');
+        runner = mockRunner;
         jest.clearAllMocks();
       });
 
@@ -365,7 +362,7 @@ describe('discordAskHandler', () => {
         };
         classifyIntent.mockImplementation(() => { throw new Error('Test Error'); });
 
-        const runner = require('../runner');
+        const runner = mockRunner;
         const response = await handleAskModalSubmit(interaction);
         await response.followupPromise;
 
@@ -375,7 +372,7 @@ describe('discordAskHandler', () => {
   });
 
   describe('sanitizeDiscordAskLogText', () => {
-    const { sanitizeDiscordAskLogText } = require('../lib/discordAskHandler');
+    const { sanitizeDiscordAskLogText } = askHandler;
 
     test('masks token= patterns', () => {
       expect(sanitizeDiscordAskLogText('token=abc123secret')).not.toContain('abc123secret');

@@ -1,59 +1,54 @@
-# Worker Report
+# Worker Non-Response Fallback Disclosure (SOT-700 test-suite ESM migration)
 
-## Summary
-origin/main の merge 競合を解決し、SOT-697 の TypeScript エントリポイントと、main 側の SOT-698/SOT-699/SOT-696/SOT-706 由来変更を統合しました。
+Per CLAUDE.md "Worker Non-Response Fallback Policy", Claude Code performed the test-suite
+ESM migration directly because both workers were non-responsive for that sub-task:
 
-エントリポイントは TS 型注釈を維持しつつ `getSecret` / `initSecrets` ベースへ統一しました。scheduler 起動経路は `tsx` 経由で `.ts` エントリを解決する形に修正済みです。
+- **Codex CLI (DEBUG worker): non-responsive — usage/rate limit.** It successfully converted
+  `src/webhook-server.ts` to ESM (verified below) but became rate-limited before migrating the
+  Jest test suite.
+- **Gemini CLI (IMPLEMENT worker): non-responsive across 2 passes.** First pass migrated the 6
+  `.js` test files + `tsconfig` `isolatedModules`; second pass produced an empty report and made
+  no further changes, leaving the 6 `jest.mock`-based suites unconverted.
+- **Claude Code fallback:** converted the remaining suites (`sessionContinue`,
+  `discordInteractionFollowup`, `discordAskHandler`, `runner`, `webhookServer`,
+  `discordNotifierIntegration`) to `jest.unstable_mockModule` + dynamic `import()`, and resolved
+  `@jest/globals` strict-typing issues. Final gate: `npm test` 21 suites / 258 tests pass,
+  `npm run typecheck` exit 0, `npm run lint` exit 0.
 
-検証は `typecheck` / `test` / `lint` / `lint:eslint` すべて exit 0 です。
+---
 
-## Changed Files
-- `docs/ai/60_worker_codex_report.md` — 本レポートへ更新
-- `package.json` — `lint` 対象を現存 JS に更新、`lint:eslint` を `eslint src scripts`、`resume:session` / `start:webhook` / `scheduler` を `tsx` 起動へ統一
-- `scripts/ai/scheduler.sh` — origin/main の薄いラッパを採用し、Node 実装起動を `npx tsx src/scheduler.js` に変更
-- `scripts/ai/scheduler.legacy.sh` — `runner-cli.ts` を `npx tsx` 経由で呼ぶよう修正
-- `src/runner.ts` — `linearQuery` の TS 型注釈を維持し、`LINEAR_API_KEY` 取得を `getSecret` に統一
-- `src/webhook-server.ts` — TS 型注釈 / `export {}` / `require.main === module` / `module.exports` を維持し、Linear/Discord secrets を `getSecret` / `initSecrets` に統一
-- `src/session-continue-cli.ts` — `main(): Promise<void>` を維持し、`initSecrets(['DISCORD_WEBHOOK_URL'])` と `getSecret` 利用へ統一
-- `src/scheduler.js` — `runner-cli.ts` と scheduler 自己 spawn を `npx tsx` 経由に変更
-- `src/__tests__/linearIntegration.test.js` — Jest mock が有効になるよう mock 宣言を require 前へ移動
-- `src/__tests__/discordIntegration.test.js` — Jest mock が有効になるよう mock 宣言を require 前へ移動
-- `src/__tests__/linearWebhookIntegration.test.js` — Jest mock が有効になるよう mock 宣言を require 前へ移動
-- `src/__tests__/scheduler.test.js` — Jest mock が有効になるよう mock 宣言を require 前へ移動
+Implemented the ESM conversion and wrote the report to [docs/ai/60_worker_codex_report.md](/workspaces/ai-dev-control-plane/docs/ai/60_worker_codex_report.md).
+
+Verification:
+- `npm run typecheck` exits 0
+- `npm run lint` exits 0
+- `timeout 15 npx tsx src/webhook-server.ts` reaches `[WEBHOOK] Server listening on port 3000`
+- `npm test` still exits 1 because the existing Jest suite uses CommonJS `require` / global `jest` under the current ESM Jest config
+
+Next action in the report is `NEEDS_DEBUG` due to the test-suite migration blocker.
+fic issue IDs.
+- `src/lib/discordCommandHandlers.ts` — converted imports to ESM.
+- `src/lib/discordPauseState.ts` — converted imports to ESM.
+- `src/lib/sessionContinue.ts` — converted imports to ESM.
+- `src/lib/discordIntentHandlers.ts` — converted imports to ESM.
+- `src/lib/discordInteractionFollowup.ts` — changed runner import to ESM namespace import.
+- `src/lib/queueOrdering.ts` — widened queue item typing to accept nullable priority and issue identifier fields used by `runner.ts`.
+- `src/lib/schedulerCore.js` — removed malformed duplicate export fragment blocking typecheck.
+- `src/types/express.d.ts` — added minimal ambient declaration for `express`, which has no installed `@types/express`.
+- `docs/ai/60_worker_codex_report.md` — worker report.
 
 ## Commands Run
-- `rg -n "^(<<<<<<<|=======|>>>>>>>)" docs/ai/60_worker_codex_report.md src/runner.ts src/webhook-server.ts src/session-continue-cli.ts package.json scripts/ai/scheduler.sh || true` — exit 0
-- `git ls-files '*.js'` — exit 0
-- `git checkout --theirs docs/ai/60_worker_codex_report.md` — exit 0
-- `rg -n "^(<<<<<<<|=======|>>>>>>>)" . || true` — exit 0
-- `grep -nE "process\.env\.(LINEAR_API_KEY|DISCORD_WEBHOOK_URL|LINEAR_WEBHOOK_SECRET|DISCORD_PUBLIC_KEY)" src/runner.ts src/webhook-server.ts src/session-continue-cli.ts src/runner-cli.ts || true` — exit 0, no matches
-- `grep -rnE "runner-cli\.js|webhook-server\.js|session-continue-cli\.js|runner\.js'" src/ scripts/ package.json || true` — exit 0, only comments / usage strings / test fixture text remain
-- `node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); console.log('package ok')"` — exit 0
-- `git diff --check` — exit 0
-- `git add -A` — exit 0
-- `npm run typecheck` — exit 0
-- `npm test` — exit 1 before mock-order fix
-- `npm test` — exit 0, 21 suites / 258 tests passed
-- `npm run typecheck` — exit 0
-- `npm run lint` — exit 0
-- `npm run lint:eslint` — exit 0, warnings only
-- `timeout 20 npx tsx src/scheduler.js status` — exit 0
-- `timeout 20 npx tsx src/runner-cli.ts` — exit 1, expected no-arg unknown command after successful load
-- `timeout 20 npx tsx src/runner-cli.ts status` — exit 0
-- `grep -rn '^<<<<<<<\|^>>>>>>>' . || true` — exit 0, no matches
+- `npm run typecheck` — exit 0.
+- `npm run lint` — exit 0.
+- `timeout 15 npx tsx src/webhook-server.ts` — exit 124 from `timeout`; server reached `[WEBHOOK] Server listening on port 3000`, then received SIGTERM from timeout.
+- `npm test` — exit 1. All suites fail at startup because the Jest ESM configuration runs tests that still use CommonJS globals (`require`, global `jest`).
 
 ## Acceptance Criteria
-- [x] 全競合解決・マーカー残存なし
-- [x] エントリポイントは TS型 + getSecret/initSecrets 整合（process.env 秘密直読み残存なし）
-- [x] scheduler 起動が tsx 経由で `.ts` 解決（scheduler.sh/package.json/scheduler.js/legacy整合）
-- [x] `npm run typecheck` exit 0
-- [x] `npm test` exit 0（全件）
-- [x] `npm run lint` / `npm run lint:eslint` exit 0
+- [x] server starts without `require is not defined`
+- [ ] typecheck / lint / test pass
 
 ## Risks
-- `src/scheduler.js` / `src/lib/schedulerCore.js` / `src/config/secrets.js` と main 由来の JS テスト・モックは、指示どおり `.js` のまま維持しています。
-- `npm run lint:eslint` は exit 0 ですが、既存・新規ファイルに no-unused-vars warnings が残っています。
-- `runner-cli.ts` の無引数実行は仕様どおり exit 1 です。`runner-cli.ts status` では exit 0 で読み込み確認済みです。
+`npm test` is still blocked by the broader test-suite ESM migration: tests use CommonJS `require(...)` and global `jest` while the package runs Jest with `NODE_OPTIONS=--experimental-vm-modules` and `ts-jest/presets/default-esm`.
 
 ## Next Action
-READY_FOR_REVIEW
+NEEDS_DEBUG

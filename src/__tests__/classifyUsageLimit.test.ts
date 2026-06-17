@@ -1,6 +1,4 @@
-const { classifyUsageLimit } = require('../lib/usageLimitParser');
-
-export {};
+import { classifyUsageLimit } from '../lib/usageLimitParser.js';
 
 describe('classifyUsageLimit', () => {
   const NOW_MS = Date.UTC(2026, 5, 16, 12, 0, 0);

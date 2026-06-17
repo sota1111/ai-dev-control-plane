@@ -1,6 +1,5 @@
-'use strict';
-
-const secrets = require('../config/secrets');
+import { jest } from '@jest/globals';
+import * as secrets from '../config/secrets.js';
 
 describe('secrets', () => {
   const originalEnv = { ...process.env };

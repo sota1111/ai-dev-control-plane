@@ -1,6 +1,6 @@
-'use strict';
+import { jest } from '@jest/globals';
 
-jest.mock('../runner', () => ({
+const mockRunner = {
   isLocked: jest.fn().mockReturnValue(false),
   loadQueue: jest.fn().mockReturnValue([]),
   getUsageLimitCooldownUntil: jest.fn().mockReturnValue(null),
@@ -9,21 +9,29 @@ jest.mock('../runner', () => ({
   LOG_DIR: '/tmp/test_logs',
   enqueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
-  drainQueue: jest.fn().mockResolvedValue(undefined),
-}));
+  drainQueue: (jest.fn() as any).mockResolvedValue(undefined),
+};
 
-jest.mock('../lib/discordPauseState', () => ({
+const mockPauseState = {
   isPaused: jest.fn().mockReturnValue(false),
   setPaused: jest.fn(),
   clearPause: jest.fn().mockReturnValue(true),
   getPauseInfo: jest.fn().mockReturnValue(null),
+};
+
+jest.unstable_mockModule('../runner.js', () => ({
+  ...mockRunner,
+  default: mockRunner,
 }));
 
-const runner = require('../runner');
-const pauseState = require('../lib/discordPauseState');
-const handlers = require('../lib/discordCommandHandlers');
+jest.unstable_mockModule('../lib/discordPauseState.js', () => ({
+  ...mockPauseState,
+  default: mockPauseState,
+}));
 
-export {};
+const runner = await import('../runner.js');
+const pauseState = await import('../lib/discordPauseState.js');
+const handlers = await import('../lib/discordCommandHandlers.js');
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -37,7 +45,7 @@ describe('handleStatus', () => {
   });
 
   test('returns status with lock indicator when locked', async () => {
-    runner.isLocked.mockReturnValueOnce(true);
+    (runner.isLocked as any).mockReturnValueOnce(true);
     const result = await handlers.handleStatus();
     expect(result.content).toContain('実行中');
   });
@@ -45,13 +53,13 @@ describe('handleStatus', () => {
 
 describe('handleQueue', () => {
   test('returns empty message for empty queue', async () => {
-    runner.loadQueue.mockReturnValueOnce([]);
+    (runner.loadQueue as any).mockReturnValueOnce([]);
     const result = await handlers.handleQueue();
     expect(result.content).toContain('空');
   });
 
   test('returns queue contents when items exist', async () => {
-    runner.loadQueue.mockReturnValueOnce([
+    (runner.loadQueue as any).mockReturnValueOnce([
       {
         issueId: 'SOT-100',
         trigger: 'webhook',
@@ -68,7 +76,7 @@ describe('handleQueue', () => {
   });
 
   test('orders issues by real execution priority in queue output', async () => {
-    runner.loadQueue.mockReturnValueOnce([
+    (runner.loadQueue as any).mockReturnValueOnce([
       {
         issueId: 'parent-uuid',
         issueIdentifier: 'SOT-200',
@@ -114,7 +122,7 @@ describe('handleQueue', () => {
   test('separates waiting items in queue output', async () => {
     const now = new Date();
     const future = new Date(now.getTime() + 3600000).toISOString();
-    runner.loadQueue.mockReturnValueOnce([
+    (runner.loadQueue as any).mockReturnValueOnce([
       {
         issueId: 'ready-1',
         priorityRank: 3,
@@ -138,14 +146,14 @@ describe('handleQueue', () => {
 
 describe('handlePause', () => {
   test('pauses when not already paused', async () => {
-    pauseState.isPaused.mockReturnValueOnce(false);
+    (pauseState.isPaused as any).mockReturnValueOnce(false);
     const result = await handlers.handlePause();
     expect(pauseState.setPaused).toHaveBeenCalled();
     expect(result.content).toContain('一時停止');
   });
 
   test('returns already paused message when already paused', async () => {
-    pauseState.isPaused.mockReturnValueOnce(true);
+    (pauseState.isPaused as any).mockReturnValueOnce(true);
     const result = await handlers.handlePause();
     expect(result.content).toContain('すでに一時停止');
   });
@@ -153,8 +161,8 @@ describe('handlePause', () => {
 
 describe('handleResume', () => {
   test('resumes when paused', async () => {
-    pauseState.clearPause.mockReturnValueOnce(true);
-    const result = await handlers.handleResume();
+    (pauseState.clearPause as any).mockReturnValueOnce(true);
+    const result: any = await handlers.handleResume();
     expect(result.content).toContain('解除');
   });
 });
@@ -162,20 +170,20 @@ describe('handleResume', () => {
 describe('handleReply', () => {
   test('rejects invalid issue ID', async () => {
     const interaction = { data: { options: [{ name: 'issue', value: 'INVALID' }, { name: 'body', value: 'test' }] } };
-    const result = await handlers.handleReply(interaction);
+    const result = await handlers.handleReply(interaction as any);
     expect(result.content).toContain('SOT-xxx');
   });
 
   test('rejects body over 1000 chars', async () => {
     const interaction = { data: { options: [{ name: 'issue', value: 'SOT-123' }, { name: 'body', value: 'x'.repeat(1001) }] } };
-    const result = await handlers.handleReply(interaction);
+    const result = await handlers.handleReply(interaction as any);
     expect(result.content).toContain('長すぎ');
   });
 
   test('posts comment for valid input', async () => {
-    runner.linearQuery.mockResolvedValueOnce({ commentCreate: { success: true, comment: { id: 'cmt1' } } });
+    (runner.linearQuery as any).mockResolvedValueOnce({ commentCreate: { success: true, comment: { id: 'cmt1' } } });
     const interaction = { data: { options: [{ name: 'issue', value: 'SOT-123' }, { name: 'body', value: 'テストコメント' }] } };
-    const result = await handlers.handleReply(interaction);
+    const result = await handlers.handleReply(interaction as any);
     expect(result.content).toContain('✅');
   });
 });
@@ -183,14 +191,14 @@ describe('handleReply', () => {
 describe('handleRetry', () => {
   test('rejects invalid issue ID', async () => {
     const interaction = { data: { options: [{ name: 'issue', value: 'INVALID' }] } };
-    const result = await handlers.handleRetry(interaction);
+    const result = await handlers.handleRetry(interaction as any);
     expect(result.content).toContain('SOT-xxx');
   });
 
   test('enqueues valid issue and triggers drain', async () => {
-    runner.isQueued.mockReturnValueOnce(false);
+    (runner.isQueued as any).mockReturnValueOnce(false);
     const interaction = { data: { options: [{ name: 'issue', value: 'SOT-123' }] } };
-    const result = await handlers.handleRetry(interaction);
+    const result = await handlers.handleRetry(interaction as any);
     expect(runner.enqueue).toHaveBeenCalledWith('SOT-123', 'discord-retry');
     expect(result.content).toContain('✅');
     expect(result.content).toContain('ドレインを開始します');
