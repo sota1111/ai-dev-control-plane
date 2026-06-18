@@ -80,6 +80,45 @@ app.use((err: any, req: any, res: any, next: any) => {
 });
 
 const PORT = process.env.PORT || 3000;
+const QUEUE_DRAIN_INTERVAL_MS = parseInt(process.env.QUEUE_DRAIN_INTERVAL_MS || '300000', 10); // 既定5分
+
+let _periodicDrainRunning = false; // in-process 再入ガード（interval callback の重なり防止）
+
+// 期限到来済み（due）のキュー項目が1つでもあるか
+function hasDueQueueItem(): boolean {
+  const now = Date.now();
+  return runner.loadQueue().some(
+    (item: any) => !item.retryAt || new Date(item.retryAt).getTime() <= now
+  );
+}
+
+// 1回分のアイドルdrainチェック。条件を満たすときだけ drainQueue を呼ぶ。
+async function runPeriodicDrainTick(): Promise<void> {
+  if (_periodicDrainRunning) return;                      // 多重起動防止（再入ガード）
+  if (runner.isLocked()) return;                          // 実行中はスキップ
+  if (runner.getUsageLimitCooldownUntil() !== null) return; // cooldown中はスキップ
+  if (!hasDueQueueItem()) return;                          // 適格項目なし
+  _periodicDrainRunning = true;
+  try {
+    runner.log('QUEUE', 'periodic drain: idle queue has due item(s), draining');
+    await runner.drainQueue();
+  } catch (err: any) {
+    runner.log('QUEUE', `periodic drain error: ${err.message}`);
+  } finally {
+    _periodicDrainRunning = false;
+  }
+}
+
+// interval を開始し、その timer を返す（テストで停止できるよう返り値を返すこと）
+function startPeriodicDrain(intervalMs: number = QUEUE_DRAIN_INTERVAL_MS): NodeJS.Timeout {
+  const timer = setInterval(() => {
+    runPeriodicDrainTick().catch((err) => {
+      runner.log('QUEUE', `periodic drain tick uncaught: ${err.message}`);
+    });
+  }, intervalMs);
+  if (typeof (timer as any).unref === 'function') (timer as any).unref(); // プロセス終了を妨げない
+  return timer;
+}
 
 function loadDedupeStore(): Record<string, string> {
   try {
@@ -454,9 +493,11 @@ if (isMain) {
         runBootstrapScan().catch((err) => {
           runner.log('BOOTSTRAP', `startup scan uncaught error: ${err.message}`);
         });
+        runner.log('QUEUE', `periodic drain started, interval=${QUEUE_DRAIN_INTERVAL_MS}ms`);
+        startPeriodicDrain();
       });
     });
   })();
 }
 
-export { app, runBootstrapScan };
+export { app, runBootstrapScan, hasDueQueueItem, runPeriodicDrainTick, startPeriodicDrain };
