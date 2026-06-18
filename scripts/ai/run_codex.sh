@@ -60,7 +60,8 @@ if [ -f "$REPORT_FILE" ] \
     echo "CODEX_USAGE_LIMIT: cooldown set until epoch $RESUME_EPOCH, delegating to Claude" >&2
     (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-cooldown codex) >/dev/null 2>&1 || true
   else
-    echo "CODEX_USAGE_LIMIT: detected but reset time unparseable, delegating to Claude (no cooldown)" >&2
+    echo "CODEX_USAGE_LIMIT: detected but reset time unparseable, notifying Discord without cooldown" >&2
+    (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-usage-limit-unknown codex) >/dev/null 2>&1 || true
   fi
   exit "$WORKER_NONRESPONSE_EXIT"
 fi

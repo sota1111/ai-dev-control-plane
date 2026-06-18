@@ -50,7 +50,7 @@ fi
 # (e.g. while implementing usage-limit features, the report contains "usage limit").
 if [ "$EXIT_CODE" -ne 0 ] \
   && [ -f "$REPORT_FILE" ] \
-  && grep -Ei "usage limit|quota exceeded|resource exhausted|rate limit|RESOURCE_EXHAUSTED|try again at|resets at" "$REPORT_FILE" > /dev/null; then
+  && grep -Ei "usage limit|quota exceeded|resource exhausted|rate limit|RESOURCE_EXHAUSTED|try again at|resets at|exhausted your daily quota|daily quota|429|too many requests|quota exceeded for quota metric|please retry in" "$REPORT_FILE" > /dev/null; then
   mkdir -p "$(dirname "$GEMINI_COOLDOWN_FILE")"
   RESUME_EPOCH="$( (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts parse-usage-limit-epoch < "$REPORT_FILE") 2>/dev/null || true)"
   if [ -n "$RESUME_EPOCH" ]; then
@@ -58,7 +58,8 @@ if [ "$EXIT_CODE" -ne 0 ] \
     echo "GEMINI_USAGE_LIMIT: cooldown set until epoch $RESUME_EPOCH, delegating to Claude" >&2
     (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-cooldown gemini) >/dev/null 2>&1 || true
   else
-    echo "GEMINI_USAGE_LIMIT: detected but reset time unparseable, delegating to Claude (no cooldown)" >&2
+    echo "GEMINI_USAGE_LIMIT: detected but reset time unparseable, notifying Discord without cooldown" >&2
+    (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-usage-limit-unknown gemini) >/dev/null 2>&1 || true
   fi
   exit "$WORKER_NONRESPONSE_EXIT"
 fi
