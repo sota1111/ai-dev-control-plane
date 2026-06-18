@@ -14,7 +14,7 @@ import { parseUsageLimitResetEpoch } from './lib/usageLimitParser.js';
 import { classifyIssue } from './lib/issueClassifier.js';
 import { getWorkerCooldownStatus } from './lib/workerCooldown.js';
 import { initSecrets } from './config/secrets.js';
-import { notifyCooldown } from './lib/cooldownNotifier.js';
+import { notifyCooldown, notifyUsageLimitUnknownReset } from './lib/cooldownNotifier.js';
 
 const [,, command, ...args] = process.argv;
 
@@ -135,8 +135,20 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'notify-usage-limit-unknown': {
+      await initSecrets(['DISCORD_WEBHOOK_URL_NOTIFY', 'DISCORD_WEBHOOK_URL']);
+      const worker = args[0] as 'gemini'|'codex'|'runner';
+      if (!['gemini', 'codex', 'runner'].includes(worker)) {
+        process.stderr.write('Usage: runner-cli.js notify-usage-limit-unknown <gemini|codex|runner>\n');
+        process.exit(1);
+      }
+      const ok = await notifyUsageLimitUnknownReset({ worker });
+      process.stdout.write(`Notification ${ok ? 'sent' : 'skipped/failed'}\n`);
+      process.exit(0);
+      break;
+    }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown\n`);
       process.exit(1);
     }
   }

@@ -26,7 +26,7 @@ jest.unstable_mockModule('../config/secrets.js', () => ({
 
 jest.unstable_mockModule('../lib/workerCooldown.js', () => mockWorkerCooldown);
 
-const { resolveNotifyWebhook, buildCooldownMessage, notifyCooldown } = await import('../lib/cooldownNotifier.js');
+const { resolveNotifyWebhook, buildCooldownMessage, notifyCooldown, buildUnknownResetMessage, notifyUsageLimitUnknownReset } = await import('../lib/cooldownNotifier.js');
 
 describe('cooldownNotifier', () => {
   beforeEach(() => {
@@ -122,6 +122,43 @@ describe('cooldownNotifier', () => {
       });
       
       const result = await notifyCooldown();
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('buildUnknownResetMessage', () => {
+    it('builds message for unknown reset', () => {
+      const msg = buildUnknownResetMessage('gemini');
+      expect(msg).toContain('⏳ **Worker Usage Limit**');
+      expect(msg).toContain('Triggered by: `gemini`');
+      expect(msg).toContain('gemini: usage-limit を検知しました（復帰時間: 不明）');
+    });
+  });
+
+  describe('notifyUsageLimitUnknownReset', () => {
+    it('returns false and does nothing when no webhook is configured', async () => {
+      mockSecrets.getSecret.mockReturnValue(null);
+      const result = await notifyUsageLimitUnknownReset({ worker: 'gemini' });
+      expect(result).toBe(false);
+      expect(DiscordNotifierMock).not.toHaveBeenCalled();
+    });
+
+    it('sends notification when webhook is provided', async () => {
+      const result = await notifyUsageLimitUnknownReset({ worker: 'gemini', webhookUrl: 'https://example.com/webhook' });
+      
+      expect(result).toBe(true);
+      expect(DiscordNotifierMock).toHaveBeenCalledWith('https://example.com/webhook');
+      expect(mockDiscordNotifier.add).toHaveBeenCalled();
+      expect(mockDiscordNotifier.stop).toHaveBeenCalled();
+    });
+
+    it('handles errors gracefully', async () => {
+      mockSecrets.getSecret.mockReturnValue('https://example.com/webhook');
+      mockDiscordNotifier.add.mockImplementation(() => {
+        throw new Error('Test error');
+      });
+      
+      const result = await notifyUsageLimitUnknownReset({ worker: 'gemini' });
       expect(result).toBe(false);
     });
   });

@@ -33,6 +33,15 @@ export function buildCooldownMessage(status: WorkerCooldownStatus, triggeredWork
   return lines.join('\n');
 }
 
+export function buildUnknownResetMessage(worker: 'gemini'|'codex'|'runner'): string {
+  let lines: string[] = [];
+  lines.push('⏳ **Worker Usage Limit**');
+  lines.push(`Triggered by: \`${worker}\``);
+  lines.push(`${worker}: usage-limit を検知しました（復帰時間: 不明）`);
+  lines.push('⚠️ 自動再開時刻を特定できないため、cooldown は設定されていません。');
+  return lines.join('\n');
+}
+
 export async function notifyCooldown(opts?: { status?: WorkerCooldownStatus; webhookUrl?: string | null; triggeredWorker?: 'gemini'|'codex'|'runner' }): Promise<boolean> {
   try {
     const status = opts?.status || getWorkerCooldownStatus();
@@ -47,6 +56,29 @@ export async function notifyCooldown(opts?: { status?: WorkerCooldownStatus; web
     }
 
     const message = buildCooldownMessage(status, opts?.triggeredWorker);
+    const notifier = new DiscordNotifier(webhookUrl);
+    notifier.add(message);
+    await notifier.stop();
+    return true;
+  } catch (err: any) {
+    process.stderr.write(`[cooldownNotifier] Warning: ${err.message}\n`);
+    return false;
+  }
+}
+
+export async function notifyUsageLimitUnknownReset(opts: { worker: 'gemini'|'codex'|'runner'; webhookUrl?: string | null }): Promise<boolean> {
+  try {
+    let webhookUrl = opts.webhookUrl;
+
+    if (webhookUrl === undefined) {
+      webhookUrl = resolveNotifyWebhook(getSecret('DISCORD_WEBHOOK_URL_NOTIFY'), getSecret('DISCORD_WEBHOOK_URL'));
+    }
+
+    if (!webhookUrl) {
+      return false;
+    }
+
+    const message = buildUnknownResetMessage(opts.worker);
     const notifier = new DiscordNotifier(webhookUrl);
     notifier.add(message);
     await notifier.stop();
