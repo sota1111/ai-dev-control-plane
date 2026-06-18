@@ -58,6 +58,7 @@ if [ -f "$REPORT_FILE" ] \
   if [ -n "$RESUME_EPOCH" ]; then
     node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({resumeAtEpoch:Number(process.argv[2]),detectedAt:new Date().toISOString(),reason:'codex_usage_limit'},null,2));" "$CODEX_COOLDOWN_FILE" "$RESUME_EPOCH"
     echo "CODEX_USAGE_LIMIT: cooldown set until epoch $RESUME_EPOCH, delegating to Claude" >&2
+    (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-cooldown codex) >/dev/null 2>&1 || true
   else
     echo "CODEX_USAGE_LIMIT: detected but reset time unparseable, delegating to Claude (no cooldown)" >&2
   fi
