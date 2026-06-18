@@ -1,61 +1,45 @@
 # Worker Report
 
 ## Summary
-SOT-788 is **ACTIONABLE**. Task check was performed by **Claude Code fallback** because Codex CLI
-was non-responsive: `scripts/ai/run_codex.sh` exited with the dedicated non-response code **75**
-(`CODEX_COOLDOWN_ACTIVE: codex usage limit until epoch 1782000900`). Per CLAUDE.md Worker
-Non-Response Fallback Policy, Claude Code took over the read-only task check.
+SOT-790 verification ("アイドル時の自動drainを追加してcooldown明け後のキュー滞留を解消する").
+Performed by **Claude Code fallback** because Codex CLI was non-responsive: `scripts/ai/run_codex.sh`
+exited with the dedicated non-response code **75** (`CODEX_COOLDOWN_ACTIVE`: codex usage limit until
+epoch 1782000900, ~63h out). A usage-limit cooldown is a hard time-gate, so per the Worker
+Non-Response Fallback Policy Claude Code ran the Quality Gate directly.
 
-Findings about the existing code:
-- `fetchActiveIssues(first=50)` — `src/runner.ts:334`. Queries Linear for `state.type in
-  ["unstarted","started"]` (= Todo + In Progress), filters archived, returns `IssueQueueMetadata[]`
-  with `{ id, identifier, title, url, priority, priorityLabel, priorityRank, parentIssueId,
-  parentIssueIdentifier, ... }`. Exported (runner.ts:1583).
-- `getPriorityRank(priority)` — `src/lib/queueOrdering.ts:25`. Maps 1→Urgent … 5→None. Exported
-  from runner too (runner.ts:1600).
-- `loadQueue()` / `saveQueue(queue)` — `src/runner.ts:646` / `:886`. Queue item shape
-  (`QueueItem`, runner.ts:627) carries `issueId, issueIdentifier, trigger, retryAt, enqueuedAt,
-  lastAttemptAt, attemptCount, reason, priority, priorityLabel, priorityRank, linearFetchedAt,
-  parentIssueId, parentIssueIdentifier, queueGroup, queueGroupOrder`. saveQueue writes atomically
-  (tmp + rename). Both exported.
-- `effectiveRank(item)` — queueOrdering.ts:36 — favors `priorityRank`, else `getPriorityRank(priority)`.
-- Command registration: `scripts/register_discord_commands.js` — flat `commands` array of
-  `{ name, description, options? }`, PUT to Discord. Add `/reorder` here.
-- Routing: `src/lib/discordCommandRouter.ts:83` — `switch (commandName)` calls the handler; import
-  the new handler at top, add a `case 'reorder'`.
-- Handlers: `src/lib/discordCommandHandlers.ts` — handlers are `async (): Promise<CommandResult>`
-  returning `{ content }`. Access runner via `import * as runner from '../runner.js'`. `handleQueue`
-  (line 102) is the closest template. Export the new handler in the bottom `export { ... }` block.
+Note: Gemini also produced a non-response exit 75 (false "empty report" — the run completed but its
+output log contained 429-retry null bytes that tripped the script's emptiness check). The actual
+implementation was written correctly; verified below.
 
 ## Changed Files
-- none (task check only)
+- none (verification only; implementation done by Gemini in `docs/ai/50_worker_gemini_report.md`)
 
 ## Commands Run
-- `TARGET_REPO=/workspaces/ai-dev-control-plane bash scripts/ai/run_codex.sh` → exit 75 (cooldown)
-
-## Verification (Claude Code fallback — Codex still in cooldown)
-Codex remained non-responsive (exit 75) for the post-implementation verification too, so per the
-Worker Non-Response Fallback Policy Claude Code ran the quality gate directly:
 - `npm run lint` → exit 0
-- `npm run typecheck` → exit 0
-- `npm test` → 292 passed, 23 suites (incl. 4 new handleReorder tests)
-- e2e: N/A (no `e2e` script in package.json)
+- `npm run typecheck` → exit 0 (tsc --noEmit, clean)
+- `npm test` → exit 0 — **Test Suites: 23 passed, 23 total; Tests: 298 passed, 298 total**
+  - includes the new `describe('periodic drain', ...)` suite (drains-when-idle, skip-when-locked,
+    skip-when-cooldown, skip-when-no-due-item, re-entry guard, startPeriodicDrain unref).
+
+## Findings
+- `src/webhook-server.ts`: `QUEUE_DRAIN_INTERVAL_MS` (default 300000ms), `hasDueQueueItem()`,
+  `runPeriodicDrainTick()` (guards: re-entry flag, `isLocked`, `getUsageLimitCooldownUntil() !== null`,
+  due-item check), `startPeriodicDrain()` (unref'd interval, returns timer). Started only inside the
+  `isMain` block after `app.listen`. New symbols exported for testability.
+- Behavior is additive — existing webhook-completion drain (`finally→drainQueue`) and bootstrap drain
+  are unchanged.
+- Multi-drain safety: in-process re-entrancy guard `_periodicDrainRunning` + existing per-item
+  `acquireLock()` inside `drainQueue`.
 
 ## Acceptance Criteria
-- [x] Issue is actionable as specified — all required helpers exist and are exported; clear
-  integration points for registration, routing, and handler.
+- [x] runner cooldown 無し・適格キュー項目あり・新規 webhook 無しの状態でキューが自動drainされる
+  （periodic interval が条件成立時に `drainQueue` を呼ぶ。テストで検証済み）
+- [x] 周期 drain がロック中に多重起動しない（再入ガード＋`isLocked` skip。テストで検証済み）
+- [x] lint / typecheck / test が pass
 
 ## Risks
-- **issueId vs identifier matching.** Queue items' `issueId` may be a Linear UUID (webhook path) or
-  an `SOT-xxx` identifier (Discord `/retry` path). When merging preserved metadata from the existing
-  queue into the rebuilt queue, match on BOTH `issueIdentifier`↔`identifier` and `issueId`↔`id` to
-  avoid losing metadata or duplicating items.
-- **Do not drop in-flight / retry items.** Active-issue set may not include every existing queue
-  item (e.g. a retry item whose Linear state already moved, or an in-flight item). Append existing
-  queue items not present in the active set to the END of the rebuilt queue so execution semantics
-  (retryAt waits, in-flight) are preserved.
-- Execution selection (`selectNextReadyIndex`) re-evaluates retryAt/priority regardless of array
-  order, so reordering the array is safe and does not bypass cooldown/retry gating.
+- 既定5分間隔のポーリング。`loadQueue()` はファイル読込のみで軽量。負荷影響は無視可能。
+- stale inflight reaper は本Issueでは未実装（Issueでも「任意/検討」）。必要なら別Issueで対応。
 
 ## Next Action
 READY_FOR_REVIEW

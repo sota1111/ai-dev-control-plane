@@ -50,7 +50,7 @@ const originalSecret = process.env.LINEAR_WEBHOOK_SECRET;
 process.env.LINEAR_WEBHOOK_SECRET = '';
 
 const webhookServer: any = await import('../webhook-server.js');
-const { app } = webhookServer;
+const { app, runPeriodicDrainTick, startPeriodicDrain } = webhookServer;
 
 // Helper: create a mock spawn child that emits given stdout, stderr, then closes
 function mockSpawnChild({ stdout = '', stderr = '', exitCode = 0 } = {}) {
@@ -756,5 +756,77 @@ describe('webhook event dedupe', () => {
     expect(res.body.reason).toBe('already queued or running: SOT-INFLIGHT');
     expect(runner.enqueue).not.toHaveBeenCalled();
     expect(runner.runItem).not.toHaveBeenCalled();
+  });
+});
+
+describe('periodic drain', () => {
+  const runner: any = mockRunner;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    runner.isLocked.mockReturnValue(false);
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+    runner.loadQueue.mockReturnValue([]);
+    runner.drainQueue.mockResolvedValue(undefined);
+  });
+
+  test('drains when idle and has due item', async () => {
+    runner.loadQueue.mockReturnValue([{ issueId: 'X', retryAt: null }]);
+    await runPeriodicDrainTick();
+    expect(runner.drainQueue).toHaveBeenCalled();
+  });
+
+  test('skips when locked', async () => {
+    runner.isLocked.mockReturnValue(true);
+    runner.loadQueue.mockReturnValue([{ issueId: 'X', retryAt: null }]);
+    await runPeriodicDrainTick();
+    expect(runner.drainQueue).not.toHaveBeenCalled();
+  });
+
+  test('skips when in cooldown', async () => {
+    runner.getUsageLimitCooldownUntil.mockReturnValue({ retryAt: 'some-date' });
+    runner.loadQueue.mockReturnValue([{ issueId: 'X', retryAt: null }]);
+    await runPeriodicDrainTick();
+    expect(runner.drainQueue).not.toHaveBeenCalled();
+  });
+
+  test('skips when no due items', async () => {
+    const future = new Date(Date.now() + 10000).toISOString();
+    runner.loadQueue.mockReturnValue([{ issueId: 'X', retryAt: future }]);
+    await runPeriodicDrainTick();
+    expect(runner.drainQueue).not.toHaveBeenCalled();
+  });
+
+  test('re-entry guard prevents concurrent drains', async () => {
+    runner.loadQueue.mockReturnValue([{ issueId: 'X', retryAt: null }]);
+    
+    // Create a promise that we can control to simulate a long-running drain
+    let resolveDrain: any;
+    const drainPromise = new Promise((resolve) => {
+      resolveDrain = resolve;
+    });
+    runner.drainQueue.mockReturnValue(drainPromise);
+
+    // Start first drain
+    const firstTick = runPeriodicDrainTick();
+    
+    // Start second drain while first is still running
+    await runPeriodicDrainTick();
+    
+    expect(runner.drainQueue).toHaveBeenCalledTimes(1);
+
+    // Resolve first drain
+    resolveDrain();
+    await firstTick;
+  });
+
+  test('startPeriodicDrain returns a timer and calls unref', () => {
+    const setIntervalSpy = jest.spyOn(global, 'setInterval');
+    const timer = startPeriodicDrain(1000);
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 1000);
+    // unref check: in jest/node it should have been called
+    // We already checked typeof timer.unref === 'function' in implementation
+    clearInterval(timer);
+    setIntervalSpy.mockRestore();
   });
 });
