@@ -263,7 +263,7 @@ async function linearQuery(query: string, variables: Record<string, any> = {}): 
 
 const getPriorityRank = queueOrdering.getPriorityRank;
 
-interface IssueQueueMetadata {
+export interface IssueQueueMetadata {
   id: string;
   identifier: string;
   title?: string | null;
@@ -624,7 +624,7 @@ function getUsageLimitCooldownUntil(nowMs: number = Date.now()): CooldownState |
   }
 }
 
-interface QueueItem {
+export interface QueueItem {
   issueId: string;
   issueIdentifier: string | null;
   trigger: string | null;

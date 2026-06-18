@@ -170,6 +170,105 @@ async function handleQueue(): Promise<CommandResult> {
   }
 }
 
+async function handleReorder(): Promise<CommandResult> {
+  try {
+    const existing = runner.loadQueue();
+    let actives: runner.IssueQueueMetadata[];
+    try {
+      actives = await runner.fetchActiveIssues();
+    } catch (err: any) {
+      runner.log('DISCORD', `fetchActiveIssues failed in /reorder: ${err.message}`);
+      return { content: `Linear Issueの取得に失敗しました: ${err.message}` };
+    }
+
+    const now = new Date().toISOString();
+    const rebuilt: runner.QueueItem[] = [];
+    const processedActiveIds = new Set<string>();
+
+    // Build lookup for existing items
+    const existingMap = new Map<string, runner.QueueItem>();
+    for (const item of existing) {
+      if (item.issueId) existingMap.set(item.issueId, item);
+      if (item.issueIdentifier) existingMap.set(item.issueIdentifier, item);
+    }
+
+    for (const active of actives) {
+      const match = existingMap.get(active.id) || (active.identifier ? existingMap.get(active.identifier) : undefined);
+      
+      if (match) {
+        rebuilt.push({
+          ...match,
+          priority: active.priority ?? null,
+          priorityLabel: active.priorityLabel ?? null,
+          priorityRank: runner.getPriorityRank(active.priority),
+          linearFetchedAt: now,
+          parentIssueId: active.parentIssueId ?? match.parentIssueId,
+          parentIssueIdentifier: active.parentIssueIdentifier ?? match.parentIssueIdentifier,
+        });
+      } else {
+        rebuilt.push({
+          issueId: active.id,
+          issueIdentifier: active.identifier,
+          trigger: 'discord-reorder',
+          retryAt: null,
+          enqueuedAt: now,
+          lastAttemptAt: null,
+          attemptCount: 0,
+          reason: null,
+          priority: active.priority ?? null,
+          priorityLabel: active.priorityLabel ?? null,
+          priorityRank: runner.getPriorityRank(active.priority),
+          linearFetchedAt: now,
+          parentIssueId: active.parentIssueId ?? null,
+          parentIssueIdentifier: active.parentIssueIdentifier ?? null,
+          queueGroup: active.parentIssueId ?? null,
+          queueGroupOrder: null
+        });
+      }
+      processedActiveIds.add(active.id);
+      if (active.identifier) processedActiveIds.add(active.identifier);
+    }
+
+    // Sort active items: priority ascending, then enqueuedAt ascending
+    rebuilt.sort((a, b) => {
+      const rankA = queueOrdering.effectiveRank(a);
+      const rankB = queueOrdering.effectiveRank(b);
+      if (rankA !== rankB) return rankA - rankB;
+      
+      const timeA = new Date(a.enqueuedAt).getTime();
+      const timeB = new Date(b.enqueuedAt).getTime();
+      return timeA - timeB;
+    });
+
+    // Append non-active existing items (e.g. archived but still in queue, or terminal state but not sync'd)
+    const nonActives = existing.filter(item => !processedActiveIds.has(item.issueId) && (!item.issueIdentifier || !processedActiveIds.has(item.issueIdentifier)));
+    rebuilt.push(...nonActives);
+
+    runner.saveQueue(rebuilt);
+
+    const activeCount = actives.length;
+    const preservedCount = nonActives.length;
+    const lines = [
+      '## キュー再構築完了',
+      `Todo+In ProgressのIssueに基づき、キューを優先度順に再構築しました。`,
+      `**総件数**: ${rebuilt.length} 件 (アクティブ: ${activeCount}, 非アクティブ保持: ${preservedCount})`,
+      '',
+      '### 上位実行予定:',
+    ];
+
+    rebuilt.slice(0, 5).forEach((item, i) => {
+      const rank = queueOrdering.effectiveRank(item);
+      const priority = item.priorityLabel ? `[${item.priorityLabel}]` : '[No priority]';
+      lines.push(`${i + 1}. **${item.issueIdentifier || item.issueId}** ${priority} (rank ${rank})`);
+    });
+
+    return { content: truncate(lines.join('\n')) };
+  } catch (err: any) {
+    runner.log('DISCORD', `handleReorder error: ${err.message}`);
+    return { content: `エラーが発生しました: ${err.message}` };
+  }
+}
+
 async function handleCooldown(): Promise<CommandResult> {
   try {
     const cooldown = runner.getUsageLimitCooldownUntil();
@@ -377,6 +476,7 @@ async function handleRetry(interaction: DiscordInteraction): Promise<CommandResu
 export {
   handleStatus,
   handleQueue,
+  handleReorder,
   handleCooldown,
   handlePause,
   handleResume,

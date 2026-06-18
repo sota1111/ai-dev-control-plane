@@ -15,6 +15,10 @@ const commands = [
     description: '実行キュー (runner.queue.json) の内容を表示します',
   },
   {
+    name: 'reorder',
+    description: 'Todo+In Progressの全Issueを取得し、実行キューを優先度順に再構築します',
+  },
+  {
     name: 'cooldown',
     description: 'usage-limit cooldown中のIssueと再実行予定時刻を表示します',
   },

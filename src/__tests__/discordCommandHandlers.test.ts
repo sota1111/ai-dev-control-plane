@@ -12,6 +12,14 @@ const mockRunner = {
   enqueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
   drainQueue: (jest.fn() as any).mockResolvedValue(undefined),
+  saveQueue: jest.fn(),
+  getPriorityRank: jest.fn((p) => {
+    if (p === 1) return 1;
+    if (p === 2) return 2;
+    if (p === 3) return 3;
+    if (p === 4) return 4;
+    return 5;
+  }),
 };
 
 const mockPauseState = {
@@ -275,5 +283,74 @@ describe('handleRetry', () => {
     // Wait for setImmediate
     await new Promise(resolve => setTimeout(resolve, 10));
     expect(runner.drainQueue).toHaveBeenCalled();
+  });
+});
+
+describe('handleReorder', () => {
+  test('reorders active issues by priority', async () => {
+    (runner.loadQueue as any).mockReturnValueOnce([]);
+    (runner.fetchActiveIssues as any).mockResolvedValueOnce([
+      { id: 'uuid-low', identifier: 'SOT-3', priority: 4, priorityLabel: 'Low' },
+      { id: 'uuid-urgent', identifier: 'SOT-1', priority: 1, priorityLabel: 'Urgent' },
+      { id: 'uuid-med', identifier: 'SOT-2', priority: 3, priorityLabel: 'Medium' },
+    ]);
+
+    const result = await handlers.handleReorder();
+    expect(runner.saveQueue).toHaveBeenCalled();
+    const saved = (runner.saveQueue as any).mock.calls[0][0];
+    
+    expect(saved[0].issueIdentifier).toBe('SOT-1');
+    expect(saved[1].issueIdentifier).toBe('SOT-2');
+    expect(saved[2].issueIdentifier).toBe('SOT-3');
+    expect(result.content).toContain('**総件数**: 3 件');
+  });
+
+  test('preserves metadata for existing issues', async () => {
+    const retryAt = new Date(Date.now() + 3600000).toISOString();
+    (runner.loadQueue as any).mockReturnValueOnce([
+      {
+        issueId: 'uuid-active',
+        issueIdentifier: 'SOT-ACTIVE',
+        retryAt,
+        queueGroup: 'group-1',
+        enqueuedAt: '2026-06-18T00:00:00.000Z',
+        attemptCount: 5
+      }
+    ]);
+    (runner.fetchActiveIssues as any).mockResolvedValueOnce([
+      { id: 'uuid-active', identifier: 'SOT-ACTIVE', priority: 2, priorityLabel: 'High' }
+    ]);
+
+    await handlers.handleReorder();
+    const saved = (runner.saveQueue as any).mock.calls[0][0];
+    
+    expect(saved[0].issueId).toBe('uuid-active');
+    expect(saved[0].retryAt).toBe(retryAt);
+    expect(saved[0].queueGroup).toBe('group-1');
+    expect(saved[0].attemptCount).toBe(5);
+    expect(saved[0].priority).toBe(2);
+    expect(saved[0].priorityLabel).toBe('High');
+  });
+
+  test('preserves non-active existing items at the end', async () => {
+    (runner.loadQueue as any).mockReturnValueOnce([
+      { issueId: 'uuid-stale', issueIdentifier: 'SOT-STALE', enqueuedAt: '2026-06-18T00:00:00.000Z' }
+    ]);
+    (runner.fetchActiveIssues as any).mockResolvedValueOnce([
+      { id: 'uuid-active', identifier: 'SOT-ACTIVE', priority: 1, priorityLabel: 'Urgent' }
+    ]);
+
+    await handlers.handleReorder();
+    const saved = (runner.saveQueue as any).mock.calls[0][0];
+    
+    expect(saved.length).toBe(2);
+    expect(saved[0].issueId).toBe('uuid-active');
+    expect(saved[1].issueId).toBe('uuid-stale');
+  });
+
+  test('returns error message when fetchActiveIssues fails', async () => {
+    (runner.fetchActiveIssues as any).mockRejectedValueOnce(new Error('Linear Timeout'));
+    const result = await handlers.handleReorder();
+    expect(result.content).toContain('Linear Issueの取得に失敗しました');
   });
 });

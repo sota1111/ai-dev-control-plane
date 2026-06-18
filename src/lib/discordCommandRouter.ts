@@ -3,6 +3,7 @@
 import {
   handleStatus,
   handleQueue,
+  handleReorder,
   handleCooldown,
   handlePause,
   handleResume,
@@ -86,6 +87,9 @@ async function handleSlashCommand(commandName: string, interaction: any): Promis
       break;
     case 'queue':
       result = await handleQueue();
+      break;
+    case 'reorder':
+      result = await handleReorder();
       break;
     case 'cooldown':
       result = await handleCooldown();
