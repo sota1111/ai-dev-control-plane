@@ -13,6 +13,8 @@ import * as runner from './runner.js';
 import { parseUsageLimitResetEpoch } from './lib/usageLimitParser.js';
 import { classifyIssue } from './lib/issueClassifier.js';
 import { getWorkerCooldownStatus } from './lib/workerCooldown.js';
+import { initSecrets } from './config/secrets.js';
+import { notifyCooldown } from './lib/cooldownNotifier.js';
 
 const [,, command, ...args] = process.argv;
 
@@ -126,8 +128,15 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'notify-cooldown': {
+      await initSecrets(['DISCORD_WEBHOOK_URL_NOTIFY', 'DISCORD_WEBHOOK_URL']);
+      const ok = await notifyCooldown({ triggeredWorker: args[0] as any });
+      process.stdout.write(`Notification ${ok ? 'sent' : 'skipped/failed'}\n`);
+      process.exit(0);
+      break;
+    }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown\n`);
       process.exit(1);
     }
   }
