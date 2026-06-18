@@ -1,45 +1,57 @@
 # Worker Report
 
 ## Summary
-SOT-790 verification ("アイドル時の自動drainを追加してcooldown明け後のキュー滞留を解消する").
-Performed by **Claude Code fallback** because Codex CLI was non-responsive: `scripts/ai/run_codex.sh`
-exited with the dedicated non-response code **75** (`CODEX_COOLDOWN_ACTIVE`: codex usage limit until
-epoch 1782000900, ~63h out). A usage-limit cooldown is a hard time-gate, so per the Worker
-Non-Response Fallback Policy Claude Code ran the Quality Gate directly.
+Initial task check for SOT-809 「Botの/queueが応答しない」. Codex CLI was NON-RESPONSIVE
+(exit 75, usage-limit cooldown until epoch 1782000900 ≈ 2026-06-20, ~49h out). Per Worker
+Non-Response Fallback Policy, Claude Code performed the read-only task check directly.
 
-Note: Gemini also produced a non-response exit 75 (false "empty report" — the run completed but its
-output log contained 429-retry null bytes that tripped the script's emptiness check). The actual
-implementation was written correctly; verified below.
+Issue is ACTIONABLE: status In Progress, no labels, no comments, no blockers.
+
+**Most likely root cause of the `/queue` timeout:**
+The Discord interaction HTTP response is sent only after `routeInteraction` resolves
+(`src/webhook-server.ts:393-397`). `/status` (`handleStatus`) is fully synchronous — it
+only reads local state (lock, queue file, cooldown, pause, session) — so it ACKs well
+within Discord's 3-second deadline. `/queue` (`handleQueue`) performs `await
+runner.fetchActiveIssues()` (a Linear GraphQL network call) BEFORE returning the response.
+When that network call is slow (or Linear is rate-limited/unreachable), the response
+exceeds the 3s ACK deadline and Discord shows "アプリケーションが応答しませんでした".
+
+## Fix model (existing pattern)
+`/ask` already solves this: it returns an immediate response and does slow work in the
+background, then PATCHes `@original` via
+`src/lib/discordInteractionFollowup.ts::editOriginalInteractionResponse`. The same
+deferred-response pattern (Discord interaction response type 5,
+DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE) should be applied to `/queue`: ACK immediately,
+then compute the queue (including `fetchActiveIssues`) in the background and edit the
+original response with the result.
 
 ## Changed Files
-- none (verification only; implementation done by Gemini in `docs/ai/50_worker_gemini_report.md`)
+- none (read-only task check)
 
 ## Commands Run
-- `npm run lint` → exit 0
-- `npm run typecheck` → exit 0 (tsc --noEmit, clean)
-- `npm test` → exit 0 — **Test Suites: 23 passed, 23 total; Tests: 298 passed, 298 total**
-  - includes the new `describe('periodic drain', ...)` suite (drains-when-idle, skip-when-locked,
-    skip-when-cooldown, skip-when-no-due-item, re-entry guard, startPeriodicDrain unref).
-
-## Findings
-- `src/webhook-server.ts`: `QUEUE_DRAIN_INTERVAL_MS` (default 300000ms), `hasDueQueueItem()`,
-  `runPeriodicDrainTick()` (guards: re-entry flag, `isLocked`, `getUsageLimitCooldownUntil() !== null`,
-  due-item check), `startPeriodicDrain()` (unref'd interval, returns timer). Started only inside the
-  `isMain` block after `app.listen`. New symbols exported for testability.
-- Behavior is additive — existing webhook-completion drain (`finally→drainQueue`) and bootstrap drain
-  are unchanged.
-- Multi-drain safety: in-process re-entrancy guard `_periodicDrainRunning` + existing per-item
-  `acquireLock()` inside `drainQueue`.
+- `bash scripts/ai/run_codex.sh` → exit 75 (codex usage-limit cooldown, non-responsive)
+- Read `src/lib/discordCommandHandlers.ts`, `src/lib/discordCommandRouter.ts`,
+  `src/webhook-server.ts`, `src/lib/discordAskHandler.ts`,
+  `src/lib/discordInteractionFollowup.ts`
 
 ## Acceptance Criteria
-- [x] runner cooldown 無し・適格キュー項目あり・新規 webhook 無しの状態でキューが自動drainされる
-  （periodic interval が条件成立時に `drainQueue` を呼ぶ。テストで検証済み）
-- [x] 周期 drain がロック中に多重起動しない（再入ガード＋`isLocked` skip。テストで検証済み）
-- [x] lint / typecheck / test が pass
+- [x] Issue status/comments/labels/actionability confirmed (actionable)
+- [x] Root cause of `/queue` timeout identified (blocking network call before ACK)
+- [x] Request path confirmed (synchronous response in webhook-server)
+- [x] Candidate fix model identified (deferred response like `/ask`)
 
 ## Risks
-- 既定5分間隔のポーリング。`loadQueue()` はファイル読込のみで軽量。負荷影響は無視可能。
-- stale inflight reaper は本Issueでは未実装（Issueでも「任意/検討」）。必要なら別Issueで対応。
+- Deferred responses (type 5) change `/queue` UX slightly: shows "thinking…" then the
+  result. Acceptable and consistent with `/ask`.
+- Must keep ephemeral flag (64) on the deferred response to match current behavior.
+
+## Post-fix verification (Claude Code fallback — Codex non-responsive)
+Codex remained non-responsive (usage-limit cooldown, exit 75), so Claude Code ran the
+quality gate directly per the Fallback Policy:
+- `npm run lint` → exit 0
+- `npm run typecheck` → exit 0
+- `npm test` → 24 suites / 305 tests passing (incl. new `discordCommandRouter.test.ts`)
+- `npm run e2e` → N/A (no e2e script in package.json)
 
 ## Next Action
 READY_FOR_REVIEW
