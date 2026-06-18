@@ -12,6 +12,7 @@ dotenv.config({ path: path.join(__dirname, '..', '.env') });
 import * as runner from './runner.js';
 import { parseUsageLimitResetEpoch } from './lib/usageLimitParser.js';
 import { classifyIssue } from './lib/issueClassifier.js';
+import { getWorkerCooldownStatus } from './lib/workerCooldown.js';
 
 const [,, command, ...args] = process.argv;
 
@@ -120,8 +121,8 @@ async function main() {
       break;
     }
     case 'cooldown-status': {
-      const cooldown = runner.getUsageLimitCooldownUntil();
-      process.stdout.write(JSON.stringify(cooldown || { active: false }, null, 2) + '\n');
+      const status = getWorkerCooldownStatus();
+      process.stdout.write(JSON.stringify(status, null, 2) + '\n');
       process.exit(0);
       break;
     }
