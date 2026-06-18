@@ -11,6 +11,8 @@ import {
   handleRetry,
 } from './discordCommandHandlers.js';
 import { handleAskCommand, handleAskModalSubmit, ASK_MODAL_CUSTOM_ID } from './discordAskHandler.js';
+import { editOriginalInteractionResponse } from './discordInteractionFollowup.js';
+import * as runner from '../runner.js';
 
 // Interaction types
 const InteractionType = {
@@ -78,6 +80,24 @@ async function routeInteraction(interaction: any): Promise<InteractionResponse> 
   };
 }
 
+/**
+ * Background worker for deferred commands: run the heavy handler, then PATCH the
+ * original interaction response. Never throws.
+ */
+async function processQueueInBackground(interaction: any): Promise<void> {
+  try {
+    const result = await handleQueue();
+    await editOriginalInteractionResponse(interaction.application_id, interaction.token, result.content);
+  } catch (err: any) {
+    runner.log('DISCORD', `processQueueInBackground error: ${err.message}`);
+    await editOriginalInteractionResponse(
+      interaction.application_id,
+      interaction.token,
+      `エラーが発生しました: ${err.message}`,
+    );
+  }
+}
+
 async function handleSlashCommand(commandName: string, interaction: any): Promise<InteractionResponse> {
   let result: any;
 
@@ -86,8 +106,17 @@ async function handleSlashCommand(commandName: string, interaction: any): Promis
       result = await handleStatus();
       break;
     case 'queue':
-      result = await handleQueue();
-      break;
+      // /queue performs a Linear network call (fetchActiveIssues) which can exceed
+      // Discord's 3s ACK deadline. ACK immediately with a deferred response and finish
+      // the work in the background, editing the original response (same pattern as /ask).
+      void processQueueInBackground(interaction);
+      return {
+        status: 200,
+        body: {
+          type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { flags: 64 },
+        },
+      };
     case 'reorder':
       result = await handleReorder();
       break;
