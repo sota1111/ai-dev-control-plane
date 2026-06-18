@@ -94,6 +94,7 @@ const STALE_LOCK_MS = 30 * 60 * 1000;  // 30 minutes
 const LINEAR_API_URL = 'https://api.linear.app/graphql';
 const QUEUE_ITEM_TTL_DAYS = parseInt(process.env.QUEUE_ITEM_TTL_DAYS || '7', 10);
 const INFLIGHT_FILE = path.join(LOG_DIR, 'runner.inflight.json');
+const CURRENT_ISSUE_FILE = path.join(LOG_DIR, 'current-issue.json');
 
 function log(tag: string, message: string, context: Record<string, any> = {}) {
   try {
@@ -265,6 +266,8 @@ const getPriorityRank = queueOrdering.getPriorityRank;
 interface IssueQueueMetadata {
   id: string;
   identifier: string;
+  title?: string | null;
+  url?: string | null;
   priority: number | null;
   priorityLabel: string | null;
   priorityRank: number;
@@ -335,6 +338,8 @@ async function fetchActiveIssues(first: number = 50): Promise<IssueQueueMetadata
         nodes {
           id
           identifier
+          title
+          url
           priority
           priorityLabel
           archivedAt
@@ -352,6 +357,8 @@ async function fetchActiveIssues(first: number = 50): Promise<IssueQueueMetadata
     .map((issue: any) => ({
       id: issue.id,
       identifier: issue.identifier,
+      title: issue.title,
+      url: issue.url,
       priority: issue.priority ?? null,
       priorityLabel: issue.priorityLabel ?? null,
       priorityRank: getPriorityRank(issue.priority),
@@ -1062,6 +1069,42 @@ function saveInflight(list: string[]): void {
   }
 }
 
+function setCurrentIssue(item: QueueItem): void {
+  try {
+    if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+    const data = {
+      issueId: item.issueId,
+      issueIdentifier: item.issueIdentifier,
+      startedAt: new Date().toISOString()
+    };
+    const tmp = CURRENT_ISSUE_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, CURRENT_ISSUE_FILE);
+  } catch (err: any) {
+    log('RUNNER', `setCurrentIssue ERROR: ${err.message}`);
+  }
+}
+
+function clearCurrentIssue(): void {
+  try {
+    if (fs.existsSync(CURRENT_ISSUE_FILE)) {
+      fs.unlinkSync(CURRENT_ISSUE_FILE);
+    }
+  } catch (err: any) {
+    log('RUNNER', `clearCurrentIssue ERROR: ${err.message}`);
+  }
+}
+
+function getCurrentIssue(): { issueId: string; issueIdentifier?: string; startedAt: string } | null {
+  try {
+    if (!fs.existsSync(CURRENT_ISSUE_FILE)) return null;
+    const content = fs.readFileSync(CURRENT_ISSUE_FILE, 'utf8');
+    return JSON.parse(content);
+  } catch (err: any) {
+    return null;
+  }
+}
+
 function addInflight(issueId: string): void {
   const list = loadInflight();
   if (!list.includes(issueId)) {
@@ -1495,6 +1538,7 @@ async function drainQueue(): Promise<void> {
     }
     try {
       addInflight(item.issueId);
+      setCurrentIssue(item);
       await runItem(item);
       processedCount++;
       // Track this item's issueId as the last processed group anchor for child issues
@@ -1503,6 +1547,7 @@ async function drainQueue(): Promise<void> {
       log('QUEUE', `drain error: ${err.message}`, { issue: item.issueId });
       lastProcessedGroup = null;
     } finally {
+      clearCurrentIssue();
       removeInflight(item.issueId);
       releaseLock();
     }
@@ -1563,6 +1608,7 @@ export {
   removeInflight,
   isInflight,
   isQueuedOrRunning,
+  getCurrentIssue,
   setIssueInProgress,
   getIssueExecutionEligibility,
   triggerRun,

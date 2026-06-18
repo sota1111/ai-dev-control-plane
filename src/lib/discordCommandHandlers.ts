@@ -41,6 +41,7 @@ function validateIssueId(issueId: string | null | undefined): { valid: boolean; 
 async function handleStatus(): Promise<CommandResult> {
   try {
     const locked = runner.isLocked();
+    const currentIssue = runner.getCurrentIssue();
     const queue = runner.loadQueue();
     const cooldown = runner.getUsageLimitCooldownUntil();
     const paused = isPaused();
@@ -50,6 +51,17 @@ async function handleStatus(): Promise<CommandResult> {
     let lockInfo = '🔓 ロックなし（アイドル状態）';
     if (locked) {
       lockInfo = '🔒 実行中（runner.lock 取得済み）';
+    }
+
+    let runningInfo = '**実行中**: なし';
+    if (currentIssue) {
+      const now = Date.now();
+      const startedAt = new Date(currentIssue.startedAt).getTime();
+      const diffMs = Math.max(0, now - startedAt);
+      const diffMin = Math.floor(diffMs / 60000);
+      const diffSec = Math.floor((diffMs % 60000) / 1000);
+      const elapsed = diffMin > 0 ? `${diffMin}m ${diffSec}s` : `${diffSec}s`;
+      runningInfo = `**実行中**: ▶ ${currentIssue.issueIdentifier || currentIssue.issueId} (経過 ${elapsed})`;
     }
 
     let cooldownInfo = 'なし';
@@ -73,6 +85,7 @@ async function handleStatus(): Promise<CommandResult> {
     const content = [
       '## 実行状態',
       `**ロック**: ${lockInfo}`,
+      runningInfo,
       `**キュー**: ${queue.length} 件`,
       `**Cooldown**: ${cooldownInfo}`,
       `**Session-Continue**: ${sessionInfo}`,
@@ -89,7 +102,22 @@ async function handleStatus(): Promise<CommandResult> {
 async function handleQueue(): Promise<CommandResult> {
   try {
     const rawQueue = runner.loadQueue();
-    if (rawQueue.length === 0) {
+    const current = runner.getCurrentIssue();
+
+    // A1: Fetch active issues for titles/urls
+    const activeMap = new Map<string, { title: string; url: string }>();
+    try {
+      const actives = await runner.fetchActiveIssues();
+      for (const issue of (actives || [])) {
+        if (issue.identifier && issue.title && issue.url) {
+          activeMap.set(issue.identifier, { title: issue.title, url: issue.url });
+        }
+      }
+    } catch (err: any) {
+      runner.log('DISCORD', `fetchActiveIssues failed: ${err.message}`);
+    }
+
+    if (rawQueue.length === 0 && !current) {
       return { content: '## 実行キュー\nキューは空です。' };
     }
 
@@ -104,11 +132,21 @@ async function handleQueue(): Promise<CommandResult> {
         ? `  ↳ 親: ${item.parentIssueIdentifier || item.parentIssueId || item.queueGroup}`
         : '';
       const retryStr = item.retryAt ? ` ⏳ ${new Date(item.retryAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}` : '';
-      return `${indent}${index}. **${item.issueIdentifier || item.issueId}** ${priorityStr} (rank ${rank}) — ${item.trigger || 'unknown'} (${at})${retryStr}${groupStr}`;
+
+      const identifier = item.issueIdentifier || item.issueId;
+      const meta = activeMap.get(identifier);
+      const titleUrl = meta ? ` — ${meta.title} ${meta.url}` : '';
+
+      return `${indent}${index}. **${identifier}** ${priorityStr} (rank ${rank}) — ${item.trigger || 'unknown'} (${at})${retryStr}${groupStr}${titleUrl}`;
     }
 
     const lines: string[] = [];
+    if (current) {
+      lines.push(`0. ▶ 現在実行中: **${current.issueIdentifier || current.issueId}**`);
+    }
+
     if (ready.length > 0) {
+      if (lines.length > 0) lines.push('');
       lines.push('### 実行待ち (Ready)');
       ready.forEach((item: any, index: number) => {
         lines.push(formatItem(item, index + 1));
