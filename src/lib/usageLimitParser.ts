@@ -5,7 +5,7 @@
 function parseRawResetEpoch(text: string, nowMs: number): number | null {
   // 'try again at' covers the Codex usage-limit phrasing
   // ("...try again at Jun 21st, 2026 12:05 AM.").
-  const keywords = ['resets', 'reset at', 'resets at', 'will reset at', 'Your limit will reset', 'try again at'];
+  const keywords = ['resets', 'reset at', 'resets at', 'will reset at', 'Your limit will reset', 'try again at', 'quota exceeded', 'resource exhausted', 'rate limit', 'RESOURCE_EXHAUSTED'];
   if (!keywords.some(k => text.toLowerCase().includes(k.toLowerCase()))) return null;
 
   // Try to find an IANA timezone in ( ). Guard against capturing a URL in
