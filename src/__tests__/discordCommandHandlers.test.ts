@@ -2,6 +2,8 @@ import { jest } from '@jest/globals';
 
 const mockRunner = {
   isLocked: jest.fn().mockReturnValue(false),
+  getCurrentIssue: jest.fn().mockReturnValue(null),
+  fetchActiveIssues: (jest.fn() as any).mockResolvedValue([]),
   loadQueue: jest.fn().mockReturnValue([]),
   getUsageLimitCooldownUntil: jest.fn().mockReturnValue(null),
   linearQuery: jest.fn(),
@@ -48,6 +50,23 @@ describe('handleStatus', () => {
     (runner.isLocked as any).mockReturnValueOnce(true);
     const result = await handlers.handleStatus();
     expect(result.content).toContain('実行中');
+  });
+
+  test('returns status with current issue and elapsed time', async () => {
+    const startedAt = new Date(Date.now() - 3 * 60000 - 42000).toISOString(); // 3m 42s ago
+    (runner.getCurrentIssue as any).mockReturnValueOnce({
+      issueId: 'uuid',
+      issueIdentifier: 'SOT-555',
+      startedAt
+    });
+    const result = await handlers.handleStatus();
+    expect(result.content).toContain('**実行中**: ▶ SOT-555 (経過 3m 42s)');
+  });
+
+  test('returns "none" when no issue is running', async () => {
+    (runner.getCurrentIssue as any).mockReturnValueOnce(null);
+    const result = await handlers.handleStatus();
+    expect(result.content).toContain('**実行中**: なし');
   });
 });
 
@@ -141,6 +160,56 @@ describe('handleQueue', () => {
     expect(result.content).toContain('1. **ready-1**');
     expect(result.content).toContain('### 待機中 (Waiting)');
     expect(result.content).toContain('1. **waiting-1**');
+  });
+
+  test('returns queue with current issue as item 0', async () => {
+    (runner.getCurrentIssue as any).mockReturnValueOnce({
+      issueId: 'uuid-777',
+      issueIdentifier: 'SOT-777',
+      startedAt: new Date().toISOString()
+    });
+    (runner.loadQueue as any).mockReturnValueOnce([]);
+    const result = await handlers.handleQueue();
+    expect(result.content).toContain('0. ▶ 現在実行中: **SOT-777**');
+  });
+
+  test('enriches queue items with title and url from fetchActiveIssues', async () => {
+    (runner.fetchActiveIssues as any).mockResolvedValueOnce([
+      {
+        identifier: 'SOT-100',
+        title: 'タイトルA',
+        url: 'https://linear.app/x/SOT-100'
+      }
+    ]);
+    (runner.loadQueue as any).mockReturnValueOnce([
+      {
+        issueId: 'uuid-100',
+        issueIdentifier: 'SOT-100',
+        trigger: 'webhook',
+        enqueuedAt: new Date().toISOString(),
+        priorityRank: 2
+      }
+    ]);
+    const result = await handlers.handleQueue();
+    expect(result.content).toContain('SOT-100');
+    expect(result.content).toContain('タイトルA');
+    expect(result.content).toContain('https://linear.app/x/SOT-100');
+  });
+
+  test('falls back to identifier only when fetchActiveIssues fails', async () => {
+    (runner.fetchActiveIssues as any).mockRejectedValueOnce(new Error('API Error'));
+    (runner.loadQueue as any).mockReturnValueOnce([
+      {
+        issueId: 'uuid-100',
+        issueIdentifier: 'SOT-100',
+        trigger: 'webhook',
+        enqueuedAt: new Date().toISOString(),
+        priorityRank: 2
+      }
+    ]);
+    const result = await handlers.handleQueue();
+    expect(result.content).toContain('SOT-100');
+    // Should not crash
   });
 });
 
