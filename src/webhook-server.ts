@@ -12,6 +12,7 @@ import { DiscordNotifier } from './lib/discordNotifier.js';
 import { verifyDiscordSignature } from './lib/discordInteractions.js';
 import { routeInteraction } from './lib/discordCommandRouter.js';
 import { isTerminalState } from './lib/issueState.js';
+import { resolveNotifyWebhook } from './lib/cooldownNotifier.js';
 import * as runner from './runner.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -94,6 +95,29 @@ function hasDueQueueItem(): boolean {
   );
 }
 
+// 起動スキャン・回収サマリを NOTIFY 側 Discord webhook に1行通知する（運用ログ）。
+// 非fatal: 失敗してもスキャン/drain本処理を妨げない。報告対象が無い（enqueued=0かつreaped=0）
+// ときは何もしない。NOTIFY 未設定時は一般 webhook にフォールバックする。
+async function notifyBootstrapSummary(
+  source: string,
+  counts: { enqueued: number; reaped: number }
+): Promise<void> {
+  if (counts.enqueued === 0 && counts.reaped === 0) return;
+  try {
+    const url = resolveNotifyWebhook(getSecret('DISCORD_WEBHOOK_URL_NOTIFY'), getSecret('DISCORD_WEBHOOK_URL'));
+    if (!url) return;
+    const parts: string[] = [];
+    if (counts.enqueued > 0) parts.push(`enqueued=${counts.enqueued}`);
+    if (counts.reaped > 0) parts.push(`reaped=${counts.reaped}`);
+    const message = `🔄 ${source}: ${parts.join(' ')}`;
+    const notifier = new DiscordNotifier(url);
+    notifier.add(message);
+    await notifier.stop();
+  } catch (err: any) {
+    runner.log('BOOTSTRAP', `notifyBootstrapSummary error (non-fatal): ${err.message}`);
+  }
+}
+
 // Linear をスキャンし、未キューの active(Todo/In Progress) Issue を実行キューへ投入する。
 // runBootstrapScan と reaper の共通処理。投入した件数を返す。
 async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
@@ -148,6 +172,18 @@ async function runReaperTick(): Promise<void> {
   const cooldownJustCleared = _prevReaperCooldownActive && !cooldownActive;
   _prevReaperCooldownActive = cooldownActive;
 
+  // クラッシュ回収: 取り残された inflight エントリをTTLで回収する。
+  // cooldown中/アイドル時でも安全（実行中ロック時は reapStaleInflight 側でno-op）。
+  let reapedInflight = 0;
+  try {
+    reapedInflight = runner.reapStaleInflight();
+  } catch (err: any) {
+    runner.log('REAPER', `reapStaleInflight error (non-fatal): ${err.message}`);
+  }
+  if (reapedInflight > 0) {
+    await notifyBootstrapSummary('reaper', { enqueued: 0, reaped: reapedInflight });
+  }
+
   if (runner.isLocked()) return;        // 実行中はスキップ
   if (cooldownActive) return;           // cooldown中はスキップ（明けてから回収）
   if (!getSecret('LINEAR_API_KEY')) return; // APIキー未設定ならスキップ
@@ -161,6 +197,7 @@ async function runReaperTick(): Promise<void> {
     const enqueued = await scanAndEnqueueActiveIssues('webhook-reaper');
     if (enqueued > 0) {
       runner.log('REAPER', `reaper: re-enqueued ${enqueued} stranded issue(s), draining`);
+      await notifyBootstrapSummary('reaper', { enqueued, reaped: 0 });
       try {
         await runner.syncQueueWithLinear();
       } catch (err: any) {
@@ -496,9 +533,10 @@ app.post('/webhooks/discord', (req: any, res: any) => {
 });
 
 async function runBootstrapScan(): Promise<void> {
-  const enabled = process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED === 'true';
+  // 既定有効・明示 false で無効化（reaper の WEBHOOK_REAPER_ENABLED と既定方針を揃える）。
+  const enabled = process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED !== 'false';
   if (!enabled) {
-    runner.log('BOOTSTRAP', 'startup scan disabled (WEBHOOK_BOOTSTRAP_SCAN_ENABLED != true)');
+    runner.log('BOOTSTRAP', 'startup scan disabled (WEBHOOK_BOOTSTRAP_SCAN_ENABLED=false)');
     return;
   }
 
@@ -510,9 +548,22 @@ async function runBootstrapScan(): Promise<void> {
   const startedAt = new Date().toISOString();
   runner.log('BOOTSTRAP', `startup scan started at ${startedAt}`);
 
+  // クラッシュ回収: 起動時に取り残された inflight を回収する。
+  let reapedInflight = 0;
+  try {
+    reapedInflight = runner.reapStaleInflight();
+    if (reapedInflight > 0) {
+      runner.log('BOOTSTRAP', `startup: reaped ${reapedInflight} leaked inflight entr${reapedInflight === 1 ? 'y' : 'ies'}`);
+    }
+  } catch (err: any) {
+    runner.log('BOOTSTRAP', `startup reapStaleInflight error (non-fatal): ${err.message}`);
+  }
+
   const enqueuedCount = await scanAndEnqueueActiveIssues('webhook-bootstrap');
 
   runner.log('BOOTSTRAP', `startup scan complete: enqueued=${enqueuedCount}`);
+
+  await notifyBootstrapSummary('bootstrap', { enqueued: enqueuedCount, reaped: reapedInflight });
 
   if (enqueuedCount > 0) {
     runner.log('BOOTSTRAP', 'startup scan: running syncQueueWithLinear before drain');
@@ -537,7 +588,7 @@ const isMain = fileURLToPath(import.meta.url) === process.argv[1];
 
 if (isMain) {
   (async () => {
-    await initSecrets(['LINEAR_WEBHOOK_SECRET', 'DISCORD_PUBLIC_KEY', 'LINEAR_API_KEY', 'DISCORD_WEBHOOK_URL']);
+    await initSecrets(['LINEAR_WEBHOOK_SECRET', 'DISCORD_PUBLIC_KEY', 'LINEAR_API_KEY', 'DISCORD_WEBHOOK_URL', 'DISCORD_WEBHOOK_URL_NOTIFY']);
     app.listen(PORT, () => {
       console.log(`[WEBHOOK] Server listening on port ${PORT}`);
       setImmediate(() => {

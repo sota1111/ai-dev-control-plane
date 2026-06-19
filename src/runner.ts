@@ -95,6 +95,8 @@ const LINEAR_API_URL = 'https://api.linear.app/graphql';
 const QUEUE_ITEM_TTL_DAYS = parseInt(process.env.QUEUE_ITEM_TTL_DAYS || '7', 10);
 const INFLIGHT_FILE = path.join(LOG_DIR, 'runner.inflight.json');
 const CURRENT_ISSUE_FILE = path.join(LOG_DIR, 'current-issue.json');
+// Leaked inflight entries (process crashed without cleanup) older than this are reaped.
+const INFLIGHT_TTL_MS = parseInt(process.env.INFLIGHT_TTL_MS || String(2 * 60 * 60 * 1000), 10); // 2 hours
 
 function log(tag: string, message: string, context: Record<string, any> = {}) {
   try {
@@ -1047,26 +1049,76 @@ function isQueued(issueId: string): boolean {
   return queue.some(item => item.issueId === issueId);
 }
 
-function loadInflight(): string[] {
+interface InflightEntry {
+  issueId: string;
+  startedAt: string | null; // null => legacy/unknown entry, treated as stale by the reaper
+}
+
+// Read inflight as normalized records. Backward-compatible with the legacy `string[]` format
+// (a bare string becomes `{ issueId, startedAt: null }`).
+function loadInflightRecords(): InflightEntry[] {
   try {
     if (!fs.existsSync(INFLIGHT_FILE)) return [];
     const content = fs.readFileSync(INFLIGHT_FILE, 'utf8');
     const parsed = JSON.parse(content);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((entry: any): InflightEntry =>
+        typeof entry === 'string'
+          ? { issueId: entry, startedAt: null }
+          : { issueId: entry.issueId, startedAt: entry.startedAt ?? null }
+      )
+      .filter((e: InflightEntry) => typeof e.issueId === 'string' && e.issueId.length > 0);
   } catch (err) {
     return [];
   }
 }
 
-function saveInflight(list: string[]): void {
+function saveInflightRecords(records: InflightEntry[]): void {
   try {
     if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
     const tmp = INFLIGHT_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(list, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify(records, null, 2));
     fs.renameSync(tmp, INFLIGHT_FILE);
   } catch (err: any) {
     log('RUNNER', `saveInflight ERROR: ${err.message}`);
   }
+}
+
+// Backward-compatible: returns issueIds only.
+function loadInflight(): string[] {
+  return loadInflightRecords().map(r => r.issueId);
+}
+
+// Backward-compatible: accepts issueId[], preserving existing startedAt and stamping new ones.
+function saveInflight(list: string[]): void {
+  const byId = new Map(loadInflightRecords().map(r => [r.issueId, r]));
+  const now = new Date().toISOString();
+  const records: InflightEntry[] = list.map(id => byId.get(id) ?? { issueId: id, startedAt: now });
+  saveInflightRecords(records);
+}
+
+// Crash recovery: remove leaked inflight entries whose run never cleaned up.
+// No-op while a run holds the lock; reaps entries older than INFLIGHT_TTL_MS, and
+// legacy/unknown (null startedAt) entries. Returns the number of entries reaped.
+function reapStaleInflight(): number {
+  if (isLocked()) return 0; // a live run holds the lock; never touch inflight mid-run
+  const records = loadInflightRecords();
+  if (records.length === 0) return 0;
+  const now = Date.now();
+  const kept: InflightEntry[] = [];
+  const reaped: string[] = [];
+  for (const r of records) {
+    const startedMs = r.startedAt ? new Date(r.startedAt).getTime() : NaN;
+    const isStale = Number.isNaN(startedMs) || (now - startedMs) > INFLIGHT_TTL_MS;
+    if (isStale) reaped.push(r.issueId);
+    else kept.push(r);
+  }
+  if (reaped.length > 0) {
+    saveInflightRecords(kept);
+    log('REAPER', `reapStaleInflight: cleared ${reaped.length} leaked inflight entr${reaped.length === 1 ? 'y' : 'ies'}: ${reaped.join(', ')}`);
+  }
+  return reaped.length;
 }
 
 function setCurrentIssue(item: QueueItem): void {
@@ -1106,16 +1158,16 @@ function getCurrentIssue(): { issueId: string; issueIdentifier?: string; started
 }
 
 function addInflight(issueId: string): void {
-  const list = loadInflight();
-  if (!list.includes(issueId)) {
-    list.push(issueId);
-    saveInflight(list);
+  const records = loadInflightRecords();
+  if (!records.some(r => r.issueId === issueId)) {
+    records.push({ issueId, startedAt: new Date().toISOString() });
+    saveInflightRecords(records);
   }
 }
 
 function removeInflight(issueId: string): void {
-  const list = loadInflight().filter(id => id !== issueId);
-  saveInflight(list);
+  const records = loadInflightRecords().filter(r => r.issueId !== issueId);
+  saveInflightRecords(records);
 }
 
 function isInflight(issueId: string): boolean {
@@ -1574,6 +1626,7 @@ export {
   MAX_DRAIN_ITEMS,
   QUEUE_ITEM_TTL_DAYS,
   INFLIGHT_FILE,
+  INFLIGHT_TTL_MS,
   log,
   linearQuery,
   acquireLock,
@@ -1604,9 +1657,12 @@ export {
   isQueued,
   loadInflight,
   saveInflight,
+  loadInflightRecords,
+  saveInflightRecords,
   addInflight,
   removeInflight,
   isInflight,
+  reapStaleInflight,
   isQueuedOrRunning,
   getCurrentIssue,
   setIssueInProgress,
