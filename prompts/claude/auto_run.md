@@ -82,8 +82,7 @@ Before starting work on any Issue, classify it and post the classification as a 
 
 ```
 タスク分類: PLAN | IMPLEMENT | FIX | DEBUG | DOC | REVIEW | SECURITY
-推奨worker: gemini | codex | claude-code
-理由: <one-line reason>
+担当AI: <TYPE>:<WORKER>   （例: IMPLEMENT:GEMINI / DOC:CLAUDE-CODE）
 ```
 
 **Task types:**
