@@ -12,6 +12,11 @@ import { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } fro
 import * as queueOrdering from './lib/queueOrdering.js';
 import { isTerminalState } from './lib/issueState.js';
 import { resolveRepoForProject } from './lib/projectRepo.js';
+import {
+  isNewProject,
+  deriveNewRepoName,
+  ensureRepoForNewProject,
+} from './lib/projectRepoCreate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -278,6 +283,35 @@ async function getIssueProjectName(issueId: string): Promise<string | null> {
   } catch (err: any) {
     log('RUNNER', `getIssueProjectName failed: ${err.message}`, { issue: issueId });
     return null;
+  }
+}
+
+interface IssueMeta {
+  identifier: string | null;
+  title: string | null;
+  description: string | null;
+  projectName: string | null;
+}
+
+// Linear issue の identifier/title/description/プロジェクト名を1クエリで取得する（never throws）。
+async function getIssueMeta(issueId: string): Promise<IssueMeta> {
+  try {
+    const data: any = await linearQuery(
+      'query($id: String!) { issue(id: $id) { identifier title description project { name } } }',
+      { id: issueId }
+    );
+    const issue = data?.issue ?? {};
+    const projectName = issue?.project?.name;
+    return {
+      identifier: typeof issue.identifier === 'string' ? issue.identifier : null,
+      title: typeof issue.title === 'string' ? issue.title : null,
+      description: typeof issue.description === 'string' ? issue.description : null,
+      projectName:
+        typeof projectName === 'string' && projectName.trim() !== '' ? projectName : null,
+    };
+  } catch (err: any) {
+    log('RUNNER', `getIssueMeta failed: ${err.message}`, { issue: issueId });
+    return { identifier: null, title: null, description: null, projectName: null };
   }
 }
 
@@ -1478,6 +1512,27 @@ async function triggerRun(issueId: string, options: TriggerOptions = {}): Promis
         env.WEBHOOK_PROJECT_NAME = resolved.project;
         env.WEBHOOK_TARGET_REPO = resolved.localPath;
         log('RUNNER', `resolved target repo: project="${projectName}" -> ${resolved.localPath}`, { issue: issueId });
+      } else if (isNewProject(projectName)) {
+        // 「New」プロジェクト: 新規レポジトリを作成して開発対象にする。
+        // 失敗時は内側 catch で fail-open（env を変えず従来動作）。
+        try {
+          const meta = await getIssueMeta(issueId);
+          const repoName = deriveNewRepoName({
+            title: meta.title,
+            identifier: meta.identifier,
+            body: meta.description,
+          });
+          const created = await ensureRepoForNewProject({ repoName });
+          env.WEBHOOK_PROJECT_NAME = repoName;
+          env.WEBHOOK_TARGET_REPO = created.localPath;
+          log(
+            'RUNNER',
+            `new project "New" -> ${created.created ? 'created' : 'reused'} repo ${created.repo} (${created.localPath})`,
+            { issue: issueId }
+          );
+        } catch (createErr: any) {
+          log('RUNNER', `new-project repo creation failed (fail-open): ${createErr.message}`, { issue: issueId });
+        }
       } else {
         log('RUNNER', `no repo mapping for project="${projectName}" (fail-open, no TARGET_REPO injected)`, { issue: issueId });
       }
