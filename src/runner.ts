@@ -1116,11 +1116,11 @@ function saveInflight(list: string[]): void {
 
 // Crash recovery: remove leaked inflight entries whose run never cleaned up.
 // No-op while a run holds the lock; reaps entries older than INFLIGHT_TTL_MS, and
-// legacy/unknown (null startedAt) entries. Returns the number of entries reaped.
-function reapStaleInflight(): number {
-  if (isLocked()) return 0; // a live run holds the lock; never touch inflight mid-run
+// legacy/unknown (null startedAt) entries. Returns the issueIds of the entries reaped.
+function reapStaleInflight(): string[] {
+  if (isLocked()) return []; // a live run holds the lock; never touch inflight mid-run
   const records = loadInflightRecords();
-  if (records.length === 0) return 0;
+  if (records.length === 0) return [];
   const now = Date.now();
   const kept: InflightEntry[] = [];
   const reaped: string[] = [];
@@ -1134,7 +1134,7 @@ function reapStaleInflight(): number {
     saveInflightRecords(kept);
     log('REAPER', `reapStaleInflight: cleared ${reaped.length} leaked inflight entr${reaped.length === 1 ? 'y' : 'ies'}: ${reaped.join(', ')}`);
   }
-  return reaped.length;
+  return reaped;
 }
 
 function setCurrentIssue(item: QueueItem): void {
