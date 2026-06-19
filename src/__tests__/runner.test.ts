@@ -225,6 +225,23 @@ describe('runner', () => {
       );
     });
 
+    it('enqueue() is idempotent: same id twice yields a single queue entry (later priority wins)', () => {
+      // Simulates bootstrap scan having enqueued the issue, then a webhook re-enqueuing it.
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([
+        { issueId: 'SOT-123', trigger: 'webhook-bootstrap', priority: 3, priorityRank: 3 }
+      ]));
+
+      runner.enqueue('SOT-123', 'webhook', null, { priority: 1, priorityLabel: 'Urgent' });
+
+      const lastWrite = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter((c: any[]) => String(c[0]).includes('runner.queue.json.tmp'))
+        .pop();
+      const saved = JSON.parse(lastWrite![1] as string);
+      expect(saved.filter((i: any) => i.issueId === 'SOT-123').length).toBe(1);
+      expect(saved.find((i: any) => i.issueId === 'SOT-123').priority).toBe(1);
+    });
+
     it('dequeue() returns first ready item (retryAt=null)', () => {
       const queue = [
         { issueId: 'SOT-1', trigger: 'webhook', retryAt: null },
@@ -784,6 +801,46 @@ describe('runner', () => {
       fs.existsSync.mockImplementation((path: string) => path === runner.INFLIGHT_FILE);
       fs.readFileSync.mockReturnValue(JSON.stringify(['SOT-1']));
       expect(runner.isQueuedOrRunning('SOT-1')).toBe(true);
+    });
+
+    it('reapStaleInflight reaps entries older than TTL when unlocked', () => {
+      const old = new Date(Date.now() - (runner.INFLIGHT_TTL_MS + 60000)).toISOString();
+      fs.existsSync.mockImplementation((path: string) => path === runner.INFLIGHT_FILE);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-1', startedAt: old }]));
+
+      const n = runner.reapStaleInflight();
+
+      expect(n).toBe(1);
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.inflight.json.tmp'),
+        expect.not.stringContaining('SOT-1')
+      );
+    });
+
+    it('reapStaleInflight keeps fresh entries', () => {
+      const fresh = new Date().toISOString();
+      fs.existsSync.mockImplementation((path: string) => path === runner.INFLIGHT_FILE);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-1', startedAt: fresh }]));
+
+      expect(runner.reapStaleInflight()).toBe(0);
+    });
+
+    it('reapStaleInflight treats legacy string[] entries as stale', () => {
+      fs.existsSync.mockImplementation((path: string) => path === runner.INFLIGHT_FILE);
+      fs.readFileSync.mockReturnValue(JSON.stringify(['SOT-1']));
+
+      expect(runner.reapStaleInflight()).toBe(1);
+    });
+
+    it('reapStaleInflight is a no-op while a run holds the lock', () => {
+      fs.existsSync.mockImplementation((path: string) => path === runner.LOCK_FILE || path === runner.INFLIGHT_FILE);
+      fs.readFileSync.mockImplementation((path: string) =>
+        path === runner.LOCK_FILE
+          ? `${process.pid}:${new Date().toISOString()}`
+          : JSON.stringify(['SOT-1'])
+      );
+
+      expect(runner.reapStaleInflight()).toBe(0);
     });
   });
 
