@@ -95,21 +95,36 @@ function hasDueQueueItem(): boolean {
   );
 }
 
+// 起動/回収サマリの通知文言を組み立てる純粋関数（テスト容易化のため分離）。
+// 案B: 回収した取り残しIssueの識別子も文言に含める。
+// 例: 「🔄 bootstrap: 取り残し処理を1件回収 (SOT-839)」
+// 報告対象が無い（enqueued=0 かつ reaped=0）ときは null を返し、呼び出し側は通知しない。
+function formatBootstrapSummary(
+  source: string,
+  counts: { enqueued: number; reaped: number; reapedIds?: string[] }
+): string | null {
+  if (counts.enqueued === 0 && counts.reaped === 0) return null;
+  const parts: string[] = [];
+  if (counts.enqueued > 0) parts.push(`未処理Issueを${counts.enqueued}件再投入`);
+  if (counts.reaped > 0) {
+    const ids = counts.reapedIds && counts.reapedIds.length > 0 ? ` (${counts.reapedIds.join(', ')})` : '';
+    parts.push(`取り残し処理を${counts.reaped}件回収${ids}`);
+  }
+  return `🔄 ${source}: ${parts.join(' / ')}`;
+}
+
 // 起動スキャン・回収サマリを NOTIFY 側 Discord webhook に1行通知する（運用ログ）。
 // 非fatal: 失敗してもスキャン/drain本処理を妨げない。報告対象が無い（enqueued=0かつreaped=0）
 // ときは何もしない。NOTIFY 未設定時は一般 webhook にフォールバックする。
 async function notifyBootstrapSummary(
   source: string,
-  counts: { enqueued: number; reaped: number }
+  counts: { enqueued: number; reaped: number; reapedIds?: string[] }
 ): Promise<void> {
-  if (counts.enqueued === 0 && counts.reaped === 0) return;
+  const message = formatBootstrapSummary(source, counts);
+  if (message === null) return;
   try {
     const url = resolveNotifyWebhook(getSecret('DISCORD_WEBHOOK_URL_NOTIFY'), getSecret('DISCORD_WEBHOOK_URL'));
     if (!url) return;
-    const parts: string[] = [];
-    if (counts.enqueued > 0) parts.push(`enqueued=${counts.enqueued}`);
-    if (counts.reaped > 0) parts.push(`reaped=${counts.reaped}`);
-    const message = `🔄 ${source}: ${parts.join(' ')}`;
     const notifier = new DiscordNotifier(url);
     notifier.add(message);
     await notifier.stop();
@@ -174,14 +189,14 @@ async function runReaperTick(): Promise<void> {
 
   // クラッシュ回収: 取り残された inflight エントリをTTLで回収する。
   // cooldown中/アイドル時でも安全（実行中ロック時は reapStaleInflight 側でno-op）。
-  let reapedInflight = 0;
+  let reapedIds: string[] = [];
   try {
-    reapedInflight = runner.reapStaleInflight();
+    reapedIds = runner.reapStaleInflight();
   } catch (err: any) {
     runner.log('REAPER', `reapStaleInflight error (non-fatal): ${err.message}`);
   }
-  if (reapedInflight > 0) {
-    await notifyBootstrapSummary('reaper', { enqueued: 0, reaped: reapedInflight });
+  if (reapedIds.length > 0) {
+    await notifyBootstrapSummary('reaper', { enqueued: 0, reaped: reapedIds.length, reapedIds });
   }
 
   if (runner.isLocked()) return;        // 実行中はスキップ
@@ -562,11 +577,11 @@ async function runBootstrapScan(): Promise<void> {
   runner.log('BOOTSTRAP', `startup scan started at ${startedAt}`);
 
   // クラッシュ回収: 起動時に取り残された inflight を回収する。
-  let reapedInflight = 0;
+  let reapedIds: string[] = [];
   try {
-    reapedInflight = runner.reapStaleInflight();
-    if (reapedInflight > 0) {
-      runner.log('BOOTSTRAP', `startup: reaped ${reapedInflight} leaked inflight entr${reapedInflight === 1 ? 'y' : 'ies'}`);
+    reapedIds = runner.reapStaleInflight();
+    if (reapedIds.length > 0) {
+      runner.log('BOOTSTRAP', `startup: reaped ${reapedIds.length} leaked inflight entr${reapedIds.length === 1 ? 'y' : 'ies'}: ${reapedIds.join(', ')}`);
     }
   } catch (err: any) {
     runner.log('BOOTSTRAP', `startup reapStaleInflight error (non-fatal): ${err.message}`);
@@ -576,7 +591,7 @@ async function runBootstrapScan(): Promise<void> {
 
   runner.log('BOOTSTRAP', `startup scan complete: enqueued=${enqueuedCount}`);
 
-  await notifyBootstrapSummary('bootstrap', { enqueued: enqueuedCount, reaped: reapedInflight });
+  await notifyBootstrapSummary('bootstrap', { enqueued: enqueuedCount, reaped: reapedIds.length, reapedIds });
 
   if (enqueuedCount > 0) {
     runner.log('BOOTSTRAP', 'startup scan: running syncQueueWithLinear before drain');
@@ -615,4 +630,4 @@ if (isMain) {
   })();
 }
 
-export { app, runBootstrapScan, hasDueQueueItem, runPeriodicDrainTick, startPeriodicDrain, scanAndEnqueueActiveIssues, runReaperTick };
+export { app, runBootstrapScan, hasDueQueueItem, runPeriodicDrainTick, startPeriodicDrain, scanAndEnqueueActiveIssues, runReaperTick, formatBootstrapSummary };

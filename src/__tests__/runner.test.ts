@@ -923,7 +923,7 @@ describe('runner', () => {
 
       const n = runner.reapStaleInflight();
 
-      expect(n).toBe(1);
+      expect(n).toEqual(['SOT-1']);
       expect(fs.writeFileSync).toHaveBeenCalledWith(
         expect.stringContaining('runner.inflight.json.tmp'),
         expect.not.stringContaining('SOT-1')
@@ -935,14 +935,14 @@ describe('runner', () => {
       fs.existsSync.mockImplementation((path: string) => path === runner.INFLIGHT_FILE);
       fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-1', startedAt: fresh }]));
 
-      expect(runner.reapStaleInflight()).toBe(0);
+      expect(runner.reapStaleInflight()).toEqual([]);
     });
 
     it('reapStaleInflight treats legacy string[] entries as stale', () => {
       fs.existsSync.mockImplementation((path: string) => path === runner.INFLIGHT_FILE);
       fs.readFileSync.mockReturnValue(JSON.stringify(['SOT-1']));
 
-      expect(runner.reapStaleInflight()).toBe(1);
+      expect(runner.reapStaleInflight()).toEqual(['SOT-1']);
     });
 
     it('reapStaleInflight is a no-op while a run holds the lock', () => {
@@ -953,7 +953,7 @@ describe('runner', () => {
           : JSON.stringify(['SOT-1'])
       );
 
-      expect(runner.reapStaleInflight()).toBe(0);
+      expect(runner.reapStaleInflight()).toEqual([]);
     });
   });
 

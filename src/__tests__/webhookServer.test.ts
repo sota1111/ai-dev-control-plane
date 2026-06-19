@@ -27,7 +27,7 @@ const mockRunner = {
   removeFromQueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
   isQueuedOrRunning: jest.fn().mockReturnValue(false),
-  reapStaleInflight: jest.fn().mockReturnValue(0),
+  reapStaleInflight: jest.fn().mockReturnValue([]),
   syncQueueWithLinear: (jest.fn() as any).mockResolvedValue(undefined),
   isLocked: jest.fn().mockReturnValue(false),
   loadQueue: jest.fn().mockReturnValue([]),
@@ -709,7 +709,7 @@ describe('reaper (runReaperTick)', () => {
     delete process.env.WEBHOOK_REAPER_ENABLED;
     process.env.LINEAR_API_KEY = 'test-key';
     runReaperTick = webhookServer.runReaperTick;
-    runner.reapStaleInflight.mockReturnValue(0);
+    runner.reapStaleInflight.mockReturnValue([]);
     runner.isLocked.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.loadQueue.mockReturnValue([]);
@@ -955,5 +955,33 @@ describe('periodic drain', () => {
     // We already checked typeof timer.unref === 'function' in implementation
     clearInterval(timer);
     setIntervalSpy.mockRestore();
+  });
+});
+
+describe('formatBootstrapSummary (SOT-839 案B)', () => {
+  const formatBootstrapSummary: any = webhookServer.formatBootstrapSummary;
+
+  it('returns null when nothing was enqueued or reaped', () => {
+    expect(formatBootstrapSummary('bootstrap', { enqueued: 0, reaped: 0 })).toBeNull();
+  });
+
+  it('includes the recovered issue identifier when one entry is reaped', () => {
+    const msg = formatBootstrapSummary('bootstrap', { enqueued: 0, reaped: 1, reapedIds: ['SOT-839'] });
+    expect(msg).toBe('🔄 bootstrap: 取り残し処理を1件回収 (SOT-839)');
+  });
+
+  it('lists multiple recovered issue identifiers', () => {
+    const msg = formatBootstrapSummary('reaper', { enqueued: 0, reaped: 2, reapedIds: ['SOT-100', 'SOT-200'] });
+    expect(msg).toBe('🔄 reaper: 取り残し処理を2件回収 (SOT-100, SOT-200)');
+  });
+
+  it('falls back to the count when no ids are provided', () => {
+    const msg = formatBootstrapSummary('reaper', { enqueued: 0, reaped: 1 });
+    expect(msg).toBe('🔄 reaper: 取り残し処理を1件回収');
+  });
+
+  it('combines enqueued and reaped parts', () => {
+    const msg = formatBootstrapSummary('bootstrap', { enqueued: 3, reaped: 1, reapedIds: ['SOT-839'] });
+    expect(msg).toBe('🔄 bootstrap: 未処理Issueを3件再投入 / 取り残し処理を1件回収 (SOT-839)');
   });
 });
