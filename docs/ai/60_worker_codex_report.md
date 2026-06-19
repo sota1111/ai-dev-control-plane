@@ -1,46 +1,43 @@
 # Worker Report
 
-> **FALLBACK NOTICE (Worker Non-Response Policy):** Codex CLI was non-responsive
-> for this run. `scripts/ai/run_codex.sh` exited with the dedicated non-response
-> code `75` due to an active usage-limit cooldown (`CODEX_COOLDOWN_ACTIVE` until
-> epoch 1782000900, ~42h out). A retry against a multi-hour cooldown is futile, so
-> per the Worker Non-Response Fallback Policy, Claude Code performed this initial
-> task check AND the DOC change directly. All quality gates were still run.
-
 ## Summary
+SOT-840 is ACTIONABLE (real orchestration gap). Codex CLI was NON-RESPONSIVE: `scripts/ai/run_codex.sh`
+exited 75 via the usage-limit cooldown pre-check (codex.cooldown.json, resumeAt 2026-06-21T00:15Z,
+~42h remaining). Per the Worker Non-Response Fallback Policy, Claude Code performed the task check,
+implementation, and verification directly.
 
-SOT-836 「Backlogを対応しない」— limit automated processing to Todo / In Progress.
-
-Findings: the code-level scan/queue filters (`src/runner.ts`, `src/webhook-server.ts`,
-`src/lib/schedulerCore.js`) already use `state.type in ["unstarted","started"]`, so the
-Linear `backlog` type is **already excluded** in code. The remaining gap was the
-orchestration prompt `prompts/claude/auto_run.md`, which listed `Backlog` as a target
-status and in the sort order, plus two docs that incorrectly described `unstarted` as
-covering Backlog. Fixed the prompt and the docs; no code change needed.
-
-## Worker Non-Response Disclosure
-- Non-responsive worker: Codex CLI
-- Detected failure mode: usage-limit cooldown (CODEX_COOLDOWN_ACTIVE, fixed epoch ~1.7 days out)
-- Action: Claude Code fallback performed the task check and the DOC change directly.
+Root cause of SOT-829 stuck In Progress: child issues (SOT-831, SOT-832) are each processed in their
+own Linear-webhook single-issue run. When a child reaches a terminal state, `src/webhook-server.ts`
+just logs + `runner.removeFromQueue()` and returns — it never re-evaluates the parent. The spec's
+"全機能Issue完了後、親Issue を In Review" transition only happens inside the parent's own run, so when
+children complete in separate runs the parent is left In Progress forever.
 
 ## Changed Files
-- `prompts/claude/auto_run.md` — removed `Backlog` from target statuses and sort order; added explicit "do not process Backlog" note
-- `docs/webhook.md` — corrected scan target wording (`unstarted` = Todo only; Backlog excluded)
-- `docs/scheduler.md` — corrected polling target wording (`unstarted` = Todo only; Backlog excluded)
+- `src/runner.ts` — `finalizeParentIfChildrenComplete(childIdentifier, parentId)`: on a child becoming
+  terminal, if all of the parent's children are terminal, move the parent to In Review + post an
+  idempotent (marker-guarded) finalization comment. Fail-open (never throws).
+- `src/webhook-server.ts` — in the terminal-state branch, fire-and-forget the finalizer with the
+  child's parent id from the webhook payload.
+- `src/__tests__/runner.test.ts` — 5 unit tests (happy path, non-terminal child, idempotent marker,
+  parent already terminal, null parent).
 
 ## Commands Run
-- `npm run lint` → exit 0 (pass)
-- `npm run typecheck` → exit 0 (pass)
-- `npm test` → exit 0 (25 suites, 329 tests passed)
+- `bash scripts/ai/run_codex.sh` → exit 75 (CODEX_COOLDOWN_ACTIVE, non-responsive)
+- `npm run lint` → exit 0
+- `npm run typecheck` → exit 0
+- `npm test` → exit 0 (334 passed, 25 suites). No `e2e` script (N/A).
 
 ## Acceptance Criteria
-- [x] Backlog excluded from automated processing targets (prompt + docs)
-- [x] Todo and In Progress remain in scope
-- [x] Code-level filter confirmed already correct (no regression)
-- [x] Quality gate green
+- [x] Root cause of SOT-829 stuck In Progress identified
+- [x] Countermeasure implemented so parents auto-advance to In Review when all children complete
+- [x] Idempotent (won't double-finalize) and fail-open (never blocks webhook ack)
+- [x] Lint / typecheck / unit tests pass
 
 ## Risks
-- Code filter was already correct; the change is prompt/doc wording only — low risk.
+- Relies on the Linear webhook payload containing `data.parent`. If absent, no finalization fires
+  (degrades gracefully; periodic sync still leaves the parent for a human). 
+- "In Review" state is matched by name; teams without an "In Review" state are skipped (logged).
+- Does not retroactively fix already-stuck parents — SOT-829 itself is finalized manually in this run.
 
 ## Next Action
 READY_FOR_REVIEW

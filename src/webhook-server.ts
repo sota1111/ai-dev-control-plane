@@ -370,6 +370,19 @@ app.post('/webhooks/linear', (req: any, res: any) => {
   if (isTerminalState({ type: stateType, name: stateName })) {
     runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=terminal state`, { issue: issueId });
     runner.removeFromQueue(issueId);
+    // A child issue just reached a terminal state. Children are processed in their own
+    // single-issue runs, so nobody finalizes the parent — advance it to In Review here
+    // if all of its children are now done (SOT-840). Fire-and-forget; never blocks the ack.
+    const parentId = body.data?.parent?.identifier ?? body.data?.parent?.id ?? null;
+    if (parentId) {
+      setImmediate(async () => {
+        try {
+          await runner.finalizeParentIfChildrenComplete(issueId, parentId);
+        } catch (e: any) {
+          runner.log("WEBHOOK", `finalizeParent error: ${e.message}`, { issue: issueId });
+        }
+      });
+    }
     return res.status(200).json({ status: "ignored", reason: `terminal state: ${stateName || stateType}` });
   }
 

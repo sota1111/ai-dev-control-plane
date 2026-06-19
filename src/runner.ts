@@ -1264,6 +1264,107 @@ async function setIssueInProgress(issueId: string): Promise<void> {
   }
 }
 
+// Marker embedded in the auto-finalization comment so we never finalize a parent twice.
+const PARENT_FINALIZED_MARKER = '<!-- auto-parent-finalized -->';
+
+// When a CHILD issue reaches a terminal state, advance its parent to In Review if all
+// of the parent's children are now terminal. Child issues are processed in independent
+// Linear-webhook single-issue runs, so without this nobody returns to finalize the
+// parent and it stays stuck In Progress (see SOT-840 / SOT-829). Fail-open: never throws.
+async function finalizeParentIfChildrenComplete(childIdentifier: string, parentId: string | null): Promise<boolean> {
+  if (!parentId) return false;
+  try {
+    const data: any = await linearQuery(
+      `query($id: String!) {
+        issue(id: $id) {
+          id
+          identifier
+          state { name type }
+          team { id }
+          children(first: 100) { nodes { identifier state { name type } } }
+        }
+      }`,
+      { id: parentId }
+    );
+    const parent = data.issue;
+    if (!parent) {
+      log('WEBHOOK', `finalizeParent: parent ${parentId} not found, skip`, { issue: childIdentifier });
+      return false;
+    }
+
+    if (isTerminalState(parent.state)) {
+      log('WEBHOOK', `finalizeParent: ${parent.identifier} already terminal (${parent.state?.name}), skip`, { issue: parent.identifier });
+      return false;
+    }
+    if ((parent.state?.name || '').toLowerCase() === 'in review') {
+      log('WEBHOOK', `finalizeParent: ${parent.identifier} already In Review, skip`, { issue: parent.identifier });
+      return false;
+    }
+
+    const children = parent.children?.nodes || [];
+    if (children.length === 0) {
+      log('WEBHOOK', `finalizeParent: ${parent.identifier} has no children, skip`, { issue: parent.identifier });
+      return false;
+    }
+
+    const pending = children.filter((c: any) => !isTerminalState(c.state));
+    if (pending.length > 0) {
+      log('WEBHOOK', `finalizeParent: ${parent.identifier} has non-terminal children: ${pending.map((c: any) => c.identifier).join(',')}, skip`, { issue: parent.identifier });
+      return false;
+    }
+
+    // Idempotency: bail if we already posted the finalization marker.
+    const commentsData: any = await linearQuery(
+      'query($id: String!) { issue(id: $id) { comments(first: 50) { nodes { body } } } }',
+      { id: parent.id }
+    );
+    const existingComments = commentsData.issue?.comments?.nodes || [];
+    if (existingComments.some((c: any) => (c.body || '').includes(PARENT_FINALIZED_MARKER))) {
+      log('WEBHOOK', `finalizeParent: ${parent.identifier} already finalized (marker present), skip`, { issue: parent.identifier });
+      return false;
+    }
+
+    // Resolve the team's "In Review" workflow state by name (both In Progress and In
+    // Review are type "started", so we must match on name, not type).
+    const statesData: any = await linearQuery(
+      'query($teamId: String!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
+      { teamId: parent.team.id }
+    );
+    const stateNodes = statesData.workflowStates?.nodes || [];
+    const reviewState = stateNodes.find((s: any) => (s.name || '').toLowerCase() === 'in review');
+    if (!reviewState) {
+      log('WEBHOOK', `finalizeParent: no In Review state for team ${parent.team.id}, skip`, { issue: parent.identifier });
+      return false;
+    }
+
+    await linearQuery(
+      'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
+      { id: parent.id, stateId: reviewState.id }
+    );
+
+    const childList = children.map((c: any) => `- ${c.identifier} (${c.state?.name})`).join('\n');
+    const body = `${PARENT_FINALIZED_MARKER}
+## 親Issue自動ファイナライズ
+
+全ての子Issueが完了したため、親Issueを **In Review** に更新しました（trigger: ${childIdentifier} 完了）。
+
+### 子Issue
+${childList}
+
+人間のレビュー後に Done へ移行してください。`;
+    await linearQuery(
+      'mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }',
+      { issueId: parent.id, body }
+    );
+
+    log('WEBHOOK', `finalizeParent: ${parent.identifier} -> In Review (all ${children.length} children terminal, trigger ${childIdentifier})`, { issue: parent.identifier });
+    return true;
+  } catch (err: any) {
+    log('ERROR', `finalizeParentIfChildrenComplete failed: ${err.message}`, { issue: parentId || '' });
+    return false;
+  }
+}
+
 interface EligibilityResult {
   eligible: boolean;
   reason?: string;
@@ -1701,6 +1802,7 @@ export {
   isQueuedOrRunning,
   getCurrentIssue,
   setIssueInProgress,
+  finalizeParentIfChildrenComplete,
   getIssueExecutionEligibility,
   getIssueProjectName,
   triggerRun,

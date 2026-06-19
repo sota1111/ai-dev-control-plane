@@ -548,6 +548,119 @@ describe('runner', () => {
     });
   });
 
+  describe('finalizeParentIfChildrenComplete', () => {
+    let writeSpy: jest.Mock;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      process.env.LINEAR_API_KEY = 'test-key';
+      writeSpy = jest.fn();
+    });
+
+    function setupLinearMocks(responses: any[]) {
+      let index = 0;
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
+        const responseData = JSON.stringify({ data: responses[index++] });
+        const res: any = {
+          on: jest.fn((event: any, cb: any) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return {
+          on: jest.fn(),
+          write: writeSpy,
+          end: jest.fn(),
+          destroy: jest.fn()
+        };
+      });
+    }
+
+    const startedState = { name: 'In Progress', type: 'started' };
+    const doneState = { name: 'Done', type: 'completed' };
+
+    it('returns false immediately when parentId is null (no Linear calls)', async () => {
+      const result = await runner.finalizeParentIfChildrenComplete('SOT-831', null);
+      expect(result).toBe(false);
+      expect(https.request).not.toHaveBeenCalled();
+    });
+
+    it('moves parent to In Review and comments when all children are terminal', async () => {
+      setupLinearMocks([
+        { issue: { id: 'parent-uuid', identifier: 'SOT-829', state: startedState, team: { id: 'team-1' },
+          children: { nodes: [
+            { identifier: 'SOT-831', state: doneState },
+            { identifier: 'SOT-832', state: doneState }
+          ] } } },
+        { issue: { comments: { nodes: [] } } },
+        { workflowStates: { nodes: [
+          { id: 'state-progress', name: 'In Progress', type: 'started' },
+          { id: 'state-review', name: 'In Review', type: 'started' }
+        ] } },
+        { issueUpdate: { success: true } },
+        { commentCreate: { success: true } }
+      ]);
+
+      const result = await runner.finalizeParentIfChildrenComplete('SOT-832', 'SOT-829');
+
+      expect(result).toBe(true);
+      expect(https.request).toHaveBeenCalledTimes(5);
+      const written = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(written.some((b: any) => b.includes('issueUpdate') && b.includes('state-review'))).toBe(true);
+      expect(written.some((b: any) => b.includes('commentCreate') && b.includes('auto-parent-finalized'))).toBe(true);
+    });
+
+    it('does nothing when a child is still non-terminal', async () => {
+      setupLinearMocks([
+        { issue: { id: 'parent-uuid', identifier: 'SOT-829', state: startedState, team: { id: 'team-1' },
+          children: { nodes: [
+            { identifier: 'SOT-831', state: doneState },
+            { identifier: 'SOT-832', state: startedState }
+          ] } } }
+      ]);
+
+      const result = await runner.finalizeParentIfChildrenComplete('SOT-831', 'SOT-829');
+
+      expect(result).toBe(false);
+      expect(https.request).toHaveBeenCalledTimes(1); // only the parent query
+      const written = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(written.some((b: any) => b.includes('issueUpdate'))).toBe(false);
+      expect(written.some((b: any) => b.includes('commentCreate'))).toBe(false);
+    });
+
+    it('is idempotent: skips when finalization marker already present', async () => {
+      setupLinearMocks([
+        { issue: { id: 'parent-uuid', identifier: 'SOT-829', state: startedState, team: { id: 'team-1' },
+          children: { nodes: [
+            { identifier: 'SOT-831', state: doneState },
+            { identifier: 'SOT-832', state: doneState }
+          ] } } },
+        { issue: { comments: { nodes: [{ body: '<!-- auto-parent-finalized -->\nalready done' }] } } }
+      ]);
+
+      const result = await runner.finalizeParentIfChildrenComplete('SOT-832', 'SOT-829');
+
+      expect(result).toBe(false);
+      expect(https.request).toHaveBeenCalledTimes(2); // parent query + comments query, then stop
+      const written = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(written.some((b: any) => b.includes('issueUpdate'))).toBe(false);
+      expect(written.some((b: any) => b.includes('commentCreate'))).toBe(false);
+    });
+
+    it('skips when parent is already terminal', async () => {
+      setupLinearMocks([
+        { issue: { id: 'parent-uuid', identifier: 'SOT-829', state: doneState, team: { id: 'team-1' },
+          children: { nodes: [{ identifier: 'SOT-831', state: doneState }] } } }
+      ]);
+
+      const result = await runner.finalizeParentIfChildrenComplete('SOT-831', 'SOT-829');
+
+      expect(result).toBe(false);
+      expect(https.request).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('normalizeQueue', () => {
     it('deduplicates items with same issueId and merges retryAt', () => {
       const future1 = new Date(Date.now() + 10000).toISOString();
