@@ -3,6 +3,7 @@
 import {
   handleStatus,
   handleQueue,
+  handlePastQueue,
   handleReorder,
   handleCooldown,
   handlePause,
@@ -98,6 +99,24 @@ async function processQueueInBackground(interaction: any): Promise<void> {
   }
 }
 
+/**
+ * Background worker for /pastqueue: same deferred pattern as /queue (handlePastQueue
+ * performs a Linear network call that can exceed Discord's 3s ACK deadline).
+ */
+async function processPastQueueInBackground(interaction: any): Promise<void> {
+  try {
+    const result = await handlePastQueue();
+    await editOriginalInteractionResponse(interaction.application_id, interaction.token, result.content);
+  } catch (err: any) {
+    runner.log('DISCORD', `processPastQueueInBackground error: ${err.message}`);
+    await editOriginalInteractionResponse(
+      interaction.application_id,
+      interaction.token,
+      `エラーが発生しました: ${err.message}`,
+    );
+  }
+}
+
 async function handleSlashCommand(commandName: string, interaction: any): Promise<InteractionResponse> {
   let result: any;
 
@@ -110,6 +129,16 @@ async function handleSlashCommand(commandName: string, interaction: any): Promis
       // Discord's 3s ACK deadline. ACK immediately with a deferred response and finish
       // the work in the background, editing the original response (same pattern as /ask).
       void processQueueInBackground(interaction);
+      return {
+        status: 200,
+        body: {
+          type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { flags: 64 },
+        },
+      };
+    case 'pastqueue':
+      // Same deferred pattern as /queue (handlePastQueue performs a Linear network call).
+      void processPastQueueInBackground(interaction);
       return {
         status: 200,
         body: {

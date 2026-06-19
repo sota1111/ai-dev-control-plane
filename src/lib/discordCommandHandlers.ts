@@ -38,6 +38,45 @@ function validateIssueId(issueId: string | null | undefined): { valid: boolean; 
   return { valid: true, id: issueId.trim().toUpperCase() };
 }
 
+// Shared row formatter for the active queue (/queue) and the past queue (/pastqueue),
+// so both commands render identical content.
+function formatQueueItem(
+  item: any,
+  index: number,
+  activeMap: Map<string, { title: string; url: string }>,
+  indent = '',
+): string {
+  const at = item.enqueuedAt ? new Date(item.enqueuedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
+  const priorityStr = item.priorityLabel ? `[${item.priorityLabel}]` : '[No priority]';
+  const rank = queueOrdering.effectiveRank(item);
+  const groupStr = item.queueGroup
+    ? `  ↳ 親: ${item.parentIssueIdentifier || item.parentIssueId || item.queueGroup}`
+    : '';
+  const retryStr = item.retryAt ? ` ⏳ ${new Date(item.retryAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}` : '';
+
+  const identifier = item.issueIdentifier || item.issueId;
+  const meta = activeMap.get(identifier);
+  const titleUrl = meta ? ` — ${meta.title} ${meta.url}` : '';
+
+  return `${indent}${index}. **${identifier}** ${priorityStr} (rank ${rank}) — ${item.trigger || 'unknown'} (${at})${retryStr}${groupStr}${titleUrl}`;
+}
+
+// Build the identifier -> {title,url} map from Linear active issues. Tolerates failure.
+async function buildActiveMap(): Promise<Map<string, { title: string; url: string }>> {
+  const activeMap = new Map<string, { title: string; url: string }>();
+  try {
+    const actives = await runner.fetchActiveIssues();
+    for (const issue of (actives || [])) {
+      if (issue.identifier && issue.title && issue.url) {
+        activeMap.set(issue.identifier, { title: issue.title, url: issue.url });
+      }
+    }
+  } catch (err: any) {
+    runner.log('DISCORD', `fetchActiveIssues failed: ${err.message}`);
+  }
+  return activeMap;
+}
+
 async function handleStatus(): Promise<CommandResult> {
   try {
     const locked = runner.isLocked();
@@ -105,17 +144,7 @@ async function handleQueue(): Promise<CommandResult> {
     const current = runner.getCurrentIssue();
 
     // A1: Fetch active issues for titles/urls
-    const activeMap = new Map<string, { title: string; url: string }>();
-    try {
-      const actives = await runner.fetchActiveIssues();
-      for (const issue of (actives || [])) {
-        if (issue.identifier && issue.title && issue.url) {
-          activeMap.set(issue.identifier, { title: issue.title, url: issue.url });
-        }
-      }
-    } catch (err: any) {
-      runner.log('DISCORD', `fetchActiveIssues failed: ${err.message}`);
-    }
+    const activeMap = await buildActiveMap();
 
     if (rawQueue.length === 0 && !current) {
       return { content: '## 実行キュー\nキューは空です。' };
@@ -123,22 +152,6 @@ async function handleQueue(): Promise<CommandResult> {
 
     // Use shared logic to determine real execution order
     const { ready, waiting } = queueOrdering.previewQueueOrder(rawQueue);
-
-    function formatItem(item: any, index: number, indent = '') {
-      const at = item.enqueuedAt ? new Date(item.enqueuedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
-      const priorityStr = item.priorityLabel ? `[${item.priorityLabel}]` : '[No priority]';
-      const rank = queueOrdering.effectiveRank(item);
-      const groupStr = item.queueGroup
-        ? `  ↳ 親: ${item.parentIssueIdentifier || item.parentIssueId || item.queueGroup}`
-        : '';
-      const retryStr = item.retryAt ? ` ⏳ ${new Date(item.retryAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}` : '';
-
-      const identifier = item.issueIdentifier || item.issueId;
-      const meta = activeMap.get(identifier);
-      const titleUrl = meta ? ` — ${meta.title} ${meta.url}` : '';
-
-      return `${indent}${index}. **${identifier}** ${priorityStr} (rank ${rank}) — ${item.trigger || 'unknown'} (${at})${retryStr}${groupStr}${titleUrl}`;
-    }
 
     const lines: string[] = [];
     if (current) {
@@ -152,7 +165,7 @@ async function handleQueue(): Promise<CommandResult> {
       if (lines.length > 0) lines.push('');
       lines.push('### 実行待ち (Ready)');
       ready.forEach((item: any, index: number) => {
-        lines.push(formatItem(item, index + 1));
+        lines.push(formatQueueItem(item, index + 1, activeMap));
       });
     }
 
@@ -161,7 +174,7 @@ async function handleQueue(): Promise<CommandResult> {
       lines.push('### 待機中 (Waiting)');
       waiting.forEach((item: any, index: number) => {
         // For waiting items, we list them in order of retryAt
-        lines.push(formatItem(item, index + 1));
+        lines.push(formatQueueItem(item, index + 1, activeMap));
       });
     }
 
@@ -169,6 +182,29 @@ async function handleQueue(): Promise<CommandResult> {
     return { content: truncate(content) };
   } catch (err: any) {
     runner.log('DISCORD', `handleQueue error: ${err.message}`);
+    return { content: `エラーが発生しました: ${err.message}` };
+  }
+}
+
+// /pastqueue: show the most recent 10 dequeued (processed) issues using the same
+// row format as /queue.
+async function handlePastQueue(): Promise<CommandResult> {
+  try {
+    const history = runner.loadQueueHistory();
+    const items = history.slice(0, 10); // history is newest-first
+
+    if (items.length === 0) {
+      return { content: '## 過去キュー\n履歴がありません。' };
+    }
+
+    const activeMap = await buildActiveMap();
+
+    const lines = items.map((item: any, index: number) => formatQueueItem(item, index + 1, activeMap));
+
+    const content = `## 過去キュー (直近${items.length}件)\n` + lines.join('\n');
+    return { content: truncate(content) };
+  } catch (err: any) {
+    runner.log('DISCORD', `handlePastQueue error: ${err.message}`);
     return { content: `エラーが発生しました: ${err.message}` };
   }
 }
@@ -479,6 +515,7 @@ async function handleRetry(interaction: DiscordInteraction): Promise<CommandResu
 export {
   handleStatus,
   handleQueue,
+  handlePastQueue,
   handleReorder,
   handleCooldown,
   handlePause,

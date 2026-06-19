@@ -3,6 +3,7 @@ import { jest } from '@jest/globals';
 const mockHandlers = {
   handleStatus: (jest.fn() as any).mockResolvedValue({ content: 'status-content' }),
   handleQueue: (jest.fn() as any).mockResolvedValue({ content: 'queue-content' }),
+  handlePastQueue: (jest.fn() as any).mockResolvedValue({ content: 'pastqueue-content' }),
   handleReorder: (jest.fn() as any).mockResolvedValue({ content: 'reorder-content' }),
   handleCooldown: (jest.fn() as any).mockResolvedValue({ content: 'cooldown-content' }),
   handlePause: (jest.fn() as any).mockResolvedValue({ content: 'pause-content' }),
@@ -91,6 +92,32 @@ describe('routeInteraction — /queue deferred response', () => {
       'app123',
       'token456',
       'エラーが発生しました: boom',
+    );
+  });
+});
+
+describe('routeInteraction — /pastqueue deferred response', () => {
+  test('returns a deferred (type 5) ephemeral response and edits with handlePastQueue result', async () => {
+    const interaction = {
+      type: APPLICATION_COMMAND,
+      application_id: 'app123',
+      token: 'token456',
+      data: { name: 'pastqueue' },
+    };
+
+    const response = await routeInteraction(interaction);
+
+    expect(response.status).toBe(200);
+    expect(response.body.type).toBe(5); // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
+    expect(response.body.data).toEqual({ flags: 64 });
+
+    await new Promise((r) => setImmediate(r));
+
+    expect(mockHandlers.handlePastQueue).toHaveBeenCalledTimes(1);
+    expect(mockFollowup.editOriginalInteractionResponse).toHaveBeenCalledWith(
+      'app123',
+      'token456',
+      'pastqueue-content',
     );
   });
 });
