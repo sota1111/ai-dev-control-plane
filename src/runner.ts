@@ -11,6 +11,7 @@ import { classifyUsageLimit } from './lib/usageLimitParser.js';
 import { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } from './lib/resumeMetadata.js';
 import * as queueOrdering from './lib/queueOrdering.js';
 import { isTerminalState } from './lib/issueState.js';
+import { resolveRepoForProject } from './lib/projectRepo.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -261,6 +262,21 @@ async function linearQuery(query: string, variables: Record<string, any> = {}): 
     req.write(body);
     req.end();
   });
+}
+
+// Linear issue が属するプロジェクト名を取得する。取得不能・未設定時は null（never throws）。
+async function getIssueProjectName(issueId: string): Promise<string | null> {
+  try {
+    const data: any = await linearQuery(
+      'query($id: String!) { issue(id: $id) { project { name } } }',
+      { id: issueId }
+    );
+    const name = data?.issue?.project?.name;
+    return typeof name === 'string' && name.trim() !== '' ? name : null;
+  } catch (err: any) {
+    log('RUNNER', `getIssueProjectName failed: ${err.message}`, { issue: issueId });
+    return null;
+  }
 }
 
 const getPriorityRank = queueOrdering.getPriorityRank;
@@ -1303,9 +1319,28 @@ interface TriggerResult {
   output: string;
 }
 
-function triggerRun(issueId: string, options: TriggerOptions = {}): Promise<TriggerResult> {
+async function triggerRun(issueId: string, options: TriggerOptions = {}): Promise<TriggerResult> {
   // SECURITY: Pass issueId only via environment variable, never as shell argument
-  const env = { ...process.env, WEBHOOK_ISSUE_ID: issueId };
+  const env: Record<string, string | undefined> = { ...process.env, WEBHOOK_ISSUE_ID: issueId };
+
+  // Linearプロジェクトから開発対象レポジトリを判定し、解決できればプロンプトへ注入する。
+  // 取得・解決失敗時は env を変えず従来動作にフォールバックする（autonomous loop を止めない）。
+  try {
+    const projectName = await getIssueProjectName(issueId);
+    if (projectName) {
+      const resolved = resolveRepoForProject(projectName);
+      if (resolved) {
+        env.WEBHOOK_PROJECT_NAME = resolved.project;
+        env.WEBHOOK_TARGET_REPO = resolved.localPath;
+        log('RUNNER', `resolved target repo: project="${projectName}" -> ${resolved.localPath}`, { issue: issueId });
+      } else {
+        log('RUNNER', `no repo mapping for project="${projectName}" (fail-open, no TARGET_REPO injected)`, { issue: issueId });
+      }
+    }
+  } catch (err: any) {
+    log('RUNNER', `project->repo resolution error (fail-open): ${err.message}`, { issue: issueId });
+  }
+
   const projectRoot = path.join(__dirname, '..');
   const startedAt = new Date().toISOString();
 
@@ -1667,6 +1702,7 @@ export {
   getCurrentIssue,
   setIssueInProgress,
   getIssueExecutionEligibility,
+  getIssueProjectName,
   triggerRun,
   runItem,
   drainQueue,
