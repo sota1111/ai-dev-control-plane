@@ -11,8 +11,16 @@ const mockRunner = {
   LOG_DIR: '/tmp/test_logs',
   enqueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
+  isQueuedOrRunning: jest.fn().mockReturnValue(false),
   drainQueue: (jest.fn() as any).mockResolvedValue(undefined),
   saveQueue: jest.fn(),
+  clearUsageLimitCooldown: jest.fn(),
+  forceReleaseLock: jest.fn().mockReturnValue(null),
+  reapStaleInflight: jest.fn().mockReturnValue([]),
+  loadInflight: jest.fn().mockReturnValue([]),
+  saveInflight: jest.fn(),
+  clearCurrentIssue: jest.fn(),
+  syncQueueWithLinear: (jest.fn() as any).mockResolvedValue(undefined),
   getPriorityRank: jest.fn((p) => {
     if (p === 1) return 1;
     if (p === 2) return 2;
@@ -370,5 +378,74 @@ describe('handleReorder', () => {
     (runner.fetchActiveIssues as any).mockRejectedValueOnce(new Error('Linear Timeout'));
     const result = await handlers.handleReorder();
     expect(result.content).toContain('Linear Issueの取得に失敗しました');
+  });
+});
+
+describe('handleRecover', () => {
+  test('soft recover clears cooldown, reaps inflight, re-enqueues and drains', async () => {
+    (runner.getUsageLimitCooldownUntil as any).mockReturnValueOnce({ issueIdentifier: 'SOT-841', retryAt: '2026-06-19T13:51:07.254Z' });
+    (runner.reapStaleInflight as any).mockReturnValueOnce(['SOT-700']);
+    (runner.fetchActiveIssues as any).mockResolvedValueOnce([
+      { id: 'u1', identifier: 'SOT-862', priority: 0, priorityLabel: 'No priority', stateName: 'Todo' },
+    ]);
+
+    const result = await handlers.handleRecover({ data: { options: [] } });
+    await new Promise((r) => setImmediate(r)); // flush the deferred drainQueue
+
+    expect(runner.clearUsageLimitCooldown).toHaveBeenCalled();
+    expect(pauseState.clearPause).not.toHaveBeenCalled(); // not paused
+    expect(runner.forceReleaseLock).not.toHaveBeenCalled(); // soft mode
+    expect(runner.enqueue).toHaveBeenCalledWith('SOT-862', 'discord-recover', null, expect.any(Object));
+    expect(runner.drainQueue).toHaveBeenCalled();
+    expect(result.content).toContain('強制復帰');
+    expect(result.content).toContain('cooldown を解除しました（SOT-841）');
+    expect(result.content).toContain('SOT-700');
+  });
+
+  test('skips In Review (hold) issues when re-enqueuing', async () => {
+    (runner.fetchActiveIssues as any).mockResolvedValueOnce([
+      { id: 'u1', identifier: 'SOT-841', priority: 0, stateName: 'In Review' },
+      { id: 'u2', identifier: 'SOT-900', priority: 0, stateName: 'Todo' },
+    ]);
+
+    await handlers.handleRecover({ data: { options: [] } });
+
+    const enqueued = (runner.enqueue as any).mock.calls.map((c: any[]) => c[0]);
+    expect(enqueued).toContain('SOT-900');
+    expect(enqueued).not.toContain('SOT-841');
+  });
+
+  test('does not re-enqueue issues already queued or running', async () => {
+    (runner.isQueuedOrRunning as any).mockReturnValue(true);
+    (runner.fetchActiveIssues as any).mockResolvedValueOnce([
+      { id: 'u1', identifier: 'SOT-862', priority: 0, stateName: 'Todo' },
+    ]);
+
+    await handlers.handleRecover({ data: { options: [] } });
+    expect(runner.enqueue).not.toHaveBeenCalled();
+  });
+
+  test('force mode force-releases lock and clears inflight/current-issue', async () => {
+    (runner.forceReleaseLock as any).mockReturnValueOnce('12345:2026-06-19T13:00:00.000Z');
+    (runner.loadInflight as any).mockReturnValueOnce(['SOT-862']);
+
+    const result = await handlers.handleRecover({ data: { options: [{ name: 'force', type: 5, value: true }] } });
+
+    expect(runner.forceReleaseLock).toHaveBeenCalled();
+    expect(runner.saveInflight).toHaveBeenCalledWith([]);
+    expect(runner.clearCurrentIssue).toHaveBeenCalled();
+    expect(runner.reapStaleInflight).not.toHaveBeenCalled(); // force path skips soft reap
+    expect(result.content).toContain('force');
+  });
+
+  test('continues with a warning when Linear re-scan fails', async () => {
+    (runner.fetchActiveIssues as any).mockRejectedValueOnce(new Error('Linear down'));
+
+    const result = await handlers.handleRecover({ data: { options: [] } });
+    await new Promise((r) => setImmediate(r)); // flush the deferred drainQueue
+
+    expect(runner.clearUsageLimitCooldown).toHaveBeenCalled();
+    expect(runner.drainQueue).toHaveBeenCalled(); // still drains existing queue
+    expect(result.content).toContain('再スキャンに失敗');
   });
 });

@@ -185,6 +185,25 @@ function releaseLock(): void {
   }
 }
 
+// Unconditionally remove the runner lock regardless of which PID owns it.
+// Used by the Discord /recover force path to break a wedged lock held by a
+// hung/alive holder (acquireLock already auto-reclaims dead/stale locks, so this
+// is only needed for the "alive but stuck" case). Returns the removed lock's raw
+// content (pid:timestamp) or null if no lock existed. Safe because run_auto.sh's
+// OS-level flock still serializes the heavy claude runs even if this JS lock is broken.
+function forceReleaseLock(): string | null {
+  try {
+    if (!fs.existsSync(LOCK_FILE)) return null;
+    const content = fs.readFileSync(LOCK_FILE, 'utf8');
+    fs.unlinkSync(LOCK_FILE);
+    log('LOCK', `force-released (was: ${content})`);
+    return content;
+  } catch (err: any) {
+    log('LOCK', `forceReleaseLock ERROR: ${err.message}`);
+    return null;
+  }
+}
+
 interface GitCheckpointInfo {
   branch: string;
   lastCommit: string;
@@ -1875,6 +1894,7 @@ export {
   linearQuery,
   acquireLock,
   releaseLock,
+  forceReleaseLock,
   isLocked,
   hasPendingIssues,
   fetchActiveIssues,
@@ -1911,6 +1931,7 @@ export {
   reapStaleInflight,
   isQueuedOrRunning,
   getCurrentIssue,
+  clearCurrentIssue,
   setIssueInProgress,
   finalizeParentIfChildrenComplete,
   getIssueExecutionEligibility,

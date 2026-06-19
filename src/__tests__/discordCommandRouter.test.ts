@@ -10,6 +10,7 @@ const mockHandlers = {
   handleResume: (jest.fn() as any).mockResolvedValue({ content: 'resume-content' }),
   handleReply: (jest.fn() as any).mockResolvedValue({ content: 'reply-content' }),
   handleRetry: (jest.fn() as any).mockResolvedValue({ content: 'retry-content' }),
+  handleRecover: (jest.fn() as any).mockResolvedValue({ content: 'recover-content' }),
 };
 
 const mockAskHandler = {
@@ -118,6 +119,32 @@ describe('routeInteraction — /pastqueue deferred response', () => {
       'app123',
       'token456',
       'pastqueue-content',
+    );
+  });
+});
+
+describe('routeInteraction — /recover deferred response', () => {
+  test('returns a deferred (type 5) ephemeral response and edits with handleRecover result', async () => {
+    const interaction = {
+      type: APPLICATION_COMMAND,
+      application_id: 'app123',
+      token: 'token456',
+      data: { name: 'recover', options: [{ name: 'force', type: 5, value: true }] },
+    };
+
+    const response = await routeInteraction(interaction);
+
+    expect(response.status).toBe(200);
+    expect(response.body.type).toBe(5); // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
+    expect(response.body.data).toEqual({ flags: 64 });
+
+    await new Promise((r) => setImmediate(r));
+
+    expect(mockHandlers.handleRecover).toHaveBeenCalledTimes(1);
+    expect(mockFollowup.editOriginalInteractionResponse).toHaveBeenCalledWith(
+      'app123',
+      'token456',
+      'recover-content',
     );
   });
 });
