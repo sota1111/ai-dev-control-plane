@@ -1244,6 +1244,33 @@ describe('runner', () => {
       expect(logs.some(l => l.includes('completed successfully'))).toBe(false);
       expect(logs.some(l => l.includes('task completion not verified: verification unavailable: Linear API Timeout'))).toBe(true);
     });
+
+    it('exits 75 (run_auto.sh flock held): re-enqueues with backoff retryAt and signals lock conflict', async () => {
+      const item: any = queueItem('SOT-101', 1);
+      mockRunAutoExit(75, 'run_auto.sh is already running (script-launched). Skipping.');
+      setupLinearMocks([
+        { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } }, // eligibility
+        { issue: { project: { name: 'ai-dev-control-plane' } } }                        // triggerRun project->repo fetch
+      ]);
+
+      const before = Date.now();
+      const result = await runner.runItem(item);
+
+      // runItem signals drainQueue to stop this pass instead of hammering the held lock
+      expect(result).toBe(true);
+
+      const queueWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('runner.queue.json'))
+        .map(c => { try { return JSON.parse(c[1] as string); } catch { return null; } })
+        .filter(Boolean);
+      const lastQueue = queueWrites[queueWrites.length - 1];
+      const requeued = lastQueue.find((q: any) => q.issueId === 'SOT-101');
+      expect(requeued).toBeDefined();
+      expect(requeued.reason).toBe('lock_conflict');
+      // backed off into the future (not null) so the drain stops rather than tight-looping
+      expect(requeued.retryAt).toEqual(expect.any(String));
+      expect(new Date(requeued.retryAt).getTime()).toBeGreaterThan(before);
+    });
   });
 
   describe('classifyRunResult', () => {
