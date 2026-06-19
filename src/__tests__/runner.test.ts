@@ -152,6 +152,60 @@ describe('runner', () => {
   });
 
 
+  describe('queue history (past queue)', () => {
+    function historyWrites() {
+      return (fs.writeFileSync as jest.Mock).mock.calls
+        .filter((c: any[]) => String(c[0]) === `${runner.HISTORY_FILE}.tmp`);
+    }
+
+    it('loadQueueHistory() returns [] when the history file is missing', () => {
+      fs.existsSync.mockReturnValue(false);
+      expect(runner.loadQueueHistory()).toEqual([]);
+    });
+
+    it('recordQueueHistory() prepends newest-first with a dequeuedAt and writes atomically', () => {
+      fs.existsSync.mockImplementation((p: string) => p === runner.HISTORY_FILE);
+      fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-OLD', dequeuedAt: '2026-01-01T00:00:00.000Z' }]));
+
+      runner.recordQueueHistory({ issueId: 'SOT-NEW', issueIdentifier: 'SOT-NEW' });
+
+      const lastWrite = historyWrites().pop();
+      expect(lastWrite).toBeDefined();
+      const saved = JSON.parse(lastWrite![1] as string);
+      expect(saved[0].issueId).toBe('SOT-NEW');
+      expect(saved[0].dequeuedAt).toEqual(expect.any(String));
+      expect(saved[1].issueId).toBe('SOT-OLD');
+      expect(fs.renameSync).toHaveBeenCalledWith(`${runner.HISTORY_FILE}.tmp`, runner.HISTORY_FILE);
+    });
+
+    it('recordQueueHistory() caps the history at MAX_QUEUE_HISTORY entries', () => {
+      const existing = Array.from({ length: runner.MAX_QUEUE_HISTORY }, (_, i) => ({ issueId: `SOT-${i}` }));
+      fs.existsSync.mockImplementation((p: string) => p === runner.HISTORY_FILE);
+      fs.readFileSync.mockReturnValue(JSON.stringify(existing));
+
+      runner.recordQueueHistory({ issueId: 'SOT-NEWEST' });
+
+      const saved = JSON.parse((historyWrites().pop()![1]) as string);
+      expect(saved.length).toBe(runner.MAX_QUEUE_HISTORY);
+      expect(saved[0].issueId).toBe('SOT-NEWEST');
+      expect(saved.some((i: any) => i.issueId === `SOT-${runner.MAX_QUEUE_HISTORY - 1}`)).toBe(false);
+    });
+
+    it('dequeue() records the dequeued item into history', () => {
+      const queue = [{ issueId: 'SOT-D1', trigger: 'webhook', retryAt: null }];
+      fs.existsSync.mockImplementation((p: string) => p === runner.QUEUE_FILE);
+      fs.readFileSync.mockImplementation((p: string) => (p === runner.QUEUE_FILE ? JSON.stringify(queue) : ''));
+
+      const item = runner.dequeue();
+      expect(item.issueId).toBe('SOT-D1');
+
+      const lastWrite = historyWrites().pop();
+      expect(lastWrite).toBeDefined();
+      expect(String(lastWrite![1])).toContain('SOT-D1');
+      expect(String(lastWrite![1])).toContain('dequeuedAt');
+    });
+  });
+
   describe('queue management', () => {
     function setupQueueState(initialQueue: any[], { lockHeld = false } = {}) {
       let currentQueue = initialQueue.map(item => ({ ...item }));

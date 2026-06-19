@@ -15,6 +15,10 @@ const commands = [
     description: '実行キュー (runner.queue.json) の内容を表示します',
   },
   {
+    name: 'pastqueue',
+    description: '直近10件の過去キュー（処理済みIssue）を /queue と同じ形式で表示します',
+  },
+  {
     name: 'reorder',
     description: 'Todo+In Progressの全Issueを取得し、実行キューを優先度順に再構築します',
   },

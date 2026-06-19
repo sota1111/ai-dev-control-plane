@@ -86,6 +86,8 @@ async function verifyTaskCompletion(issueId: string, output: string): Promise<Co
 const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
 const LOCK_FILE = path.join(LOG_DIR, 'runner.lock');
 const QUEUE_FILE = path.join(LOG_DIR, 'runner.queue.json');
+const HISTORY_FILE = path.join(LOG_DIR, 'runner.queue.history.json');
+const MAX_QUEUE_HISTORY = 50;  // cap on persisted past-queue (dequeued) entries
 const USAGE_LIMIT_FILE = path.join(LOG_DIR, 'runner.usage-limit.json');
 const COOLDOWN_FILE = path.join(LOG_DIR, 'runner.cooldown.json');
 const USAGE_LIMIT_RETRY_BUFFER_SECONDS = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
@@ -661,6 +663,47 @@ export interface QueueItem {
   queueGroupOrder: string | null;
 }
 
+// A past-queue (history) entry: a QueueItem that has been dequeued/processed,
+// tagged with the time it left the active queue.
+export interface QueueHistoryItem extends QueueItem {
+  dequeuedAt: string;
+}
+
+// Read the past-queue history (newest first). Returns [] when the file is
+// missing, empty, or unparseable (mirrors loadQueue's defensive behavior).
+function loadQueueHistory(): QueueHistoryItem[] {
+  try {
+    if (!fs.existsSync(HISTORY_FILE)) return [];
+    const content = fs.readFileSync(HISTORY_FILE, 'utf8');
+    try {
+      const history = JSON.parse(content);
+      return Array.isArray(history) ? history : [];
+    } catch (parseErr: any) {
+      log('QUEUE', `loadQueueHistory: JSON parse failed: ${parseErr.message}`);
+      return [];
+    }
+  } catch (err: any) {
+    log('QUEUE', `loadQueueHistory ERROR: ${err.message}`);
+    return [];
+  }
+}
+
+// Prepend a dequeued item to the past-queue history (newest first), capped to
+// MAX_QUEUE_HISTORY entries. Atomic write; never throws.
+function recordQueueHistory(item: QueueItem): void {
+  try {
+    const entry: QueueHistoryItem = { ...item, dequeuedAt: new Date().toISOString() };
+    const history = loadQueueHistory();
+    history.unshift(entry);
+    const capped = history.slice(0, MAX_QUEUE_HISTORY);
+    const tmpFile = HISTORY_FILE + '.tmp';
+    fs.writeFileSync(tmpFile, JSON.stringify(capped, null, 2));
+    fs.renameSync(tmpFile, HISTORY_FILE);
+  } catch (err: any) {
+    log('QUEUE', `recordQueueHistory ERROR: ${err.message}`, { issue: item.issueId });
+  }
+}
+
 function loadQueue(): QueueItem[] {
   try {
     if (!fs.existsSync(QUEUE_FILE)) return [];
@@ -1033,6 +1076,7 @@ function dequeue(lastProcessedGroup: string | null = null): QueueItem | null {
 
     queue.splice(bestIndex, 1);
     saveQueue(queue);
+    recordQueueHistory(item);
 
     if (logType === 'dequeued (group priority)') {
       log('QUEUE', logType, { issue: item.issueId, queueGroup: item.queueGroup, priorityRank: rank });
@@ -1753,6 +1797,8 @@ export {
   LOG_DIR,
   LOCK_FILE,
   QUEUE_FILE,
+  HISTORY_FILE,
+  MAX_QUEUE_HISTORY,
   COOLDOWN_FILE,
   USAGE_LIMIT_FILE,
   LOG_FILE,
@@ -1781,6 +1827,8 @@ export {
   removeUsageLimitLabelFromAllIssues,
   loadQueue,
   saveQueue,
+  loadQueueHistory,
+  recordQueueHistory,
   normalizeQueue,
   syncQueueWithLinear,
   refreshQueuePriorities,
