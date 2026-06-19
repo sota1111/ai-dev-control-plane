@@ -27,10 +27,12 @@ Use the MCP tool `mcp__linear-server__list_issues` to retrieve issues.
 
 Target the following statuses:
 
-- Backlog
 - Todo
 - In Progress
 - Blocked (only if the blocking factor can be resolved)
+
+Do NOT process `Backlog` issues. Backlog issues are not yet triaged for automated
+work; leave them untouched until a human moves them to `Todo`.
 
 Sort the issues by priority in the following order:
 
@@ -38,7 +40,7 @@ Urgent → High → Medium → Low
 
 Within the same priority, process them in the following status order:
 
-In Progress → Todo → Backlog
+In Progress → Todo
 
 ---
 

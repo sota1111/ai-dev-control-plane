@@ -26,7 +26,7 @@ npm run start:webhook
 **動作詳細**:
 
 - `LINEAR_API_KEY` が未設定の場合は scan をスキップします
-- 取得対象: state が `unstarted`（Todo/Backlog）または `started`（In Progress）で、archived でない Issue（最大 50 件）
+- 取得対象: state が `unstarted`（Todo）または `started`（In Progress）で、archived でない Issue（最大 50 件）。`backlog`（Backlog）は対象外です
 - 取得した Issue を trigger=`webhook-bootstrap` で共通 queue に enqueue します
 - 既に queue にある Issue は重複登録しません
 - usage-limit cooldown 中の場合は `retryAt` を設定して enqueue します（即時実行しません）

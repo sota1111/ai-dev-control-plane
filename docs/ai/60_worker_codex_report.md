@@ -1,37 +1,46 @@
 # Worker Report
 
-## Summary
-SOT-835 task check + verification. Codex CLI was NON-RESPONSIVE: `scripts/ai/run_codex.sh`
-reported `CODEX_COOLDOWN_ACTIVE` (usage-limit cooldown until epoch 1782000900 = 2026-06-21
-12:15 UTC). Per the Worker Non-Response Fallback Policy, Claude Code performed the task
-check and the FIX directly.
+> **FALLBACK NOTICE (Worker Non-Response Policy):** Codex CLI was non-responsive
+> for this run. `scripts/ai/run_codex.sh` exited with the dedicated non-response
+> code `75` due to an active usage-limit cooldown (`CODEX_COOLDOWN_ACTIVE` until
+> epoch 1782000900, ~42h out). A retry against a multi-hour cooldown is futile, so
+> per the Worker Non-Response Fallback Policy, Claude Code performed this initial
+> task check AND the DOC change directly. All quality gates were still run.
 
-Issue is actionable. The `/queue` response is built in `src/lib/discordCommandHandlers.ts`
-`handleQueue()`. Waiting/Ready items get their title+url via `formatItem` → `activeMap`
-(populated from `runner.fetchActiveIssues()`), but the current/in-progress task line
-(`0. ▶ 現在実行中: **<id>**`) only rendered the identifier, with no title. The current
-task's title is available from the same `activeMap` lookup, so the fix is a minimal,
-single-file change.
+## Summary
+
+SOT-836 「Backlogを対応しない」— limit automated processing to Todo / In Progress.
+
+Findings: the code-level scan/queue filters (`src/runner.ts`, `src/webhook-server.ts`,
+`src/lib/schedulerCore.js`) already use `state.type in ["unstarted","started"]`, so the
+Linear `backlog` type is **already excluded** in code. The remaining gap was the
+orchestration prompt `prompts/claude/auto_run.md`, which listed `Backlog` as a target
+status and in the sort order, plus two docs that incorrectly described `unstarted` as
+covering Backlog. Fixed the prompt and the docs; no code change needed.
 
 ## Worker Non-Response Disclosure
 - Non-responsive worker: Codex CLI
 - Detected failure mode: usage-limit cooldown (CODEX_COOLDOWN_ACTIVE, fixed epoch ~1.7 days out)
-- Action: Claude Code fallback performed the implementation and verification directly.
+- Action: Claude Code fallback performed the task check and the DOC change directly.
 
 ## Changed Files
-- `src/lib/discordCommandHandlers.ts` — current-task line now appends ` — <title> <url>` via activeMap lookup
-- `src/__tests__/discordCommandHandlers.test.ts` — added test asserting current-task title/url rendering
+- `prompts/claude/auto_run.md` — removed `Backlog` from target statuses and sort order; added explicit "do not process Backlog" note
+- `docs/webhook.md` — corrected scan target wording (`unstarted` = Todo only; Backlog excluded)
+- `docs/scheduler.md` — corrected polling target wording (`unstarted` = Todo only; Backlog excluded)
 
 ## Commands Run
-- `npm run lint`, `npm run typecheck`, `npm test` (results below)
+- `npm run lint` → exit 0 (pass)
+- `npm run typecheck` → exit 0 (pass)
+- `npm test` → exit 0 (25 suites, 329 tests passed)
 
 ## Acceptance Criteria
-- [x] Located the /queue current-task rendering code: `src/lib/discordCommandHandlers.ts:144-146`
-- [x] Confirmed the current task's title is available to render (activeMap via fetchActiveIssues)
+- [x] Backlog excluded from automated processing targets (prompt + docs)
+- [x] Todo and In Progress remain in scope
+- [x] Code-level filter confirmed already correct (no regression)
+- [x] Quality gate green
 
 ## Risks
-- If `fetchActiveIssues` fails or the current issue is not among active issues, the line
-  gracefully falls back to identifier-only (no title) — same behavior as waiting items.
+- Code filter was already correct; the change is prompt/doc wording only — low risk.
 
 ## Next Action
 READY_FOR_REVIEW
