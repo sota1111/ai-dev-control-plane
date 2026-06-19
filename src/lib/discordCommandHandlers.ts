@@ -142,7 +142,10 @@ async function handleQueue(): Promise<CommandResult> {
 
     const lines: string[] = [];
     if (current) {
-      lines.push(`0. ▶ 現在実行中: **${current.issueIdentifier || current.issueId}**`);
+      const currentId = current.issueIdentifier || current.issueId;
+      const currentMeta = activeMap.get(currentId);
+      const currentTitleUrl = currentMeta ? ` — ${currentMeta.title} ${currentMeta.url}` : '';
+      lines.push(`0. ▶ 現在実行中: **${currentId}**${currentTitleUrl}`);
     }
 
     if (ready.length > 0) {
