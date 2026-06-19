@@ -644,8 +644,7 @@ Post the classification as a Linear comment at the start of each Issue:
 
 ```
 タスク分類: <TYPE>
-推奨worker: <worker name>
-理由: <one-line reason>
+担当AI: <TYPE>:<WORKER>   （例: IMPLEMENT:GEMINI）
 ```
 
 ### Worker Failure Re-Delegation Rules
