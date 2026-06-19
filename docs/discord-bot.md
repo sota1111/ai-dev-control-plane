@@ -67,6 +67,8 @@ https://discord.com/oauth2/authorize?client_id=<DISCORD_APPLICATION_ID>&permissi
 | ----------------------------------------- | ------------------------------------------------------------------------ |
 | `/status`                                 | 実行中Issue、ロック、キュー、cooldown、**session-continue 待機状態**を表示 |
 | `/queue`                                  | 実行キューの内容を表示                                                   |
+| `/pastqueue`                              | 直近10件の過去キュー（処理済みIssue）を `/queue` と同じ形式で表示          |
+| `/reorder`                                | Todo+In Progress を取得し、実行キューを優先度順に再構築                   |
 | `/cooldown`                               | usage-limit cooldown状態（**種別含む**）を表示                          |
 | `/pause`                                  | 新規実行を一時停止                                                       |
 | `/resume pause`                           | 一時停止を解除（従来の `/resume`）                                       |
@@ -74,7 +76,17 @@ https://discord.com/oauth2/authorize?client_id=<DISCORD_APPLICATION_ID>&permissi
 | `/resume session pane:%1 [issue:SOT-xxx]` | tmux pane のセッションに continue を送信                                 |
 | `/reply issue:SOT-xxx body:...`           | 指定IssueへLinearコメントを投稿                                          |
 | `/retry issue:SOT-xxx`                    | 指定Issueを再実行キューへ投入                                            |
+| `/recover`                                | 停止した自動実行を強制復帰（cooldown/pause解除・stale inflight回収・Linear再スキャン・ドレイン） |
+| `/recover force:true`                     | 上記に加え `runner.lock` を強制解放し inflight/current-issue も強制クリア（生存だが固まったロック向け） |
 | `/ask`                                    | 自然言語で質問・指示（モーダルが開く）                                    |
+
+### `/recover` の使い分け
+
+自動実行が何らかの要因で止まったときの復帰用コマンド。
+
+- **まず `/recover`（soft）を試す。** usage-limit cooldown の居残り、`/pause` のかけっぱなし、leaked inflight、webhook 取りこぼし、終端Issueの居残りといった「止まる」主因をまとめて解消し、Linear の actionable Issue（Todo / In Progress、**In Review は除外**）を再投入してドレインを起動する。副作用が安全な操作のみ。
+- **それでも動かない（ロックが固着している）場合に `/recover force:true`。** 実行ロックの保持プロセスが「生存しているが固まっている」ケース向け。`run_auto.sh` の OS flock が実際の二重起動を防ぐため、JSロックの強制解放は比較的安全。
+  - なお dead/stale なロックは通常の実行時に自動回収されるため、force が要るのは稀。
 
 ## ngrok URL が変わった場合の更新箇所
 
