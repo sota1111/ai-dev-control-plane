@@ -152,6 +152,19 @@ Mandatory behavior:
 ---
 
 ${RUNTIME_PROMPT}"
+
+  # Linearプロジェクトから解決した開発対象レポジトリ（runner が WEBHOOK_TARGET_REPO に注入）。
+  # セットされていれば、worker 委譲時の TARGET_REPO を明示する指示行をプロンプトへ追記する。
+  if [[ -n "${WEBHOOK_TARGET_REPO:-}" ]]; then
+    RUNTIME_PROMPT="## Target Repository (resolved from Linear project)
+
+Target repository for this issue: ${WEBHOOK_TARGET_REPO} (project: ${WEBHOOK_PROJECT_NAME:-unknown}).
+When delegating to Gemini/Codex workers, set TARGET_REPO=${WEBHOOK_TARGET_REPO} before running scripts/ai/run_gemini.sh or scripts/ai/run_codex.sh.
+
+---
+
+${RUNTIME_PROMPT}"
+  fi
 fi
 
 echo "== Claude Code Auto Runner =="

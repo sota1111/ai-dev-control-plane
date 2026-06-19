@@ -983,6 +983,7 @@ describe('runner', () => {
       mockRunAutoExit(0, 'some output');
       setupLinearMocks([
         { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } }, // eligibility
+        { issue: { project: { name: 'ai-dev-control-plane' } } },                       // triggerRun project->repo fetch
         { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } }  // verification
       ]);
 
@@ -1016,6 +1017,7 @@ describe('runner', () => {
       mockRunAutoExit(0, 'COMPLETION_CONTRACT: COMPLETED');
       setupLinearMocks([
         { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } }, // eligibility
+        { issue: { project: { name: 'ai-dev-control-plane' } } },                       // triggerRun project->repo fetch
         { issue: { id: 'SOT-101', state: { type: 'completed', name: 'Done' } } }       // verification
       ]);
 

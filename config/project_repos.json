@@ -1,0 +1,47 @@
+[
+  {
+    "project": "ai-dev-control-plane",
+    "repo": "sota1111/ai-dev-control-plane",
+    "localPath": "/workspaces/ai-dev-control-plane"
+  },
+  {
+    "project": "english-phrase-trainer",
+    "repo": "sota1111/english-phrase-trainer",
+    "localPath": "/workspaces/english-phrase-trainer"
+  },
+  {
+    "project": "stock-signal-research",
+    "repo": "sota1111/stock-signal-research",
+    "localPath": "/workspaces/stock-signal-research"
+  },
+  {
+    "project": "state-machine-simulator",
+    "repo": "sota1111/state-machine-simulator",
+    "localPath": "/workspaces/state-machine-simulator"
+  },
+  {
+    "project": "shrine-stair-trainer",
+    "repo": "sota1111/shrine-stair-trainer",
+    "localPath": "/workspaces/shrine-stair-trainer"
+  },
+  {
+    "project": "kindle-sale-monitor",
+    "repo": "sota1111/kindle-sale-monitor",
+    "localPath": "/workspaces/kindle-sale-monitor"
+  },
+  {
+    "project": "booking-monitor",
+    "repo": "sota1111/booking-monitor",
+    "localPath": "/workspaces/booking-monitor"
+  },
+  {
+    "project": "toddler-nas-photo-indexer",
+    "repo": "sota1111/toddler-nas-photo-indexer",
+    "localPath": "/workspaces/toddler-nas-photo-indexer"
+  },
+  {
+    "project": "toddler-private-rag",
+    "repo": "sota1111/toddler-private-rag",
+    "localPath": "/workspaces/toddler-private-rag"
+  }
+]

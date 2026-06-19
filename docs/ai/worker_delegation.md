@@ -139,6 +139,22 @@ Humans interact only with Claude Code — never directly with workers.
 - If `TARGET_REPO` is set: `cd $TARGET_REPO` before running
 - Output: written to `docs/ai/60_worker_codex_report.md` AND stdout
 
+## Project → Repository Resolution
+
+`TARGET_REPO`（worker の作業対象レポジトリ）は、Linear issue が属する **プロジェクト名** から
+決定的に判定できる。マッピングの権威ソースは `config/project_repos.json`
+（`{ project, repo, localPath }` の配列）。project_repos.json に無いプロジェクトは
+`config/auth/apps.json` の `name` にフォールバックする。不明なプロジェクトは未解決（null）。
+
+- 解決モジュール: `src/lib/projectRepo.ts`
+  - `resolveRepoForProject(projectName, config?)` → `{ project, repo, localPath } | null`（trim + 大小無視）
+  - `loadProjectRepoConfig(configPath?)` → `ProjectRepo[]`
+- CLI: `tsx src/project-repo-cli.ts "<projectName>" [--json]`（localPath を出力、不明は exit 1）
+- runner 配線: `src/runner.ts triggerRun()` が issue の project を取得し解決、解決できれば
+  `run_auto.sh` の spawn env に `WEBHOOK_PROJECT_NAME` / `WEBHOOK_TARGET_REPO`(=localPath) を注入。
+  `run_auto.sh` は Webhook Single-Issue Mode で「Target Repository」指示行をプロンプトに追記する。
+  取得・解決失敗時は env を変えず従来動作（fail-open）。
+
 ## Workflow Sequence
 
 ```
