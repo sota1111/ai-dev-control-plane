@@ -9,7 +9,7 @@
 ### Linear ポーリングモード（推奨）
 
 `LINEAR_API_KEY` が設定されている場合、`CHECK_INTERVAL` 秒ごとに Linear API をポーリングする。
-Linear 上の Issue 状態タイプが `unstarted`（Backlog/Todo）または `started`（In Progress）の Issue が存在する場合、各 Issue を `node src/runner-cli.js enqueue` でキューに追加し、`node src/runner-cli.js drain` で共通実行パイプラインを通じて処理する。
+Linear 上の Issue 状態タイプが `unstarted`（Todo）または `started`（In Progress）の Issue が存在する場合、各 Issue を `node src/runner-cli.js enqueue` でキューに追加し、`node src/runner-cli.js drain` で共通実行パイプラインを通じて処理する。`backlog`（Backlog）の Issue は対象外。
 Issue の更新差分（`updatedAt` の変化）は現在判定していない。
 
 ### フォールバックモード
