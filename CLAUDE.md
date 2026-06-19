@@ -564,7 +564,8 @@ Claude Code uses the MCP tool to register child Issues:
 2. 親Issueへの紐付け（parentId指定）
 3. 子Issueの Status を `Todo` に設定
 4. 子Issueの Priority を親から継承
-5. 親Issue にコメントで分解結果を報告
+5. 子Issueの Project を親から継承（親Issueの `project` / `projectId` を子Issueにも設定し、同じLinear Projectに属させる）
+6. 親Issue にコメントで分解結果を報告
 
 #### Issue上限到達時の復旧（cannot add issue）
 
