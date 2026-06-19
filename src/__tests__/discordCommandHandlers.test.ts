@@ -181,6 +181,24 @@ describe('handleQueue', () => {
     expect(result.content).toContain('0. ▶ 現在実行中: **SOT-777**');
   });
 
+  test('current issue line includes title and url from fetchActiveIssues', async () => {
+    (runner.fetchActiveIssues as any).mockResolvedValueOnce([
+      {
+        identifier: 'SOT-777',
+        title: '現在タスクのタイトル',
+        url: 'https://linear.app/x/SOT-777'
+      }
+    ]);
+    (runner.getCurrentIssue as any).mockReturnValueOnce({
+      issueId: 'uuid-777',
+      issueIdentifier: 'SOT-777',
+      startedAt: new Date().toISOString()
+    });
+    (runner.loadQueue as any).mockReturnValueOnce([]);
+    const result = await handlers.handleQueue();
+    expect(result.content).toContain('0. ▶ 現在実行中: **SOT-777** — 現在タスクのタイトル https://linear.app/x/SOT-777');
+  });
+
   test('enriches queue items with title and url from fetchActiveIssues', async () => {
     (runner.fetchActiveIssues as any).mockResolvedValueOnce([
       {
