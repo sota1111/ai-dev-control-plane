@@ -135,7 +135,16 @@ async function registerCommands() {
     console.error('ERROR: DISCORD_BOT_TOKEN and DISCORD_APPLICATION_ID must be set in .env');
     process.exit(1);
   }
-  const url = `https://discord.com/api/v10/applications/${DISCORD_APPLICATION_ID}/commands`;
+
+  // DISCORD_GUILD_ID が設定されていれば guild スコープで登録する（即時反映）。
+  // 未設定ならグローバル登録（全サーバーで使えるが反映に最大1時間かかる）。
+  const guildId = (process.env.DISCORD_GUILD_ID || '').trim();
+  const url = guildId
+    ? `https://discord.com/api/v10/applications/${DISCORD_APPLICATION_ID}/guilds/${guildId}/commands`
+    : `https://discord.com/api/v10/applications/${DISCORD_APPLICATION_ID}/commands`;
+  const scope = guildId ? `guild ${guildId} (即時反映)` : 'global (反映に最大1時間)';
+  console.log(`Registering ${commands.length} commands to ${scope}...`);
+
   const response = await fetch(url, {
     method: 'PUT',
     headers: {
@@ -152,7 +161,7 @@ async function registerCommands() {
   }
 
   const result = await response.json();
-  console.log(`Successfully registered ${result.length} commands:`);
+  console.log(`Successfully registered ${result.length} commands (${scope}):`);
   for (const cmd of result) {
     console.log(`  /${cmd.name} (id: ${cmd.id})`);
   }
