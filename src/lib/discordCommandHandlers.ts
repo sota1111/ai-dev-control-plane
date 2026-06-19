@@ -4,6 +4,7 @@ import * as runner from '../runner.js';
 import * as queueOrdering from './queueOrdering.js';
 import { isPaused, setPaused, clearPause, getPauseInfo } from './discordPauseState.js';
 import * as sessionContinue from './sessionContinue.js';
+import { isHoldState } from './issueState.js';
 
 const ISSUE_ID_PATTERN = /^SOT-\d+$/i;
 const MAX_BODY_LENGTH = 1000;
@@ -512,6 +513,122 @@ async function handleRetry(interaction: DiscordInteraction): Promise<CommandResu
   }
 }
 
+// /recover: 何らかの要因で自動実行が止まったときの強制復帰コマンド。
+// 「止まる」主因（cooldown居残り・一時停止のかけっぱなし・leaked inflight・webhook取りこぼし・
+// 終端Issueの居残り）をまとめて解消し、Linearの actionable Issue を再投入してドレインを起動する。
+//
+// soft（既定）: 副作用が安全な操作のみ。
+//   - usage-limit cooldown をクリア
+//   - pause を解除
+//   - stale inflight を回収（実行中ロック時は触らない）
+//   - Linear の Todo/In Progress を再スキャンして未投入分を enqueue（In Review は除外）
+//   - 終端/archived をキューから除去（syncQueueWithLinear）
+//   - drainQueue を起動
+// force: 上記に加えて runner.lock を無条件解放し inflight / current-issue を強制クリアする。
+//   ロック保持者が「生存しているが固まっている」ケース向け（dead/stale は acquireLock が自動回収する）。
+//   run_auto.sh の OS flock が実際の二重起動を防ぐため、JSロックの強制解放は比較的安全。
+async function handleRecover(interaction?: DiscordInteraction): Promise<CommandResult> {
+  const actions: string[] = [];
+  try {
+    const opts = (interaction && interaction.data && interaction.data.options) || [];
+    const forceOpt = opts.find(o => o.name === 'force');
+    const force = forceOpt ? forceOpt.value === true : false;
+
+    // 1. usage-limit cooldown のクリア
+    const cd = runner.getUsageLimitCooldownUntil();
+    runner.clearUsageLimitCooldown();
+    if (cd) {
+      const ref = cd.issueIdentifier || cd.issueId || '不明';
+      actions.push(`⏳ cooldown を解除しました（${ref}）`);
+    } else {
+      actions.push('⏳ cooldown: なし');
+    }
+
+    // 2. 一時停止(pause)の解除
+    if (isPaused()) {
+      clearPause();
+      actions.push('▶ pause を解除しました');
+    } else {
+      actions.push('▶ pause: なし');
+    }
+
+    // 3. ロック / inflight の回収
+    if (force) {
+      const removed = runner.forceReleaseLock();
+      const before = runner.loadInflight();
+      runner.saveInflight([]);
+      runner.clearCurrentIssue();
+      actions.push(
+        `🧹 force: runner.lock を強制解放（${removed ? `was ${removed}` : 'ロックなし'}）/ inflight ${before.length}件クリア / current-issue クリア`,
+      );
+    } else {
+      const reaped = runner.reapStaleInflight();
+      if (runner.isLocked()) {
+        actions.push('🔒 実行中ロックあり: inflight は保持（強制したい場合は force:true）');
+      } else if (reaped.length > 0) {
+        actions.push(`🧹 leaked inflight を ${reaped.length}件回収（${reaped.join(', ')}）`);
+      } else {
+        actions.push('🧹 leaked inflight: なし');
+      }
+    }
+
+    // 4. Linear の actionable Issue を再スキャンして未投入分を enqueue
+    let enqueuedCount = 0;
+    try {
+      const actives = await runner.fetchActiveIssues();
+      for (const issue of (actives || [])) {
+        if (isHoldState({ name: issue.stateName ?? undefined })) continue; // In Review は対象外
+        const identifier = issue.identifier || issue.id;
+        if (!identifier) continue;
+        if (runner.isQueuedOrRunning(identifier)) continue;
+        runner.enqueue(identifier, 'discord-recover', null, {
+          priority: issue.priority ?? null,
+          priorityLabel: issue.priorityLabel ?? null,
+          parentIssueId: issue.parentIssueId ?? null,
+          parentIssueIdentifier: issue.parentIssueIdentifier ?? null,
+        });
+        enqueuedCount++;
+      }
+      actions.push(`📥 Linear 再スキャン: ${enqueuedCount}件を再投入（actionable ${actives ? actives.length : 0}件中）`);
+    } catch (err: any) {
+      runner.log('DISCORD', `handleRecover fetchActiveIssues failed: ${err.message}`);
+      actions.push(`⚠ Linear 再スキャンに失敗（既存キューで続行）: ${err.message}`);
+    }
+
+    // 5. 終端/archived をキューから除去
+    try {
+      await runner.syncQueueWithLinear();
+    } catch (err: any) {
+      runner.log('DISCORD', `handleRecover syncQueueWithLinear failed: ${err.message}`);
+    }
+
+    const queueLen = runner.loadQueue().length;
+
+    // 6. ドレインを非同期で起動（Discord 応答はブロックしない）
+    setImmediate(() => {
+      runner.drainQueue().catch((err: any) => {
+        runner.log('DISCORD', `drainQueue error after /recover: ${err.message}`);
+      });
+    });
+
+    runner.log('DISCORD', `Recover executed via Discord /recover (force=${force}, enqueued=${enqueuedCount})`);
+
+    const header = force ? '## 🚑 強制復帰 (force)' : '## 🚑 強制復帰';
+    const content = [
+      header,
+      ...actions.map(a => `- ${a}`),
+      '',
+      `**現在のキュー**: ${queueLen} 件 — ドレインを開始しました。`,
+    ].join('\n');
+
+    return { content: truncate(content) };
+  } catch (err: any) {
+    runner.log('DISCORD', `handleRecover error: ${err.message}`);
+    const partial = actions.length > 0 ? `\n実施済み:\n${actions.map(a => `- ${a}`).join('\n')}` : '';
+    return { content: `❌ 復帰処理中にエラーが発生しました: ${err.message}${partial}` };
+  }
+}
+
 export {
   handleStatus,
   handleQueue,
@@ -522,4 +639,5 @@ export {
   handleResume,
   handleReply,
   handleRetry,
+  handleRecover,
 };

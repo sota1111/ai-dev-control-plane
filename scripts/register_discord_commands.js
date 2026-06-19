@@ -104,6 +104,18 @@ const commands = [
     ],
   },
   {
+    name: 'recover',
+    description: '停止した自動実行を強制復帰します（cooldown解除/pause解除/inflight回収/再スキャン/ドレイン）',
+    options: [
+      {
+        name: 'force',
+        description: 'runner.lockを強制解放しinflight/current-issueも強制クリア（生存だが固まったロック向け）',
+        type: 5, // BOOLEAN
+        required: false,
+      },
+    ],
+  },
+  {
     name: 'ask',
     description: '自然言語でai-dev-control-planeに質問・指示を送ります（モーダルが開きます）',
   },

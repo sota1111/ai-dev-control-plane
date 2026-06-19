@@ -10,6 +10,7 @@ import {
   handleResume,
   handleReply,
   handleRetry,
+  handleRecover,
 } from './discordCommandHandlers.js';
 import { handleAskCommand, handleAskModalSubmit, ASK_MODAL_CUSTOM_ID } from './discordAskHandler.js';
 import { editOriginalInteractionResponse } from './discordInteractionFollowup.js';
@@ -117,6 +118,25 @@ async function processPastQueueInBackground(interaction: any): Promise<void> {
   }
 }
 
+/**
+ * Background worker for /recover: clears cooldown/pause/locks, re-scans Linear and
+ * re-enqueues actionable issues, then drains. Performs Linear network calls, so it
+ * uses the deferred pattern (ACK immediately, edit the response when done).
+ */
+async function processRecoverInBackground(interaction: any): Promise<void> {
+  try {
+    const result = await handleRecover(interaction);
+    await editOriginalInteractionResponse(interaction.application_id, interaction.token, result.content);
+  } catch (err: any) {
+    runner.log('DISCORD', `processRecoverInBackground error: ${err.message}`);
+    await editOriginalInteractionResponse(
+      interaction.application_id,
+      interaction.token,
+      `エラーが発生しました: ${err.message}`,
+    );
+  }
+}
+
 async function handleSlashCommand(commandName: string, interaction: any): Promise<InteractionResponse> {
   let result: any;
 
@@ -164,6 +184,17 @@ async function handleSlashCommand(commandName: string, interaction: any): Promis
     case 'retry':
       result = await handleRetry(interaction);
       break;
+    case 'recover':
+      // /recover performs Linear network calls (fetchActiveIssues / syncQueueWithLinear)
+      // that can exceed Discord's 3s ACK deadline. Defer and finish in the background.
+      void processRecoverInBackground(interaction);
+      return {
+        status: 200,
+        body: {
+          type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { flags: 64 },
+        },
+      };
     case 'ask':
       return await handleAskCommand();
     default:
