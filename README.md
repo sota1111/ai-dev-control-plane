@@ -218,6 +218,61 @@ Linear に Issue を作成（または状態を `Todo` / `In Progress` に変更
 
 ---
 
+## 株式・論文データ取得と MCP 設定
+
+Claude Code が株式・論文情報を取得して投資前兆ダッシュボード用データを生成するための、MCP 設定と必要な API キーをまとめる。
+
+### MCP サーバー設定（`.mcp.json`）
+
+Claude Code 用の MCP サーバーは、リポジトリルートの `.mcp.json` で定義する。現在は Linear のみを登録している:
+
+```json
+{
+  "mcpServers": {
+    "linear-server": {
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp"
+    }
+  }
+}
+```
+
+- 認証は `claude` を起動 → `/mcp` → linear を選択（Codex 用は `codex mcp login linear`）。詳細は[クイックスタート](#クイックスタート実行手順) 手順 3 を参照。
+
+### 論文データ取得（arXiv / Semantic Scholar）
+
+論文収集パイプラインは **stock-signal-research プロジェクト**（`/workspaces/stock-signal-research`）に実装されている。この管制プレーン自体は収集コードを持たない。
+
+| ソース | エンドポイント | API キー | 備考 |
+| ------ | -------------- | -------- | ---- |
+| arXiv | `http://export.arxiv.org/api/query` | **不要** | 3 秒のレート制限あり |
+| Semantic Scholar | `https://api.semanticscholar.org/graph/v1` | `SEMANTIC_SCHOLAR_API_KEY`（**任意**） | 未設定なら自動スキップ |
+
+収集の実行方法・統一シグナルレポート JSON の生成方法は、stock-signal-research の README「投資前兆ダッシュボード用 統一シグナルレポート JSON」セクションを参照。
+
+### 株価・財務データ取得 MCP（J-Quants / Alpha Vantage / Finnhub）— 導入予定
+
+株価・財務データを取得する MCP ツール（[SOT-842](https://linear.app/sota-dev/issue/SOT-842)）は **API キー未提供のため未導入**。導入時に必要となる環境変数は次のとおり（取得後に `.env` で管理し、リポジトリにコミットしないこと）:
+
+| 変数名 | 用途 | 対象市場 | 取得先 |
+| ------ | ---- | -------- | ------ |
+| `JQUANTS_REFRESH_TOKEN` | J-Quants（過去株価・財務） | 日本株（第一候補） | https://jpx-jquants.com/ |
+| `ALPHA_VANTAGE_API_KEY` | Alpha Vantage | 米国株・海外株 | https://www.alphavantage.co/support/#api-key |
+| `FINNHUB_API_KEY` | Finnhub | 米国株・海外株 | https://finnhub.io/ |
+
+> **Note**: 上記の変数名は SOT-842 導入時の想定であり、実装確定後にこのセクションを更新する。API キーは `.env`（Git 管理外）または Secret Manager で管理し、`.env.example` に実値を書かないこと。
+
+### 必要 API キーまとめ
+
+| 変数名 | 必須 | 用途 |
+| ------ | ---- | ---- |
+| `ANTHROPIC_API_KEY` | 必須 | Claude Code（オーケストレーター）の動作 |
+| `LINEAR_API_KEY` | 任意 | Linear ポーリングモード（MCP 認証とは別） |
+| `SEMANTIC_SCHOLAR_API_KEY` | 任意 | 論文収集（stock-signal-research 側で設定） |
+| `JQUANTS_REFRESH_TOKEN` / `ALPHA_VANTAGE_API_KEY` / `FINNHUB_API_KEY` | 導入予定 | 株価・財務データ取得 MCP（SOT-842） |
+
+---
+
 ## ドキュメント
 
 運用詳細は以下の個別ドキュメントを参照:
