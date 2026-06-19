@@ -27,6 +27,7 @@ const mockRunner = {
   removeFromQueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
   isQueuedOrRunning: jest.fn().mockReturnValue(false),
+  reapStaleInflight: jest.fn().mockReturnValue(0),
   syncQueueWithLinear: (jest.fn() as any).mockResolvedValue(undefined),
   isLocked: jest.fn().mockReturnValue(false),
   loadQueue: jest.fn().mockReturnValue([]),
@@ -599,10 +600,18 @@ describe('runBootstrapScan', () => {
     runBootstrapScan = webhookServer.runBootstrapScan;
   });
 
-  it('should skip scan when WEBHOOK_BOOTSTRAP_SCAN_ENABLED is not set', async () => {
+  it('should scan by default when WEBHOOK_BOOTSTRAP_SCAN_ENABLED is not set', async () => {
+    process.env.LINEAR_API_KEY = 'test-key';
+    runner.fetchActiveIssues.mockResolvedValue([
+      { identifier: 'SOT-100', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+    ]);
+    runner.isQueued.mockReturnValue(false);
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+
     await runBootstrapScan();
-    expect(runner.fetchActiveIssues).not.toHaveBeenCalled();
-    expect(runner.enqueue).not.toHaveBeenCalled();
+
+    expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50);
+    expect(runner.enqueue).toHaveBeenCalledWith('SOT-100', 'webhook-bootstrap', null, expect.objectContaining({ priority: 2 }));
   });
 
   it('should skip scan when WEBHOOK_BOOTSTRAP_SCAN_ENABLED=false', async () => {
@@ -679,6 +688,16 @@ describe('runBootstrapScan', () => {
 
     expect(runner.drainQueue).not.toHaveBeenCalled();
   });
+
+  it('should reap stale inflight entries at startup', async () => {
+    process.env.LINEAR_API_KEY = 'test-key';
+    runner.fetchActiveIssues.mockResolvedValue([]);
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+
+    await runBootstrapScan();
+
+    expect(runner.reapStaleInflight).toHaveBeenCalled();
+  });
 });
 
 describe('reaper (runReaperTick)', () => {
@@ -690,6 +709,7 @@ describe('reaper (runReaperTick)', () => {
     delete process.env.WEBHOOK_REAPER_ENABLED;
     process.env.LINEAR_API_KEY = 'test-key';
     runReaperTick = webhookServer.runReaperTick;
+    runner.reapStaleInflight.mockReturnValue(0);
     runner.isLocked.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.loadQueue.mockReturnValue([]);
@@ -731,6 +751,11 @@ describe('reaper (runReaperTick)', () => {
     delete process.env.LINEAR_API_KEY;
     await runReaperTick();
     expect(runner.fetchActiveIssues).not.toHaveBeenCalled();
+  });
+
+  it('should reap stale inflight entries on each tick (even when nothing to scan)', async () => {
+    await runReaperTick();
+    expect(runner.reapStaleInflight).toHaveBeenCalled();
   });
 
   it('should scan and enqueue stranded active issues when idle, then drain', async () => {

@@ -1,57 +1,58 @@
 # Worker Report
 
 ## Summary
-Initial task check for SOT-807 「動作再開」.
-Codex CLI was NON-RESPONSIVE (`run_codex.sh` exit 75, usage-limit cooldown until epoch 1782000900 ≈ 2026-06-20, ~48h).
-Per Worker Non-Response Fallback Policy, Claude Code performed the read-only task check directly.
+Initial task check for SOT-810 (now IMPLEMENT phase). Human selected proposals **1, 2, 4, 5**
+(proposal 3 deferred to SOT-792); proposal 5 must post to the NOTIFY Discord webhook.
 
-**Determination: ACTIONABLE as an IMPLEMENT task (build the "reaper").**
+**Worker non-response disclosure:** Codex CLI was delegated this task check
+(`scripts/ai/run_codex.sh`) but returned exit 75 (usage-limit cooldown until epoch
+1782000900, ≈2026-06-20). Per CLAUDE.md Worker Non-Response Fallback Policy, Claude Code
+performed this read-only verification directly.
 
-The latest human instruction (2026-06-19 00:09, after reopening the issue Todo→reprocess) requests the
-permanent fix flagged in the earlier completion report: a periodic Linear re-scan that re-enqueues
-issues left stuck in `In Progress` / `usage-limit` after a cooldown clears.
+## Codebase verification (all facts confirmed)
 
-## Findings
-- SOT-807 current status: **In Progress** (set by Claude Code this run). Labels: none. Priority: High.
-- Issue history: Todo → In Progress → Done (21:59) → reopened Todo (00:09:48). Latest human comment at
-  00:09 asks to implement the reaper as the recurrence-prevention measure.
-- Current drain architecture in `src/webhook-server.ts`:
-  - `runPeriodicDrainTick()` (line 96) only inspects the **in-memory queue** via `hasDueQueueItem()`
-    (`runner.loadQueue()`). It skips while locked, while in cooldown, and when no due item exists.
-    It NEVER re-scans Linear. → If the in-memory queue is empty (process restarted, or stuck issue was
-    never re-enqueued), stuck `In Progress` issues are invisible to the periodic drain.
-  - `runBootstrapScan()` (line 408) DOES re-scan Linear (`runner.fetchActiveIssues(50)`) and enqueues
-    active issues, but it runs **only once at startup** and is gated by `WEBHOOK_BOOTSTRAP_SCAN_ENABLED`.
-    There is no periodic equivalent that runs after a cooldown clears.
-- `runner.fetchActiveIssues()` (runner.ts:334) already returns Todo (`unstarted`) + In Progress
-  (`started`) issues with archived filtered out — exactly the input a periodic reaper needs.
-- Confirmed: **no existing periodic mechanism re-scans Linear to recover stuck issues.** This matches the
-  human's diagnosis.
+### 提案1 — default-enable webhook bootstrap scan ✅
+- `runBootstrapScan()` at `src/webhook-server.ts:498-534`.
+- Gated at line 499: `process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED === 'true'` → **default disabled**.
+- Reaper uses the opposite default convention (line 144: `WEBHOOK_REAPER_ENABLED === 'false'` → default enabled).
+- Change surface: flip the gate to `!== 'false'` so startup scan runs by default; update tests/README/.env.example.
 
-## Reaper integration point
-Add a periodic Linear re-scan to the drain loop in `src/webhook-server.ts`:
-- A reaper tick that, when NOT locked and NOT in cooldown, calls `runner.fetchActiveIssues()`, enqueues
-  any active issue not already queued (reuse the `runBootstrapScan` enqueue loop / `runner.isQueued`),
-  then drains. Mirror `runBootstrapScan`'s logic (syncQueueWithLinear → drainQueue) to avoid duplication.
-- Trigger primarily on cooldown→clear transitions (and as a periodic safety net), so issues stranded
-  during a cooldown are recovered automatically once usage-limit lifts.
+### 提案2 — leaked-inflight TTL reaper ✅
+- `runner.inflight.json` (`src/runner.ts:96` INFLIGHT_FILE). `loadInflight()` (1050) returns a **`string[]`** of issueIds — **no `startedAt`/PID**.
+- `isQueuedOrRunning()` (1125) = `isQueued || isInflight`; a leaked inflight entry blocks the issue forever.
+- Lock has staleness handling already (`isLocked()` :197, `STALE_LOCK_MS`, PID `process.kill(pid,0)`), but inflight does not.
+- Change surface: give inflight entries a `startedAt` (schema migration tolerant of legacy string[]), then add TTL+`!isLocked()` cleanup to `runReaperTick` / startup.
+
+### 提案4 — idempotent enqueue ✅
+- `enqueue()` at `src/runner.ts:910`; scan guards with `isQueued()` (`webhook-server.ts:118`, runner.ts:1045).
+- Race window remains between bootstrap scan and webhook on restart.
+- Change surface: make `enqueue()` idempotent (same identifier → update priority/retryAt instead of duplicate); add tests for bootstrap↔webhook boundary.
+
+### 提案5 — startup/recovery summary to NOTIFY Discord ✅
+- NOTIFY webhook env var is `DISCORD_WEBHOOK_URL_NOTIFY`; helper `resolveNotifyWebhook(notify, fallback)` in `src/lib/cooldownNotifier.ts:7` (pattern: `resolveNotifyWebhook(getSecret('DISCORD_WEBHOOK_URL_NOTIFY'), getSecret('DISCORD_WEBHOOK_URL'))`).
+- Bootstrap/reaper currently emit logs only (`runner.log('BOOTSTRAP'/'REAPER', ...)`).
+- Change surface: post a one-line summary (counts + target issues + next drain) of bootstrap scan and reaper recovery to the NOTIFY webhook.
+
+## Existing tests
+- `src/__tests__/webhookServer.test.ts:589` (`runBootstrapScan`), `:684` (`runReaperTick`) — solid base to extend.
 
 ## Changed Files
-- none (read-only check)
+- none (read-only task check)
 
 ## Commands Run
-- `bash scripts/ai/run_codex.sh` → exit 75 (cooldown, non-responsive)
-- `grep`/`Read` over `src/webhook-server.ts`, `src/runner.ts`
+- `bash scripts/ai/run_codex.sh` → exit 75 (codex usage-limit cooldown; fell back to Claude)
+- grep/sed/read over `src/webhook-server.ts`, `src/runner.ts`, `src/lib/cooldownNotifier.ts`
 
 ## Acceptance Criteria
-- [x] SOT-807 actionable determination — ACTIONABLE (IMPLEMENT: reaper)
-- [x] reaper integration point identified — periodic Linear re-scan in `src/webhook-server.ts` drain loop
+- [x] Issue is actionable (human selected proposals 1,2,4,5; proposal 5 → NOTIFY webhook)
+- [x] Current webhook startup behavior re: Todo/In Progress determined (exists, default-disabled)
+- [x] Relevant files identified
+- [x] Change surface for each selected proposal confirmed
 
 ## Risks
-- Reaper must respect the lock and cooldown guards to avoid double-running tasks or hammering Linear.
-- Avoid duplicate enqueues: reuse `runner.isQueued()` / `isQueuedOrRunning()`.
-- Keep re-scan interval reasonable to limit Linear API load (reuse `QUEUE_DRAIN_INTERVAL_MS`).
-- Should be guarded by an env flag (mirroring `WEBHOOK_BOOTSTRAP_SCAN_ENABLED`) so it can be disabled.
+- 提案2 requires an inflight schema change; keep backward-compat with legacy `string[]` file.
+- 提案5 must use `DISCORD_WEBHOOK_URL_NOTIFY` (NOTIFY), not the general `DISCORD_WEBHOOK_URL`.
+- Linear free-plan issue cap may block child-issue creation; archive if needed.
 
 ## Next Action
 READY_FOR_REVIEW
