@@ -97,6 +97,11 @@ const USAGE_LIMIT_FILE = path.join(LOG_DIR, 'runner.usage-limit.json');
 const COOLDOWN_FILE = path.join(LOG_DIR, 'runner.cooldown.json');
 const USAGE_LIMIT_RETRY_BUFFER_SECONDS = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
 const MAX_DRAIN_ITEMS = 20;  // safety guard against infinite drain loops
+// run_auto.sh のOS flock（同時に1プロセスのみ）を別の実行が保持しているとき、
+// drain から起動した run_auto.sh は exit 75 を返す。グローバルロックなので他のキュー項目も
+// 同様に弾かれる。即時 null 再投入だと drain が同一Issueを MAX_DRAIN_ITEMS 回連打して
+// コンソールを溢れさせるため、この秒数だけ retryAt バックオフを付けて再投入し drain を止める。
+const LOCK_CONFLICT_BACKOFF_MS = parseInt(process.env.LOCK_CONFLICT_BACKOFF_MS || '60000', 10);
 const LOG_FILE = path.join(LOG_DIR, 'auto_runner.log');
 const STALE_LOCK_MS = 30 * 60 * 1000;  // 30 minutes
 const LINEAR_API_URL = 'https://api.linear.app/graphql';
@@ -1659,14 +1664,17 @@ function classifyRunResult({ code, output, completion }: ClassifyRunArgs): Class
   return { kind: RUN_RESULT.FAILED, code, classification };
 }
 
-async function runItem(item: QueueItem): Promise<void> {
+// Returns true when the run was blocked by the global run_auto.sh OS flock
+// (another run is active). drainQueue uses this to stop the current pass instead
+// of hammering the same item, since no queued item can run while the lock is held.
+async function runItem(item: QueueItem): Promise<boolean> {
   const { issueId } = item;
 
   // Check current Linear state before executing
   const eligibility = await getIssueExecutionEligibility(issueId);
   if (!eligibility.eligible) {
     log('RUN', `skipped: ${eligibility.reason}`, { trigger: item.trigger || 'queue', issue: issueId });
-    return;
+    return false;
   }
 
   const isResume = item.reason === 'usage_limit';
@@ -1696,9 +1704,13 @@ async function runItem(item: QueueItem): Promise<void> {
       }
       break;
 
-    case RUN_RESULT.LOCK_CONFLICT:
-      log('RUNNER', 'SKIPPED_LOCKED received from run_auto.sh — re-enqueuing', { issue: issueId });
-      enqueue(issueId, item.trigger || 'queue', null, {
+    case RUN_RESULT.LOCK_CONFLICT: {
+      // Another run_auto.sh holds the global OS flock. Re-enqueue with a short
+      // backoff (not null) so drainQueue's future-retryAt guard stops the pass
+      // instead of re-spawning run_auto.sh in a tight loop (console flood).
+      const backoffRetryAt = new Date(Date.now() + LOCK_CONFLICT_BACKOFF_MS).toISOString();
+      log('RUNNER', `SKIPPED_LOCKED received from run_auto.sh — re-enqueuing with backoff retryAt=${backoffRetryAt}`, { issue: issueId });
+      enqueue(issueId, item.trigger || 'queue', backoffRetryAt, {
         issueIdentifier: item.issueIdentifier || null,
         reason: 'lock_conflict',
         priority: item.priority ?? null,
@@ -1708,7 +1720,8 @@ async function runItem(item: QueueItem): Promise<void> {
         queueGroup: item.queueGroup ?? null,
         queueGroupOrder: item.queueGroupOrder ?? null
       });
-      break;
+      return true; // signal drainQueue to stop this pass
+    }
 
     case RUN_RESULT.USAGE_LIMIT_RETRY: {
       const { classification } = result;
@@ -1779,6 +1792,7 @@ async function runItem(item: QueueItem): Promise<void> {
       log('RUN', `failed exit=${result.code}`, { trigger: item.trigger || 'queue', issue: issueId });
       break;
   }
+  return false;
 }
 
 async function drainQueue(): Promise<void> {
@@ -1849,10 +1863,11 @@ async function drainQueue(): Promise<void> {
       });
       break;
     }
+    let lockConflict = false;
     try {
       addInflight(item.issueId);
       setCurrentIssue(item);
-      await runItem(item);
+      lockConflict = await runItem(item);
       processedCount++;
       // Track this item's issueId as the last processed group anchor for child issues
       lastProcessedGroup = item.issueId || item.issueIdentifier || null;
@@ -1863,6 +1878,13 @@ async function drainQueue(): Promise<void> {
       clearCurrentIssue();
       removeInflight(item.issueId);
       releaseLock();
+    }
+
+    // A global run_auto.sh flock is held by another active run — no queued item can
+    // run right now. Stop this drain pass; the backed-off item retries later.
+    if (lockConflict) {
+      log('QUEUE', 'drain: run_auto.sh lock held by another run, stopping pass (backed off)', { issue: item.issueId });
+      break;
     }
   }
 
