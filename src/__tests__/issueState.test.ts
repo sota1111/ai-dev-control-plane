@@ -1,4 +1,4 @@
-import { isTerminalState } from '../lib/issueState.js';
+import { isTerminalState, isHoldState } from '../lib/issueState.js';
 
 describe('isTerminalState', () => {
   test('returns true for terminal types', () => {
@@ -41,5 +41,25 @@ describe('isTerminalState', () => {
     expect(isTerminalState({ type: 'completed', name: 'Done' })).toBe(true);
     expect(isTerminalState({ type: 'backlog', name: 'Done' })).toBe(true);
     expect(isTerminalState({ type: 'completed', name: 'Backlog' })).toBe(true);
+  });
+});
+
+describe('isHoldState', () => {
+  test('returns true for In Review (case-insensitive), which shares type "started"', () => {
+    expect(isHoldState({ type: 'started', name: 'In Review' })).toBe(true);
+    expect(isHoldState({ name: 'in review' })).toBe(true);
+    expect(isHoldState({ name: 'IN REVIEW' })).toBe(true);
+  });
+
+  test('returns false for actionable and terminal states', () => {
+    expect(isHoldState({ type: 'started', name: 'In Progress' })).toBe(false);
+    expect(isHoldState({ type: 'unstarted', name: 'Todo' })).toBe(false);
+    expect(isHoldState({ type: 'completed', name: 'Done' })).toBe(false);
+  });
+
+  test('is null-safe', () => {
+    expect(isHoldState(null)).toBe(false);
+    expect(isHoldState(undefined)).toBe(false);
+    expect(isHoldState({})).toBe(false);
   });
 });

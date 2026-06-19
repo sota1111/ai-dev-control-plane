@@ -11,7 +11,7 @@ import { getSecret, initSecrets } from './config/secrets.js';
 import { DiscordNotifier } from './lib/discordNotifier.js';
 import { verifyDiscordSignature } from './lib/discordInteractions.js';
 import { routeInteraction } from './lib/discordCommandRouter.js';
-import { isTerminalState } from './lib/issueState.js';
+import { isTerminalState, isHoldState } from './lib/issueState.js';
 import { resolveNotifyWebhook } from './lib/cooldownNotifier.js';
 import * as runner from './runner.js';
 
@@ -152,10 +152,17 @@ async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
 
   let enqueuedCount = 0;
   for (const issue of issues) {
-    const { identifier, priority, priorityLabel, parentIssueId, parentIssueIdentifier } = issue;
+    const { identifier, priority, priorityLabel, parentIssueId, parentIssueIdentifier, stateName } = issue;
 
     if (runner.isQueued(identifier)) {
       runner.log('SCAN', `${trigger}: skip ${identifier} (already queued)`);
+      continue;
+    }
+
+    // In Review は人間のレビュー待ちの保留状態。type が "started" のため fetchActiveIssues に
+    // 含まれるが、自動実行の対象外なので再投入しない（SOT-841 のような終端Issueの再実行ループ防止）。
+    if (isHoldState({ name: stateName })) {
+      runner.log('SCAN', `${trigger}: skip ${identifier} (hold state In Review)`);
       continue;
     }
 

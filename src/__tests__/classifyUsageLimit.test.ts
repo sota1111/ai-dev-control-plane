@@ -150,4 +150,33 @@ describe('classifyUsageLimit', () => {
     expect(result.type).toBe('model_unavailable');
     expect(result.retryAt).toBe('2026-06-16T13:00:00.000Z');
   });
+
+  it('does NOT classify a bare timestamp containing "503" as model_unavailable', () => {
+    // 開始時刻 12:50:34 -> "125034" は部分文字列 "503" を含む。run_auto.sh のバナー
+    // ("Start: 20260619_125034" / "...run_20260619_125034.log") がこれを出力し、
+    // 旧 includes('503') が HTTP 503 と誤検知して不要な1時間 cooldown を引き起こしていた。
+    const text = [
+      'Start: 20260619_125034',
+      'Log: docs/ai/auto_logs/run_20260619_125034.log',
+      'SOT-841 is already complete and in a terminal hold state. No work to do. Terminating.',
+      '== Finished: 20260619_125107 (exit: 1) =='
+    ].join('\n');
+    const result = classifyUsageLimit(text, NOW_MS);
+
+    expect(result.type).toBe('unknown');
+    expect(result.retryable).toBe(false);
+    expect(result.retryAt).toBeNull();
+  });
+
+  it('does NOT classify a bare "429" inside a digit run (e.g. PID/timestamp) as api_429', () => {
+    const result = classifyUsageLimit('Spawned run_auto.sh pid=1142986 at 04:29:00, exit 1', NOW_MS);
+    expect(result.type).toBe('unknown');
+    expect(result.retryable).toBe(false);
+  });
+
+  it('still classifies a real 503 with context even when other digits are present', () => {
+    const result = classifyUsageLimit('pid=125034 API Error: 503 Service Unavailable', NOW_MS);
+    expect(result.type).toBe('model_unavailable');
+    expect(result.retryable).toBe(true);
+  });
 });

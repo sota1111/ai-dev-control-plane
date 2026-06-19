@@ -10,7 +10,7 @@ import { spawn, execSync } from 'node:child_process';
 import { classifyUsageLimit } from './lib/usageLimitParser.js';
 import { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } from './lib/resumeMetadata.js';
 import * as queueOrdering from './lib/queueOrdering.js';
-import { isTerminalState } from './lib/issueState.js';
+import { isTerminalState, isHoldState } from './lib/issueState.js';
 import { resolveRepoForProject } from './lib/projectRepo.js';
 import {
   isNewProject,
@@ -1479,6 +1479,13 @@ async function getIssueExecutionEligibility(issueId: string): Promise<Eligibilit
     if (isTerminal) {
       removeFromQueue(issueId);
       return { eligible: false, reason: 'terminal state before run' };
+    }
+
+    // In Review は人間のレビュー待ちの保留状態。自動実行の対象外とし、キューからも除去する
+    // （reaper が "started" 扱いで再投入し続けるのを防ぐ）。
+    if (isHoldState(state)) {
+      removeFromQueue(issueId);
+      return { eligible: false, reason: 'hold state (In Review) before run' };
     }
 
     return { eligible: true };

@@ -121,13 +121,13 @@ Context:
 - This is a continuation of a previous run that hit a usage limit.
 - Process only ${RESUME_ISSUE}. Do not search for or select other Linear issues.
 - Treat this as a continuation of the existing work, not a new task.
-- When ${RESUME_ISSUE} reaches a terminal outcome, exit 0 or 1 and stop.
+- When ${RESUME_ISSUE} reaches a terminal outcome or there is no work to do, this is a SUCCESS: exit 0 and stop. Reserve a non-zero exit for actual errors only (a non-zero exit is treated downstream as a failure and may be misclassified as a usage limit).
 
 Mandatory Resume Flow:
 1. Read the resume metadata JSON if it exists.
 2. Read the previous run log referenced in the metadata.
 3. Check the Linear issue's latest status, comments, and current git state.
-4. If the issue is already terminal (Completed/Canceled/Archived/Duplicate), stop and exit.
+4. If the issue is already terminal (Completed/Canceled/Archived/Duplicate) or is on hold awaiting human review (In Review), stop and exit 0 (this is a successful no-op, not a failure).
 5. If status is 'Todo', set it to 'In Progress'.
 6. Remove 'usage-limit' label if present.
 7. Post a resume-start comment on Linear.
@@ -147,7 +147,7 @@ Mandatory behavior:
 - Perform the initial task check exactly once. The task check must be delegated to Codex CLI before Claude Code starts decomposition.
 - For the Codex task check, write instructions to prompts/codex/debug.md, run scripts/ai/run_codex.sh, and read docs/ai/60_worker_codex_report.md. The check should verify the target issue status, latest comments, labels, acceptance criteria, and whether it is actionable.
 - After the Codex task check is complete, Claude Code owns decomposition, child issue registration, worker delegation, Linear status updates, PR flow, and final reporting.
-- When ${WEBHOOK_ISSUE_ID} reaches a terminal outcome for this run, exit immediately with 0 or 1. Do not re-check the Linear queue and do not continue to another issue.
+- When ${WEBHOOK_ISSUE_ID} reaches a terminal outcome for this run, or there is no actionable work (e.g. already terminal, or on hold In Review), this is a SUCCESS: exit immediately with 0. Reserve a non-zero exit for actual errors only. Do not re-check the Linear queue and do not continue to another issue.
 
 ---
 

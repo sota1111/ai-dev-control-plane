@@ -100,11 +100,32 @@ interface UsageLimitResult {
   rawMessage: string;
 }
 
+// HTTP ステータスを示す文脈語。裸の数字一致による誤検知を抑えるため、
+// ステータスコード判定は「単語境界つきの数字」かつ「この文脈語のいずれかが本文に存在」
+// する場合のみ真とする。
+const HTTP_STATUS_CONTEXT = /\b(https?|status|error|code|response|api|server|unavailable|overloaded|service|too many requests|rate ?limits?|unauthorized|forbidden|quota)\b/;
+
+/**
+ * 本文中に指定のHTTPステータスコードが「ステータスコードとして」現れているかを判定する。
+ *
+ * 素朴な includes('503') はタイムスタンプ等（例: 開始時刻 "125034" に '503' が部分一致）にも
+ * マッチして usage-limit を誤検知し、不要な cooldown を引き起こす。これを防ぐため:
+ *   1. 数字は単語境界 \b で囲んでマッチさせる（連続数字の途中一致を排除）
+ *   2. かつ HTTP/ステータス文脈語が本文に存在することを要求する
+ *
+ * @param {string} lowerText 小文字化済みの本文
+ * @param {string} code 判定するステータスコード（例: '503'）
+ */
+function hasHttpStatus(lowerText: string, code: string): boolean {
+  if (!new RegExp(`\\b${code}\\b`).test(lowerText)) return false;
+  return HTTP_STATUS_CONTEXT.test(lowerText);
+}
+
 /**
  * Classifies the type of limit encountered in the text.
- * 
- * @param {string} text 
- * @param {number} nowMs 
+ *
+ * @param {string} text
+ * @param {number} nowMs
  */
 export function classifyUsageLimit(text: string, nowMs: number = Date.now()): UsageLimitResult {
   const buffer = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
@@ -147,7 +168,7 @@ export function classifyUsageLimit(text: string, nowMs: number = Date.now()): Us
   }
 
   // API 429
-  if (lowerText.includes('429') || lowerText.includes('too many requests') || lowerText.includes('rate limit')) {
+  if (lowerText.includes('too many requests') || lowerText.includes('rate limit') || hasHttpStatus(lowerText, '429')) {
     result.type = 'api_429';
     result.retryable = true;
     result.confidence = 'high';
@@ -161,8 +182,9 @@ export function classifyUsageLimit(text: string, nowMs: number = Date.now()): Us
   }
 
   // Auth Error
-  if (lowerText.includes('401') || lowerText.includes('403') || lowerText.includes('unauthorized') || 
-      lowerText.includes('authentication') || lowerText.includes('invalid api key') || lowerText.includes('credentials')) {
+  if (lowerText.includes('unauthorized') || lowerText.includes('authentication') ||
+      lowerText.includes('invalid api key') || lowerText.includes('credentials') ||
+      hasHttpStatus(lowerText, '401') || hasHttpStatus(lowerText, '403')) {
     result.type = 'auth_error';
     result.retryable = false;
     result.confidence = 'high';
@@ -179,8 +201,8 @@ export function classifyUsageLimit(text: string, nowMs: number = Date.now()): Us
   }
 
   // Model Unavailable
-  if (lowerText.includes('model is currently unavailable') || lowerText.includes('overloaded') || 
-      lowerText.includes('503') || lowerText.includes('529') || lowerText.includes('service unavailable')) {
+  if (lowerText.includes('model is currently unavailable') || lowerText.includes('overloaded') ||
+      lowerText.includes('service unavailable') || hasHttpStatus(lowerText, '503') || hasHttpStatus(lowerText, '529')) {
     result.type = 'model_unavailable';
     result.retryable = true;
     result.confidence = 'medium';
