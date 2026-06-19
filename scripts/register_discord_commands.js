@@ -1,9 +1,13 @@
 #!/usr/bin/env node
-'use strict';
+// ESM: package.json has "type": "module", and src/config/secrets.js is ESM,
+// so this script must use import (not require).
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
+import { getRequiredSecret, initSecrets } from '../src/config/secrets.js';
 
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-const { getRequiredSecret, initSecrets } = require('../src/config/secrets');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const commands = [
   {
