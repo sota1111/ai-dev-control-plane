@@ -1,57 +1,57 @@
 # Worker Report
 
 ## Summary
-Initial task check for SOT-809 「Botの/queueが応答しない」. Codex CLI was NON-RESPONSIVE
-(exit 75, usage-limit cooldown until epoch 1782000900 ≈ 2026-06-20, ~49h out). Per Worker
-Non-Response Fallback Policy, Claude Code performed the read-only task check directly.
+Initial task check for SOT-807 「動作再開」.
+Codex CLI was NON-RESPONSIVE (`run_codex.sh` exit 75, usage-limit cooldown until epoch 1782000900 ≈ 2026-06-20, ~48h).
+Per Worker Non-Response Fallback Policy, Claude Code performed the read-only task check directly.
 
-Issue is ACTIONABLE: status In Progress, no labels, no comments, no blockers.
+**Determination: ACTIONABLE as an IMPLEMENT task (build the "reaper").**
 
-**Most likely root cause of the `/queue` timeout:**
-The Discord interaction HTTP response is sent only after `routeInteraction` resolves
-(`src/webhook-server.ts:393-397`). `/status` (`handleStatus`) is fully synchronous — it
-only reads local state (lock, queue file, cooldown, pause, session) — so it ACKs well
-within Discord's 3-second deadline. `/queue` (`handleQueue`) performs `await
-runner.fetchActiveIssues()` (a Linear GraphQL network call) BEFORE returning the response.
-When that network call is slow (or Linear is rate-limited/unreachable), the response
-exceeds the 3s ACK deadline and Discord shows "アプリケーションが応答しませんでした".
+The latest human instruction (2026-06-19 00:09, after reopening the issue Todo→reprocess) requests the
+permanent fix flagged in the earlier completion report: a periodic Linear re-scan that re-enqueues
+issues left stuck in `In Progress` / `usage-limit` after a cooldown clears.
 
-## Fix model (existing pattern)
-`/ask` already solves this: it returns an immediate response and does slow work in the
-background, then PATCHes `@original` via
-`src/lib/discordInteractionFollowup.ts::editOriginalInteractionResponse`. The same
-deferred-response pattern (Discord interaction response type 5,
-DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE) should be applied to `/queue`: ACK immediately,
-then compute the queue (including `fetchActiveIssues`) in the background and edit the
-original response with the result.
+## Findings
+- SOT-807 current status: **In Progress** (set by Claude Code this run). Labels: none. Priority: High.
+- Issue history: Todo → In Progress → Done (21:59) → reopened Todo (00:09:48). Latest human comment at
+  00:09 asks to implement the reaper as the recurrence-prevention measure.
+- Current drain architecture in `src/webhook-server.ts`:
+  - `runPeriodicDrainTick()` (line 96) only inspects the **in-memory queue** via `hasDueQueueItem()`
+    (`runner.loadQueue()`). It skips while locked, while in cooldown, and when no due item exists.
+    It NEVER re-scans Linear. → If the in-memory queue is empty (process restarted, or stuck issue was
+    never re-enqueued), stuck `In Progress` issues are invisible to the periodic drain.
+  - `runBootstrapScan()` (line 408) DOES re-scan Linear (`runner.fetchActiveIssues(50)`) and enqueues
+    active issues, but it runs **only once at startup** and is gated by `WEBHOOK_BOOTSTRAP_SCAN_ENABLED`.
+    There is no periodic equivalent that runs after a cooldown clears.
+- `runner.fetchActiveIssues()` (runner.ts:334) already returns Todo (`unstarted`) + In Progress
+  (`started`) issues with archived filtered out — exactly the input a periodic reaper needs.
+- Confirmed: **no existing periodic mechanism re-scans Linear to recover stuck issues.** This matches the
+  human's diagnosis.
+
+## Reaper integration point
+Add a periodic Linear re-scan to the drain loop in `src/webhook-server.ts`:
+- A reaper tick that, when NOT locked and NOT in cooldown, calls `runner.fetchActiveIssues()`, enqueues
+  any active issue not already queued (reuse the `runBootstrapScan` enqueue loop / `runner.isQueued`),
+  then drains. Mirror `runBootstrapScan`'s logic (syncQueueWithLinear → drainQueue) to avoid duplication.
+- Trigger primarily on cooldown→clear transitions (and as a periodic safety net), so issues stranded
+  during a cooldown are recovered automatically once usage-limit lifts.
 
 ## Changed Files
-- none (read-only task check)
+- none (read-only check)
 
 ## Commands Run
-- `bash scripts/ai/run_codex.sh` → exit 75 (codex usage-limit cooldown, non-responsive)
-- Read `src/lib/discordCommandHandlers.ts`, `src/lib/discordCommandRouter.ts`,
-  `src/webhook-server.ts`, `src/lib/discordAskHandler.ts`,
-  `src/lib/discordInteractionFollowup.ts`
+- `bash scripts/ai/run_codex.sh` → exit 75 (cooldown, non-responsive)
+- `grep`/`Read` over `src/webhook-server.ts`, `src/runner.ts`
 
 ## Acceptance Criteria
-- [x] Issue status/comments/labels/actionability confirmed (actionable)
-- [x] Root cause of `/queue` timeout identified (blocking network call before ACK)
-- [x] Request path confirmed (synchronous response in webhook-server)
-- [x] Candidate fix model identified (deferred response like `/ask`)
+- [x] SOT-807 actionable determination — ACTIONABLE (IMPLEMENT: reaper)
+- [x] reaper integration point identified — periodic Linear re-scan in `src/webhook-server.ts` drain loop
 
 ## Risks
-- Deferred responses (type 5) change `/queue` UX slightly: shows "thinking…" then the
-  result. Acceptable and consistent with `/ask`.
-- Must keep ephemeral flag (64) on the deferred response to match current behavior.
-
-## Post-fix verification (Claude Code fallback — Codex non-responsive)
-Codex remained non-responsive (usage-limit cooldown, exit 75), so Claude Code ran the
-quality gate directly per the Fallback Policy:
-- `npm run lint` → exit 0
-- `npm run typecheck` → exit 0
-- `npm test` → 24 suites / 305 tests passing (incl. new `discordCommandRouter.test.ts`)
-- `npm run e2e` → N/A (no e2e script in package.json)
+- Reaper must respect the lock and cooldown guards to avoid double-running tasks or hammering Linear.
+- Avoid duplicate enqueues: reuse `runner.isQueued()` / `isQueuedOrRunning()`.
+- Keep re-scan interval reasonable to limit Linear API load (reuse `QUEUE_DRAIN_INTERVAL_MS`).
+- Should be guarded by an env flag (mirroring `WEBHOOK_BOOTSTRAP_SCAN_ENABLED`) so it can be disabled.
 
 ## Next Action
 READY_FOR_REVIEW

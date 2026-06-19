@@ -83,6 +83,8 @@ const PORT = process.env.PORT || 3000;
 const QUEUE_DRAIN_INTERVAL_MS = parseInt(process.env.QUEUE_DRAIN_INTERVAL_MS || '300000', 10); // 既定5分
 
 let _periodicDrainRunning = false; // in-process 再入ガード（interval callback の重なり防止）
+let _reaperRunning = false;        // reaper 再入ガード
+let _prevReaperCooldownActive = false; // 前tick時点で cooldown 中だったか（cooldown明け検知用）
 
 // 期限到来済み（due）のキュー項目が1つでもあるか
 function hasDueQueueItem(): boolean {
@@ -90,6 +92,87 @@ function hasDueQueueItem(): boolean {
   return runner.loadQueue().some(
     (item: any) => !item.retryAt || new Date(item.retryAt).getTime() <= now
   );
+}
+
+// Linear をスキャンし、未キューの active(Todo/In Progress) Issue を実行キューへ投入する。
+// runBootstrapScan と reaper の共通処理。投入した件数を返す。
+async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
+  let issues: any[] = [];
+  try {
+    issues = await runner.fetchActiveIssues(50);
+  } catch (err: any) {
+    runner.log('SCAN', `fetchActiveIssues error: ${err.message}`);
+    return 0;
+  }
+
+  runner.log('SCAN', `${trigger}: found ${issues.length} active issue(s)`);
+  if (issues.length === 0) return 0;
+
+  const cooldown = runner.getUsageLimitCooldownUntil();
+  const cooldownRetryAt = cooldown ? cooldown.retryAt : null;
+
+  let enqueuedCount = 0;
+  for (const issue of issues) {
+    const { identifier, priority, priorityLabel, parentIssueId, parentIssueIdentifier } = issue;
+
+    if (runner.isQueued(identifier)) {
+      runner.log('SCAN', `${trigger}: skip ${identifier} (already queued)`);
+      continue;
+    }
+
+    const retryAt = cooldownRetryAt || null;
+    runner.enqueue(identifier, trigger, retryAt, {
+      priority,
+      priorityLabel,
+      parentIssueId,
+      parentIssueIdentifier
+    });
+    runner.log('SCAN', `${trigger}: enqueued ${identifier}${retryAt ? ` retryAt=${retryAt}` : ''}`);
+    enqueuedCount++;
+  }
+
+  return enqueuedCount;
+}
+
+// 取り残されたIssueの回収（reaper）。
+// webhook は新規イベントでしか発火しないため、cooldown中に In Progress のまま取り残されたIssueは
+// 定期drain（メモリ内キューしか見ない）からは不可視になる。reaper は Linear を再スキャンして
+// そうしたIssueを実行キューへ再投入する。主トリガーは cooldown 明けの遷移、加えてアイドル時の
+// セーフティネットとしても動作する。
+async function runReaperTick(): Promise<void> {
+  if (_reaperRunning) return;
+  if (process.env.WEBHOOK_REAPER_ENABLED === 'false') return; // 既定有効・明示falseで無効化
+
+  // cooldown 明け検知のため、early-return の前に前回状態を更新する
+  const cooldownActive = runner.getUsageLimitCooldownUntil() !== null;
+  const cooldownJustCleared = _prevReaperCooldownActive && !cooldownActive;
+  _prevReaperCooldownActive = cooldownActive;
+
+  if (runner.isLocked()) return;        // 実行中はスキップ
+  if (cooldownActive) return;           // cooldown中はスキップ（明けてから回収）
+  if (!getSecret('LINEAR_API_KEY')) return; // APIキー未設定ならスキップ
+
+  // トリガー: cooldown明け、またはアイドル（dueなキュー項目なし）時のセーフティネット。
+  // アイドル時に限定することで Linear API 呼び出しを稼働中に多発させない。
+  if (!cooldownJustCleared && hasDueQueueItem()) return;
+
+  _reaperRunning = true;
+  try {
+    const enqueued = await scanAndEnqueueActiveIssues('webhook-reaper');
+    if (enqueued > 0) {
+      runner.log('REAPER', `reaper: re-enqueued ${enqueued} stranded issue(s), draining`);
+      try {
+        await runner.syncQueueWithLinear();
+      } catch (err: any) {
+        runner.log('REAPER', `reaper: syncQueueWithLinear error (non-fatal): ${err.message}`);
+      }
+      await runner.drainQueue();
+    }
+  } catch (err: any) {
+    runner.log('REAPER', `reaper error: ${err.message}`);
+  } finally {
+    _reaperRunning = false;
+  }
 }
 
 // 1回分のアイドルdrainチェック。条件を満たすときだけ drainQueue を呼ぶ。
@@ -112,9 +195,16 @@ async function runPeriodicDrainTick(): Promise<void> {
 // interval を開始し、その timer を返す（テストで停止できるよう返り値を返すこと）
 function startPeriodicDrain(intervalMs: number = QUEUE_DRAIN_INTERVAL_MS): NodeJS.Timeout {
   const timer = setInterval(() => {
-    runPeriodicDrainTick().catch((err) => {
-      runner.log('QUEUE', `periodic drain tick uncaught: ${err.message}`);
-    });
+    // reaper（Linear再スキャン→取り残しIssue回収）→ 既存の定期drain（メモリ内キュー）の順で実行
+    runReaperTick()
+      .catch((err) => {
+        runner.log('REAPER', `reaper tick uncaught: ${err.message}`);
+      })
+      .finally(() => {
+        runPeriodicDrainTick().catch((err) => {
+          runner.log('QUEUE', `periodic drain tick uncaught: ${err.message}`);
+        });
+      });
   }, intervalMs);
   if (typeof (timer as any).unref === 'function') (timer as any).unref(); // プロセス終了を妨げない
   return timer;
@@ -420,48 +510,9 @@ async function runBootstrapScan(): Promise<void> {
   const startedAt = new Date().toISOString();
   runner.log('BOOTSTRAP', `startup scan started at ${startedAt}`);
 
-  let issues: any[] = [];
-  try {
-    issues = await runner.fetchActiveIssues(50);
-  } catch (err: any) {
-    runner.log('BOOTSTRAP', `fetchActiveIssues error: ${err.message}`);
-    return;
-  }
+  const enqueuedCount = await scanAndEnqueueActiveIssues('webhook-bootstrap');
 
-  runner.log('BOOTSTRAP', `startup scan: found ${issues.length} active issue(s)`);
-
-  if (issues.length === 0) {
-    runner.log('BOOTSTRAP', 'startup scan: no issues to enqueue');
-    return;
-  }
-
-  const cooldown = runner.getUsageLimitCooldownUntil();
-  const cooldownRetryAt = cooldown ? cooldown.retryAt : null;
-
-  let enqueuedCount = 0;
-  let skippedCount = 0;
-
-  for (const issue of issues) {
-    const { identifier, priority, priorityLabel, parentIssueId, parentIssueIdentifier } = issue;
-
-    if (runner.isQueued(identifier)) {
-      runner.log('BOOTSTRAP', `startup scan: skip ${identifier} (already queued)`);
-      skippedCount++;
-      continue;
-    }
-
-    const retryAt = cooldownRetryAt || null;
-    runner.enqueue(identifier, 'webhook-bootstrap', retryAt, {
-      priority,
-      priorityLabel,
-      parentIssueId,
-      parentIssueIdentifier
-    });
-    runner.log('BOOTSTRAP', `startup scan: enqueued ${identifier}${retryAt ? ` retryAt=${retryAt}` : ''}`);
-    enqueuedCount++;
-  }
-
-  runner.log('BOOTSTRAP', `startup scan complete: enqueued=${enqueuedCount} skipped=${skippedCount}`);
+  runner.log('BOOTSTRAP', `startup scan complete: enqueued=${enqueuedCount}`);
 
   if (enqueuedCount > 0) {
     runner.log('BOOTSTRAP', 'startup scan: running syncQueueWithLinear before drain');
@@ -500,4 +551,4 @@ if (isMain) {
   })();
 }
 
-export { app, runBootstrapScan, hasDueQueueItem, runPeriodicDrainTick, startPeriodicDrain };
+export { app, runBootstrapScan, hasDueQueueItem, runPeriodicDrainTick, startPeriodicDrain, scanAndEnqueueActiveIssues, runReaperTick };
