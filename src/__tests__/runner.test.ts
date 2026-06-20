@@ -1745,4 +1745,164 @@ describe('runner', () => {
       });
     });
   });
+
+  // SOT-918: end-to-end parallel "wait task" (待機タスク) scenario. A wait task is a `long-run`-labeled
+  // issue launched DETACHED — its heavy process keeps running in the background (the mock child never
+  // emits 'close') so the runner must return immediately without blocking the lane. This exercises the
+  // full lane + detached parallelism with SEVERAL such tasks at once (launch → lane independence → reap).
+  describe('parallel wait-task scenario (SOT-918)', () => {
+    let writeSpy: jest.Mock;
+    beforeEach(() => {
+      writeSpy = jest.fn();
+      process.env.LINEAR_API_KEY = 'test-key';
+    });
+
+    function queueItem(issueId: string) {
+      return {
+        issueId,
+        trigger: 'webhook',
+        retryAt: null,
+        enqueuedAt: new Date().toISOString(),
+        priority: 2,
+        priorityRank: runner.getPriorityRank(2)
+      };
+    }
+
+    // A detached wait task: child with pid + unref that NEVER emits 'close' (we must not await it).
+    function mockDetachedSpawn(pid: number) {
+      const child: any = new EventEmitter();
+      child.pid = pid;
+      child.unref = jest.fn();
+      (spawn as jest.Mock).mockReturnValue(child);
+      return child;
+    }
+
+    function setupLinearMocks(responses: any[]) {
+      let index = 0;
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
+        const responseData = JSON.stringify({ data: responses[index++] });
+        const res: any = {
+          on: jest.fn((event: any, cb: any) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return { on: jest.fn(), write: writeSpy, end: jest.fn(), destroy: jest.fn() };
+      });
+    }
+
+    function setupLinearAlwaysCompleted() {
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
+        const responseData = JSON.stringify({
+          data: { issue: { id: 'x', state: { type: 'completed', name: 'Done' } }, issues: { nodes: [] } }
+        });
+        const res: any = {
+          on: jest.fn((event: any, cb: any) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return { on: jest.fn(), write: writeSpy, end: jest.fn(), destroy: jest.fn() };
+      });
+    }
+
+    function unlockedDetachedFs() {
+      fs.existsSync.mockImplementation((p: string) =>
+        p === runner.DETACHED_DIR ||
+        (typeof p === 'string' && (p.includes('.done.json') || p.endsWith('.log') || p.endsWith('.json')))
+      );
+    }
+
+    const WAIT_TASKS = ['SOT-940', 'SOT-941', 'SOT-942'];
+
+    it('launches several wait tasks detached, each freeing the lane immediately (no blocking await)', async () => {
+      const children: any[] = [];
+      for (let i = 0; i < WAIT_TASKS.length; i++) {
+        const id = WAIT_TASKS[i];
+        fs.existsSync.mockReturnValue(false);
+        children.push(mockDetachedSpawn(54000 + i));
+        setupLinearMocks([
+          { issue: { id, state: { type: 'started', name: 'In Progress' }, labels: { nodes: [{ name: 'long-run' }] } } },
+          { issue: { project: { name: 'ai-dev-control-plane' } } }
+        ]);
+
+        const outcome = await runner.runItem(queueItem(id) as any);
+
+        // Returned WITHOUT awaiting the still-running child → the lane is not held for the wait duration.
+        expect(outcome).toEqual({ lockConflict: false, detached: true });
+      }
+
+      // One detached spawn per wait task, all fire-and-forget.
+      expect(spawn).toHaveBeenCalledTimes(WAIT_TASKS.length);
+      for (let i = 0; i < WAIT_TASKS.length; i++) {
+        const spawnOpts: any = (spawn as jest.Mock).mock.calls[i][2];
+        expect(spawnOpts.detached).toBe(true);
+        expect(spawnOpts.stdio).toBe('ignore');
+        expect(children[i].unref).toHaveBeenCalled();
+        // A per-issue sentinel was written for each wait task.
+        const sentinelWrites = (fs.writeFileSync as jest.Mock).mock.calls
+          .filter(c => typeof c[0] === 'string' && (c[0] as string).includes(`${WAIT_TASKS[i]}.json`));
+        expect(sentinelWrites.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('runs wait tasks on independent lanes concurrently while the same lane stays serial', () => {
+      // Distinct lanes → distinct lock + queue paths, so two wait tasks on different lanes never share a
+      // lock (they can be in-flight simultaneously).
+      const lanes = [runner.LOCK_FILE, runner.laneLockFile('sim'), runner.laneLockFile('build')];
+      expect(new Set(lanes).size).toBe(3);
+      const queues = [runner.QUEUE_FILE, runner.laneQueueFile('sim'), runner.laneQueueFile('build')];
+      expect(new Set(queues).size).toBe(3);
+      for (const p of [...lanes, ...queues]) {
+        expect(p.startsWith(runner.LOG_DIR)).toBe(true);
+        expect(p.includes('..')).toBe(false);
+      }
+
+      // The default lane preserves the historical single-lane paths (backward compatible).
+      expect(runner.laneLockFile()).toBe(runner.LOCK_FILE);
+      expect(runner.laneLockFile('default')).toBe(runner.LOCK_FILE);
+      expect(runner.laneQueueFile()).toBe(runner.QUEUE_FILE);
+
+      // Same lane → same lock/queue file: work on one lane is serialized through a single lock.
+      expect(runner.laneLockFile('sim')).toBe(runner.laneLockFile('sim'));
+      expect(runner.laneQueueFile('sim')).toBe(runner.laneQueueFile('sim'));
+    });
+
+    it('reaps several completed wait tasks in one sweep with mixed outcomes (success / usage-limit / fail)', async () => {
+      unlockedDetachedFs();
+      fs.readdirSync.mockReturnValue(WAIT_TASKS.map(id => `${id}.done.json`));
+      const now = new Date().toISOString();
+      fs.readFileSync.mockImplementation((p: string) => {
+        // Match .done.json BEFORE .log (a done-marker path also contains ".json").
+        if (p.includes('SOT-940.done.json')) return JSON.stringify({ issueId: 'SOT-940', exitCode: 0, endedAt: now });
+        if (p.includes('SOT-941.done.json')) return JSON.stringify({ issueId: 'SOT-941', exitCode: 1, endedAt: now });
+        if (p.includes('SOT-942.done.json')) return JSON.stringify({ issueId: 'SOT-942', exitCode: 1, endedAt: now });
+        if (p.includes('SOT-940') && p.endsWith('.log')) return 'all good';
+        // model_unavailable is retryable → Resume re-enqueue path.
+        if (p.includes('SOT-941') && p.endsWith('.log')) return 'Error: the model is currently unavailable, please retry';
+        if (p.includes('SOT-942') && p.endsWith('.log')) return 'fatal: boom';
+        return '[]';
+      });
+      setupLinearAlwaysCompleted();
+
+      const processed = await runner.reapCompletedDetachedRuns();
+
+      // All three wait tasks drained in a single sweep.
+      expect(processed).toEqual(expect.arrayContaining(WAIT_TASKS));
+      expect(processed.length).toBe(WAIT_TASKS.length);
+
+      // Each done-marker cleaned up after post-processing.
+      for (const id of WAIT_TASKS) {
+        expect(fs.unlinkSync).toHaveBeenCalledWith(runner.detachedDoneFile(id));
+      }
+
+      // The usage-limited wait task was re-injected into the Resume queue.
+      const queueWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('runner.queue.json'));
+      expect(queueWrites.length).toBeGreaterThan(0);
+      expect(queueWrites.some(c => (c[1] as string).includes('SOT-941'))).toBe(true);
+    });
+  });
 });
