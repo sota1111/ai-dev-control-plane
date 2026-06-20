@@ -78,7 +78,7 @@
         │ 報告              ┌────────────────────────┐
         │ (Discord)         │   起動レイヤー           │
         │                   │  scheduler.sh（定期監視）│
-        │                   │  webhook-server.js（即時）│
+        │                   │  webhook-server.ts（即時）│
         │                   └───────────┬────────────┘
         │                               │ runner-cli queue/drain
         │                   ┌───────────▼────────────┐
@@ -105,8 +105,8 @@
 | **Gemini CLI**       | 実装ワーカー                         | `scripts/ai/run_gemini.sh`                |
 | **Codex CLI**        | デバッグ・検証ワーカー               | `scripts/ai/run_codex.sh`                 |
 | **スケジューラー**   | Linear をポーリングして起動          | `scripts/ai/scheduler.sh`                 |
-| **Webhook サーバー** | Linear/Discord イベントで即時起動    | `src/webhook-server.js`                   |
-| **Discord Bot**      | 遠隔での状態確認・制御               | `src/lib/discord*.js`                     |
+| **Webhook サーバー** | Linear/Discord イベントで即時起動    | `src/webhook-server.ts`                   |
+| **Discord Bot**      | 遠隔での状態確認・制御               | `src/lib/discord*.ts`                     |
 | **自律実行ランナー** | Claude Code を起動する実行エントリ   | `scripts/ai/run_auto.sh`                  |
 | **Linear**           | 指示・進捗・状態の管理場所           | 外部 SaaS（MCP / API / Webhook 連携）     |
 | **GitHub**           | 成果物・履歴の保管庫                 | 外部 SaaS（`gh` CLI 連携）                |
