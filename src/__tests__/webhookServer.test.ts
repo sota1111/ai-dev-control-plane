@@ -30,6 +30,7 @@ const mockRunner = {
   isQueued: jest.fn().mockReturnValue(false),
   isQueuedOrRunning: jest.fn().mockReturnValue(false),
   reapStaleInflight: jest.fn().mockReturnValue([]),
+  reapCompletedDetachedRuns: (jest.fn() as any).mockResolvedValue([]),
   syncQueueWithLinear: (jest.fn() as any).mockResolvedValue(undefined),
   isLocked: jest.fn().mockReturnValue(false),
   loadQueue: jest.fn().mockReturnValue([]),

@@ -1521,6 +1521,130 @@ describe('runner', () => {
     });
   });
 
+  describe('detached completion → Resume re-injection (SOT-915)', () => {
+    let writeSpy: jest.Mock;
+    beforeEach(() => {
+      writeSpy = jest.fn();
+      process.env.LINEAR_API_KEY = 'test-key';
+    });
+
+    // Always respond with a "completed" issue so verifyTaskCompletion / cleanup queries succeed.
+    function setupLinearAlwaysCompleted() {
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
+        const responseData = JSON.stringify({
+          data: { issue: { id: 'x', state: { type: 'completed', name: 'Done' } }, issues: { nodes: [] } }
+        });
+        const res: any = {
+          on: jest.fn((event: any, cb: any) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return { on: jest.fn(), write: writeSpy, end: jest.fn(), destroy: jest.fn() };
+      });
+    }
+
+    // existsSync: unlocked, DETACHED_DIR present, and per-issue done/log/sentinel files present.
+    function unlockedDetachedFs() {
+      fs.existsSync.mockImplementation((p: string) =>
+        p === runner.DETACHED_DIR ||
+        (typeof p === 'string' && (p.includes('.done.json') || p.endsWith('.log') || p.endsWith('.json')))
+      );
+    }
+
+    it('is a no-op while a run holds the lock', async () => {
+      fs.existsSync.mockImplementation((p: string) => p === runner.LOCK_FILE);
+      fs.readFileSync.mockImplementation((p: string) => {
+        if (p === runner.LOCK_FILE) return `${process.pid}:${new Date().toISOString()}`;
+        return '[]';
+      });
+      fs.readdirSync.mockReturnValue(['SOT-500.done.json']);
+
+      const processed = await runner.reapCompletedDetachedRuns();
+
+      expect(processed).toEqual([]);
+      expect(fs.readdirSync).not.toHaveBeenCalledWith(runner.DETACHED_DIR);
+    });
+
+    it('post-processes a successful done-marker and clears done/log/sentinel/inflight', async () => {
+      unlockedDetachedFs();
+      fs.readdirSync.mockReturnValue(['SOT-500.done.json']);
+      fs.readFileSync.mockImplementation((p: string) => {
+        if (p.includes('.done.json')) return JSON.stringify({ issueId: 'SOT-500', exitCode: 0, endedAt: new Date().toISOString() });
+        if (p.endsWith('.log')) return 'run output: all good';
+        return '[]';
+      });
+      setupLinearAlwaysCompleted();
+
+      const processed = await runner.reapCompletedDetachedRuns();
+
+      expect(processed).toEqual(['SOT-500']);
+      expect(fs.unlinkSync).toHaveBeenCalledWith(runner.detachedDoneFile('SOT-500'));
+      expect(fs.unlinkSync).toHaveBeenCalledWith(runner.detachedLogFile('SOT-500'));
+      expect(fs.unlinkSync).toHaveBeenCalledWith(runner.detachedSentinelFile('SOT-500'));
+      // inflight rewritten (entry removed)
+      const inflightWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('runner.inflight.json'));
+      expect(inflightWrites.length).toBeGreaterThan(0);
+    });
+
+    it('detects an abnormal (non-zero) exit, records it, and cleans up without re-enqueue', async () => {
+      unlockedDetachedFs();
+      fs.readdirSync.mockReturnValue(['SOT-501.done.json']);
+      fs.readFileSync.mockImplementation((p: string) => {
+        if (p.includes('.done.json')) return JSON.stringify({ issueId: 'SOT-501', exitCode: 1, endedAt: new Date().toISOString() });
+        if (p.endsWith('.log')) return 'fatal: something broke';
+        return '[]';
+      });
+
+      const processed = await runner.reapCompletedDetachedRuns();
+
+      expect(processed).toEqual(['SOT-501']);
+      expect(fs.unlinkSync).toHaveBeenCalledWith(runner.detachedDoneFile('SOT-501'));
+      // FAILED result → no resume re-enqueue (no write to the queue file)
+      const queueWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('runner.queue.json'));
+      expect(queueWrites.length).toBe(0);
+    });
+
+    it('re-injects a usage-limited detached run into the Resume path (cooldown + re-enqueue)', async () => {
+      unlockedDetachedFs();
+      fs.readdirSync.mockReturnValue(['SOT-502.done.json']);
+      fs.readFileSync.mockImplementation((p: string) => {
+        if (p.includes('.done.json')) return JSON.stringify({ issueId: 'SOT-502', exitCode: 1, endedAt: new Date().toISOString() });
+        // model_unavailable is retryable and does NOT trigger the session/api notify path.
+        if (p.endsWith('.log')) return 'Error: the model is currently unavailable, please retry';
+        return '[]';
+      });
+
+      const processed = await runner.reapCompletedDetachedRuns();
+
+      expect(processed).toEqual(['SOT-502']);
+      // Resume re-injection: the issue is re-enqueued with a retryAt.
+      const queueWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('runner.queue.json'));
+      expect(queueWrites.length).toBeGreaterThan(0);
+      expect(queueWrites.some(c => (c[1] as string).includes('SOT-502'))).toBe(true);
+      // cleanup still happened
+      expect(fs.unlinkSync).toHaveBeenCalledWith(runner.detachedDoneFile('SOT-502'));
+    });
+
+    it('drops an unparseable done-marker without throwing', async () => {
+      unlockedDetachedFs();
+      fs.readdirSync.mockReturnValue(['garbage.done.json']);
+      fs.readFileSync.mockImplementation((p: string) => {
+        if (p.includes('.done.json')) return 'not-json{{{';
+        return '[]';
+      });
+
+      const processed = await runner.reapCompletedDetachedRuns();
+
+      expect(processed).toEqual([]);
+      expect(fs.unlinkSync).toHaveBeenCalledWith(expect.stringContaining('garbage.done.json'));
+    });
+  });
+
   describe('classifyRunResult', () => {
     const { RUN_RESULT, classifyRunResult } = runner;
 
