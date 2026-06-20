@@ -121,6 +121,26 @@ webhook / startup-scan / Discord retry / scheduler の共通 queue は以下の�
 - ワーカー成果物（Gemini/Codex のレポート・プロンプト）も lane 別パス、`WORKER_TIMEOUT` は per-lane
   （long-run lane は長め）。詳細は `scripts/ai/run_gemini.sh` / `run_codex.sh`（SOT-916）。
 
+### 直列スコープの切替（RUNNER_SERIALIZE_SCOPE / SOT-931, 案A）
+
+書き込み側の直列（serialization）粒度は切替可能。環境変数 `RUNNER_SERIALIZE_SCOPE` で
+lane キーの導出ルールを切り替える。これは案A（並行ワーカープール＋worktree レーン＋既定デタッチ）の
+第一実装ステップで、`RUNNER_LANE` を明示しなくても repo/branch から lane を自動導出できるようにする。
+
+- `repo`（**既定 / 現行互換**）: 同一 repo の全 branch が同一 lane を共有 → **同一 repo は直列**。
+- `branch`: lane を `repo--branch` で導出。**同一 branch だけ直列／別 branch は別 lane（別 lock/queue）で並行可**。
+
+導出は `resolveLane()` が次の優先順で行う（`src/runner.ts`）:
+
+1. **明示 `RUNNER_LANE`（非 default）が最優先** — 従来の repo 単位 lane 割当（SOT-913）と後方互換を維持。
+2. それ以外で `RUNNER_SERIALIZE_SCOPE=branch` のとき、`RUNNER_REPO` / `RUNNER_BRANCH` から
+   `serializationLaneKey()` で lane を導出（別 branch → 別 lane）。
+3. それ以外 → `default` lane（同一 repo 直列、現行どおり）。
+
+lane キーは `[a-zA-Z0-9_-]` にサニタイズされ `LOG_DIR` の外に出られない。`branch` スコープでも
+**同一 branch は必ず直列**（git/作業ツリー破損防止）を保つ。実際に同一 repo・別 branch を安全に並行
+実行するための worktree 供給・N スロット並列プール・既定デタッチ化は後続の案A実装ステップで扱う。
+
 ### デタッチ実行（long-run ラベル）
 
 Linear で `long-run` ラベルの付いた Issue は **デタッチ実行** される。重いプロセス（sim 等）が

@@ -1,40 +1,62 @@
 # Worker Report
 
 ## Summary
-Initial task check for SOT-925 "タスク開始時間と終了時間まとめ" (reopened FIX task).
-Codex CLI was non-responsive (usage-limit cooldown — `run_codex.sh` exited 75, reset
-≈ epoch 1782000900, ~12h out), so per the **Worker Non-Response Fallback Policy** Claude Code
-performed the task check directly.
+SOT-931 follow-up #3 (IMPLEMENT). Latest human instruction (2026-06-20T16:11:59Z):
+「案Aを採用するが、現行の『同一 repo は直列』制約と『同一 branch だけ直列／別 branch は並行可』を
+切り替えられるようにしてください。」→ adopt 案A, and make the write-side serialization constraint
+**switchable** between per-repo serial (current) and per-branch serial (different branches parallel).
 
-Findings confirmed by direct code reading:
-- Detached path (`src/runner.ts`): `getIssueExecutionEligibility` sets `isLongRun` from the
-  `long-run` label (line ~1816); `runItem` routes `isLongRun` issues to `triggerRunDetached`
-  and releases the lock immediately (lines ~2071-2081); `reapCompletedDetachedRuns` (line ~1377)
-  post-processes detached completion via `processCompletedRun`. CONFIRMED.
-- Reaper starvation (`src/webhook-server.ts` `runReaperTick`): the Linear re-scan
-  `scanAndEnqueueActiveIssues('webhook-reaper')` is skipped when a run is active OR the in-memory
-  queue has a due item — gate `if (!cooldownJustCleared && hasDueQueueItem()) return;` (line ~178).
-  A continuously busy queue can therefore starve recovery of stranded In-Progress issues
-  (deviation 1's mechanism). CONFIRMED.
-- Wait/long tasks without the `long-run` label run on the synchronous path and occupy the single
-  lane for their whole duration → wall-clock inflation (deviation 2). CONFIRMED.
+This run implemented the **first 案A step**: a switchable serialization-scope primitive
+(`RUNNER_SERIALIZE_SCOPE`) that controls how the runner lane key is derived.
+
+## Worker Non-Response Disclosure (audit sink)
+- Non-responsive workers:
+  - **Codex CLI** (assigned the initial task check): `run_codex.sh` exited **75** (CODEX_COOLDOWN_ACTIVE,
+    usage-limit cooldown until epoch 1782000900). Dedicated non-response code per Worker Non-Response Policy.
+  - **Gemini CLI** (would own IMPLEMENT): permanently non-responsive — `run_gemini.sh` hard-fails exit 75
+    (IneligibleTierError, free tier unsupported) per project history.
+- Detected failure mode: both workers unavailable (cooldown / ineligible tier).
+- Fallback: **Claude Code performed the implementation + verification directly.** Bounded retry not
+  applicable (both are hard gates). All Quality Gates applied identically (lint/typecheck/test below).
+
+## Implementation (Claude Code fallback)
+- `src/runner.ts`:
+  - `RUNNER_SERIALIZE_SCOPE` resolver (`resolveSerializeScope`): `branch` → per-branch serial,
+    anything else → `repo` (default = current "同一 repo は直列").
+  - `serializationLaneKey({repo, branch, scope})`: scope=repo → lane = sanitized repo; scope=branch →
+    lane = `repo--branch` (別 branch = 別 lane = 並行可、同一 branch = 直列). Empty repo → DEFAULT_LANE.
+  - `resolveLane()` precedence updated: explicit non-default `RUNNER_LANE` wins (backward compat);
+    else under branch scope derive lane from `RUNNER_REPO`/`RUNNER_BRANCH`; else DEFAULT_LANE.
+  - Lane keys stay sanitized to `[a-zA-Z0-9_-]` (cannot escape LOG_DIR). Reuses existing
+    `laneLockFile`/`laneQueueFile` lock/queue separation — no change to that machinery.
+- Follow-ups (NOT in this step): worktree provisioning, N-slot semaphore worker pool
+  (`RUNNER_MAX_PARALLEL`), default-detach. These are the heavier 案A pieces, to be separate IMPLEMENT issues.
 
 ## Changed Files
-- none (read-only check)
+- `src/runner.ts` — serialization-scope resolver + lane-key derivation + resolveLane wiring + exports
+- `src/__tests__/runner.test.ts` — 8 new tests (scope resolution, repo vs branch lane keys, sanitization,
+  explicit-lane precedence, RUNNER_REPO/RUNNER_BRANCH derivation, default backward-compat)
+- `docs/runner-queue.md` — new section「直列スコープの切替（RUNNER_SERIALIZE_SCOPE / SOT-931, 案A）」
 
 ## Commands Run
-- `TARGET_REPO=/workspaces/ai-dev-control-plane bash scripts/ai/run_codex.sh` → exit 75 (cooldown, non-responsive)
-- `npm run lint` → exit 0
+- `bash scripts/ai/run_codex.sh` → exit 75 (cooldown; non-responsive)
 - `npm run typecheck` → exit 0
-- `npm test` → exit 0 (402 passed / 402 total)
+- `npm run lint` → exit 0
+- `npm test` → exit 0 (28 suites, **411 tests pass**; +9 from the new scope tests)
+- e2e: N/A (no `e2e` script)
 
 ## Acceptance Criteria
-- [x] detached path (long-run → triggerRunDetached → reapCompletedDetachedRuns) confirmed w/ line refs
-- [x] reaper starvation gate (hasDueQueueItem) confirmed w/ line refs
-- [x] baseline lint/typecheck/test reported (all green, 402 tests)
+- [x] Serialization constraint is switchable (`RUNNER_SERIALIZE_SCOPE=repo|branch`)
+- [x] Default (`repo`) preserves current "同一 repo は直列" behavior (backward compatible)
+- [x] Branch scope gives 別 branch independent lanes (並行可) while 同一 branch stays serial (直列)
+- [x] Lane keys remain LOG_DIR-safe; explicit RUNNER_LANE still wins
+- [x] lint / typecheck / full test suite green
 
 ## Risks
-- Codex unavailable ~12h; subsequent verification in this run is Claude fallback (disclosed here).
+- This step only switches the lane-key **derivation**. Safely running 同一 repo・別 branch concurrently
+  in practice still needs worktree provisioning + a parallel worker pool (later 案A steps); until then,
+  branch scope yields independent lock/queue lanes but the operator must avoid two checkouts of one
+  working tree. Documented in `docs/runner-queue.md`.
 
 ## Next Action
 READY_FOR_REVIEW

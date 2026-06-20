@@ -99,22 +99,85 @@ const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
 // backward compatibility; a non-default lane gets independent, lane-suffixed paths.
 const DEFAULT_LANE = 'default';
 
+// Serialization scope (SOT-931, 案A switch). The write-side serialization granularity is
+// switchable between two modes, controlled by `RUNNER_SERIALIZE_SCOPE`:
+//   - 'repo'   (default, current behavior): すべての同一 repo の Issue が同一 lane を共有 → 直列。
+//   - 'branch': 同一 branch だけ直列／別 branch は別 lane（別 lock/queue）で並行可。
+// The default keeps the historical "同一 repo は直列" guarantee. The scope only affects how the
+// lane key is DERIVED (serializationLaneKey); the lock/queue separation machinery is unchanged.
+const SERIALIZE_SCOPE_REPO = 'repo';
+const SERIALIZE_SCOPE_BRANCH = 'branch';
+
+/** Sanitize an arbitrary token to the lane-safe charset `[a-zA-Z0-9_-]`. */
+function sanitizeLaneToken(raw?: string | null): string {
+  return (raw || '').replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
+/**
+ * Resolve the active serialization scope. Reads `RUNNER_SERIALIZE_SCOPE` from the given env
+ * (or `process.env`); anything other than the explicit 'branch' value maps to 'repo' so the
+ * default stays the backward-compatible per-repo serialization.
+ */
+function resolveSerializeScope(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = (env.RUNNER_SERIALIZE_SCOPE || '').trim().toLowerCase();
+  return raw === SERIALIZE_SCOPE_BRANCH ? SERIALIZE_SCOPE_BRANCH : SERIALIZE_SCOPE_REPO;
+}
+
+/**
+ * Derive the serialization lane key for a unit of work from its repo and branch, under the
+ * active scope. This is the SOT-931 switch primitive:
+ *   - scope 'repo'   → lane = sanitized repo (同一 repo の全 branch が同一 lane = 直列).
+ *   - scope 'branch' → lane = sanitized `${repo}--${branch}` (別 branch は別 lane = 並行可、同一 branch は直列).
+ * Empty repo (unknown target) maps to DEFAULT_LANE so existing single-lane behavior is preserved.
+ */
+function serializationLaneKey(
+  opts: { repo?: string | null; branch?: string | null; scope?: string } = {},
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const scope = opts.scope || resolveSerializeScope(env);
+  const repo = sanitizeLaneToken(opts.repo);
+  if (!repo) return DEFAULT_LANE;
+  if (scope === SERIALIZE_SCOPE_BRANCH) {
+    const branch = sanitizeLaneToken(opts.branch);
+    return branch ? `${repo}--${branch}` : repo;
+  }
+  return repo;
+}
+
 /**
  * Resolve the runner lane. Accepts an explicit lane string, an env object, or
- * (when omitted) reads `process.env.RUNNER_LANE`. The lane is sanitized to
- * `[a-zA-Z0-9_-]` so it can never escape LOG_DIR; empty/unknown maps to DEFAULT_LANE.
+ * (when omitted) reads from `process.env`. Precedence:
+ *   1. An explicit non-default `RUNNER_LANE` (or string arg) always wins — preserves the
+ *      externally-assigned per-repo lane behavior (SOT-913) and backward compatibility.
+ *   2. Otherwise, under `RUNNER_SERIALIZE_SCOPE=branch`, the lane is derived from
+ *      `RUNNER_REPO` / `RUNNER_BRANCH` via serializationLaneKey so 別 branch は別 lane で並行可。
+ *   3. Otherwise → DEFAULT_LANE (同一 repo 直列, current behavior).
+ * The lane is sanitized to `[a-zA-Z0-9_-]` so it can never escape LOG_DIR.
  */
 function resolveLane(laneOrEnv?: string | NodeJS.ProcessEnv): string {
+  let env: NodeJS.ProcessEnv = process.env;
   let raw: string | undefined;
   if (typeof laneOrEnv === 'string') {
     raw = laneOrEnv;
   } else if (laneOrEnv && typeof laneOrEnv === 'object') {
+    env = laneOrEnv;
     raw = laneOrEnv.RUNNER_LANE;
   } else {
     raw = process.env.RUNNER_LANE;
   }
-  const sanitized = (raw || '').replace(/[^a-zA-Z0-9_-]/g, '');
-  return sanitized && sanitized !== DEFAULT_LANE ? sanitized : DEFAULT_LANE;
+  const explicit = sanitizeLaneToken(raw);
+  if (explicit && explicit !== DEFAULT_LANE) {
+    return explicit;
+  }
+  // No explicit lane: under branch scope, derive a per-branch lane from RUNNER_REPO/RUNNER_BRANCH.
+  if (resolveSerializeScope(env) === SERIALIZE_SCOPE_BRANCH) {
+    const derived = serializationLaneKey(
+      { repo: env.RUNNER_REPO, branch: env.RUNNER_BRANCH, scope: SERIALIZE_SCOPE_BRANCH },
+      env
+    );
+    if (derived !== DEFAULT_LANE) return derived;
+  }
+  return DEFAULT_LANE;
 }
 
 /** Lock file path for a given lane (default lane → historical `runner.lock`). */
@@ -2328,6 +2391,10 @@ export {
   SKIPPED_LOCKED,
   LOG_DIR,
   DEFAULT_LANE,
+  SERIALIZE_SCOPE_REPO,
+  SERIALIZE_SCOPE_BRANCH,
+  resolveSerializeScope,
+  serializationLaneKey,
   resolveLane,
   laneLockFile,
   laneQueueFile,
