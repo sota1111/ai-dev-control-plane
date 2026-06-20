@@ -1,62 +1,59 @@
 # Worker Report
 
 ## Summary
-SOT-931 follow-up #3 (IMPLEMENT). Latest human instruction (2026-06-20T16:11:59Z):
-「案Aを採用するが、現行の『同一 repo は直列』制約と『同一 branch だけ直列／別 branch は並行可』を
-切り替えられるようにしてください。」→ adopt 案A, and make the write-side serialization constraint
-**switchable** between per-repo serial (current) and per-branch serial (different branches parallel).
+Task check for **SOT-933「N スロット並列ワーカープール（RUNNER_MAX_PARALLEL）を追加する」**.
 
-This run implemented the **first 案A step**: a switchable serialization-scope primitive
-(`RUNNER_SERIALIZE_SCOPE`) that controls how the runner lane key is derived.
+**Worker non-response disclosure (audit sink):** the initial task check was delegated to Codex CLI
+(`scripts/ai/run_codex.sh`) per policy, but Codex was **non-responsive** — exit code **75**
+(`CODEX_COOLDOWN_ACTIVE`, usage-limit cooldown until epoch 1782000900, ~7.6h out). Gemini CLI is a
+known permanently-ineligible tier (exit 75 IneligibleTierError). Per the Worker Non-Response Fallback
+Policy, Claude Code performed this read-only task check directly. Implementation/verification for this
+Issue likewise fall to Claude Code fallback while both workers are down.
 
-## Worker Non-Response Disclosure (audit sink)
-- Non-responsive workers:
-  - **Codex CLI** (assigned the initial task check): `run_codex.sh` exited **75** (CODEX_COOLDOWN_ACTIVE,
-    usage-limit cooldown until epoch 1782000900). Dedicated non-response code per Worker Non-Response Policy.
-  - **Gemini CLI** (would own IMPLEMENT): permanently non-responsive — `run_gemini.sh` hard-fails exit 75
-    (IneligibleTierError, free tier unsupported) per project history.
-- Detected failure mode: both workers unavailable (cooldown / ineligible tier).
-- Fallback: **Claude Code performed the implementation + verification directly.** Bounded retry not
-  applicable (both are hard gates). All Quality Gates applied identically (lint/typecheck/test below).
-
-## Implementation (Claude Code fallback)
-- `src/runner.ts`:
-  - `RUNNER_SERIALIZE_SCOPE` resolver (`resolveSerializeScope`): `branch` → per-branch serial,
-    anything else → `repo` (default = current "同一 repo は直列").
-  - `serializationLaneKey({repo, branch, scope})`: scope=repo → lane = sanitized repo; scope=branch →
-    lane = `repo--branch` (別 branch = 別 lane = 並行可、同一 branch = 直列). Empty repo → DEFAULT_LANE.
-  - `resolveLane()` precedence updated: explicit non-default `RUNNER_LANE` wins (backward compat);
-    else under branch scope derive lane from `RUNNER_REPO`/`RUNNER_BRANCH`; else DEFAULT_LANE.
-  - Lane keys stay sanitized to `[a-zA-Z0-9_-]` (cannot escape LOG_DIR). Reuses existing
-    `laneLockFile`/`laneQueueFile` lock/queue separation — no change to that machinery.
-- Follow-ups (NOT in this step): worktree provisioning, N-slot semaphore worker pool
-  (`RUNNER_MAX_PARALLEL`), default-detach. These are the heavier 案A pieces, to be separate IMPLEMENT issues.
+**Verdict: SOT-933 is actionable and NOT already implemented.** It is the 3rd 案A implementation step
+(after SOT-931 serialize-scope switch and SOT-932 worktree lane supply, both merged).
 
 ## Changed Files
-- `src/runner.ts` — serialization-scope resolver + lane-key derivation + resolveLane wiring + exports
-- `src/__tests__/runner.test.ts` — 8 new tests (scope resolution, repo vs branch lane keys, sanitization,
-  explicit-lane precedence, RUNNER_REPO/RUNNER_BRANCH derivation, default backward-compat)
-- `docs/runner-queue.md` — new section「直列スコープの切替（RUNNER_SERIALIZE_SCOPE / SOT-931, 案A）」
+- none (task check only)
 
 ## Commands Run
-- `bash scripts/ai/run_codex.sh` → exit 75 (cooldown; non-responsive)
-- `npm run typecheck` → exit 0
-- `npm run lint` → exit 0
-- `npm test` → exit 0 (28 suites, **411 tests pass**; +9 from the new scope tests)
-- e2e: N/A (no `e2e` script)
+- `grep -rn "RUNNER_MAX_PARALLEL" src/` → only docs/plan references; **no code**. Not implemented.
+- `grep -rn "acquireLock|drainQueue|RUNNER_LANE|RUNNER_SERIALIZE_SCOPE|laneKey" src/`
+- Read `src/runner.ts` (drainQueue, acquireLock/releaseLock, resolveLane, serializationLaneKey,
+  buildRunEnv, triggerRun, triggerRunDetached, runItem), `src/lib/worktree.ts`,
+  `scripts/ai/run_auto.sh`, `src/__tests__/runner.test.ts`.
+
+## Findings
+- **Current serial bottleneck**: `drainQueue()` (runner.ts) is a strictly serial while-loop —
+  dequeue → `acquireLock()` (single lane lock file) → `runItem()` → `releaseLock()`. The next item
+  waits for the previous run's lock release.
+- **Hard global serializer**: `scripts/ai/run_auto.sh` holds a FIXED global OS flock
+  `/tmp/l-concierge-auto-run.lock` (line 49/68-72) — only ONE run_auto.sh can run system-wide,
+  regardless of `RUNNER_LANE`. This is the real cross-process serialization point and MUST become
+  lane-aware for N>1 to actually run concurrently.
+- **Worktree lane supply (SOT-932) is wired**: `buildRunEnv()` calls `resolveLane(env)` and, for a
+  non-default lane, repoints `WEBHOOK_TARGET_REPO` to a per-lane git worktree via
+  `resolveLaneWorkingDir`. `buildRunEnv` reads lane from its `env` arg, so a per-dispatch env override
+  (RUNNER_LANE) cleanly drives per-item worktree provisioning without mutating shared process.env.
+- **Reuse points (do NOT rebuild)**: `runItem` already calls inflight/sentinel/`laneNotifier`
+  (`notifyDetachedLaunched`) and the detached path; the reaper `reapCompletedDetachedRuns` +
+  `processCompletedRun` already own completion. The pool only orchestrates dispatch.
+- **Test pattern**: `src/__tests__/runner.test.ts` → `describe('parallel wait-task scenario (SOT-918)')`
+  drives drainQueue with mocked Linear fetch + spied `triggerRunDetached`; new pool tests follow it.
 
 ## Acceptance Criteria
-- [x] Serialization constraint is switchable (`RUNNER_SERIALIZE_SCOPE=repo|branch`)
-- [x] Default (`repo`) preserves current "同一 repo は直列" behavior (backward compatible)
-- [x] Branch scope gives 別 branch independent lanes (並行可) while 同一 branch stays serial (直列)
-- [x] Lane keys remain LOG_DIR-safe; explicit RUNNER_LANE still wins
-- [x] lint / typecheck / full test suite green
+- [ ] RUNNER_MAX_PARALLEL=1 current-compatible — NOT met yet (flag does not exist). Design gates the
+  pool behind `maxParallel>1` so N=1 keeps the exact serial path.
+- [ ] N>1 frees queue waiting — NOT met yet. Requires pool dispatch + lane-aware OS flock.
+- [ ] same branch stays serial — NOT met yet. Enforced by keying concurrency on the serialization
+  lane (repo, or repo--branch under branch scope) so same-lane never dispatches concurrently.
 
 ## Risks
-- This step only switches the lane-key **derivation**. Safely running 同一 repo・別 branch concurrently
-  in practice still needs worktree provisioning + a parallel worker pool (later 案A steps); until then,
-  branch scope yields independent lock/queue lanes but the operator must avoid two checkouts of one
-  working tree. Documented in `docs/runner-queue.md`.
+- run_auto.sh global flock must be made lane-aware (default lane → historical path for backward compat),
+  else concurrent lanes collide on one flock and serialize anyway.
+- Concurrency must NOT mutate shared `process.env` per item — pass per-dispatch env overrides through
+  `runItem`→`triggerRun(Detached)`→`buildRunEnv` instead.
+- Default N=1 must be byte-for-byte the current behavior to protect the 400+ existing tests.
 
 ## Next Action
 READY_FOR_REVIEW

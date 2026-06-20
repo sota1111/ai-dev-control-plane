@@ -46,7 +46,18 @@ done
 LOG_DIR="docs/ai/auto_logs"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/run_${TIMESTAMP}.log"
-LOCK_FILE="/tmp/l-concierge-auto-run.lock"
+
+# Lane-aware exclusion lock (SOT-933, N-slot parallel pool). The default/unset lane keeps the
+# historical GLOBAL lock path so existing single-lane behavior is byte-for-byte unchanged. A
+# non-default RUNNER_LANE gets its OWN lock file so distinct lanes (別repo / 別branch worktree) can
+# run run_auto.sh concurrently instead of all serializing on one global flock. The lane token is
+# sanitized to [a-zA-Z0-9_-] so it can never escape /tmp.
+RUNNER_LANE_SANITIZED="$(printf '%s' "${RUNNER_LANE:-}" | tr -cd 'a-zA-Z0-9_-')"
+if [ -z "$RUNNER_LANE_SANITIZED" ] || [ "$RUNNER_LANE_SANITIZED" = "default" ]; then
+  LOCK_FILE="/tmp/l-concierge-auto-run.lock"
+else
+  LOCK_FILE="/tmp/l-concierge-auto-run.${RUNNER_LANE_SANITIZED}.lock"
+fi
 
 if [ ! -f "$PROMPT_FILE" ]; then
   echo "Prompt file not found: $PROMPT_FILE" >&2

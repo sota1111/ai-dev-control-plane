@@ -125,6 +125,16 @@ function resolveSerializeScope(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
+ * N-slot parallel pool size (SOT-931 案A, 3rd step). `RUNNER_MAX_PARALLEL` controls how many queued
+ * items `drainQueue()` may dispatch concurrently into DISTINCT serialization lanes. Default 1 keeps
+ * the historical fully-serial drain (一切の挙動不変). Values < 1 or non-numeric clamp to 1.
+ */
+function resolveMaxParallel(env: NodeJS.ProcessEnv = process.env): number {
+  const n = parseInt((env.RUNNER_MAX_PARALLEL || '').trim(), 10);
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+}
+
+/**
  * Derive the serialization lane key for a unit of work from its repo and branch, under the
  * active scope. This is the SOT-931 switch primitive:
  *   - scope 'repo'   → lane = sanitized repo (同一 repo の全 branch が同一 lane = 直列).
@@ -237,19 +247,22 @@ function log(tag: string, message: string, context: Record<string, any> = {}) {
   }
 }
 
-function acquireLock(context: Record<string, any> = {}): boolean {
+// Lock acquisition over an arbitrary lock file. The default-lane lock (LOCK_FILE) and any per-lane
+// lock (laneLockFile(lane), SOT-933 N-slot pool) share this identical logic; same-lane → same file →
+// serial (the 同一 branch/同一 repo safety valve), distinct lanes → distinct files → concurrent.
+function acquireLockFile(lockFile: string, context: Record<string, any> = {}): boolean {
   try {
     if (!fs.existsSync(LOG_DIR)) {
       fs.mkdirSync(LOG_DIR, { recursive: true });
     }
 
-    if (!fs.existsSync(LOCK_FILE)) {
-      fs.writeFileSync(LOCK_FILE, `${process.pid}:${new Date().toISOString()}`);
+    if (!fs.existsSync(lockFile)) {
+      fs.writeFileSync(lockFile, `${process.pid}:${new Date().toISOString()}`);
       log('LOCK', 'acquired', context);
       return true;
     }
 
-    const content = fs.readFileSync(LOCK_FILE, 'utf8');
+    const content = fs.readFileSync(lockFile, 'utf8');
     const parts = content.split(':');
     const pidStr = parts[0];
     const timestampStr = parts.slice(1).join(':');
@@ -270,8 +283,8 @@ function acquireLock(context: Record<string, any> = {}): boolean {
     if (isDead || isStale) {
       const reason = isDead ? 'dead process' : 'stale';
       log('LOCK', `removing ${reason} lock`, { oldPid: pidStr });
-      fs.unlinkSync(LOCK_FILE);
-      fs.writeFileSync(LOCK_FILE, `${process.pid}:${new Date().toISOString()}`);
+      fs.unlinkSync(lockFile);
+      fs.writeFileSync(lockFile, `${process.pid}:${new Date().toISOString()}`);
       log('LOCK', 'acquired (after stale/dead removal)', context);
       return true;
     }
@@ -284,19 +297,37 @@ function acquireLock(context: Record<string, any> = {}): boolean {
   }
 }
 
-function releaseLock(): void {
+function releaseLockFile(lockFile: string): void {
   try {
-    if (fs.existsSync(LOCK_FILE)) {
-      const content = fs.readFileSync(LOCK_FILE, 'utf8');
+    if (fs.existsSync(lockFile)) {
+      const content = fs.readFileSync(lockFile, 'utf8');
       const [pidStr] = content.split(':');
       if (parseInt(pidStr, 10) === process.pid) {
-        fs.unlinkSync(LOCK_FILE);
+        fs.unlinkSync(lockFile);
         log('LOCK', 'released');
       }
     }
   } catch (err: any) {
     log('LOCK', `release ERROR: ${err.message}`);
   }
+}
+
+function acquireLock(context: Record<string, any> = {}): boolean {
+  return acquireLockFile(LOCK_FILE, context);
+}
+
+function releaseLock(): void {
+  releaseLockFile(LOCK_FILE);
+}
+
+// Lane-scoped lock used by the N-slot pool (SOT-933). The default lane resolves to LOCK_FILE, so
+// acquireLaneLock('default') is identical to acquireLock(). A non-default lane gets its own lock file.
+function acquireLaneLock(lane: string, context: Record<string, any> = {}): boolean {
+  return acquireLockFile(laneLockFile(lane), { ...context, lane });
+}
+
+function releaseLaneLock(lane: string): void {
+  releaseLockFile(laneLockFile(lane));
 }
 
 // Unconditionally remove the runner lock regardless of which PID owns it.
@@ -415,6 +446,23 @@ async function getIssueProjectName(issueId: string): Promise<string | null> {
     return typeof name === 'string' && name.trim() !== '' ? name : null;
   } catch (err: any) {
     log('RUNNER', `getIssueProjectName failed: ${err.message}`, { issue: issueId });
+    return null;
+  }
+}
+
+// Linear が割り当てる git branch 名（gitBranchName）を取得する（never throws）。
+// SOT-933 の concurrency-lane 導出で、RUNNER_SERIALIZE_SCOPE=branch のとき同一 branch を直列に
+// 弾くために使う。取得失敗時は null（呼び出し側は repo lane にフォールバック＝より直列で安全）。
+async function getIssueGitBranch(issueId: string): Promise<string | null> {
+  try {
+    const data: any = await linearQuery(
+      'query($id: String!) { issue(id: $id) { branchName } }',
+      { id: issueId }
+    );
+    const branch = data?.issue?.branchName;
+    return typeof branch === 'string' && branch.trim() !== '' ? branch : null;
+  } catch (err: any) {
+    log('RUNNER', `getIssueGitBranch failed: ${err.message}`, { issue: issueId });
     return null;
   }
 }
@@ -1909,6 +1957,9 @@ async function getIssueExecutionEligibility(issueId: string): Promise<Eligibilit
 
 interface TriggerOptions {
   resume?: boolean;
+  // Per-dispatch environment overrides (SOT-933). The N-slot pool passes `{ RUNNER_LANE: <lane> }`
+  // so each concurrent run resolves its own worktree lane WITHOUT mutating shared process.env.
+  envOverrides?: Record<string, string | undefined>;
 }
 
 interface TriggerResult {
@@ -1918,9 +1969,15 @@ interface TriggerResult {
 
 // Build the environment for a run_auto.sh launch: inject WEBHOOK_ISSUE_ID and resolve the
 // Linear project -> target repo (fail-open). Shared by triggerRun and triggerRunDetached.
-async function buildRunEnv(issueId: string): Promise<Record<string, string | undefined>> {
-  // SECURITY: Pass issueId only via environment variable, never as shell argument
-  const env: Record<string, string | undefined> = { ...process.env, WEBHOOK_ISSUE_ID: issueId };
+async function buildRunEnv(
+  issueId: string,
+  overrides: Record<string, string | undefined> = {}
+): Promise<Record<string, string | undefined>> {
+  // SECURITY: Pass issueId only via environment variable, never as shell argument.
+  // `overrides` (e.g. per-dispatch RUNNER_LANE from the N-slot pool, SOT-933) win over process.env
+  // but never over WEBHOOK_ISSUE_ID. Building a fresh object per call keeps concurrent dispatches
+  // isolated (no shared process.env mutation).
+  const env: Record<string, string | undefined> = { ...process.env, ...overrides, WEBHOOK_ISSUE_ID: issueId };
 
   // Linearプロジェクトから開発対象レポジトリを判定し、解決できればプロンプトへ注入する。
   // 取得・解決失敗時は env を変えず従来動作にフォールバックする（autonomous loop を止めない）。
@@ -1984,7 +2041,7 @@ async function buildRunEnv(issueId: string): Promise<Record<string, string | und
 }
 
 async function triggerRun(issueId: string, options: TriggerOptions = {}): Promise<TriggerResult> {
-  const env = await buildRunEnv(issueId);
+  const env = await buildRunEnv(issueId, options.envOverrides);
 
   const projectRoot = path.join(__dirname, '..');
   const startedAt = new Date().toISOString();
@@ -2042,7 +2099,7 @@ async function triggerRun(issueId: string, options: TriggerOptions = {}): Promis
 // JS lock right away so the runner can advance; the detached run is tracked by an inflight entry
 // + a sentinel, and reclaimed by the reaper. Returns the child pid (undefined on spawn failure).
 async function triggerRunDetached(issueId: string, options: TriggerOptions = {}): Promise<{ pid: number | undefined }> {
-  const env = await buildRunEnv(issueId);
+  const env = await buildRunEnv(issueId, options.envOverrides);
   const projectRoot = path.join(__dirname, '..');
   const startedAt = new Date().toISOString();
 
@@ -2140,8 +2197,12 @@ interface RunItemOutcome {
   detached: boolean;
 }
 
-async function runItem(item: QueueItem): Promise<RunItemOutcome> {
+async function runItem(item: QueueItem, options: TriggerOptions = {}): Promise<RunItemOutcome> {
   const { issueId } = item;
+  const envOverrides = options.envOverrides;
+  // Lane this dispatch runs in: the per-dispatch override (N-slot pool, SOT-933) when present,
+  // otherwise the process-level lane (default single-lane path, unchanged).
+  const dispatchLane = resolveLane(envOverrides?.RUNNER_LANE ?? undefined);
 
   // Check current Linear state before executing
   const eligibility = await getIssueExecutionEligibility(issueId);
@@ -2157,9 +2218,9 @@ async function runItem(item: QueueItem): Promise<RunItemOutcome> {
   if (eligibility.isLongRun) {
     log('RUN', `long-run detected (label="${LONG_RUN_LABEL}") — launching detached`, { trigger: item.trigger || 'queue', issue: issueId });
     addInflight(issueId); // idempotent; ensures tracking regardless of caller
-    const { pid } = await triggerRunDetached(issueId, { resume: isResume });
+    const { pid } = await triggerRunDetached(issueId, { resume: isResume, envOverrides });
     writeDetachedSentinel(issueId, pid);
-    await notifyDetachedLaunched({ issueId, lane: resolveLane(), pid, resume: isResume }).catch(() => {});
+    await notifyDetachedLaunched({ issueId, lane: dispatchLane, pid, resume: isResume }).catch(() => {});
     log('RUN', `detached run started pid=${pid ?? 'unknown'} — releasing lock`, { trigger: item.trigger || 'queue', issue: issueId });
     return { lockConflict: false, detached: true };
   }
@@ -2171,7 +2232,7 @@ async function runItem(item: QueueItem): Promise<RunItemOutcome> {
     log('RUN', 'start', { trigger: item.trigger || 'queue', issue: issueId });
   }
 
-  const { code, output } = await triggerRun(issueId, { resume: isResume });
+  const { code, output } = await triggerRun(issueId, { resume: isResume, envOverrides });
   const { lockConflict } = await processCompletedRun(item, code, output);
   return { lockConflict, detached: false };
 }
@@ -2306,6 +2367,145 @@ function detachedOutcomeForKind(kind: string): DetachedOutcome {
   }
 }
 
+// Resolve the serialization lane a queue item runs in (SOT-933). Items sharing a lane never run
+// concurrently (the safety valve): under the default 'repo' scope a lane = repo (同一 repo 直列);
+// under 'branch' scope a lane = repo--branch (別 branch 並行可・同一 branch 直列). Unknown target
+// (no repo mapping) → DEFAULT_LANE so such items serialize through the shared single lock. Never
+// throws; on any failure returns DEFAULT_LANE (strictly safe / more serial).
+async function resolveConcurrencyLane(item: QueueItem, env: NodeJS.ProcessEnv = process.env): Promise<string> {
+  try {
+    const projectName = await getIssueProjectName(item.issueId);
+    const resolved = projectName ? resolveRepoForProject(projectName) : null;
+    const repo = resolved ? path.basename(resolved.localPath) : '';
+    if (!repo) return DEFAULT_LANE;
+    let branch: string | null = null;
+    if (resolveSerializeScope(env) === SERIALIZE_SCOPE_BRANCH) {
+      branch = await getIssueGitBranch(item.issueId);
+    }
+    return serializationLaneKey({ repo, branch }, env);
+  } catch {
+    return DEFAULT_LANE;
+  }
+}
+
+// Generic N-slot, lane-serial pool scheduler (SOT-933). Dispatches `items` via `runOne`, running at
+// most `maxParallel` at once and NEVER two items of the same lane concurrently (same lane waits for
+// its predecessor — the 同一 branch 直列 safety valve). Pure orchestration: all side effects live in
+// `runOne`, so this is deterministically unit-testable. Order within a lane is preserved (the
+// earliest still-dispatchable item is always chosen first).
+async function runLanePool<T extends { lane: string }>(
+  items: T[],
+  maxParallel: number,
+  runOne: (entry: T) => Promise<void>
+): Promise<void> {
+  const slots = Math.max(1, maxParallel);
+  const pending = [...items];
+  const activeLanes = new Set<string>();
+  const running = new Set<Promise<void>>();
+
+  const fill = () => {
+    let progressed = true;
+    while (progressed && running.size < slots) {
+      progressed = false;
+      const idx = pending.findIndex((e) => !activeLanes.has(e.lane));
+      if (idx === -1) break; // every remaining item is blocked by an in-flight same-lane run
+      const entry = pending.splice(idx, 1)[0];
+      activeLanes.add(entry.lane);
+      const task = (async () => {
+        try {
+          await runOne(entry);
+        } finally {
+          activeLanes.delete(entry.lane);
+        }
+      })();
+      running.add(task);
+      // Self-remove once settled. Registered here (before the loop's Promise.race attaches its own
+      // reaction), so this runs first and `running` is current when fill() re-checks capacity.
+      void task.then(() => running.delete(task), () => running.delete(task));
+      progressed = true;
+    }
+  };
+
+  fill();
+  while (running.size > 0) {
+    await Promise.race(running);
+    fill();
+  }
+}
+
+// N-slot parallel drain (SOT-933). Used when RUNNER_MAX_PARALLEL>1. Pulls a batch of ready, eligible
+// items (resolving each item's serialization lane), then runs them through runLanePool so distinct
+// lanes drain concurrently while same-lane work stays serial. Completion is handled exactly as in the
+// serial path (runItem → processCompletedRun / detached reaper); only dispatch is parallelized.
+async function drainQueuePooled(maxParallel: number): Promise<void> {
+  const batch: { item: QueueItem; lane: string }[] = [];
+  let item: QueueItem | null;
+  while (batch.length < MAX_DRAIN_ITEMS && (item = dequeue(null)) !== null) {
+    // Future retryAt: put it back and stop pulling (ordering preserved; it runs in a later pass).
+    if (item.retryAt && new Date(item.retryAt) > new Date()) {
+      enqueue(item.issueId, item.trigger, item.retryAt, {
+        issueIdentifier: item.issueIdentifier || null,
+        reason: item.reason || null,
+        priority: item.priority ?? null,
+        priorityLabel: item.priorityLabel ?? null,
+        parentIssueId: item.parentIssueId ?? null,
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null,
+        queueGroup: item.queueGroup ?? null,
+        queueGroupOrder: item.queueGroupOrder ?? null
+      });
+      log('QUEUE', `drain(pool): item ${item.issueId} has future retryAt=${item.retryAt}, stopping batch`);
+      break;
+    }
+    const eligibility = await getIssueExecutionEligibility(item.issueId);
+    if (!eligibility.eligible) {
+      log('QUEUE', `drain(pool): skipped issueId=${item.issueId} reason=${eligibility.reason}`, { issue: item.issueId });
+      continue;
+    }
+    const lane = await resolveConcurrencyLane(item);
+    batch.push({ item, lane });
+  }
+
+  if (batch.length === 0) {
+    log('QUEUE', 'drain complete (pool: nothing to dispatch)');
+    return;
+  }
+  log('QUEUE', `drain(pool): dispatching ${batch.length} item(s) across up to ${maxParallel} slots`);
+
+  await runLanePool(batch, maxParallel, async ({ item, lane }) => {
+    // Distinct lanes get distinct locks (cross-process safety); same lane shares one lock (serial).
+    const locked = acquireLaneLock(lane, { trigger: 'drain', issue: item.issueId });
+    if (!locked) {
+      log('QUEUE', 'drain(pool): SKIPPED_LOCKED — re-enqueuing', { issue: item.issueId, lane });
+      enqueue(item.issueId, item.trigger || 'drain', null, {
+        issueIdentifier: item.issueIdentifier || null,
+        reason: 'lock_conflict',
+        priority: item.priority ?? null,
+        priorityLabel: item.priorityLabel ?? null,
+        parentIssueId: item.parentIssueId ?? null,
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null,
+        queueGroup: item.queueGroup ?? null,
+        queueGroupOrder: item.queueGroupOrder ?? null
+      });
+      return;
+    }
+    // A non-default lane runs in its own worktree (SOT-932) via the RUNNER_LANE env override.
+    const envOverrides = lane === DEFAULT_LANE ? undefined : { RUNNER_LANE: lane };
+    let outcome: RunItemOutcome = { lockConflict: false, detached: false };
+    try {
+      addInflight(item.issueId);
+      outcome = await runItem(item, { envOverrides });
+    } catch (err: any) {
+      log('QUEUE', `drain(pool) error: ${err.message}`, { issue: item.issueId, lane });
+    } finally {
+      // Detached long-runs keep their inflight entry (reaper owns cleanup); always release the lane lock.
+      if (!outcome.detached) removeInflight(item.issueId);
+      releaseLaneLock(lane);
+    }
+  });
+
+  log('QUEUE', `drain complete (pool, maxParallel=${maxParallel}, dispatched=${batch.length})`);
+}
+
 async function drainQueue(): Promise<void> {
   // Normalize queue to eliminate any duplicate issueId entries
   const normalizedQueue = normalizeQueue(loadQueue());
@@ -2324,6 +2524,14 @@ async function drainQueue(): Promise<void> {
     await refreshQueuePriorities();
   } catch (err: any) {
     log('QUEUE', `drainQueue: refreshQueuePriorities error (non-fatal): ${err.message}`);
+  }
+
+  // N-slot parallel pool (SOT-933): when RUNNER_MAX_PARALLEL>1, dispatch distinct lanes concurrently.
+  // Default (1) falls through to the historical fully-serial loop below — behavior is unchanged.
+  const maxParallel = resolveMaxParallel();
+  if (maxParallel > 1) {
+    await drainQueuePooled(maxParallel);
+    return;
   }
 
   let processedCount = 0;
@@ -2415,7 +2623,10 @@ export {
   SERIALIZE_SCOPE_REPO,
   SERIALIZE_SCOPE_BRANCH,
   resolveSerializeScope,
+  resolveMaxParallel,
   serializationLaneKey,
+  resolveConcurrencyLane,
+  runLanePool,
   resolveLane,
   laneLockFile,
   laneQueueFile,
@@ -2439,6 +2650,8 @@ export {
   linearQuery,
   acquireLock,
   releaseLock,
+  acquireLaneLock,
+  releaseLaneLock,
   forceReleaseLock,
   isLocked,
   hasPendingIssues,

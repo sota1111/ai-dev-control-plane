@@ -1980,4 +1980,144 @@ describe('runner', () => {
       expect(queueWrites.some(c => (c[1] as string).includes('SOT-941'))).toBe(true);
     });
   });
+
+  // SOT-933: N-slot parallel worker pool (RUNNER_MAX_PARALLEL). Verifies (1) N=1 stays fully serial
+  // (current-compatible), (2) N>1 dispatches DISTINCT lanes concurrently so queue waiting is freed,
+  // (3) the SAME lane (= same branch / same repo) is always kept serial (safety valve).
+  describe('N-slot parallel pool (SOT-933)', () => {
+    const flush = () => new Promise((r) => setImmediate(r));
+
+    // A runOne whose entries resolve only when explicitly released — lets us observe concurrency.
+    function makeControllable() {
+      const releases = new Map<string, () => void>();
+      const started: string[] = [];
+      const activeByLane = new Map<string, number>();
+      let concurrent = 0;
+      let maxConcurrent = 0;
+      let laneViolation = false;
+      const runOne = (entry: any): Promise<void> => {
+        started.push(entry.id);
+        concurrent++;
+        maxConcurrent = Math.max(maxConcurrent, concurrent);
+        const laneCount = (activeByLane.get(entry.lane) || 0) + 1;
+        activeByLane.set(entry.lane, laneCount);
+        if (laneCount > 1) laneViolation = true; // two of the same lane in-flight at once
+        return new Promise<void>((resolve) => {
+          releases.set(entry.id, () => {
+            concurrent--;
+            activeByLane.set(entry.lane, (activeByLane.get(entry.lane) || 1) - 1);
+            resolve();
+          });
+        });
+      };
+      return {
+        runOne,
+        releases,
+        started,
+        get maxConcurrent() { return maxConcurrent; },
+        get laneViolation() { return laneViolation; },
+      };
+    }
+
+    it('resolveMaxParallel defaults to 1 and clamps invalid/empty/<1 to 1', () => {
+      expect(runner.resolveMaxParallel({})).toBe(1);
+      expect(runner.resolveMaxParallel({ RUNNER_MAX_PARALLEL: '' })).toBe(1);
+      expect(runner.resolveMaxParallel({ RUNNER_MAX_PARALLEL: '0' })).toBe(1);
+      expect(runner.resolveMaxParallel({ RUNNER_MAX_PARALLEL: '-3' })).toBe(1);
+      expect(runner.resolveMaxParallel({ RUNNER_MAX_PARALLEL: 'abc' })).toBe(1);
+      expect(runner.resolveMaxParallel({ RUNNER_MAX_PARALLEL: '4' })).toBe(4);
+    });
+
+    it('maxParallel=1 runs strictly serially even across distinct lanes (current-compatible)', async () => {
+      const ctl = makeControllable();
+      const items = [
+        { id: 'A', lane: 'repoA' },
+        { id: 'B', lane: 'repoB' },
+        { id: 'C', lane: 'repoC' },
+      ];
+      const done = runner.runLanePool(items, 1, ctl.runOne);
+      await flush();
+      expect(ctl.started).toEqual(['A']); // only one in-flight
+      ctl.releases.get('A')!();
+      await flush();
+      expect(ctl.started).toEqual(['A', 'B']);
+      ctl.releases.get('B')!();
+      await flush();
+      expect(ctl.started).toEqual(['A', 'B', 'C']);
+      ctl.releases.get('C')!();
+      await done;
+      expect(ctl.maxConcurrent).toBe(1);
+    });
+
+    it('N>1 dispatches distinct lanes concurrently (≤ N) while same-lane stays serial & in order', async () => {
+      const ctl = makeControllable();
+      const items = [
+        { id: 'A', lane: 'repoA' },
+        { id: 'B', lane: 'repoB' },
+        { id: 'C', lane: 'repoA' }, // same lane as A → must wait for A (safety valve)
+        { id: 'D', lane: 'repoC' },
+      ];
+      const done = runner.runLanePool(items, 2, ctl.runOne);
+
+      await flush();
+      // Two free slots: A(repoA) and B(repoB) start; C(repoA) is blocked; D waits for a slot.
+      expect(ctl.started).toEqual(['A', 'B']);
+
+      ctl.releases.get('A')!(); // frees a slot AND lane repoA
+      await flush();
+      // Next dispatchable is C (repoA now free) — same-lane order A→C preserved.
+      expect(ctl.started).toEqual(['A', 'B', 'C']);
+
+      ctl.releases.get('B')!(); // frees a slot
+      await flush();
+      expect(ctl.started).toEqual(['A', 'B', 'C', 'D']);
+
+      ctl.releases.get('C')!();
+      ctl.releases.get('D')!();
+      await done;
+
+      expect(ctl.maxConcurrent).toBeLessThanOrEqual(2); // never exceeded the slot count
+      expect(ctl.laneViolation).toBe(false);            // same lane never ran concurrently
+    });
+
+    it('a single lane with many items is fully serial regardless of a high slot count', async () => {
+      const ctl = makeControllable();
+      const items = [
+        { id: 'A', lane: 'repoX' },
+        { id: 'B', lane: 'repoX' },
+        { id: 'C', lane: 'repoX' },
+      ];
+      const done = runner.runLanePool(items, 5, ctl.runOne);
+      await flush();
+      expect(ctl.started).toEqual(['A']);
+      ctl.releases.get('A')!();
+      await flush();
+      expect(ctl.started).toEqual(['A', 'B']);
+      ctl.releases.get('B')!();
+      await flush();
+      expect(ctl.started).toEqual(['A', 'B', 'C']);
+      ctl.releases.get('C')!();
+      await done;
+      expect(ctl.maxConcurrent).toBe(1);
+      expect(ctl.laneViolation).toBe(false);
+    });
+
+    it('resolveConcurrencyLane falls back to the shared default lane when the repo is unknown', async () => {
+      process.env.LINEAR_API_KEY = 'test-key';
+      // getIssueProjectName → no project mapping → DEFAULT_LANE (such items serialize together).
+      (https.request as jest.Mock).mockImplementation((_options: any, callback: any) => {
+        const responseData = JSON.stringify({ data: { issue: { project: null } } });
+        const res: any = {
+          on: jest.fn((event: any, cb: any) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return { on: jest.fn(), write: jest.fn(), end: jest.fn(), destroy: jest.fn() };
+      });
+      const lane = await runner.resolveConcurrencyLane({ issueId: 'SOT-999', trigger: 'webhook' } as any);
+      expect(lane).toBe(runner.DEFAULT_LANE);
+    });
+  });
 });
