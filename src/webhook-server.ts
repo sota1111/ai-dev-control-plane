@@ -85,6 +85,14 @@ const QUEUE_DRAIN_INTERVAL_MS = parseInt(process.env.QUEUE_DRAIN_INTERVAL_MS || 
 let _periodicDrainRunning = false; // in-process 再入ガード（interval callback の重なり防止）
 let _reaperRunning = false;        // reaper 再入ガード
 let _prevReaperCooldownActive = false; // 前tick時点で cooldown 中だったか（cooldown明け検知用）
+let _lastStrandedScanAt = 0;       // 直近で取り残し In-Progress の Linear 再スキャンを行った epoch(ms)。0=未実施
+
+// 取り残し回収の最大間隔（SOT-925 逸脱1）。ビジーなキューが続いても、この間隔が経過していれば
+// 1回だけ Linear 再スキャンを許可し、In Progress のまま取り残された Issue の starvation を防ぐ。
+// テストで per-test に差し替えられるよう、モジュールロード時の const にはせず関数内で都度読む。
+function reaperStrandedMaxIntervalMs(): number {
+  return parseInt(process.env.REAPER_STRANDED_MAX_INTERVAL_MS || '300000', 10); // 既定5分
+}
 
 // 期限到来済み（due）のキュー項目が1つでもあるか
 function hasDueQueueItem(): boolean {
@@ -175,9 +183,17 @@ async function runReaperTick(): Promise<void> {
 
   // トリガー: cooldown明け、またはアイドル（dueなキュー項目なし）時のセーフティネット。
   // アイドル時に限定することで Linear API 呼び出しを稼働中に多発させない。
-  if (!cooldownJustCleared && hasDueQueueItem()) return;
+  //
+  // SOT-925 逸脱1（取り残し回収の starvation 解消）: 待機タスクが連続するとキューに常に due 項目が
+  // あり、従来は Linear 再スキャンが永久に抑止され、In Progress のまま取り残された Issue（SOT-921/922 の
+  // ような再開漏れ）が回収されなかった。最後の取り残しスキャンから一定間隔（REAPER_STRANDED_MAX_INTERVAL_MS）
+  // が経過していれば、ビジー時でも1回だけ再スキャンを許可する（API レート制限付き）。
+  // なお isLocked()/cooldownActive の early-return は上で適用済みのため、実行中・cooldown 中は再スキャンしない。
+  const strandedScanDue = (Date.now() - _lastStrandedScanAt) >= reaperStrandedMaxIntervalMs();
+  if (!cooldownJustCleared && hasDueQueueItem() && !strandedScanDue) return;
 
   _reaperRunning = true;
+  _lastStrandedScanAt = Date.now(); // 取り残しスキャンを実施したのでレート制限の起点を更新
   try {
     const enqueued = await scanAndEnqueueActiveIssues('webhook-reaper');
     if (enqueued > 0) {

@@ -138,6 +138,29 @@ JS のロックを長時間占有しないよう、起動直後にロックを�
    - 後始末で done-marker / log / sentinel / inflight を削除。
 4. PID が死んだのに sentinel が残った場合は `reapDeadDetachedSentinels()` が掃除する（クラッシュ復旧）。
 
+### 運用ルール: 待機 / 長時間タスクは `long-run` を付ける（SOT-925）
+
+**待機タスク（ScheduleWakeup 等で待つ）や長時間タスクには必ず `long-run` ラベルを付け、デタッチ実行に
+乗せること。** 非 `long-run` の待機/長時間タスクは同期パスで実行され、待っている間ずっと単一 lane
+（グローバル flock）を占有する。これは設計（同一 lane は Claude 単線・直列）上の以下の弊害を生む:
+
+- **wall-clock 膨張**: 後続タスクが lane の解放を待ち、1分待機の実行開始まで数十分かかる等、実時間が
+  要件を大きく超過する。
+- **取り残し / 再開漏れ**: 同期パスの待機は実行プロセスのライフサイクルを跨いで再開されにくく、
+  Issue が In Progress のまま完了しないことがある（SOT-921 / SOT-922 の事例）。
+
+`long-run` を付けるとデタッチ実行になり、起動直後にロックを解放するため lane を占有せず（wall-clock 膨張の
+解消）、完了は `reapCompletedDetachedRuns()` が後処理する（取り残しの解消）。
+
+#### reaper による取り残し回収のセーフティネット
+
+`runReaperTick()` は Linear を再スキャンして取り残し In-Progress Issue を実行キューへ再投入する。
+従来この再スキャンは「実行中でない」かつ「アイドル（due なキュー項目なし）」または「cooldown 明け」時のみ
+だったため、待機タスクが連続してキューが常にビジーだと再スキャンが starvation し、取り残しが回収
+されなかった。現在は **最後の取り残しスキャンから `REAPER_STRANDED_MAX_INTERVAL_MS`（既定 5 分）が
+経過していれば、ビジー時でも 1 回だけ再スキャンを許可**する（API レート制限付き）。実行中（lock 保持）/
+cooldown 中は引き続き再スキャンしない。
+
 ### Discord 通知（lane / デタッチ状態の可視化）
 
 デタッチ実行の状態は Discord に通知され、`DISCORD_WEBHOOK_URL_NOTIFY`（無ければ `DISCORD_WEBHOOK_URL`）

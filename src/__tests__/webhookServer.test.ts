@@ -54,7 +54,7 @@ const originalSecret = process.env.LINEAR_WEBHOOK_SECRET;
 process.env.LINEAR_WEBHOOK_SECRET = '';
 
 const webhookServer: any = await import('../webhook-server.js');
-const { app, runPeriodicDrainTick, startPeriodicDrain } = webhookServer;
+const { app, runPeriodicDrainTick, startPeriodicDrain, runReaperTick } = webhookServer;
 
 // Helper: create a mock spawn child that emits given stdout, stderr, then closes
 function mockSpawnChild({ stdout = '', stderr = '', exitCode = 0 } = {}) {
@@ -344,6 +344,45 @@ describe('webhook usage limit retry', () => {
 // Restore secret at the end of all tests in this file
 afterAll(() => {
   process.env.LINEAR_WEBHOOK_SECRET = originalSecret;
+});
+
+// SOT-925 逸脱1: 取り残し回収 starvation の解消。ビジーなキューが続いても一定間隔で
+// In Progress 取り残しの Linear 再スキャンを保証し、かつ直近スキャン済みならレート制限でスキップする。
+describe('reaper stranded-recovery de-starvation (SOT-925)', () => {
+  const originalApiKey = process.env.LINEAR_API_KEY;
+  const originalInterval = process.env.REAPER_STRANDED_MAX_INTERVAL_MS;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    const runner: any = mockRunner;
+    // 取り残し回収が「実行中でなく」「cooldownでなく」「API キーあり」かつ「キューに due 項目あり（ビジー）」の条件
+    runner.isLocked.mockReturnValue(false);
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+    runner.loadQueue.mockReturnValue([{ issueId: 'BUSY-1', retryAt: null }]); // hasDueQueueItem()=true
+    runner.fetchActiveIssues.mockResolvedValue([]); // 副次的な drain を起こさない
+    process.env.LINEAR_API_KEY = 'test-key';
+  });
+
+  afterAll(() => {
+    if (originalApiKey === undefined) delete process.env.LINEAR_API_KEY;
+    else process.env.LINEAR_API_KEY = originalApiKey;
+    if (originalInterval === undefined) delete process.env.REAPER_STRANDED_MAX_INTERVAL_MS;
+    else process.env.REAPER_STRANDED_MAX_INTERVAL_MS = originalInterval;
+  });
+
+  test('rescans stranded In-Progress under a busy queue when the interval has elapsed, then rate-limits', async () => {
+    const runner: any = mockRunner;
+
+    // 1回目: interval=0 → ビジーでもバイパスして再スキャンが走る
+    process.env.REAPER_STRANDED_MAX_INTERVAL_MS = '0';
+    await runReaperTick();
+    expect(runner.fetchActiveIssues).toHaveBeenCalledTimes(1);
+
+    // 2回目: interval を大きく → 直近スキャン済みのためレート制限でスキップ（再スキャンしない）
+    process.env.REAPER_STRANDED_MAX_INTERVAL_MS = '999999999';
+    await runReaperTick();
+    expect(runner.fetchActiveIssues).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('webhook issue filtering', () => {
@@ -738,10 +777,21 @@ describe('reaper (runReaperTick)', () => {
   let runReaperTick: any;
   const runner: any = mockRunner;
 
+  const originalStrandedInterval = process.env.REAPER_STRANDED_MAX_INTERVAL_MS;
+
+  afterAll(() => {
+    if (originalStrandedInterval === undefined) delete process.env.REAPER_STRANDED_MAX_INTERVAL_MS;
+    else process.env.REAPER_STRANDED_MAX_INTERVAL_MS = originalStrandedInterval;
+  });
+
   beforeEach(async () => {
     jest.clearAllMocks();
     delete process.env.WEBHOOK_REAPER_ENABLED;
     process.env.LINEAR_API_KEY = 'test-key';
+    // これらのテストは「ビジー時は再スキャンしない」旧来セマンティクスを検証する。SOT-925 の
+    // 取り残しスキャン（時間経過バイパス）は別 describe で検証するため、ここでは間隔を現在エポックより
+    // 大きく固定し strandedScanDue を常に false にして、モジュール状態に依存せず決定的にする。
+    process.env.REAPER_STRANDED_MAX_INTERVAL_MS = '9999999999999';
     runReaperTick = webhookServer.runReaperTick;
     runner.reapStaleInflight.mockReturnValue([]);
     runner.isLocked.mockReturnValue(false);
