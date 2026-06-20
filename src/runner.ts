@@ -135,6 +135,19 @@ function resolveMaxParallel(env: NodeJS.ProcessEnv = process.env): number {
 }
 
 /**
+ * Default-detach toggle (SOT-934 案A, final step). When `RUNNER_DEFAULT_DETACH` is enabled, a NORMAL
+ * run (no `long-run` label) is also launched detached in `runItem` — exactly like a long-run — so the
+ * JS/lane lock is released immediately and the webhook returns without occupying a slot for the whole
+ * run. Completion still flows through the existing done-marker → reapCompletedDetachedRuns →
+ * processCompletedRun path. Default false ⇒ normal runs stay on the synchronous foreground path
+ * (現行挙動と byte-for-byte 同一・後方互換). Accepts '1' or 'true' (trim, case-insensitive).
+ */
+function resolveDefaultDetach(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = (env.RUNNER_DEFAULT_DETACH || '').trim().toLowerCase();
+  return v === '1' || v === 'true';
+}
+
+/**
  * Derive the serialization lane key for a unit of work from its repo and branch, under the
  * active scope. This is the SOT-931 switch primitive:
  *   - scope 'repo'   → lane = sanitized repo (同一 repo の全 branch が同一 lane = 直列).
@@ -2213,10 +2226,18 @@ async function runItem(item: QueueItem, options: TriggerOptions = {}): Promise<R
 
   const isResume = item.reason === 'usage_limit';
 
-  // long-run detached mode (SOT-914): launch detached, record inflight + sentinel, and return
-  // immediately so the caller releases the lock right away (lock hold ≈ startup time, not sim time).
-  if (eligibility.isLongRun) {
-    log('RUN', `long-run detected (label="${LONG_RUN_LABEL}") — launching detached`, { trigger: item.trigger || 'queue', issue: issueId });
+  // Detached mode: launch detached, record inflight + sentinel, and return immediately so the caller
+  // releases the lock right away (lock hold ≈ startup time, not run time). Triggered by either:
+  //   - the `long-run` label (SOT-914), or
+  //   - default-detach (SOT-934): RUNNER_DEFAULT_DETACH makes EVERY normal run detach too, so the
+  //     webhook returns without occupying a slot for the whole run.
+  // Both paths reuse the same triggerRunDetached + done-marker reaper completion flow.
+  const defaultDetach = resolveDefaultDetach();
+  if (eligibility.isLongRun || defaultDetach) {
+    const detachReason = eligibility.isLongRun
+      ? `long-run detected (label="${LONG_RUN_LABEL}")`
+      : 'default-detach enabled (RUNNER_DEFAULT_DETACH)';
+    log('RUN', `${detachReason} — launching detached`, { trigger: item.trigger || 'queue', issue: issueId });
     addInflight(issueId); // idempotent; ensures tracking regardless of caller
     const { pid } = await triggerRunDetached(issueId, { resume: isResume, envOverrides });
     writeDetachedSentinel(issueId, pid);
@@ -2624,6 +2645,7 @@ export {
   SERIALIZE_SCOPE_BRANCH,
   resolveSerializeScope,
   resolveMaxParallel,
+  resolveDefaultDetach,
   serializationLaneKey,
   resolveConcurrencyLane,
   runLanePool,

@@ -1596,6 +1596,120 @@ describe('runner', () => {
     });
   });
 
+  // SOT-934: default-detach. RUNNER_DEFAULT_DETACH makes a NORMAL run (no long-run label) detach too,
+  // so the webhook releases the lock immediately instead of holding it for the whole run. Default off
+  // keeps the historical synchronous foreground path (後方互換).
+  describe('default-detach (SOT-934)', () => {
+    let writeSpy: jest.Mock;
+    let prevDefaultDetach: string | undefined;
+    beforeEach(() => {
+      writeSpy = jest.fn();
+      process.env.LINEAR_API_KEY = 'test-key';
+      prevDefaultDetach = process.env.RUNNER_DEFAULT_DETACH;
+      delete process.env.RUNNER_DEFAULT_DETACH;
+    });
+    afterEach(() => {
+      if (prevDefaultDetach === undefined) delete process.env.RUNNER_DEFAULT_DETACH;
+      else process.env.RUNNER_DEFAULT_DETACH = prevDefaultDetach;
+    });
+
+    function setupLinearMocks(responses: any[]) {
+      let index = 0;
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
+        const responseData = JSON.stringify({ data: responses[index++] });
+        const res: any = {
+          on: jest.fn((event: any, cb: any) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return { on: jest.fn(), write: writeSpy, end: jest.fn(), destroy: jest.fn() };
+      });
+    }
+
+    function queueItem(issueId: string) {
+      return {
+        issueId,
+        trigger: 'webhook',
+        retryAt: null,
+        enqueuedAt: new Date().toISOString(),
+        priority: 2,
+        priorityRank: runner.getPriorityRank(2)
+      };
+    }
+
+    it('resolveDefaultDetach reads RUNNER_DEFAULT_DETACH (default off, accepts 1/true case-insensitively)', () => {
+      expect(runner.resolveDefaultDetach({})).toBe(false);
+      expect(runner.resolveDefaultDetach({ RUNNER_DEFAULT_DETACH: '' })).toBe(false);
+      expect(runner.resolveDefaultDetach({ RUNNER_DEFAULT_DETACH: '0' })).toBe(false);
+      expect(runner.resolveDefaultDetach({ RUNNER_DEFAULT_DETACH: 'no' })).toBe(false);
+      expect(runner.resolveDefaultDetach({ RUNNER_DEFAULT_DETACH: '1' })).toBe(true);
+      expect(runner.resolveDefaultDetach({ RUNNER_DEFAULT_DETACH: 'true' })).toBe(true);
+      expect(runner.resolveDefaultDetach({ RUNNER_DEFAULT_DETACH: ' TRUE ' })).toBe(true);
+    });
+
+    it('RUNNER_DEFAULT_DETACH=1 → a normal run (no long-run label) detaches and returns immediately', async () => {
+      process.env.RUNNER_DEFAULT_DETACH = '1';
+      fs.existsSync.mockReturnValue(false);
+      const item: any = queueItem('SOT-934A');
+      const child: any = new EventEmitter();
+      child.pid = 77777;
+      child.unref = jest.fn();
+      (spawn as jest.Mock).mockReturnValue(child);
+      setupLinearMocks([
+        // eligibility query: normal issue, NO long-run label
+        { issue: { id: 'SOT-934A', state: { type: 'started', name: 'In Progress' }, labels: { nodes: [{ name: 'other' }] } } },
+        // buildRunEnv -> getIssueProjectName
+        { issue: { project: { name: 'ai-dev-control-plane' } } }
+      ]);
+
+      const outcome = await runner.runItem(item);
+
+      // detached path taken even without the long-run label
+      expect(outcome).toEqual({ lockConflict: false, detached: true });
+      expect(spawn).toHaveBeenCalledTimes(1);
+      const spawnOpts: any = (spawn as jest.Mock).mock.calls[0][2];
+      expect(spawnOpts.detached).toBe(true);
+      expect(spawnOpts.stdio).toBe('ignore');
+      expect(child.unref).toHaveBeenCalled();
+      // inflight + sentinel recorded (reaper owns cleanup, same as long-run)
+      const inflightWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('runner.inflight.json'));
+      expect(inflightWrites.length).toBeGreaterThan(0);
+      const sentinelWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('SOT-934A.json'));
+      expect(sentinelWrites.length).toBeGreaterThan(0);
+      expect(sentinelWrites[0][1]).toContain('77777');
+    });
+
+    it('flag unset (default) → a normal run stays on the synchronous foreground path', async () => {
+      fs.existsSync.mockReturnValue(true);
+      const item: any = queueItem('SOT-934B');
+      (spawn as jest.Mock).mockImplementation(() => {
+        const child: any = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.pid = 12345;
+        process.nextTick(() => child.emit('close', 0, null));
+        return child;
+      });
+      setupLinearMocks([
+        { issue: { id: 'SOT-934B', state: { type: 'started', name: 'In Progress' }, labels: { nodes: [{ name: 'other' }] } } },
+        { issue: { project: { name: 'ai-dev-control-plane' } } },
+        { issue: { id: 'SOT-934B', state: { type: 'completed', name: 'Done' } } }
+      ]);
+
+      const outcome = await runner.runItem(item);
+
+      // foreground synchronous path: not detached, no sentinel written
+      expect(outcome.detached).toBe(false);
+      const sentinelWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('SOT-934B.json'));
+      expect(sentinelWrites.length).toBe(0);
+    });
+  });
+
   describe('detached completion → Resume re-injection (SOT-915)', () => {
     let writeSpy: jest.Mock;
     beforeEach(() => {
