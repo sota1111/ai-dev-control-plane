@@ -162,6 +162,13 @@ async function runReaperTick(): Promise<void> {
   } catch (err: any) {
     runner.log('REAPER', `reapStaleInflight error (non-fatal): ${err.message}`);
   }
+  // SOT-915: デタッチ long-run の完了(done-marker)を検知し、結果を既存の enqueue/Resume 後処理へ
+  // 再投入する（実行中ロック時は内部で no-op）。
+  try {
+    await runner.reapCompletedDetachedRuns();
+  } catch (err: any) {
+    runner.log('REAPER', `reapCompletedDetachedRuns error (non-fatal): ${err.message}`);
+  }
   if (runner.isLocked()) return;        // 実行中はスキップ
   if (cooldownActive) return;           // cooldown中はスキップ（明けてから回収）
   if (!getSecret('LINEAR_API_KEY')) return; // APIキー未設定ならスキップ

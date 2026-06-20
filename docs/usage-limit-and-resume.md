@@ -30,6 +30,26 @@ usage-limit 検知時の cooldown / 自動再実行、および中断タスク�
 - **チェックポイント**: ログに `[RESUME]` タグで再開ポイントを記録し、トレーサビリティを確保します
 - **統合**: スケジューラー、Webhook、Discord、手動実行すべてがこの共通パスを使用します
 
+## 長時間 long-run のデタッチ完了検知と Resume 再投入 (SOT-914 / SOT-915)
+
+`long-run` ラベルの付いた Issue（長時間 sim / ビルド等）は、JS ロックを起動時間ぶんだけ保持して
+すぐ解放できるよう、`run_auto.sh` を**デタッチ起動**します（SOT-914）。デタッチした重い処理は親プロセス
+が生きていなくても完走するため、起動 → 完了 → 後処理 のループを Claude を専有せずに閉じます。
+
+- **完了マーカー**: デタッチした子プロセスは自身の出力を `docs/ai/auto_logs/detached/<issue>.log` に
+  リダイレクトし、終了時に exit code を含む done マーカー `docs/ai/auto_logs/detached/<issue>.done.json`
+  （`{ issueId, exitCode, endedAt }`）をアトミックに書き出します。issueId・パスはシェル引数ではなく
+  環境変数で渡します（インジェクション防止）。
+- **完了検知**: `reapCompletedDetachedRuns()`（runner）が done マーカーを検知し、結果を**通常の
+  enqueue/Resume 後処理**（`processCompletedRun`、同期実行パスと共通）へ再投入します。
+  - exit 0 + 完了検証 OK → 成功後処理（cooldown クリア / `usage-limit` ラベル除去）
+  - usage-limit → cooldown 設定 + Resume メタデータ保存 + `retryAt` 付きで再キュー（= Resume 再投入）
+  - 非0 / 失敗 → 異常終了として記録
+  処理後は done マーカー・log・sentinel・inflight エントリを片付けます。
+- **起動タイミング**: webhook server の reaper tick（アイドル時/cooldown 明け）で実行します。実行中ロック
+  保持時は no-op です。クラッシュして done マーカーを残せなかったデタッチ run は、従来どおり
+  `reapDeadDetachedSentinels()`（dead-PID 検知）が sentinel/inflight を回収します。
+
 ## Session-Continue (Opt-in)
 
 既存の tmux pane で実行中の Claude Code セッションに `continue` を送信する補助機能です。

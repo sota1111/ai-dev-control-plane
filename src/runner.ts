@@ -1365,6 +1365,91 @@ function reapDeadDetachedSentinels(): string[] {
   return cleared;
 }
 
+// SOT-915: detect detached long-run completion via the per-issue done-marker and feed the result
+// back through the normal enqueue/Resume post-processing (processCompletedRun). This closes the
+// "launch → complete → post-process" loop for detached runs without occupying Claude:
+//   - exit 0 + verified   → success cleanup (clear cooldown / remove usage-limit label)
+//   - usage-limit          → cooldown set + resume metadata saved + re-enqueued with retryAt
+//   - non-zero / failed    → recorded (the abnormal exit is logged)
+// A no-op while a run holds the lock. Each marker's outcome is applied once, then the marker, log,
+// sentinel and inflight entry are cleared. Returns the issueIds processed.
+async function reapCompletedDetachedRuns(): Promise<string[]> {
+  if (isLocked()) return []; // never act mid-run
+  const processed: string[] = [];
+  if (!fs.existsSync(DETACHED_DIR)) return processed;
+  let files: string[] = [];
+  try {
+    files = fs.readdirSync(DETACHED_DIR).filter(f => f.endsWith('.done.json'));
+  } catch (err: any) {
+    log('REAPER', `reapCompletedDetachedRuns readdir ERROR: ${err.message}`);
+    return processed;
+  }
+  for (const file of files) {
+    const fullPath = path.join(DETACHED_DIR, file);
+    let issueId: string | null = null;
+    try {
+      let done: DetachedDone | null = null;
+      try {
+        const parsed = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+        if (parsed && typeof parsed.issueId === 'string') {
+          done = { issueId: parsed.issueId, exitCode: Number(parsed.exitCode), endedAt: parsed.endedAt };
+        }
+      } catch {
+        done = null;
+      }
+      if (!done || !done.issueId) {
+        // Unparseable / orphan marker: drop it so it doesn't accumulate.
+        try { fs.unlinkSync(fullPath); } catch { /* ignore */ }
+        log('REAPER', `reapCompletedDetachedRuns: dropped unparseable done-marker ${file}`);
+        continue;
+      }
+      issueId = done.issueId;
+      const exitCode = Number.isFinite(done.exitCode) ? done.exitCode : 1;
+      const logFile = detachedLogFile(issueId);
+      let runOutput = '';
+      try {
+        if (fs.existsSync(logFile)) runOutput = fs.readFileSync(logFile, 'utf8');
+      } catch { /* ignore — empty output */ }
+
+      // Minimal QueueItem for re-injection. Priority/parent grouping are intentionally null:
+      // a usage-limit resume re-enqueue gets its priority refreshed from Linear on the next drain.
+      const item: QueueItem = {
+        issueId,
+        issueIdentifier: null,
+        trigger: 'detached',
+        retryAt: null,
+        enqueuedAt: new Date().toISOString(),
+        lastAttemptAt: null,
+        attemptCount: 0,
+        reason: null,
+        priority: null,
+        priorityLabel: null,
+        priorityRank: 0,
+        linearFetchedAt: null,
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+        queueGroup: null,
+        queueGroupOrder: null
+      };
+
+      await processCompletedRun(item, exitCode, runOutput);
+      log('REAPER', `reapCompletedDetachedRuns: post-processed detached completion exit=${exitCode}`, { issue: issueId });
+      processed.push(issueId);
+    } catch (err: any) {
+      log('REAPER', `reapCompletedDetachedRuns ERROR for ${file}: ${err.message}`, issueId ? { issue: issueId } : undefined);
+    } finally {
+      // Clean up this completed run's tracking regardless of post-processing outcome.
+      if (issueId) {
+        clearDetachedDone(issueId);
+        clearDetachedLog(issueId);
+        clearDetachedSentinel(issueId);
+        removeInflight(issueId);
+      }
+    }
+  }
+  return processed;
+}
+
 function setCurrentIssue(item: QueueItem): void {
   try {
     if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -1465,6 +1550,57 @@ function loadDetachedSentinel(issueId: string): DetachedSentinel | null {
     return JSON.parse(fs.readFileSync(target, 'utf8'));
   } catch {
     return null;
+  }
+}
+
+// --- Detached completion done-markers (SOT-915) --------------------------------------------
+// A detached long-run (SOT-914) is launched fully detached: the parent JS process may not be
+// alive when the heavy run finishes, so the child itself records its outcome durably. On exit
+// the child writes a per-issue log (its stdout+stderr) and a done-marker carrying the exit code.
+// The completion reaper consumes these and re-injects the result into the normal enqueue/Resume
+// post-processing (see reapCompletedDetachedRuns).
+
+interface DetachedDone {
+  issueId: string;
+  exitCode: number;
+  endedAt: string;
+}
+
+function detachedLogFile(issueId: string): string {
+  return path.join(DETACHED_DIR, `${sanitizeIssueIdForFile(issueId)}.log`);
+}
+
+function detachedDoneFile(issueId: string): string {
+  return path.join(DETACHED_DIR, `${sanitizeIssueIdForFile(issueId)}.done.json`);
+}
+
+function loadDetachedDone(issueId: string): DetachedDone | null {
+  try {
+    const target = detachedDoneFile(issueId);
+    if (!fs.existsSync(target)) return null;
+    const parsed = JSON.parse(fs.readFileSync(target, 'utf8'));
+    if (!parsed || typeof parsed.issueId !== 'string') return null;
+    return { issueId: parsed.issueId, exitCode: Number(parsed.exitCode), endedAt: parsed.endedAt };
+  } catch {
+    return null;
+  }
+}
+
+function clearDetachedDone(issueId: string): void {
+  try {
+    const target = detachedDoneFile(issueId);
+    if (fs.existsSync(target)) fs.unlinkSync(target);
+  } catch (err: any) {
+    log('RUNNER', `clearDetachedDone ERROR: ${err.message}`, { issue: issueId });
+  }
+}
+
+function clearDetachedLog(issueId: string): void {
+  try {
+    const target = detachedLogFile(issueId);
+    if (fs.existsSync(target)) fs.unlinkSync(target);
+  } catch (err: any) {
+    log('RUNNER', `clearDetachedLog ERROR: ${err.message}`, { issue: issueId });
   }
 }
 
@@ -1819,14 +1955,32 @@ async function triggerRunDetached(issueId: string, options: TriggerOptions = {})
   const projectRoot = path.join(__dirname, '..');
   const startedAt = new Date().toISOString();
 
-  const args = ['scripts/ai/run_auto.sh'];
-  if (options.resume) {
-    args.push('--resume');
-  }
+  if (!fs.existsSync(DETACHED_DIR)) fs.mkdirSync(DETACHED_DIR, { recursive: true });
+  const logFile = detachedLogFile(issueId);
+  const doneFile = detachedDoneFile(issueId);
+  // Clear any stale markers from a previous launch of the same issue.
+  clearDetachedDone(issueId);
+  clearDetachedLog(issueId);
+
+  // The child records its own outcome durably (the parent may not be alive at completion):
+  // redirect run_auto.sh output to the per-issue log, then atomically write a done-marker
+  // carrying the exit code. SECURITY: issueId and file paths are passed via env only, never as
+  // shell arguments; `--resume` is the sole inline arg (a static literal).
+  const resumeFlag = options.resume ? ' --resume' : '';
+  const wrapper =
+    'ec=0\n' +
+    `bash scripts/ai/run_auto.sh${resumeFlag} > "$DETACHED_LOG_FILE" 2>&1 || ec=$?\n` +
+    'printf \'{"issueId":"%s","exitCode":%s,"endedAt":"%s"}\' "$DETACHED_ISSUE_ID" "$ec" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$DETACHED_DONE_FILE.tmp"\n' +
+    'mv "$DETACHED_DONE_FILE.tmp" "$DETACHED_DONE_FILE"\n';
 
   try {
-    const child = spawn('bash', args, {
-      env,
+    const child = spawn('bash', ['-c', wrapper], {
+      env: {
+        ...env,
+        DETACHED_LOG_FILE: logFile,
+        DETACHED_DONE_FILE: doneFile,
+        DETACHED_ISSUE_ID: issueId
+      },
       cwd: projectRoot,
       detached: true,
       stdio: 'ignore'
@@ -1926,6 +2080,17 @@ async function runItem(item: QueueItem): Promise<RunItemOutcome> {
   }
 
   const { code, output } = await triggerRun(issueId, { resume: isResume });
+  const { lockConflict } = await processCompletedRun(item, code, output);
+  return { lockConflict, detached: false };
+}
+
+// Post-process a finished run: verify completion, classify the result, and apply the matching
+// side effects (success cleanup / usage-limit cooldown+resume re-enqueue / failure logging).
+// Extracted from runItem so both the synchronous path AND the detached-completion reaper
+// (reapCompletedDetachedRuns, SOT-915) feed their results through the SAME post-processing.
+// Returns lockConflict so the synchronous drain can stop the pass on a global-flock conflict.
+async function processCompletedRun(item: QueueItem, code: number, output: string): Promise<{ lockConflict: boolean }> {
+  const { issueId } = item;
   const completion = code === 0 ? await verifyTaskCompletion(issueId, output) : null;
   const result = classifyRunResult({ code, output, completion });
 
@@ -1960,13 +2125,13 @@ async function runItem(item: QueueItem): Promise<RunItemOutcome> {
         queueGroup: item.queueGroup ?? null,
         queueGroupOrder: item.queueGroupOrder ?? null
       });
-      return { lockConflict: true, detached: false }; // signal drainQueue to stop this pass
+      return { lockConflict: true }; // signal drainQueue to stop this pass
     }
 
     case RUN_RESULT.USAGE_LIMIT_RETRY: {
       const { classification } = result;
       log('RUN', `retryable limit detected: ${classification.type}`, { trigger: item.trigger || 'queue', issue: issueId });
-      
+
       // Notify for session limits or API rate limits
       if (classification.type === 'session_limit' || classification.type === 'api_429') {
         const retryEpoch = Math.floor(new Date(classification.retryAt).getTime() / 1000);
@@ -2032,7 +2197,7 @@ async function runItem(item: QueueItem): Promise<RunItemOutcome> {
       log('RUN', `failed exit=${result.code}`, { trigger: item.trigger || 'queue', issue: issueId });
       break;
   }
-  return { lockConflict: false, detached: false };
+  return { lockConflict: false };
 }
 
 async function drainQueue(): Promise<void> {
@@ -2201,10 +2366,17 @@ export {
   isInflight,
   reapStaleInflight,
   reapDeadDetachedSentinels,
+  reapCompletedDetachedRuns,
   detachedSentinelFile,
   writeDetachedSentinel,
   clearDetachedSentinel,
   loadDetachedSentinel,
+  detachedLogFile,
+  detachedDoneFile,
+  loadDetachedDone,
+  clearDetachedDone,
+  clearDetachedLog,
+  processCompletedRun,
   isQueuedOrRunning,
   getCurrentIssue,
   clearCurrentIssue,
