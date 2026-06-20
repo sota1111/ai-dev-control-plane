@@ -28,6 +28,17 @@ import {
   forceReleaseLock,
   isLocked,
 } from './lib/runnerLock.js';
+import {
+  configureCooldown,
+  buildUsageLimitCommentBody,
+  postUsageLimitComment,
+  addUsageLimitLabel,
+  removeUsageLimitLabel,
+  addCheckLabel,
+  setUsageLimitCooldownUntil,
+  clearUsageLimitCooldown,
+  getUsageLimitCooldownUntil,
+} from './lib/cooldown.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -517,298 +528,17 @@ async function fetchActiveIssues(first: number = 50): Promise<IssueQueueMetadata
     }));
 }
 
-function buildUsageLimitCommentBody(resetEpoch: number): string {
-  const date = new Date(resetEpoch * 1000);
-  const jstDate = new Date(date.getTime() + 9 * 60 * 60 * 1000);
-  const iso = jstDate.toISOString();
-  const jstTime = `${iso.substring(0, 10)} ${iso.substring(11, 16)} JST`;
-  return `usage-limit: Next auto run: ${jstTime}`;
-}
-
-async function postUsageLimitComment(issueId: string, resetEpoch: number): Promise<void> {
-  try {
-    const getIssue: any = await linearQuery('query($id: String!) { issue(id: $id) { id } }', { id: issueId });
-    if (!getIssue.issue) return;
-    const uuid = getIssue.issue.id;
-
-    const body = buildUsageLimitCommentBody(resetEpoch);
-
-    // Check for duplicate comment before posting
-    let existingComments: any[] = [];
-    try {
-      const commentsData: any = await linearQuery(
-        'query($id: String!) { issue(id: $id) { comments(first: 50) { nodes { body } } } }',
-        { id: uuid }
-      );
-      existingComments = commentsData.issue?.comments?.nodes || [];
-    } catch (err: any) {
-      log('WARN', `postUsageLimitComment: could not fetch comments, proceeding to post. ${err.message}`, { issue: issueId });
-    }
-
-    if (existingComments.some(c => c.body === body)) {
-      log('RUNNER', 'usage-limit comment already exists, skipped', { issue: issueId, body });
-      return;
-    }
-
-    await linearQuery(`
-      mutation($issueId: String!, $body: String!) {
-        commentCreate(input: { issueId: $issueId, body: $body }) {
-          success
-        }
-      }
-    `, { issueId: uuid, body });
-  } catch (err: any) {
-    log('ERROR', `postUsageLimitComment failed: ${err.message}`, { issue: issueId });
-  }
-}
-
-async function addUsageLimitLabel(issueId: string): Promise<void> {
-  try {
-    const issueData: any = await linearQuery('query($id: String!) { issue(id: $id) { id labelIds team { id } } }', { id: issueId });
-    if (!issueData.issue) return;
-    const { id: uuid, labelIds, team } = issueData.issue;
-    const teamId = team.id;
-
-    const labelsData: any = await linearQuery('query { issueLabels(filter: { name: { eq: "usage-limit" } }) { nodes { id } } }');
-    let labelId = labelsData.issueLabels.nodes[0]?.id;
-
-    if (!labelId) {
-      const createLabelData: any = await linearQuery(`
-        mutation($name: String!, $teamId: String!, $color: String!) {
-          issueLabelCreate(input: { name: $name, teamId: $teamId, color: $color }) {
-            issueLabel { id }
-          }
-        }
-      `, { name: 'usage-limit', teamId, color: '#FF6B6B' });
-      labelId = createLabelData.issueLabelCreate.issueLabel.id;
-    }
-
-    if (!labelIds.includes(labelId)) {
-      await linearQuery(`
-        mutation($id: String!, $labelIds: [String!]!) {
-          issueUpdate(id: $id, input: { labelIds: $labelIds }) {
-            success
-          }
-        }
-      `, { id: uuid, labelIds: [...labelIds, labelId] });
-    }
-  } catch (err: any) {
-    log('ERROR', `addUsageLimitLabel failed: ${err.message}`, { issue: issueId });
-  }
-}
-
-async function removeUsageLimitLabel(issueId: string): Promise<void> {
-  try {
-    const issueData: any = await linearQuery('query($id: String!) { issue(id: $id) { id labelIds } }', { id: issueId });
-    if (!issueData.issue) return;
-    const { id: uuid, labelIds } = issueData.issue;
-
-    const labelsData: any = await linearQuery('query { issueLabels(filter: { name: { eq: "usage-limit" } }) { nodes { id } } }');
-    const labelId = labelsData.issueLabels.nodes[0]?.id;
-
-    if (labelId && labelIds.includes(labelId)) {
-      const filteredIds = labelIds.filter((id: string) => id !== labelId);
-      await linearQuery(`
-        mutation($id: String!, $labelIds: [String!]!) {
-          issueUpdate(id: $id, input: { labelIds: $labelIds }) {
-            success
-          }
-        }
-      `, { id: uuid, labelIds: filteredIds });
-    }
-  } catch (err: any) {
-    log('ERROR', `removeUsageLimitLabel failed: ${err.message}`, { issue: issueId });
-  }
-}
-
-/**
- * Issue が Done（完了）に到達したときに `check` ラベルを付与する。
- * 人間が完了Issueを確認した後、手動でラベルを外す運用（SOT-908）。
- * ラベルが無ければ作成し、既に付いていれば何もしない（冪等）。
- */
-async function addCheckLabel(issueId: string): Promise<void> {
-  try {
-    const issueData: any = await linearQuery('query($id: String!) { issue(id: $id) { id labelIds team { id } } }', { id: issueId });
-    if (!issueData.issue) return;
-    const { id: uuid, labelIds, team } = issueData.issue;
-    const teamId = team.id;
-
-    const labelsData: any = await linearQuery('query { issueLabels(filter: { name: { eq: "check" } }) { nodes { id } } }');
-    let labelId = labelsData.issueLabels.nodes[0]?.id;
-
-    if (!labelId) {
-      const createLabelData: any = await linearQuery(`
-        mutation($name: String!, $teamId: String!, $color: String!) {
-          issueLabelCreate(input: { name: $name, teamId: $teamId, color: $color }) {
-            issueLabel { id }
-          }
-        }
-      `, { name: 'check', teamId, color: '#4CB782' });
-      labelId = createLabelData.issueLabelCreate.issueLabel.id;
-    }
-
-    if (!labelIds.includes(labelId)) {
-      await linearQuery(`
-        mutation($id: String!, $labelIds: [String!]!) {
-          issueUpdate(id: $id, input: { labelIds: $labelIds }) {
-            success
-          }
-        }
-      `, { id: uuid, labelIds: [...labelIds, labelId] });
-      log('RUNNER', 'check label added (issue Done)', { issue: issueId });
-    }
-  } catch (err: any) {
-    log('ERROR', `addCheckLabel failed: ${err.message}`, { issue: issueId });
-  }
-}
-
-interface CooldownState {
-  retryAt: string;
-  issueId: string | null;
-  issueIdentifier?: string | null;
-  reason?: string | null;
-  limitType?: string | null;
-  active?: boolean;
-}
-
-interface CooldownOptions {
-  issueId?: string | null;
-  issueIdentifier?: string | null;
-  resetAt?: string | null;
-  bufferSeconds?: number;
-  reason?: string;
-  limitType?: string;
-}
-
-function setUsageLimitCooldownUntil(retryAt: string, issueIdOrOptions: string | CooldownOptions | null = null): void {
-  // Accept both old signature (retryAt, issueId) and new (retryAt, { issueId, issueIdentifier, resetAt, bufferSeconds, reason, limitType })
-  let issueId: string | null = null;
-  let issueIdentifier: string | null = null;
-  let resetAt: string | null = null;
-  let bufferSeconds = USAGE_LIMIT_RETRY_BUFFER_SECONDS;
-  let reason = 'usage_limit';
-  let limitType = 'session_limit';
-
-  if (typeof issueIdOrOptions === 'string') {
-    issueId = issueIdOrOptions; // backward compat
-  } else if (issueIdOrOptions && typeof issueIdOrOptions === 'object') {
-    issueId = issueIdOrOptions.issueId || null;
-    issueIdentifier = issueIdOrOptions.issueIdentifier || null;
-    resetAt = issueIdOrOptions.resetAt || null;
-    bufferSeconds = issueIdOrOptions.bufferSeconds != null ? issueIdOrOptions.bufferSeconds : USAGE_LIMIT_RETRY_BUFFER_SECONDS;
-    reason = issueIdOrOptions.reason || 'usage_limit';
-    limitType = issueIdOrOptions.limitType || 'session_limit';
-  }
-
-  try {
-    if (!fs.existsSync(LOG_DIR)) {
-      fs.mkdirSync(LOG_DIR, { recursive: true });
-    }
-    const now = new Date().toISOString();
-
-    // Write to new COOLDOWN_FILE with rich structure
-    const cooldownData = {
-      active: true,
-      until: retryAt,
-      detectedAt: now,
-      sourceIssueId: issueId,
-      sourceIssueIdentifier: issueIdentifier,
-      resetAt: resetAt,
-      bufferSeconds: bufferSeconds,
-      reason: reason,
-      limitType: limitType
-    };
-    const cooldownTmp = COOLDOWN_FILE + '.tmp';
-    fs.writeFileSync(cooldownTmp, JSON.stringify(cooldownData, null, 2));
-    fs.renameSync(cooldownTmp, COOLDOWN_FILE);
-
-    // Also write backward-compat USAGE_LIMIT_FILE so old scheduler.sh can still read it
-    const legacyData = { retryAt, issueId };
-    const legacyTmp = USAGE_LIMIT_FILE + '.tmp';
-    fs.writeFileSync(legacyTmp, JSON.stringify(legacyData, null, 2));
-    fs.renameSync(legacyTmp, USAGE_LIMIT_FILE);
-
-    log('RUNNER', 'usage limit cooldown set', { retryAt, issueId: issueId || undefined, issueIdentifier: issueIdentifier || undefined });
-  } catch (err: any) {
-    log('ERROR', `setUsageLimitCooldownUntil failed: ${err.message}`);
-  }
-}
-
-function clearUsageLimitCooldown(): void {
-  try {
-    if (fs.existsSync(COOLDOWN_FILE)) {
-      fs.unlinkSync(COOLDOWN_FILE);
-    }
-    if (fs.existsSync(USAGE_LIMIT_FILE)) {
-      fs.unlinkSync(USAGE_LIMIT_FILE);
-    }
-    log('RUNNER', 'usage limit cooldown cleared');
-  } catch (err: any) {
-    log('ERROR', `clearUsageLimitCooldown failed: ${err.message}`);
-  }
-}
-
-function getUsageLimitCooldownUntil(nowMs: number = Date.now()): CooldownState | null {
-  // Try new COOLDOWN_FILE first
-  if (fs.existsSync(COOLDOWN_FILE)) {
-    try {
-      const content = fs.readFileSync(COOLDOWN_FILE, 'utf8');
-      const state = JSON.parse(content);
-      const retryAt = state.until || state.retryAt || null;
-      if (!retryAt) {
-        clearUsageLimitCooldown();
-        return null;
-      }
-      const retryAtMs = new Date(retryAt).getTime();
-      if (isNaN(retryAtMs) || retryAtMs <= nowMs) {
-        clearUsageLimitCooldown();
-        return null;
-      }
-      return {
-        retryAt,
-        issueId: state.sourceIssueId || null,
-        issueIdentifier: state.sourceIssueIdentifier || null,
-        reason: state.reason || null,
-        limitType: state.limitType || null,
-        active: true
-      };
-    } catch (err: any) {
-      log('ERROR', `getUsageLimitCooldownUntil: COOLDOWN_FILE parse failed: ${err.message}`);
-      // Fall through to legacy file
-    }
-  }
-
-  // Fall back to legacy USAGE_LIMIT_FILE
-  try {
-    if (!fs.existsSync(USAGE_LIMIT_FILE)) return null;
-    const content = fs.readFileSync(USAGE_LIMIT_FILE, 'utf8');
-    const state = JSON.parse(content);
-
-    let retryAt: string | null = null;
-    let issueId: string | null = null;
-    if (typeof state === 'string') {
-      retryAt = state;
-    } else {
-      retryAt = state.retryAt;
-      issueId = state.issueId;
-    }
-
-    if (!retryAt) return null;
-    const retryAtMs = new Date(retryAt).getTime();
-    if (isNaN(retryAtMs)) {
-      clearUsageLimitCooldown();
-      return null;
-    }
-    if (retryAtMs <= nowMs) {
-      clearUsageLimitCooldown();
-      return null;
-    }
-    return { retryAt, issueId: issueId || null };
-  } catch (err: any) {
-    log('ERROR', `getUsageLimitCooldownUntil failed: ${err.message}`);
-    return null;
-  }
-}
+// Usage-limit cooldown + Linear label/comment helpers live in ./lib/cooldown.ts.
+// They depend on log / linearQuery / LOG_DIR / COOLDOWN_FILE / USAGE_LIMIT_FILE /
+// USAGE_LIMIT_RETRY_BUFFER_SECONDS, owned here and injected once to avoid a circular import.
+configureCooldown({
+  logDir: LOG_DIR,
+  cooldownFile: COOLDOWN_FILE,
+  usageLimitFile: USAGE_LIMIT_FILE,
+  usageLimitRetryBufferSeconds: USAGE_LIMIT_RETRY_BUFFER_SECONDS,
+  log,
+  linearQuery,
+});
 
 export interface QueueItem {
   issueId: string;
