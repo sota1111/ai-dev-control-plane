@@ -602,6 +602,81 @@ describe('runner', () => {
     });
   });
 
+  describe('addCheckLabel', () => {
+    let writeSpy: jest.Mock;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      process.env.LINEAR_API_KEY = 'test-key';
+      writeSpy = jest.fn();
+    });
+
+    function setupLinearMocks(responses: any[]) {
+      let index = 0;
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
+        const responseData = JSON.stringify({ data: responses[index++] });
+        const res: any = {
+          on: jest.fn((event: any, cb: any) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return { on: jest.fn(), write: writeSpy, end: jest.fn(), destroy: jest.fn() };
+      });
+    }
+
+    it('creates the check label when missing and adds it to the issue', async () => {
+      setupLinearMocks([
+        { issue: { id: 'uuid-1', labelIds: [], team: { id: 'team-1' } } }, // issue lookup
+        { issueLabels: { nodes: [] } },                                    // label lookup (missing)
+        { issueLabelCreate: { issueLabel: { id: 'label-check' } } },       // create label
+        { issueUpdate: { success: true } }                                 // attach label
+      ]);
+
+      await runner.addCheckLabel('SOT-908');
+
+      expect(https.request).toHaveBeenCalledTimes(4);
+      const written = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(written.some((b: any) => b.includes('issueLabelCreate'))).toBe(true);
+      expect(written.some((b: any) => b.includes('issueUpdate') && b.includes('label-check'))).toBe(true);
+    });
+
+    it('adds the existing check label when the issue does not have it yet', async () => {
+      setupLinearMocks([
+        { issue: { id: 'uuid-2', labelIds: ['other-label'], team: { id: 'team-1' } } },
+        { issueLabels: { nodes: [{ id: 'label-check' }] } },
+        { issueUpdate: { success: true } }
+      ]);
+
+      await runner.addCheckLabel('SOT-908');
+
+      expect(https.request).toHaveBeenCalledTimes(3);
+      const written = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(written.some((b: any) => b.includes('issueLabelCreate'))).toBe(false);
+      expect(written.some((b: any) => b.includes('issueUpdate'))).toBe(true);
+    });
+
+    it('is idempotent: does not re-add when the issue already has the check label', async () => {
+      setupLinearMocks([
+        { issue: { id: 'uuid-3', labelIds: ['label-check'], team: { id: 'team-1' } } },
+        { issueLabels: { nodes: [{ id: 'label-check' }] } }
+      ]);
+
+      await runner.addCheckLabel('SOT-908');
+
+      // Only the 2 lookups; no issueUpdate mutation.
+      expect(https.request).toHaveBeenCalledTimes(2);
+      const written = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(written.some((b: any) => b.includes('issueUpdate'))).toBe(false);
+    });
+
+    it('never throws when the Linear API fails', async () => {
+      (https.request as jest.Mock).mockImplementation(() => { throw new Error('network down'); });
+      await expect(runner.addCheckLabel('SOT-908')).resolves.toBeUndefined();
+    });
+  });
+
   describe('finalizeParentIfChildrenComplete', () => {
     let writeSpy: jest.Mock;
 

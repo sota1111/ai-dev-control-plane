@@ -405,6 +405,18 @@ app.post('/webhooks/linear', (req: any, res: any) => {
         }
       });
     }
+    // Issue reached Done (completed). Attach the `check` label so the human can review the
+    // completed issue and remove the label manually (SOT-908). Only for Done/completed —
+    // not Canceled/Duplicate, which are also terminal. Fire-and-forget; never blocks the ack.
+    if (stateType === "completed" || stateName === "Done") {
+      setImmediate(async () => {
+        try {
+          await runner.addCheckLabel(issueId);
+        } catch (e: any) {
+          runner.log("WEBHOOK", `addCheckLabel error: ${e.message}`, { issue: issueId });
+        }
+      });
+    }
     return res.status(200).json({ status: "ignored", reason: `terminal state: ${stateName || stateType}` });
   }
 

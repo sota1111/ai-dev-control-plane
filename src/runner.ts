@@ -554,6 +554,47 @@ async function removeUsageLimitLabel(issueId: string): Promise<void> {
   }
 }
 
+/**
+ * Issue が Done（完了）に到達したときに `check` ラベルを付与する。
+ * 人間が完了Issueを確認した後、手動でラベルを外す運用（SOT-908）。
+ * ラベルが無ければ作成し、既に付いていれば何もしない（冪等）。
+ */
+async function addCheckLabel(issueId: string): Promise<void> {
+  try {
+    const issueData: any = await linearQuery('query($id: String!) { issue(id: $id) { id labelIds team { id } } }', { id: issueId });
+    if (!issueData.issue) return;
+    const { id: uuid, labelIds, team } = issueData.issue;
+    const teamId = team.id;
+
+    const labelsData: any = await linearQuery('query { issueLabels(filter: { name: { eq: "check" } }) { nodes { id } } }');
+    let labelId = labelsData.issueLabels.nodes[0]?.id;
+
+    if (!labelId) {
+      const createLabelData: any = await linearQuery(`
+        mutation($name: String!, $teamId: String!, $color: String!) {
+          issueLabelCreate(input: { name: $name, teamId: $teamId, color: $color }) {
+            issueLabel { id }
+          }
+        }
+      `, { name: 'check', teamId, color: '#4CB782' });
+      labelId = createLabelData.issueLabelCreate.issueLabel.id;
+    }
+
+    if (!labelIds.includes(labelId)) {
+      await linearQuery(`
+        mutation($id: String!, $labelIds: [String!]!) {
+          issueUpdate(id: $id, input: { labelIds: $labelIds }) {
+            success
+          }
+        }
+      `, { id: uuid, labelIds: [...labelIds, labelId] });
+      log('RUNNER', 'check label added (issue Done)', { issue: issueId });
+    }
+  } catch (err: any) {
+    log('ERROR', `addCheckLabel failed: ${err.message}`, { issue: issueId });
+  }
+}
+
 interface CooldownState {
   retryAt: string;
   issueId: string | null;
@@ -1924,6 +1965,7 @@ export {
   buildUsageLimitCommentBody,
   addUsageLimitLabel,
   removeUsageLimitLabel,
+  addCheckLabel,
   setUsageLimitCooldownUntil,
   clearUsageLimitCooldown,
   getUsageLimitCooldownUntil,
