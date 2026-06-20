@@ -88,7 +88,7 @@ Before running, write the full instruction into `prompts/codex/debug.md`.
 - **Fallback rule.** Claude Code must FIRST attempt normal delegation. Only when a worker is non-responsive per the definition above, Claude Code MAY take over that worker's role and perform the implementation (Gemini's role) or verification/fix (Codex's role) directly, so the Issue is not blocked. This is an explicit, narrowly-scoped EXCEPTION to the otherwise-mandatory delegation rules.
 - **Bounded retry.** Retry a non-responsive worker AT MOST once before falling back. Never loop on a hung or failing worker.
 - **Quality unchanged.** All Quality Gates (lint / typecheck / test / diff review / acceptance criteria) apply identically whether the work was done by the worker or by Claude Code fallback.
-- **Disclosure / audit.** When Claude Code falls back, it MUST record (a) which worker was non-responsive, (b) the detected failure mode, and (c) that Claude Code performed the work directly — both in the relevant worker report file and as a Linear comment on the Issue.
+- **Disclosure / audit.** When Claude Code falls back, it MUST record (a) which worker was non-responsive, (b) the detected failure mode, and (c) that Claude Code performed the work directly — in the relevant worker report file (the audit sink). Do NOT post this fallback disclosure as a Linear comment: Linear receives only the work result. The human needs the outcome of the delegation, not the fallback mechanics.
 
 ---
 
