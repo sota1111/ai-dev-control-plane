@@ -12,6 +12,7 @@ import { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } fro
 import * as queueOrdering from './lib/queueOrdering.js';
 import { isTerminalState, isHoldState } from './lib/issueState.js';
 import { resolveRepoForProject } from './lib/projectRepo.js';
+import { notifyDetachedLaunched, notifyDetachedCompleted, DetachedOutcome } from './lib/laneNotifier.js';
 import {
   isNewProject,
   deriveNewRepoName,
@@ -1432,7 +1433,13 @@ async function reapCompletedDetachedRuns(): Promise<string[]> {
         queueGroupOrder: null
       };
 
-      await processCompletedRun(item, exitCode, runOutput);
+      const r = await processCompletedRun(item, exitCode, runOutput);
+      await notifyDetachedCompleted({
+        issueId,
+        lane: resolveLane(),
+        exitCode,
+        outcome: detachedOutcomeForKind(r.resultKind)
+      }).catch(() => {});
       log('REAPER', `reapCompletedDetachedRuns: post-processed detached completion exit=${exitCode}`, { issue: issueId });
       processed.push(issueId);
     } catch (err: any) {
@@ -2068,6 +2075,7 @@ async function runItem(item: QueueItem): Promise<RunItemOutcome> {
     addInflight(issueId); // idempotent; ensures tracking regardless of caller
     const { pid } = await triggerRunDetached(issueId, { resume: isResume });
     writeDetachedSentinel(issueId, pid);
+    await notifyDetachedLaunched({ issueId, lane: resolveLane(), pid, resume: isResume }).catch(() => {});
     log('RUN', `detached run started pid=${pid ?? 'unknown'} — releasing lock`, { trigger: item.trigger || 'queue', issue: issueId });
     return { lockConflict: false, detached: true };
   }
@@ -2089,7 +2097,7 @@ async function runItem(item: QueueItem): Promise<RunItemOutcome> {
 // Extracted from runItem so both the synchronous path AND the detached-completion reaper
 // (reapCompletedDetachedRuns, SOT-915) feed their results through the SAME post-processing.
 // Returns lockConflict so the synchronous drain can stop the pass on a global-flock conflict.
-async function processCompletedRun(item: QueueItem, code: number, output: string): Promise<{ lockConflict: boolean }> {
+async function processCompletedRun(item: QueueItem, code: number, output: string): Promise<{ lockConflict: boolean; resultKind: string }> {
   const { issueId } = item;
   const completion = code === 0 ? await verifyTaskCompletion(issueId, output) : null;
   const result = classifyRunResult({ code, output, completion });
@@ -2125,7 +2133,7 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
         queueGroup: item.queueGroup ?? null,
         queueGroupOrder: item.queueGroupOrder ?? null
       });
-      return { lockConflict: true }; // signal drainQueue to stop this pass
+      return { lockConflict: true, resultKind: result.kind }; // signal drainQueue to stop this pass
     }
 
     case RUN_RESULT.USAGE_LIMIT_RETRY: {
@@ -2197,7 +2205,21 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
       log('RUN', `failed exit=${result.code}`, { trigger: item.trigger || 'queue', issue: issueId });
       break;
   }
-  return { lockConflict: false };
+  return { lockConflict: false, resultKind: result.kind };
+}
+
+// Map a processCompletedRun result kind to a Discord notification outcome (SOT-917).
+function detachedOutcomeForKind(kind: string): DetachedOutcome {
+  switch (kind) {
+    case RUN_RESULT.TASK_COMPLETED:
+      return 'success';
+    case RUN_RESULT.COMPLETION_UNVERIFIED:
+      return 'unverified';
+    case RUN_RESULT.USAGE_LIMIT_RETRY:
+      return 'usage_limit';
+    default:
+      return 'failed';
+  }
 }
 
 async function drainQueue(): Promise<void> {

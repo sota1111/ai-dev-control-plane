@@ -42,6 +42,18 @@ Claude 自身の計算を並列に増やしても、同じ上限を N 倍速で�
 この方針は既存の委譲フロー（Gemini=実装 / Codex=検証）と矛盾しない。read-only fan-out は
 Claude Code の調査・検証の補助であり、実装は Gemini、検証/修正は Codex への委譲を維持する。
 
+### lane 並行 / デタッチ実行モデル（案② / SOT-911）
+
+書き込み（実装・git・PR）の並列は「別 repo の時だけ lane 並行可」。これを支える実行基盤:
+
+- **lane 分離**: `RUNNER_LANE` で lock / queue / ワーカー成果物を lane 別パスにし、別 repo の
+  ドレインを独立 lane で並行できる。default lane は従来パス（後方互換）。**同一 repo / 同一 branch は必ず直列**。
+- **デタッチ実行**: Linear `long-run` ラベルの Issue は切り離し起動され、JS ロックを即解放する。
+  完了は done-marker 経由で reaper（`reapCompletedDetachedRuns`）が後処理し、成功クリーンアップ /
+  usage-limit resume 再投入 / 失敗ログを共通の `processCompletedRun` で行う。
+- **可視化**: lane / デタッチ実行の起動・完了（成功 / 未検証 / usage-limit / 失敗）は Discord に通知される。
+- 詳細仕様は `docs/runner-queue.md`「lane 並行 / デタッチ実行モデル」を参照。
+
 ---
 
 Use the MCP tool `mcp__linear-server__list_issues` to retrieve issues.
