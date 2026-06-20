@@ -13,6 +13,7 @@ import * as queueOrdering from './lib/queueOrdering.js';
 import { isTerminalState, isHoldState } from './lib/issueState.js';
 import { resolveRepoForProject } from './lib/projectRepo.js';
 import { notifyDetachedLaunched, notifyDetachedCompleted, DetachedOutcome } from './lib/laneNotifier.js';
+import { resolveLaneWorkingDir } from './lib/worktree.js';
 import {
   isNewProject,
   deriveNewRepoName,
@@ -1959,6 +1960,26 @@ async function buildRunEnv(issueId: string): Promise<Record<string, string | und
   } catch (err: any) {
     log('RUNNER', `project->repo resolution error (fail-open): ${err.message}`, { issue: issueId });
   }
+
+  // Lane worktree 供給 (SOT-932, 案A): RUNNER_SERIALIZE_SCOPE=branch などで非 default lane が
+  // 導出される場合、同一 repo・別 branch の作業ツリー競合を避けるため、解決済み TARGET_REPO を
+  // lane 専用の git worktree に差し替える。default lane（既定 repo スコープ）は repoRoot のまま
+  // 不変（後方互換）。fail-open: worktree 供給に失敗しても元の localPath を維持し run を止めない。
+  if (env.WEBHOOK_TARGET_REPO) {
+    const lane = resolveLane(env);
+    if (lane !== DEFAULT_LANE) {
+      try {
+        const workingDir = resolveLaneWorkingDir({ repoRoot: env.WEBHOOK_TARGET_REPO, lane }, env);
+        if (workingDir !== env.WEBHOOK_TARGET_REPO) {
+          log('RUNNER', `lane worktree: lane=${lane} -> ${workingDir}`, { issue: issueId });
+          env.WEBHOOK_TARGET_REPO = workingDir;
+        }
+      } catch (err: any) {
+        log('RUNNER', `lane worktree provisioning failed (fail-open): ${err.message}`, { issue: issueId });
+      }
+    }
+  }
+
   return env;
 }
 
