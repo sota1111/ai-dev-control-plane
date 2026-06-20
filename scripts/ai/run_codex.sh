@@ -4,8 +4,33 @@ set -euo pipefail
 CONTROL_PLANE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 mkdir -p "$CONTROL_PLANE_DIR/docs/ai"
 
-PROMPT_FILE="$CONTROL_PLANE_DIR/prompts/codex/debug.md"
-REPORT_FILE="$CONTROL_PLANE_DIR/docs/ai/60_worker_codex_report.md"
+# Lane support (SOT-916 / SOT-911 案②): worker artifacts are lane-aware so parallel lanes don't
+# overwrite each other's report/prompt files. The default lane keeps the historical paths/timeout
+# (backward compatible); a non-default lane inserts `.<lane>` before the file extension. The lane is
+# sanitized the same way as src/runner.ts (`[a-zA-Z0-9_-]`) so it can never escape the directory.
+RUNNER_LANE="$(printf '%s' "${RUNNER_LANE:-default}" | tr -cd 'a-zA-Z0-9_-')"
+[ -z "$RUNNER_LANE" ] && RUNNER_LANE="default"
+LONG_RUN_LANE="$(printf '%s' "${LONG_RUN_LANE:-long-run}" | tr -cd 'a-zA-Z0-9_-')"
+[ -z "$LONG_RUN_LANE" ] && LONG_RUN_LANE="long-run"
+
+# Insert `.<lane>` before the extension for non-default lanes; default lane is returned unchanged.
+lane_path() {
+  local p="$1"
+  if [ "$RUNNER_LANE" = "default" ]; then
+    printf '%s' "$p"
+    return
+  fi
+  local dir base name ext
+  dir="$(dirname "$p")"
+  base="$(basename "$p")"
+  ext="${base##*.}"
+  name="${base%.*}"
+  printf '%s/%s.%s.%s' "$dir" "$name" "$RUNNER_LANE" "$ext"
+}
+
+PROMPT_FILE="$(lane_path "$CONTROL_PLANE_DIR/prompts/codex/debug.md")"
+REPORT_FILE="$(lane_path "$CONTROL_PLANE_DIR/docs/ai/60_worker_codex_report.md")"
+# Cooldown is account-global (worker usage limit is shared across lanes): NOT lane-suffixed.
 CODEX_COOLDOWN_FILE="$CONTROL_PLANE_DIR/docs/ai/auto_logs/codex.cooldown.json"
 
 if [ ! -f "$PROMPT_FILE" ]; then
@@ -15,7 +40,24 @@ fi
 
 echo "== Codex CLI: debugging worker =="
 
-WORKER_TIMEOUT="${WORKER_TIMEOUT:-1800}"
+# Per-lane WORKER_TIMEOUT (SOT-916). Priority (highest first):
+#  1) WORKER_TIMEOUT_<LANE>  — lane-specific override (lane upper-cased, `-` -> `_`)
+#  2) WORKER_TIMEOUT          — global override (backward compatible)
+#  3) lane default: the long-run lane gets WORKER_TIMEOUT_LONG_RUN (default 21600s/6h) so it is not
+#     killed mid-run; every other lane keeps the historical 1800s.
+DEFAULT_WORKER_TIMEOUT=1800
+LONG_RUN_WORKER_TIMEOUT="${WORKER_TIMEOUT_LONG_RUN:-21600}"
+LANE_ENV_KEY="WORKER_TIMEOUT_$(printf '%s' "$RUNNER_LANE" | tr 'a-z-' 'A-Z_')"
+LANE_TIMEOUT_OVERRIDE="${!LANE_ENV_KEY:-}"
+if [ -n "$LANE_TIMEOUT_OVERRIDE" ]; then
+  WORKER_TIMEOUT="$LANE_TIMEOUT_OVERRIDE"
+elif [ -n "${WORKER_TIMEOUT:-}" ]; then
+  WORKER_TIMEOUT="$WORKER_TIMEOUT"
+elif [ "$RUNNER_LANE" = "$LONG_RUN_LANE" ]; then
+  WORKER_TIMEOUT="$LONG_RUN_WORKER_TIMEOUT"
+else
+  WORKER_TIMEOUT="$DEFAULT_WORKER_TIMEOUT"
+fi
 WORKER_NONRESPONSE_EXIT=75
 
 # --- Codex usage-limit cooldown pre-check (auto fallback / auto resume) ---
