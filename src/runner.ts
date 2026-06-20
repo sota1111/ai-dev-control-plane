@@ -12,7 +12,7 @@ import { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } fro
 import * as queueOrdering from './lib/queueOrdering.js';
 import { isTerminalState, isHoldState } from './lib/issueState.js';
 import { resolveRepoForProject } from './lib/projectRepo.js';
-import { notifyDetachedLaunched, notifyDetachedCompleted, DetachedOutcome } from './lib/laneNotifier.js';
+import { notifyDetachedLaunched, DetachedOutcome } from './lib/laneNotifier.js';
 import { resolveLaneWorkingDir } from './lib/worktree.js';
 import {
   isNewProject,
@@ -39,6 +39,29 @@ import {
   clearUsageLimitCooldown,
   getUsageLimitCooldownUntil,
 } from './lib/cooldown.js';
+import {
+  configureDetachedState,
+  loadInflightRecords,
+  saveInflightRecords,
+  loadInflight,
+  saveInflight,
+  reapStaleInflight,
+  reapDeadDetachedSentinels,
+  reapCompletedDetachedRuns,
+  addInflight,
+  removeInflight,
+  isInflight,
+  sanitizeIssueIdForFile,
+  detachedSentinelFile,
+  writeDetachedSentinel,
+  clearDetachedSentinel,
+  loadDetachedSentinel,
+  detachedLogFile,
+  detachedDoneFile,
+  loadDetachedDone,
+  clearDetachedDone,
+  clearDetachedLog,
+} from './lib/detachedState.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1005,209 +1028,21 @@ function isQueued(issueId: string): boolean {
   return queue.some(item => item.issueId === issueId);
 }
 
-interface InflightEntry {
-  issueId: string;
-  startedAt: string | null; // null => legacy/unknown entry, treated as stale by the reaper
-}
-
-// Read inflight as normalized records. Backward-compatible with the legacy `string[]` format
-// (a bare string becomes `{ issueId, startedAt: null }`).
-function loadInflightRecords(): InflightEntry[] {
-  try {
-    if (!fs.existsSync(INFLIGHT_FILE)) return [];
-    const content = fs.readFileSync(INFLIGHT_FILE, 'utf8');
-    const parsed = JSON.parse(content);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((entry: any): InflightEntry =>
-        typeof entry === 'string'
-          ? { issueId: entry, startedAt: null }
-          : { issueId: entry.issueId, startedAt: entry.startedAt ?? null }
-      )
-      .filter((e: InflightEntry) => typeof e.issueId === 'string' && e.issueId.length > 0);
-  } catch (err) {
-    return [];
-  }
-}
-
-function saveInflightRecords(records: InflightEntry[]): void {
-  try {
-    if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
-    const tmp = INFLIGHT_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(records, null, 2));
-    fs.renameSync(tmp, INFLIGHT_FILE);
-  } catch (err: any) {
-    log('RUNNER', `saveInflight ERROR: ${err.message}`);
-  }
-}
-
-// Backward-compatible: returns issueIds only.
-function loadInflight(): string[] {
-  return loadInflightRecords().map(r => r.issueId);
-}
-
-// Backward-compatible: accepts issueId[], preserving existing startedAt and stamping new ones.
-function saveInflight(list: string[]): void {
-  const byId = new Map(loadInflightRecords().map(r => [r.issueId, r]));
-  const now = new Date().toISOString();
-  const records: InflightEntry[] = list.map(id => byId.get(id) ?? { issueId: id, startedAt: now });
-  saveInflightRecords(records);
-}
-
-// Crash recovery: remove leaked inflight entries whose run never cleaned up.
-// No-op while a run holds the lock; reaps entries older than INFLIGHT_TTL_MS, and
-// legacy/unknown (null startedAt) entries. Returns the issueIds of the entries reaped.
-function reapStaleInflight(): string[] {
-  if (isLocked()) return []; // a live run holds the lock; never touch inflight mid-run
-  const records = loadInflightRecords();
-  if (records.length === 0) return [];
-  const now = Date.now();
-  const kept: InflightEntry[] = [];
-  const reaped: string[] = [];
-  for (const r of records) {
-    const startedMs = r.startedAt ? new Date(r.startedAt).getTime() : NaN;
-    const isStale = Number.isNaN(startedMs) || (now - startedMs) > INFLIGHT_TTL_MS;
-    if (isStale) reaped.push(r.issueId);
-    else kept.push(r);
-  }
-  if (reaped.length > 0) {
-    saveInflightRecords(kept);
-    // A reaped inflight entry means its (possibly detached) run leaked — drop its sentinel too.
-    for (const id of reaped) clearDetachedSentinel(id);
-    log('REAPER', `reapStaleInflight: cleared ${reaped.length} leaked inflight entr${reaped.length === 1 ? 'y' : 'ies'}: ${reaped.join(', ')}`);
-  }
-  // Independently sweep detached sentinels whose recorded PID is no longer alive (the detached
-  // run finished or crashed without removing its own sentinel). No-op while a run holds the lock.
-  reapDeadDetachedSentinels();
-  return reaped;
-}
-
-// Remove detached sentinels whose recorded PID is dead. Returns the cleared issueIds.
-function reapDeadDetachedSentinels(): string[] {
-  const cleared: string[] = [];
-  try {
-    if (!fs.existsSync(DETACHED_DIR)) return cleared;
-    for (const file of fs.readdirSync(DETACHED_DIR)) {
-      if (!file.endsWith('.json')) continue;
-      let record: DetachedSentinel | null = null;
-      try {
-        record = JSON.parse(fs.readFileSync(path.join(DETACHED_DIR, file), 'utf8'));
-      } catch {
-        record = null;
-      }
-      if (!record || !record.issueId) continue;
-      if (record.pid == null) continue; // unknown pid: leave for the inflight-TTL path
-      let isDead = false;
-      try {
-        process.kill(record.pid, 0);
-      } catch (e: any) {
-        if (e.code === 'ESRCH') isDead = true;
-      }
-      if (isDead) {
-        clearDetachedSentinel(record.issueId);
-        removeInflight(record.issueId);
-        cleared.push(record.issueId);
-      }
-    }
-    if (cleared.length > 0) {
-      log('REAPER', `reapDeadDetachedSentinels: cleared ${cleared.length} finished detached run(s): ${cleared.join(', ')}`);
-    }
-  } catch (err: any) {
-    log('REAPER', `reapDeadDetachedSentinels ERROR: ${err.message}`);
-  }
-  return cleared;
-}
-
-// SOT-915: detect detached long-run completion via the per-issue done-marker and feed the result
-// back through the normal enqueue/Resume post-processing (processCompletedRun). This closes the
-// "launch → complete → post-process" loop for detached runs without occupying Claude:
-//   - exit 0 + verified   → success cleanup (clear cooldown / remove usage-limit label)
-//   - usage-limit          → cooldown set + resume metadata saved + re-enqueued with retryAt
-//   - non-zero / failed    → recorded (the abnormal exit is logged)
-// A no-op while a run holds the lock. Each marker's outcome is applied once, then the marker, log,
-// sentinel and inflight entry are cleared. Returns the issueIds processed.
-async function reapCompletedDetachedRuns(): Promise<string[]> {
-  if (isLocked()) return []; // never act mid-run
-  const processed: string[] = [];
-  if (!fs.existsSync(DETACHED_DIR)) return processed;
-  let files: string[] = [];
-  try {
-    files = fs.readdirSync(DETACHED_DIR).filter(f => f.endsWith('.done.json'));
-  } catch (err: any) {
-    log('REAPER', `reapCompletedDetachedRuns readdir ERROR: ${err.message}`);
-    return processed;
-  }
-  for (const file of files) {
-    const fullPath = path.join(DETACHED_DIR, file);
-    let issueId: string | null = null;
-    try {
-      let done: DetachedDone | null = null;
-      try {
-        const parsed = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
-        if (parsed && typeof parsed.issueId === 'string') {
-          done = { issueId: parsed.issueId, exitCode: Number(parsed.exitCode), endedAt: parsed.endedAt };
-        }
-      } catch {
-        done = null;
-      }
-      if (!done || !done.issueId) {
-        // Unparseable / orphan marker: drop it so it doesn't accumulate.
-        try { fs.unlinkSync(fullPath); } catch { /* ignore */ }
-        log('REAPER', `reapCompletedDetachedRuns: dropped unparseable done-marker ${file}`);
-        continue;
-      }
-      issueId = done.issueId;
-      const exitCode = Number.isFinite(done.exitCode) ? done.exitCode : 1;
-      const logFile = detachedLogFile(issueId);
-      let runOutput = '';
-      try {
-        if (fs.existsSync(logFile)) runOutput = fs.readFileSync(logFile, 'utf8');
-      } catch { /* ignore — empty output */ }
-
-      // Minimal QueueItem for re-injection. Priority/parent grouping are intentionally null:
-      // a usage-limit resume re-enqueue gets its priority refreshed from Linear on the next drain.
-      const item: QueueItem = {
-        issueId,
-        issueIdentifier: null,
-        trigger: 'detached',
-        retryAt: null,
-        enqueuedAt: new Date().toISOString(),
-        lastAttemptAt: null,
-        attemptCount: 0,
-        reason: null,
-        priority: null,
-        priorityLabel: null,
-        priorityRank: 0,
-        linearFetchedAt: null,
-        parentIssueId: null,
-        parentIssueIdentifier: null,
-        queueGroup: null,
-        queueGroupOrder: null
-      };
-
-      const r = await processCompletedRun(item, exitCode, runOutput);
-      await notifyDetachedCompleted({
-        issueId,
-        lane: resolveLane(),
-        exitCode,
-        outcome: detachedOutcomeForKind(r.resultKind)
-      }).catch(() => {});
-      log('REAPER', `reapCompletedDetachedRuns: post-processed detached completion exit=${exitCode}`, { issue: issueId });
-      processed.push(issueId);
-    } catch (err: any) {
-      log('REAPER', `reapCompletedDetachedRuns ERROR for ${file}: ${err.message}`, issueId ? { issue: issueId } : undefined);
-    } finally {
-      // Clean up this completed run's tracking regardless of post-processing outcome.
-      if (issueId) {
-        clearDetachedDone(issueId);
-        clearDetachedLog(issueId);
-        clearDetachedSentinel(issueId);
-        removeInflight(issueId);
-      }
-    }
-  }
-  return processed;
-}
+// Inflight tracking + detached sentinels/done-markers + their reapers live in ./lib/detachedState.ts.
+// They depend on log / LOG_DIR / INFLIGHT_FILE / INFLIGHT_TTL_MS / DETACHED_DIR and the orchestration
+// callbacks the completion reaper feeds into (processCompletedRun / resolveLane /
+// detachedOutcomeForKind), owned here and injected once to avoid a circular import. The callbacks are
+// hoisted function declarations, so referencing them here (before their definitions) is safe.
+configureDetachedState({
+  logDir: LOG_DIR,
+  inflightFile: INFLIGHT_FILE,
+  inflightTtlMs: INFLIGHT_TTL_MS,
+  detachedDir: DETACHED_DIR,
+  log,
+  processCompletedRun,
+  resolveLane,
+  detachedOutcomeForKind,
+});
 
 function setCurrentIssue(item: QueueItem): void {
   try {
@@ -1242,124 +1077,6 @@ function getCurrentIssue(): { issueId: string; issueIdentifier?: string; started
     return JSON.parse(content);
   } catch (err: any) {
     return null;
-  }
-}
-
-function addInflight(issueId: string): void {
-  const records = loadInflightRecords();
-  if (!records.some(r => r.issueId === issueId)) {
-    records.push({ issueId, startedAt: new Date().toISOString() });
-    saveInflightRecords(records);
-  }
-}
-
-function removeInflight(issueId: string): void {
-  const records = loadInflightRecords().filter(r => r.issueId !== issueId);
-  saveInflightRecords(records);
-}
-
-function isInflight(issueId: string): boolean {
-  return loadInflight().includes(issueId);
-}
-
-// --- Detached long-run sentinels (SOT-914) -------------------------------------------------
-// A sentinel marks an issue whose run was launched detached (the heavy process keeps running
-// after the JS lock is released). The reaper clears sentinels for dead PIDs / reaped inflight.
-
-interface DetachedSentinel {
-  issueId: string;
-  pid: number | null;
-  startedAt: string;
-}
-
-function sanitizeIssueIdForFile(issueId: string): string {
-  return issueId.replace(/[^a-zA-Z0-9_-]/g, '_');
-}
-
-function detachedSentinelFile(issueId: string): string {
-  return path.join(DETACHED_DIR, `${sanitizeIssueIdForFile(issueId)}.json`);
-}
-
-function writeDetachedSentinel(issueId: string, pid: number | undefined): void {
-  try {
-    if (!fs.existsSync(DETACHED_DIR)) fs.mkdirSync(DETACHED_DIR, { recursive: true });
-    const record: DetachedSentinel = { issueId, pid: pid ?? null, startedAt: new Date().toISOString() };
-    const target = detachedSentinelFile(issueId);
-    const tmp = target + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(record, null, 2));
-    fs.renameSync(tmp, target);
-  } catch (err: any) {
-    log('RUNNER', `writeDetachedSentinel ERROR: ${err.message}`, { issue: issueId });
-  }
-}
-
-function clearDetachedSentinel(issueId: string): void {
-  try {
-    const target = detachedSentinelFile(issueId);
-    if (fs.existsSync(target)) fs.unlinkSync(target);
-  } catch (err: any) {
-    log('RUNNER', `clearDetachedSentinel ERROR: ${err.message}`, { issue: issueId });
-  }
-}
-
-function loadDetachedSentinel(issueId: string): DetachedSentinel | null {
-  try {
-    const target = detachedSentinelFile(issueId);
-    if (!fs.existsSync(target)) return null;
-    return JSON.parse(fs.readFileSync(target, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-// --- Detached completion done-markers (SOT-915) --------------------------------------------
-// A detached long-run (SOT-914) is launched fully detached: the parent JS process may not be
-// alive when the heavy run finishes, so the child itself records its outcome durably. On exit
-// the child writes a per-issue log (its stdout+stderr) and a done-marker carrying the exit code.
-// The completion reaper consumes these and re-injects the result into the normal enqueue/Resume
-// post-processing (see reapCompletedDetachedRuns).
-
-interface DetachedDone {
-  issueId: string;
-  exitCode: number;
-  endedAt: string;
-}
-
-function detachedLogFile(issueId: string): string {
-  return path.join(DETACHED_DIR, `${sanitizeIssueIdForFile(issueId)}.log`);
-}
-
-function detachedDoneFile(issueId: string): string {
-  return path.join(DETACHED_DIR, `${sanitizeIssueIdForFile(issueId)}.done.json`);
-}
-
-function loadDetachedDone(issueId: string): DetachedDone | null {
-  try {
-    const target = detachedDoneFile(issueId);
-    if (!fs.existsSync(target)) return null;
-    const parsed = JSON.parse(fs.readFileSync(target, 'utf8'));
-    if (!parsed || typeof parsed.issueId !== 'string') return null;
-    return { issueId: parsed.issueId, exitCode: Number(parsed.exitCode), endedAt: parsed.endedAt };
-  } catch {
-    return null;
-  }
-}
-
-function clearDetachedDone(issueId: string): void {
-  try {
-    const target = detachedDoneFile(issueId);
-    if (fs.existsSync(target)) fs.unlinkSync(target);
-  } catch (err: any) {
-    log('RUNNER', `clearDetachedDone ERROR: ${err.message}`, { issue: issueId });
-  }
-}
-
-function clearDetachedLog(issueId: string): void {
-  try {
-    const target = detachedLogFile(issueId);
-    if (fs.existsSync(target)) fs.unlinkSync(target);
-  } catch (err: any) {
-    log('RUNNER', `clearDetachedLog ERROR: ${err.message}`, { issue: issueId });
   }
 }
 
