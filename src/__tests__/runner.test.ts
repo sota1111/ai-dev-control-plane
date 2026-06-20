@@ -6,6 +6,7 @@ const mockFs = {
   existsSync: jest.fn(),
   mkdirSync: jest.fn(),
   readFileSync: jest.fn(),
+  readdirSync: jest.fn(() => []),
   renameSync: jest.fn(),
   unlinkSync: jest.fn(),
   writeFileSync: jest.fn(),
@@ -1367,7 +1368,8 @@ describe('runner', () => {
       const result = await runner.runItem(item);
 
       // runItem signals drainQueue to stop this pass instead of hammering the held lock
-      expect(result).toBe(true);
+      expect(result.lockConflict).toBe(true);
+      expect(result.detached).toBe(false);
 
       const queueWrites = (fs.writeFileSync as jest.Mock).mock.calls
         .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('runner.queue.json'))
@@ -1380,6 +1382,142 @@ describe('runner', () => {
       // backed off into the future (not null) so the drain stops rather than tight-looping
       expect(requeued.retryAt).toEqual(expect.any(String));
       expect(new Date(requeued.retryAt).getTime()).toBeGreaterThan(before);
+    });
+  });
+
+  describe('long-run detached mode (SOT-914)', () => {
+    let writeSpy: jest.Mock;
+    beforeEach(() => {
+      writeSpy = jest.fn();
+      process.env.LINEAR_API_KEY = 'test-key';
+    });
+
+    function setupLinearMocks(responses: any[]) {
+      let index = 0;
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
+        const responseData = JSON.stringify({ data: responses[index++] });
+        const res: any = {
+          on: jest.fn((event: any, cb: any) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return { on: jest.fn(), write: writeSpy, end: jest.fn(), destroy: jest.fn() };
+      });
+    }
+
+    function queueItem(issueId: string) {
+      return {
+        issueId,
+        trigger: 'webhook',
+        retryAt: null,
+        enqueuedAt: new Date().toISOString(),
+        priority: 2,
+        priorityRank: runner.getPriorityRank(2)
+      };
+    }
+
+    // A detached spawn: child with pid + unref, never emits 'close' (we must NOT await it).
+    function mockDetachedSpawn(pid = 99999) {
+      const child: any = new EventEmitter();
+      child.pid = pid;
+      child.unref = jest.fn();
+      (spawn as jest.Mock).mockReturnValue(child);
+      return child;
+    }
+
+    it('long-run label → detached launch, immediate return, inflight + sentinel recorded', async () => {
+      fs.existsSync.mockReturnValue(false);
+      const item: any = queueItem('SOT-200');
+      const child = mockDetachedSpawn(54321);
+      setupLinearMocks([
+        // eligibility query (carries the long-run label)
+        { issue: { id: 'SOT-200', state: { type: 'started', name: 'In Progress' }, labels: { nodes: [{ name: 'long-run' }] } } },
+        // buildRunEnv -> getIssueProjectName
+        { issue: { project: { name: 'ai-dev-control-plane' } } }
+      ]);
+
+      const outcome = await runner.runItem(item);
+
+      expect(outcome).toEqual({ lockConflict: false, detached: true });
+      // spawned detached, unref'd, and we never registered a 'close' listener (fire-and-forget)
+      expect(spawn).toHaveBeenCalledTimes(1);
+      const spawnOpts: any = (spawn as jest.Mock).mock.calls[0][2];
+      expect(spawnOpts.detached).toBe(true);
+      expect(spawnOpts.stdio).toBe('ignore');
+      expect(child.unref).toHaveBeenCalled();
+      // inflight entry written
+      const inflightWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('runner.inflight.json'));
+      expect(inflightWrites.length).toBeGreaterThan(0);
+      // sentinel written under DETACHED_DIR with pid
+      const sentinelWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('SOT-200.json'));
+      expect(sentinelWrites.length).toBeGreaterThan(0);
+      expect(sentinelWrites[0][1]).toContain('54321');
+    });
+
+    it('normal issue (no long-run label) stays on the synchronous path', async () => {
+      fs.existsSync.mockReturnValue(true);
+      const item: any = queueItem('SOT-201');
+      // synchronous spawn that emits close(0)
+      (spawn as jest.Mock).mockImplementation(() => {
+        const child: any = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.pid = 12345;
+        process.nextTick(() => child.emit('close', 0, null));
+        return child;
+      });
+      setupLinearMocks([
+        { issue: { id: 'SOT-201', state: { type: 'started', name: 'In Progress' }, labels: { nodes: [{ name: 'other' }] } } },
+        { issue: { project: { name: 'ai-dev-control-plane' } } },
+        { issue: { id: 'SOT-201', state: { type: 'completed', name: 'Done' } } }
+      ]);
+
+      const outcome = await runner.runItem(item);
+
+      expect(outcome.detached).toBe(false);
+      // no sentinel file written for a normal run
+      const sentinelWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('SOT-201.json'));
+      expect(sentinelWrites.length).toBe(0);
+    });
+
+    it('writeDetachedSentinel + clearDetachedSentinel manage the per-issue file', () => {
+      fs.existsSync.mockReturnValue(true);
+      runner.writeDetachedSentinel('SOT-300', 4242);
+      const target = runner.detachedSentinelFile('SOT-300');
+      expect(target.startsWith(runner.DETACHED_DIR)).toBe(true);
+      const written: any = (fs.writeFileSync as jest.Mock).mock.calls
+        .find(c => (c[0] as string).includes('SOT-300.json.tmp'));
+      expect(written).toBeDefined();
+      expect(written[1]).toContain('4242');
+
+      runner.clearDetachedSentinel('SOT-300');
+      expect(fs.unlinkSync).toHaveBeenCalledWith(target);
+    });
+
+    it('reapDeadDetachedSentinels clears sentinels whose pid is dead and keeps live ones', () => {
+      fs.existsSync.mockImplementation((p: string) => p === runner.DETACHED_DIR || p.includes('.json'));
+      fs.readdirSync.mockReturnValue(['SOT-400.json', 'SOT-401.json']);
+      fs.readFileSync.mockImplementation((p: string) => {
+        if (p.includes('SOT-400')) return JSON.stringify({ issueId: 'SOT-400', pid: 111, startedAt: new Date().toISOString() });
+        if (p.includes('SOT-401')) return JSON.stringify({ issueId: 'SOT-401', pid: 222, startedAt: new Date().toISOString() });
+        return JSON.stringify([]);
+      });
+      // pid 111 dead (ESRCH), pid 222 alive
+      jest.spyOn(process, 'kill').mockImplementation((pid: number) => {
+        if (pid === 111) { const e: any = new Error('no such process'); e.code = 'ESRCH'; throw e; }
+        return true;
+      });
+
+      const cleared = runner.reapDeadDetachedSentinels();
+
+      expect(cleared).toEqual(['SOT-400']);
+      expect(fs.unlinkSync).toHaveBeenCalledWith(runner.detachedSentinelFile('SOT-400'));
+      expect(fs.unlinkSync).not.toHaveBeenCalledWith(runner.detachedSentinelFile('SOT-401'));
     });
   });
 
