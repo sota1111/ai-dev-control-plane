@@ -158,6 +158,19 @@ JS のロックを長時間占有しないよう、起動直後にロックを�
    - 後始末で done-marker / log / sentinel / inflight を削除。
 4. PID が死んだのに sentinel が残った場合は `reapDeadDetachedSentinels()` が掃除する（クラッシュ復旧）。
 
+### 既定デタッチ化（RUNNER_DEFAULT_DETACH / SOT-934, 案A 最終歩）
+
+環境変数 `RUNNER_DEFAULT_DETACH` を有効（`1` / `true`）にすると、`long-run` ラベルの無い **通常 run も
+デタッチ実行**される。`runItem()` のデタッチ分岐の条件が `isLongRun` から `isLongRun || RUNNER_DEFAULT_DETACH`
+に一般化され、通常 run も上記 long-run と同じ `triggerRunDetached` → done-marker → `reapCompletedDetachedRuns()`
+経路を通る。これにより webhook は run の完了を待たずロックを即解放（即 return）でき、supervisor/drain
+（N スロットプール, SOT-933）が空きスロットへ次を流せる。
+
+- **既定は `false`（無効）= 後方互換**: 通常 run は従来どおり同期（前景）パスで実行され、ロックを run 完了まで
+  保持する。既存挙動と byte-for-byte 同一。段階導入用のフラグであり、有効化は明示的に行う。
+- 有効時は全通常 run がデタッチされるため、完了後処理は reaper（`reapCompletedDetachedRuns()`）が担う
+  （long-run と同じモデル）。`long-run` ラベルや SOT-925 の運用ルールとは非競合（isLongRun 分岐は維持）。
+
 ### 運用ルール: 待機 / 長時間タスクは `long-run` を付ける（SOT-925）
 
 **待機タスク（ScheduleWakeup 等で待つ）や長時間タスクには必ず `long-run` ラベルを付け、デタッチ実行に
