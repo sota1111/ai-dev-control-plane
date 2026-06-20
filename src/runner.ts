@@ -19,6 +19,15 @@ import {
   deriveNewRepoName,
   ensureRepoForNewProject,
 } from './lib/projectRepoCreate.js';
+import {
+  configureRunnerLock,
+  acquireLock,
+  releaseLock,
+  acquireLaneLock,
+  releaseLaneLock,
+  forceReleaseLock,
+  isLocked,
+} from './lib/runnerLock.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -260,107 +269,16 @@ function log(tag: string, message: string, context: Record<string, any> = {}) {
   }
 }
 
-// Lock acquisition over an arbitrary lock file. The default-lane lock (LOCK_FILE) and any per-lane
-// lock (laneLockFile(lane), SOT-933 N-slot pool) share this identical logic; same-lane → same file →
-// serial (the 同一 branch/同一 repo safety valve), distinct lanes → distinct files → concurrent.
-function acquireLockFile(lockFile: string, context: Record<string, any> = {}): boolean {
-  try {
-    if (!fs.existsSync(LOG_DIR)) {
-      fs.mkdirSync(LOG_DIR, { recursive: true });
-    }
-
-    if (!fs.existsSync(lockFile)) {
-      fs.writeFileSync(lockFile, `${process.pid}:${new Date().toISOString()}`);
-      log('LOCK', 'acquired', context);
-      return true;
-    }
-
-    const content = fs.readFileSync(lockFile, 'utf8');
-    const parts = content.split(':');
-    const pidStr = parts[0];
-    const timestampStr = parts.slice(1).join(':');
-    const pid = parseInt(pidStr, 10);
-    const timestamp = new Date(timestampStr);
-
-    let isDead = false;
-    try {
-      process.kill(pid, 0);
-    } catch (e: any) {
-      if (e.code === 'ESRCH') {
-        isDead = true;
-      }
-    }
-
-    const isStale = (Date.now() - timestamp.getTime()) > STALE_LOCK_MS;
-
-    if (isDead || isStale) {
-      const reason = isDead ? 'dead process' : 'stale';
-      log('LOCK', `removing ${reason} lock`, { oldPid: pidStr });
-      fs.unlinkSync(lockFile);
-      fs.writeFileSync(lockFile, `${process.pid}:${new Date().toISOString()}`);
-      log('LOCK', 'acquired (after stale/dead removal)', context);
-      return true;
-    }
-
-    log('LOCK', `SKIPPED_LOCKED lock held by pid=${pid}`, context);
-    return false;
-  } catch (err: any) {
-    log('LOCK', `ERROR: ${err.message}`, context);
-    return false;
-  }
-}
-
-function releaseLockFile(lockFile: string): void {
-  try {
-    if (fs.existsSync(lockFile)) {
-      const content = fs.readFileSync(lockFile, 'utf8');
-      const [pidStr] = content.split(':');
-      if (parseInt(pidStr, 10) === process.pid) {
-        fs.unlinkSync(lockFile);
-        log('LOCK', 'released');
-      }
-    }
-  } catch (err: any) {
-    log('LOCK', `release ERROR: ${err.message}`);
-  }
-}
-
-function acquireLock(context: Record<string, any> = {}): boolean {
-  return acquireLockFile(LOCK_FILE, context);
-}
-
-function releaseLock(): void {
-  releaseLockFile(LOCK_FILE);
-}
-
-// Lane-scoped lock used by the N-slot pool (SOT-933). The default lane resolves to LOCK_FILE, so
-// acquireLaneLock('default') is identical to acquireLock(). A non-default lane gets its own lock file.
-function acquireLaneLock(lane: string, context: Record<string, any> = {}): boolean {
-  return acquireLockFile(laneLockFile(lane), { ...context, lane });
-}
-
-function releaseLaneLock(lane: string): void {
-  releaseLockFile(laneLockFile(lane));
-}
-
-// Unconditionally remove the runner lock regardless of which PID owns it.
-// Used by the Discord /recover force path to break a wedged lock held by a
-// hung/alive holder (acquireLock already auto-reclaims dead/stale locks, so this
-// is only needed for the "alive but stuck" case). Returns the removed lock's raw
-// content (pid:timestamp) or null if no lock existed. Safe because run_auto.sh's
-// OS-level flock still serializes the heavy claude runs even if this JS lock is broken.
-function forceReleaseLock(): string | null {
-  try {
-    if (!fs.existsSync(LOCK_FILE)) return null;
-    const content = fs.readFileSync(LOCK_FILE, 'utf8');
-    fs.unlinkSync(LOCK_FILE);
-    log('LOCK', `force-released (was: ${content})`);
-    return content;
-  } catch (err: any) {
-    log('LOCK', `forceReleaseLock ERROR: ${err.message}`);
-    return null;
-  }
-}
+// Lock operations (acquire/release/forceRelease/isLocked) live in ./lib/runnerLock.ts.
+// They depend on LOG_DIR / LOCK_FILE / STALE_LOCK_MS / laneLockFile / log, which are owned here and
+// injected once below to avoid a circular import (configure at module init, used only at runtime).
+configureRunnerLock({
+  logDir: LOG_DIR,
+  lockFile: LOCK_FILE,
+  staleLockMs: STALE_LOCK_MS,
+  laneLockFile,
+  log,
+});
 
 interface GitCheckpointInfo {
   branch: string;
@@ -379,27 +297,6 @@ function getGitCheckpointInfo(): GitCheckpointInfo {
     // Silence errors, return empty strings as requested
   }
   return result;
-}
-
-function isLocked(): boolean {
-  try {
-    if (!fs.existsSync(LOCK_FILE)) return false;
-    const content = fs.readFileSync(LOCK_FILE, 'utf8');
-    const parts = content.split(':');
-    const pid = parseInt(parts[0], 10);
-    const timestamp = new Date(parts.slice(1).join(':'));
-    if (isNaN(pid)) return false;
-    const isStale = (Date.now() - timestamp.getTime()) > STALE_LOCK_MS;
-    if (isStale) return false;
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch (e: any) {
-      return e.code !== 'ESRCH';
-    }
-  } catch (err) {
-    return false;
-  }
 }
 
 async function linearQuery(query: string, variables: Record<string, any> = {}): Promise<any> {
