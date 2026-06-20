@@ -104,6 +104,51 @@ webhook / startup-scan / Discord retry / scheduler の共通 queue は以下の�
 - completed / canceled / archived Issue は queue に入っていても実行されません
 - queue ファイル (`runner.queue.json`) の更新はアトミック書き込み (tmp → rename) で行います
 
+## lane 並行 / デタッチ実行モデル（SOT-911 案②）
+
+長時間 sim repo と細かい変更 repo を並行開発できるよう、実行を **lane**（レーン）単位に分離し、
+長時間タスクは **デタッチ実行** する仕組みを導入している。Claude 利用上限は account-global のため、
+この並列化は「Claude を専有しない待ち主体の処理（別 repo の sim 実行）」にのみ効く。
+
+### lane 分離（RUNNER_LANE）
+
+環境変数 `RUNNER_LANE` で lane を指定すると、lock / queue / ワーカー成果物が lane 別パスになる。
+別 repo の作業を独立 lane で並行ドレインしても、互いの lock / queue / レポートを踏まない。
+
+- `RUNNER_LANE` 未指定（= `default` lane）は **後方互換**: 従来の `runner.lock` / `runner.queue.json` を使う。
+- 非 default lane は lane 名を挟んだ独立パス: `runner.<lane>.lock` / `runner.<lane>.queue.json`。
+- lane 名は `[a-zA-Z0-9_-]` にサニタイズされ、`LOG_DIR` の外には出られない。
+- ワーカー成果物（Gemini/Codex のレポート・プロンプト）も lane 別パス、`WORKER_TIMEOUT` は per-lane
+  （long-run lane は長め）。詳細は `scripts/ai/run_gemini.sh` / `run_codex.sh`（SOT-916）。
+
+### デタッチ実行（long-run ラベル）
+
+Linear で `long-run` ラベルの付いた Issue は **デタッチ実行** される。重いプロセス（sim 等）が
+JS のロックを長時間占有しないよう、起動直後にロックを解放する。
+
+1. `runItem()` が `long-run` を検知 → `addInflight()` → `triggerRunDetached()` で
+   `run_auto.sh` を切り離し起動 → `detached/<issue>.sentinel.json`（pid 記録）を書き、**即ロック解放**。
+   inflight と sentinel は残し、reaper が後始末を担う。
+2. デタッチ子プロセスは自分の log を `detached/<issue>.log` に書き、終了時に exit code を載せた
+   done-marker `detached/<issue>.done.json` をアトミックに書く（親 JS は完了時に生存していなくてよい）。
+3. `reapCompletedDetachedRuns()` が done-marker を検出し、共通の `processCompletedRun()` に結果を渡す:
+   - 成功 → 成功クリーンアップ（usage-limit ラベル除去等）
+   - usage-limit → cooldown 設定 + resume 再投入（`reason=usage_limit`）
+   - 失敗 / 未検証 → ログのみ（成功クリーンアップはスキップ）
+   - 後始末で done-marker / log / sentinel / inflight を削除。
+4. PID が死んだのに sentinel が残った場合は `reapDeadDetachedSentinels()` が掃除する（クラッシュ復旧）。
+
+### Discord 通知（lane / デタッチ状態の可視化）
+
+デタッチ実行の状態は Discord に通知され、`DISCORD_WEBHOOK_URL_NOTIFY`（無ければ `DISCORD_WEBHOOK_URL`）
+へ送られる（`src/lib/laneNotifier.ts`）。webhook 未設定時は no-op（後方互換）。
+
+- 🚀 **Detached run launched** — issue / lane / pid（resume 再開時は `(resume)`）
+- ✅ **Detached run 完了** — 成功（issue / lane / exit）
+- ⚠️ **Detached run 完了（未検証）** — exit 0 だが完了未検証（成功クリーンアップ skip）
+- ⏳ **Detached run usage-limit（resume 再投入）** — cooldown 後に resume 再投入
+- ❌ **Detached run 失敗** — 失敗 exit
+
 ## ロック取得失敗時の扱い
 
 scheduler / webhook / Discord のいずれも共通の挙動:
