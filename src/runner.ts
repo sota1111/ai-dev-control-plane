@@ -8,7 +8,6 @@ import { spawn, execSync } from 'node:child_process';
 import { classifyUsageLimit } from './lib/usageLimitParser.js';
 import { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } from './lib/resumeMetadata.js';
 import * as queueOrdering from './lib/queueOrdering.js';
-import { isTerminalState } from './lib/issueState.js';
 import { resolveRepoForProject } from './lib/projectRepo.js';
 import { notifyDetachedLaunched, DetachedOutcome } from './lib/laneNotifier.js';
 import { resolveLaneWorkingDir } from './lib/worktree.js';
@@ -73,6 +72,21 @@ import {
   finalizeParentIfChildrenComplete,
   getIssueExecutionEligibility,
 } from './lib/linearApi.js';
+import {
+  configureQueueStore,
+  loadQueueHistory,
+  recordQueueHistory,
+  loadQueue,
+  normalizeQueue,
+  syncQueueWithLinear,
+  refreshQueuePriorities,
+  pruneExpiredQueueItems,
+  saveQueue,
+  enqueue,
+  dequeue,
+  removeFromQueue,
+  isQueued,
+} from './lib/queueStore.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -411,445 +425,20 @@ export interface QueueHistoryItem extends QueueItem {
   dequeuedAt: string;
 }
 
-// Read the past-queue history (newest first). Returns [] when the file is
-// missing, empty, or unparseable (mirrors loadQueue's defensive behavior).
-function loadQueueHistory(): QueueHistoryItem[] {
-  try {
-    if (!fs.existsSync(HISTORY_FILE)) return [];
-    const content = fs.readFileSync(HISTORY_FILE, 'utf8');
-    try {
-      const history = JSON.parse(content);
-      return Array.isArray(history) ? history : [];
-    } catch (parseErr: any) {
-      log('QUEUE', `loadQueueHistory: JSON parse failed: ${parseErr.message}`);
-      return [];
-    }
-  } catch (err: any) {
-    log('QUEUE', `loadQueueHistory ERROR: ${err.message}`);
-    return [];
-  }
-}
-
-// Prepend a dequeued item to the past-queue history (newest first), capped to
-// MAX_QUEUE_HISTORY entries. Atomic write; never throws.
-function recordQueueHistory(item: QueueItem): void {
-  try {
-    const entry: QueueHistoryItem = { ...item, dequeuedAt: new Date().toISOString() };
-    const history = loadQueueHistory();
-    history.unshift(entry);
-    const capped = history.slice(0, MAX_QUEUE_HISTORY);
-    const tmpFile = HISTORY_FILE + '.tmp';
-    fs.writeFileSync(tmpFile, JSON.stringify(capped, null, 2));
-    fs.renameSync(tmpFile, HISTORY_FILE);
-  } catch (err: any) {
-    log('QUEUE', `recordQueueHistory ERROR: ${err.message}`, { issue: item.issueId });
-  }
-}
-
-function loadQueue(): QueueItem[] {
-  try {
-    if (!fs.existsSync(QUEUE_FILE)) return [];
-    const content = fs.readFileSync(QUEUE_FILE, 'utf8');
-    try {
-      const queue = JSON.parse(content);
-      return Array.isArray(queue) ? queue : [];
-    } catch (parseErr: any) {
-      const backupFile = QUEUE_FILE + '.corrupt.' + Date.now();
-      try { fs.writeFileSync(backupFile, content); } catch (_) {}
-      log('QUEUE', `loadQueue: JSON parse failed, backed up corrupt file to ${path.basename(backupFile)}: ${parseErr.message}`);
-      return [];
-    }
-  } catch (err: any) {
-    log('QUEUE', `loadQueue ERROR: ${err.message}`);
-    return [];
-  }
-}
-
-function normalizeQueue(queue: QueueItem[]): QueueItem[] {
-  if (!Array.isArray(queue) || queue.length === 0) return [];
-
-  const map = new Map<string, QueueItem>();
-  for (const item of queue) {
-    const issueId = item.issueId;
-    if (!issueId) continue;
-
-    if (!map.has(issueId)) {
-      map.set(issueId, { ...item });
-      continue;
-    }
-
-    const existing = map.get(issueId)!;
-
-    // Merge retryAt: null (immediate) beats any future time; among two future times, earlier wins
-    const existingRetryMs = existing.retryAt ? new Date(existing.retryAt).getTime() : null;
-    const newRetryMs = item.retryAt ? new Date(item.retryAt).getTime() : null;
-    let mergedRetryAt: string | null;
-    if (newRetryMs === null || existingRetryMs === null) {
-      mergedRetryAt = null;
-    } else {
-      mergedRetryAt = new Date(Math.min(existingRetryMs, newRetryMs)).toISOString();
-    }
-
-    // priorityRank: take the lower rank value (higher urgency)
-    const existingRank = existing.priorityRank ?? getPriorityRank(existing.priority);
-    const newRank = item.priorityRank ?? getPriorityRank(item.priority);
-    const mergedRank = Math.min(existingRank, newRank);
-
-    // enqueuedAt: take the earlier timestamp
-    const existingEnqMs = existing.enqueuedAt ? new Date(existing.enqueuedAt).getTime() : Infinity;
-    const newEnqMs = item.enqueuedAt ? new Date(item.enqueuedAt).getTime() : Infinity;
-    const mergedEnqueuedAt = existingEnqMs <= newEnqMs ? existing.enqueuedAt : item.enqueuedAt;
-
-    // attemptCount: sum both counts
-    const mergedAttemptCount = (existing.attemptCount || 0) + (item.attemptCount || 0);
-
-    // lastAttemptAt: take the later timestamp
-    const existingLastMs = existing.lastAttemptAt ? new Date(existing.lastAttemptAt).getTime() : 0;
-    const newLastMs = item.lastAttemptAt ? new Date(item.lastAttemptAt).getTime() : 0;
-    const mergedLastAttemptAt = existingLastMs >= newLastMs ? existing.lastAttemptAt : item.lastAttemptAt;
-
-    map.set(issueId, {
-      ...existing,
-      ...item, // keep fields from the latest one by default
-      retryAt: mergedRetryAt,
-      priorityRank: mergedRank,
-      enqueuedAt: mergedEnqueuedAt,
-      attemptCount: mergedAttemptCount,
-      lastAttemptAt: mergedLastAttemptAt,
-      // Restore some fields from existing if they were null in item
-      issueIdentifier: item.issueIdentifier || existing.issueIdentifier || null,
-      trigger: item.trigger || existing.trigger || null,
-      reason: item.reason || existing.reason || null,
-      priority: item.priority !== null ? item.priority : existing.priority,
-      priorityLabel: item.priorityLabel || existing.priorityLabel || null,
-      parentIssueId: item.parentIssueId || existing.parentIssueId || null,
-      parentIssueIdentifier: item.parentIssueIdentifier || existing.parentIssueIdentifier || null,
-      queueGroup: item.queueGroup || existing.queueGroup || null,
-      queueGroupOrder: item.queueGroupOrder || existing.queueGroupOrder || null
-    });
-  }
-  return Array.from(map.values());
-}
-
-async function syncQueueWithLinear(): Promise<void> {
-  const queue = loadQueue();
-  if (queue.length === 0) return;
-
-  const toRemove: string[] = [];
-  for (const item of queue) {
-    try {
-      const query = `
-        query($id: String!) {
-          issue(id: $id) {
-            id
-            archivedAt
-            state { type name }
-          }
-        }
-      `;
-      const data: any = await linearQuery(query, { id: item.issueId });
-
-      if (!data.issue) {
-        log('QUEUE', `syncQueueWithLinear: removing not-found issue`, { issue: item.issueId });
-        toRemove.push(item.issueId);
-        continue;
-      }
-
-      const { archivedAt, state } = data.issue;
-
-      if (archivedAt) {
-        log('QUEUE', `syncQueueWithLinear: removing archived issue`, { issue: item.issueId });
-        toRemove.push(item.issueId);
-        continue;
-      }
-
-      const isTerminal = isTerminalState(state);
-
-      if (isTerminal) {
-        log('QUEUE', `syncQueueWithLinear: removing terminal issue state=${state?.name}`, { issue: item.issueId });
-        toRemove.push(item.issueId);
-      }
-    } catch (err: any) {
-      // Fail-open: API failure does not remove the item
-      log('QUEUE', `syncQueueWithLinear: API error for ${item.issueId}, skipping: ${err.message}`);
-    }
-  }
-
-  if (toRemove.length > 0) {
-    const cleaned = loadQueue().filter(item => !toRemove.includes(item.issueId));
-    saveQueue(cleaned);
-    log('QUEUE', `syncQueueWithLinear: removed ${toRemove.length} item(s)`, { removed: toRemove.join(',') });
-  }
-}
-
-/**
- * Refreshes the priority of items already in the local queue from Linear's current state.
- *
- * Priority-only changes in Linear do NOT fire a webhook, so an issue bumped to High/Urgent after
- * it was enqueued would otherwise stay ordered on its stale enqueue-time priority. This re-stamps
- * each queued item's priority/priorityLabel/priorityRank with the latest Linear value so the next
- * dequeue() selects the genuinely highest-priority issue.
- *
- * Fail-open: on any error (e.g. Linear API failure) the queue is left untouched and execution is
- * never blocked. This only affects selection of the NEXT item — items already running under the
- * lock are not touched.
- */
-async function refreshQueuePriorities(): Promise<void> {
-  try {
-    const queue = loadQueue();
-    if (queue.length === 0) return;
-
-    const active = await fetchActiveIssues();
-    // Key by both identifier and id, since queue items store issueId as either.
-    const byKey = new Map<string, { priority: number | null; priorityLabel: string | null }>();
-    for (const issue of active) {
-      const entry = { priority: issue.priority ?? null, priorityLabel: issue.priorityLabel ?? null };
-      if (issue.identifier) byKey.set(issue.identifier, entry);
-      if (issue.id) byKey.set(issue.id, entry);
-    }
-
-    const changed: string[] = [];
-    for (const item of queue) {
-      const fresh = item.issueId ? byKey.get(item.issueId) : undefined;
-      if (!fresh) continue;
-      const newRank = getPriorityRank(fresh.priority);
-      const oldRank = item.priorityRank ?? getPriorityRank(item.priority);
-      if (newRank !== oldRank || fresh.priority !== item.priority) {
-        changed.push(`${item.issueId}:${oldRank}->${newRank}`);
-        item.priority = fresh.priority;
-        item.priorityLabel = fresh.priorityLabel;
-        item.priorityRank = newRank;
-      }
-    }
-
-    if (changed.length > 0) {
-      saveQueue(queue);
-      log('QUEUE', `refreshQueuePriorities: updated ${changed.length} item(s)`, { changed: changed.join(',') });
-    }
-  } catch (err: any) {
-    log('QUEUE', `refreshQueuePriorities: error (fail-open, queue unchanged): ${err.message}`);
-  }
-}
-
-async function pruneExpiredQueueItems(): Promise<void> {
-  const queue = loadQueue();
-  if (queue.length === 0) return;
-
-  const now = Date.now();
-  const ttlMs = QUEUE_ITEM_TTL_DAYS * 24 * 60 * 60 * 1000;
-
-  const expired = queue.filter(item => {
-    if (!item.enqueuedAt) return false;
-    const age = now - new Date(item.enqueuedAt).getTime();
-    return age > ttlMs;
-  });
-
-  if (expired.length === 0) return;
-
-  const toRemove: string[] = [];
-  for (const item of expired) {
-    try {
-      const query = `
-        query($id: String!) {
-          issue(id: $id) {
-            id
-            archivedAt
-            state { type name }
-          }
-        }
-      `;
-      const data: any = await linearQuery(query, { id: item.issueId });
-
-      if (!data.issue) {
-        toRemove.push(item.issueId);
-        continue;
-      }
-      const { archivedAt, state } = data.issue;
-      if (archivedAt) {
-        toRemove.push(item.issueId);
-        continue;
-      }
-      const isTerminal = isTerminalState(state);
-      if (isTerminal) {
-        toRemove.push(item.issueId);
-      }
-      // Active issues older than TTL: keep in queue (do not blindly remove active issues)
-    } catch (err: any) {
-      log('QUEUE', `pruneExpiredQueueItems: API error for ${item.issueId}, skip: ${err.message}`);
-    }
-  }
-
-  if (toRemove.length > 0) {
-    const cleaned = loadQueue().filter(item => !toRemove.includes(item.issueId));
-    saveQueue(cleaned);
-    log('QUEUE', `pruneExpiredQueueItems: removed ${toRemove.length} expired item(s)`, { removed: toRemove.join(',') });
-  }
-}
-
-function saveQueue(queue: QueueItem[]): void {
-  try {
-    if (!fs.existsSync(LOG_DIR)) {
-      fs.mkdirSync(LOG_DIR, { recursive: true });
-    }
-    const tmpFile = QUEUE_FILE + '.tmp';
-    fs.writeFileSync(tmpFile, JSON.stringify(queue, null, 2));
-    fs.renameSync(tmpFile, QUEUE_FILE);
-  } catch (err: any) {
-    log('QUEUE', `save ERROR: ${err.message}`);
-  }
-}
-
-interface EnqueueOptions {
-  issueIdentifier?: string | null;
-  reason?: string | null;
-  priority?: number | null;
-  priorityLabel?: string | null;
-  parentIssueId?: string | null;
-  parentIssueIdentifier?: string | null;
-  queueGroup?: string | null;
-  queueGroupOrder?: string | null;
-}
-
-function enqueue(issueId: string, trigger: string | null, retryAt: string | null = null, {
-  issueIdentifier = null,
-  reason = null,
-  priority = null,
-  priorityLabel = null,
-  parentIssueId = null,
-  parentIssueIdentifier = null,
-  queueGroup = null,
-  queueGroupOrder = null
-}: EnqueueOptions = {}): void {
-  try {
-    // Derive queueGroup from parentIssueId if not explicitly set
-    const resolvedQueueGroup = queueGroup ?? (parentIssueId || null);
-
-    const queue = loadQueue();
-    const now = new Date().toISOString();
-    const existingIndex = queue.findIndex(item => item.issueId === issueId);
-
-    if (existingIndex !== -1) {
-      const existing = queue[existingIndex];
-
-      // Merge retryAt: null (immediate) beats any future time; among two future times, earlier wins
-      const existingRetryMs = existing.retryAt ? new Date(existing.retryAt).getTime() : null;
-      const newRetryMs = retryAt ? new Date(retryAt).getTime() : null;
-      let mergedRetryAt: string | null;
-      if (newRetryMs === null || existingRetryMs === null) {
-        mergedRetryAt = null; // immediate beats any future time
-      } else {
-        mergedRetryAt = new Date(Math.min(existingRetryMs, newRetryMs)).toISOString();
-      }
-
-      queue[existingIndex] = {
-        ...existing,
-        trigger,
-        retryAt: mergedRetryAt,
-        lastAttemptAt: now,
-        attemptCount: (existing.attemptCount || 0) + 1,
-        reason: reason || existing.reason || null,
-        ...(issueIdentifier && !existing.issueIdentifier ? { issueIdentifier } : {}),
-        // Update priority if provided
-        ...(priority !== null ? {
-          priority,
-          priorityLabel: priorityLabel ?? existing.priorityLabel ?? null,
-          priorityRank: getPriorityRank(priority),
-          linearFetchedAt: now
-        } : {}),
-        // Update parent if provided
-        ...(parentIssueId !== null ? {
-          parentIssueId,
-          parentIssueIdentifier: parentIssueIdentifier ?? existing.parentIssueIdentifier ?? null
-        } : {}),
-        // Update queueGroup if provided or derivable
-        ...(resolvedQueueGroup !== null ? {
-          queueGroup: resolvedQueueGroup,
-          ...(queueGroupOrder !== null ? { queueGroupOrder } : {})
-        } : {})
-      };
-      saveQueue(queue);
-      log('QUEUE', 'enqueue: updated existing item', { issue: issueId, trigger, retryAt: mergedRetryAt });
-      return;
-    }
-
-    queue.push({
-      issueId,
-      issueIdentifier: issueIdentifier || null,
-      trigger,
-      retryAt,
-      enqueuedAt: now,
-      lastAttemptAt: null,
-      attemptCount: 0,
-      reason: reason || null,
-      priority: priority !== null ? priority : null,
-      priorityLabel: priorityLabel ?? null,
-      priorityRank: priority !== null ? getPriorityRank(priority) : getPriorityRank(null),
-      linearFetchedAt: priority !== null ? now : null,
-      parentIssueId: parentIssueId ?? null,
-      parentIssueIdentifier: parentIssueIdentifier ?? null,
-      queueGroup: resolvedQueueGroup,
-      queueGroupOrder: queueGroupOrder ?? null
-    });
-    saveQueue(queue);
-    log('QUEUE', 'enqueued', { issue: issueId, trigger });
-  } catch (err: any) {
-    log('QUEUE', `enqueue ERROR: ${err.message}`, { issue: issueId });
-  }
-}
-
-function dequeue(lastProcessedGroup: string | null = null): QueueItem | null {
-  try {
-    const queue = loadQueue();
-    const now = new Date();
-
-    const bestIndex = queueOrdering.selectNextReadyIndex(queue, { lastProcessedGroup, now });
-    if (bestIndex === null) return null;
-
-    const item = queue[bestIndex];
-    const rank = queueOrdering.effectiveRank(item);
-
-    // Determine which branch was taken for logging (Urgent > Group > Normal)
-    let logType = 'dequeued';
-    if (rank === 1) {
-      logType = 'dequeued (urgent)';
-    } else if (lastProcessedGroup && item.queueGroup === lastProcessedGroup) {
-      logType = 'dequeued (group priority)';
-    }
-
-    queue.splice(bestIndex, 1);
-    saveQueue(queue);
-    recordQueueHistory(item);
-
-    if (logType === 'dequeued (group priority)') {
-      log('QUEUE', logType, { issue: item.issueId, queueGroup: item.queueGroup, priorityRank: rank });
-    } else {
-      log('QUEUE', logType, { issue: item.issueId, priorityRank: rank });
-    }
-
-    return item;
-  } catch (err: any) {
-    log('QUEUE', `dequeue ERROR: ${err.message}`);
-    return null;
-  }
-}
-
-function removeFromQueue(issueId: string): void {
-  try {
-    const queue = loadQueue();
-    const filtered = queue.filter(item => item.issueId !== issueId);
-    if (filtered.length !== queue.length) {
-      saveQueue(filtered);
-      log('QUEUE', 'removed', { issue: issueId });
-    }
-  } catch (err: any) {
-    log('QUEUE', `removeFromQueue ERROR: ${err.message}`, { issue: issueId });
-  }
-}
-
-function isQueued(issueId: string): boolean {
-  const queue = loadQueue();
-  return queue.some(item => item.issueId === issueId);
-}
+// Persistent queue store (active queue + past-queue history) lives in ./lib/queueStore.ts.
+// It depends on log / LOG_DIR / QUEUE_FILE / HISTORY_FILE / MAX_QUEUE_HISTORY / QUEUE_ITEM_TTL_DAYS,
+// owned here and injected once to avoid a circular import. linearQuery / fetchActiveIssues /
+// queueOrdering / isTerminalState are imported directly by queueStore from their own modules.
+// laneQueueFile stays here (lane path infra, alongside laneLockFile); the resolved default-lane
+// QUEUE_FILE is injected so the lane file-path contract (RUNNER_LANE / SOT-913〜917) is unchanged.
+configureQueueStore({
+  logDir: LOG_DIR,
+  queueFile: QUEUE_FILE,
+  historyFile: HISTORY_FILE,
+  maxQueueHistory: MAX_QUEUE_HISTORY,
+  queueItemTtlDays: QUEUE_ITEM_TTL_DAYS,
+  log,
+});
 
 // Inflight tracking + detached sentinels/done-markers + their reapers live in ./lib/detachedState.ts.
 // They depend on log / LOG_DIR / INFLIGHT_FILE / INFLIGHT_TTL_MS / DETACHED_DIR and the orchestration
