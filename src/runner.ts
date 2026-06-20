@@ -89,8 +89,45 @@ async function verifyTaskCompletion(issueId: string, output: string): Promise<Co
   }
 }
 const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
-const LOCK_FILE = path.join(LOG_DIR, 'runner.lock');
-const QUEUE_FILE = path.join(LOG_DIR, 'runner.queue.json');
+
+// Lane support (SOT-913): the lock/queue paths can be split per lane (repo/レーン) so
+// that detached/parallel drain (SOT-911 案②) can run without sharing a single lock/queue.
+// The default lane keeps the historical paths (runner.lock / runner.queue.json) for
+// backward compatibility; a non-default lane gets independent, lane-suffixed paths.
+const DEFAULT_LANE = 'default';
+
+/**
+ * Resolve the runner lane. Accepts an explicit lane string, an env object, or
+ * (when omitted) reads `process.env.RUNNER_LANE`. The lane is sanitized to
+ * `[a-zA-Z0-9_-]` so it can never escape LOG_DIR; empty/unknown maps to DEFAULT_LANE.
+ */
+function resolveLane(laneOrEnv?: string | NodeJS.ProcessEnv): string {
+  let raw: string | undefined;
+  if (typeof laneOrEnv === 'string') {
+    raw = laneOrEnv;
+  } else if (laneOrEnv && typeof laneOrEnv === 'object') {
+    raw = laneOrEnv.RUNNER_LANE;
+  } else {
+    raw = process.env.RUNNER_LANE;
+  }
+  const sanitized = (raw || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  return sanitized && sanitized !== DEFAULT_LANE ? sanitized : DEFAULT_LANE;
+}
+
+/** Lock file path for a given lane (default lane → historical `runner.lock`). */
+function laneLockFile(lane?: string): string {
+  const l = resolveLane(lane);
+  return path.join(LOG_DIR, l === DEFAULT_LANE ? 'runner.lock' : `runner.${l}.lock`);
+}
+
+/** Queue file path for a given lane (default lane → historical `runner.queue.json`). */
+function laneQueueFile(lane?: string): string {
+  const l = resolveLane(lane);
+  return path.join(LOG_DIR, l === DEFAULT_LANE ? 'runner.queue.json' : `runner.${l}.queue.json`);
+}
+
+const LOCK_FILE = laneLockFile();
+const QUEUE_FILE = laneQueueFile();
 const HISTORY_FILE = path.join(LOG_DIR, 'runner.queue.history.json');
 const MAX_QUEUE_HISTORY = 50;  // cap on persisted past-queue (dequeued) entries
 const USAGE_LIMIT_FILE = path.join(LOG_DIR, 'runner.usage-limit.json');
@@ -1939,6 +1976,10 @@ async function drainQueue(): Promise<void> {
 export {
   SKIPPED_LOCKED,
   LOG_DIR,
+  DEFAULT_LANE,
+  resolveLane,
+  laneLockFile,
+  laneQueueFile,
   LOCK_FILE,
   QUEUE_FILE,
   HISTORY_FILE,

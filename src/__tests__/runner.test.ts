@@ -36,6 +36,41 @@ describe('runner', () => {
     jest.restoreAllMocks();
   });
 
+  describe('lane resolution (SOT-913)', () => {
+    it('default lane keeps the historical lock/queue paths', () => {
+      expect(runner.LOCK_FILE.endsWith('runner.lock')).toBe(true);
+      expect(runner.QUEUE_FILE.endsWith('runner.queue.json')).toBe(true);
+      expect(runner.resolveLane()).toBe(runner.DEFAULT_LANE);
+      expect(runner.resolveLane('')).toBe(runner.DEFAULT_LANE);
+      expect(runner.resolveLane('default')).toBe(runner.DEFAULT_LANE);
+      expect(runner.laneLockFile()).toBe(runner.LOCK_FILE);
+      expect(runner.laneQueueFile()).toBe(runner.QUEUE_FILE);
+    });
+
+    it('non-default lane produces independent lock/queue paths', () => {
+      const lockSim = runner.laneLockFile('sim');
+      const queueSim = runner.laneQueueFile('sim');
+      expect(lockSim.endsWith('runner.sim.lock')).toBe(true);
+      expect(queueSim.endsWith('runner.sim.queue.json')).toBe(true);
+      expect(lockSim).not.toBe(runner.LOCK_FILE);
+      expect(queueSim).not.toBe(runner.QUEUE_FILE);
+      expect(lockSim.startsWith(runner.LOG_DIR)).toBe(true);
+    });
+
+    it('reads the lane from an env object via RUNNER_LANE', () => {
+      expect(runner.resolveLane({ RUNNER_LANE: 'fast' })).toBe('fast');
+      expect(runner.resolveLane({})).toBe(runner.DEFAULT_LANE);
+    });
+
+    it('sanitizes the lane so it cannot escape LOG_DIR', () => {
+      // '../evil' → non [a-zA-Z0-9_-] chars stripped → 'evil', stays inside LOG_DIR
+      expect(runner.resolveLane('../evil')).toBe('evil');
+      const lock = runner.laneLockFile('../evil');
+      expect(lock.startsWith(runner.LOG_DIR)).toBe(true);
+      expect(lock.includes('..')).toBe(false);
+    });
+  });
+
   describe('acquireLock', () => {
     it('returns true when lock file does not exist', () => {
       fs.existsSync.mockImplementation((path: string) => path === runner.LOG_DIR); // log dir exists, lock file doesn't
