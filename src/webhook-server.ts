@@ -10,6 +10,7 @@ import dotenv from 'dotenv';
 import { getSecret, initSecrets } from './config/secrets.js';
 import { DiscordNotifier } from './lib/discordNotifier.js';
 import { verifyDiscordSignature } from './lib/discordInteractions.js';
+import { timingSafeEqualStr } from './lib/timingSafeEqual.js';
 import { routeInteraction } from './lib/discordCommandRouter.js';
 import { isTerminalState, isHoldState } from './lib/issueState.js';
 import * as runner from './runner.js';
@@ -313,7 +314,8 @@ function verifyLinearSignature(req: any): boolean {
     .createHmac('sha256', getSecret('LINEAR_WEBHOOK_SECRET') as string)
     .update(req.rawBody || '')
     .digest('hex');
-  return signature === expected;
+  // Constant-time comparison to avoid an HMAC timing side-channel (SOT-935).
+  return timingSafeEqualStr(signature, expected);
 }
 
 if (!getSecret('LINEAR_WEBHOOK_SECRET')) {
