@@ -426,6 +426,32 @@ Claude Code must NEVER implement code or run tests directly, regardless of task 
 Do not expose Gemini CLI or Codex CLI as user-facing agents in Linear comments.
 From the user's perspective, Claude Code is handling the task.
 
+### Parallel Execution Policy
+
+承認済みの並列化方針（案①）。並列化の効果は **「Claude を専有しない並列」だけ** に出る、という前提を運用ルールとして固定する。
+
+#### 大前提: Claude 利用上限は account-global
+
+Claude の利用上限はアカウント全体（account-global）で共有される。したがって Claude 自身の計算を並列に増やしても、複数の処理が同じ上限を **N 倍速で食い潰す** だけで、スループットは上がらない。並列化してよいのは「Claude の計算を専有しない待ち/読取り主体の処理」に限る。
+
+#### ルール
+
+1. **read-only な調査・検証は並列 fan-out 可（推奨）**
+   - 対象: コード調査、受入チェック（acceptance check）、複数 repo の live 検証など、**読取り・待ち主体**の作業。
+   - 方法: 1 つの run 内で sub-agent（`Agent` tool, 例: `Explore` / `acceptance-checker` / `repo-scanner`）に **read-only で並列 fan-out** する。
+   - 理由: I/O・ネットワーク待ちが主で Claude 本体の計算を専有しないため、並列化が実時間短縮に効く。
+   - 制約: sub-agent には **書き込み（実装/git/PR）を一切させない**。結論のみ親に集約する。
+
+2. **書き込み（実装・git・PR）は単線**
+   - 実装、コミット、ブランチ操作、PR 作成/merge は **直列（単線）** で行う。
+   - **別 repo の作業に限り lane 並列を許可**（repo ごとに独立した作業 lane）。
+   - **同一 repo / 同一 branch は必ず直列**。並列でファイル/git を触らない（競合・破損防止）。
+
+3. **生成量が多い作業（Claude 計算主体）は単線で受容**
+   - 大量のコード生成・長文生成など Claude の計算が主体の作業は、並列化しても account-global 上限に N 倍速で当たるだけなので、**単線で受容**する（並列化しない）。
+
+この方針は既存の委譲フロー（Gemini=実装 / Codex=検証）と矛盾しない。read-only fan-out は Claude Code の調査・検証の補助であり、実装は引き続き Gemini、検証/修正は引き続き Codex に委譲する（Worker Non-Response Fallback Policy はそのまま適用）。
+
 ### Local Files Used For Linear Work
 
 For each Linear issue, Claude Code may create a local work note:
