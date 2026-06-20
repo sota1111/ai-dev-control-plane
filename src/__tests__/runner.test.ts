@@ -72,6 +72,81 @@ describe('runner', () => {
     });
   });
 
+  describe('serialization scope switch (SOT-931, 案A)', () => {
+    it('defaults to repo scope when RUNNER_SERIALIZE_SCOPE is unset/unknown', () => {
+      expect(runner.resolveSerializeScope({})).toBe(runner.SERIALIZE_SCOPE_REPO);
+      expect(runner.resolveSerializeScope({ RUNNER_SERIALIZE_SCOPE: '' })).toBe(runner.SERIALIZE_SCOPE_REPO);
+      expect(runner.resolveSerializeScope({ RUNNER_SERIALIZE_SCOPE: 'nonsense' })).toBe(runner.SERIALIZE_SCOPE_REPO);
+      // explicit repo / branch (case-insensitive, trimmed)
+      expect(runner.resolveSerializeScope({ RUNNER_SERIALIZE_SCOPE: 'repo' })).toBe(runner.SERIALIZE_SCOPE_REPO);
+      expect(runner.resolveSerializeScope({ RUNNER_SERIALIZE_SCOPE: '  Branch ' })).toBe(runner.SERIALIZE_SCOPE_BRANCH);
+    });
+
+    it('repo scope: all branches of one repo share the same lane (直列)', () => {
+      const a = runner.serializationLaneKey({ repo: 'booking-monitor', branch: 'feat/a', scope: 'repo' });
+      const b = runner.serializationLaneKey({ repo: 'booking-monitor', branch: 'feat/b', scope: 'repo' });
+      expect(a).toBe('booking-monitor');
+      expect(a).toBe(b); // same lane → serialized
+    });
+
+    it('branch scope: different branches get independent lanes (並行可), same branch shares a lane (直列)', () => {
+      const a = runner.serializationLaneKey({ repo: 'booking-monitor', branch: 'feat/a', scope: 'branch' });
+      const b = runner.serializationLaneKey({ repo: 'booking-monitor', branch: 'feat/b', scope: 'branch' });
+      const a2 = runner.serializationLaneKey({ repo: 'booking-monitor', branch: 'feat/a', scope: 'branch' });
+      expect(a).not.toBe(b);            // 別 branch → 別 lane
+      expect(a).toBe(a2);               // 同一 branch → 同一 lane
+      expect(a.startsWith('booking-monitor')).toBe(true);
+    });
+
+    it('unknown/empty repo maps to DEFAULT_LANE under either scope', () => {
+      expect(runner.serializationLaneKey({ repo: '', branch: 'x', scope: 'branch' })).toBe(runner.DEFAULT_LANE);
+      expect(runner.serializationLaneKey({ scope: 'repo' })).toBe(runner.DEFAULT_LANE);
+    });
+
+    it('branch-scope lane key stays lane-safe (cannot escape LOG_DIR)', () => {
+      const key = runner.serializationLaneKey({ repo: '../evil', branch: '../../x', scope: 'branch' });
+      const lock = runner.laneLockFile(key);
+      expect(key.includes('/')).toBe(false);
+      expect(key.includes('..')).toBe(false);
+      expect(lock.startsWith(runner.LOG_DIR)).toBe(true);
+    });
+
+    it('explicit RUNNER_LANE always wins over scope derivation (backward compat)', () => {
+      const lane = runner.resolveLane({
+        RUNNER_LANE: 'sim',
+        RUNNER_SERIALIZE_SCOPE: 'branch',
+        RUNNER_REPO: 'booking-monitor',
+        RUNNER_BRANCH: 'feat/a'
+      });
+      expect(lane).toBe('sim');
+    });
+
+    it('branch scope derives lane from RUNNER_REPO/RUNNER_BRANCH when no explicit lane', () => {
+      const lane = runner.resolveLane({
+        RUNNER_SERIALIZE_SCOPE: 'branch',
+        RUNNER_REPO: 'booking-monitor',
+        RUNNER_BRANCH: 'feat/a'
+      });
+      expect(lane).toBe('booking-monitor--feata');
+      // distinct branch → distinct lane → distinct lock/queue files
+      const other = runner.resolveLane({
+        RUNNER_SERIALIZE_SCOPE: 'branch',
+        RUNNER_REPO: 'booking-monitor',
+        RUNNER_BRANCH: 'feat/b'
+      });
+      expect(runner.laneLockFile(lane)).not.toBe(runner.laneLockFile(other));
+    });
+
+    it('repo scope (default) keeps DEFAULT_LANE even with RUNNER_REPO/RUNNER_BRANCH set', () => {
+      const lane = runner.resolveLane({
+        RUNNER_REPO: 'booking-monitor',
+        RUNNER_BRANCH: 'feat/a'
+      });
+      expect(lane).toBe(runner.DEFAULT_LANE);
+      expect(runner.laneLockFile(lane)).toBe(runner.LOCK_FILE);
+    });
+  });
+
   describe('acquireLock', () => {
     it('returns true when lock file does not exist', () => {
       fs.existsSync.mockImplementation((path: string) => path === runner.LOG_DIR); // log dir exists, lock file doesn't
