@@ -22,6 +22,27 @@ Please process Linear issues using the following procedure.
 - Claude Code takes over from decomposition onward: decomposition judgment, child Issue creation, worker delegation, Linear status sync, PR flow, and final reporting.
 - Do not repeat the task check for the same issue within one run.
 
+---
+
+## Parallel Execution Policy
+
+承認済みの並列化方針（案①）。Claude 利用上限は **account-global**（アカウント全体で共有）のため、
+並列化の効果が出るのは「**Claude を専有しない並列**」だけ、という前提を固定する。
+Claude 自身の計算を並列に増やしても、同じ上限を N 倍速で食い潰すだけでスループットは上がらない。
+
+1. **read-only な調査・検証は並列 fan-out 可（推奨）**
+   - 対象: コード調査・受入チェック・複数 repo の live 検証など、読取り/待ち主体の作業。
+   - 方法: 1 run 内で sub-agent（`Agent` tool, 例: `Explore` / `acceptance-checker` / `repo-scanner`）に
+     read-only で並列 fan-out し、結論のみ親に集約する。sub-agent に書き込みはさせない。
+2. **書き込み（実装・git・PR）は単線**
+   - 実装/commit/branch/PR は直列。**別 repo の時だけ lane 並列可**。同一 repo / 同一 branch は必ず直列。
+3. **生成量が多い作業（Claude 計算主体）は単線で受容**
+   - 大量のコード/長文生成は並列化しても上限に N 倍速で当たるだけなので単線で受容する。
+
+この方針は既存の委譲フロー（Gemini=実装 / Codex=検証）と矛盾しない。read-only fan-out は
+Claude Code の調査・検証の補助であり、実装は Gemini、検証/修正は Codex への委譲を維持する。
+
+---
 
 Use the MCP tool `mcp__linear-server__list_issues` to retrieve issues.
 
