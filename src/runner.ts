@@ -28,6 +28,7 @@ interface RunResultType {
   USAGE_LIMIT_RETRY: string;
   NON_RETRYABLE_LIMIT: string;
   FAILED: string;
+  DETACHED: string;
 }
 
 const SKIPPED_LOCKED = 75;  // exit code when lock is not available
@@ -39,7 +40,8 @@ const RUN_RESULT: RunResultType = {
   LOCK_CONFLICT: 'LOCK_CONFLICT',
   USAGE_LIMIT_RETRY: 'USAGE_LIMIT_RETRY',
   NON_RETRYABLE_LIMIT: 'NON_RETRYABLE_LIMIT',
-  FAILED: 'FAILED'
+  FAILED: 'FAILED',
+  DETACHED: 'DETACHED'
 };
 
 interface CompletionResult {
@@ -147,6 +149,11 @@ const INFLIGHT_FILE = path.join(LOG_DIR, 'runner.inflight.json');
 const CURRENT_ISSUE_FILE = path.join(LOG_DIR, 'current-issue.json');
 // Leaked inflight entries (process crashed without cleanup) older than this are reaped.
 const INFLIGHT_TTL_MS = parseInt(process.env.INFLIGHT_TTL_MS || String(2 * 60 * 60 * 1000), 10); // 2 hours
+// long-run detached execution (SOT-914 / SOT-911 案②): issues carrying this Linear label are
+// launched detached so the JS lock is released immediately (lock hold ≈ startup time, not sim time).
+const LONG_RUN_LABEL = process.env.LONG_RUN_LABEL || 'long-run';
+// Per-issue sentinel files for in-flight detached runs ({ issueId, pid, startedAt }).
+const DETACHED_DIR = path.join(LOG_DIR, 'detached');
 
 function log(tag: string, message: string, context: Record<string, any> = {}) {
   try {
@@ -1312,9 +1319,50 @@ function reapStaleInflight(): string[] {
   }
   if (reaped.length > 0) {
     saveInflightRecords(kept);
+    // A reaped inflight entry means its (possibly detached) run leaked — drop its sentinel too.
+    for (const id of reaped) clearDetachedSentinel(id);
     log('REAPER', `reapStaleInflight: cleared ${reaped.length} leaked inflight entr${reaped.length === 1 ? 'y' : 'ies'}: ${reaped.join(', ')}`);
   }
+  // Independently sweep detached sentinels whose recorded PID is no longer alive (the detached
+  // run finished or crashed without removing its own sentinel). No-op while a run holds the lock.
+  reapDeadDetachedSentinels();
   return reaped;
+}
+
+// Remove detached sentinels whose recorded PID is dead. Returns the cleared issueIds.
+function reapDeadDetachedSentinels(): string[] {
+  const cleared: string[] = [];
+  try {
+    if (!fs.existsSync(DETACHED_DIR)) return cleared;
+    for (const file of fs.readdirSync(DETACHED_DIR)) {
+      if (!file.endsWith('.json')) continue;
+      let record: DetachedSentinel | null = null;
+      try {
+        record = JSON.parse(fs.readFileSync(path.join(DETACHED_DIR, file), 'utf8'));
+      } catch {
+        record = null;
+      }
+      if (!record || !record.issueId) continue;
+      if (record.pid == null) continue; // unknown pid: leave for the inflight-TTL path
+      let isDead = false;
+      try {
+        process.kill(record.pid, 0);
+      } catch (e: any) {
+        if (e.code === 'ESRCH') isDead = true;
+      }
+      if (isDead) {
+        clearDetachedSentinel(record.issueId);
+        removeInflight(record.issueId);
+        cleared.push(record.issueId);
+      }
+    }
+    if (cleared.length > 0) {
+      log('REAPER', `reapDeadDetachedSentinels: cleared ${cleared.length} finished detached run(s): ${cleared.join(', ')}`);
+    }
+  } catch (err: any) {
+    log('REAPER', `reapDeadDetachedSentinels ERROR: ${err.message}`);
+  }
+  return cleared;
 }
 
 function setCurrentIssue(item: QueueItem): void {
@@ -1368,6 +1416,56 @@ function removeInflight(issueId: string): void {
 
 function isInflight(issueId: string): boolean {
   return loadInflight().includes(issueId);
+}
+
+// --- Detached long-run sentinels (SOT-914) -------------------------------------------------
+// A sentinel marks an issue whose run was launched detached (the heavy process keeps running
+// after the JS lock is released). The reaper clears sentinels for dead PIDs / reaped inflight.
+
+interface DetachedSentinel {
+  issueId: string;
+  pid: number | null;
+  startedAt: string;
+}
+
+function sanitizeIssueIdForFile(issueId: string): string {
+  return issueId.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function detachedSentinelFile(issueId: string): string {
+  return path.join(DETACHED_DIR, `${sanitizeIssueIdForFile(issueId)}.json`);
+}
+
+function writeDetachedSentinel(issueId: string, pid: number | undefined): void {
+  try {
+    if (!fs.existsSync(DETACHED_DIR)) fs.mkdirSync(DETACHED_DIR, { recursive: true });
+    const record: DetachedSentinel = { issueId, pid: pid ?? null, startedAt: new Date().toISOString() };
+    const target = detachedSentinelFile(issueId);
+    const tmp = target + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(record, null, 2));
+    fs.renameSync(tmp, target);
+  } catch (err: any) {
+    log('RUNNER', `writeDetachedSentinel ERROR: ${err.message}`, { issue: issueId });
+  }
+}
+
+function clearDetachedSentinel(issueId: string): void {
+  try {
+    const target = detachedSentinelFile(issueId);
+    if (fs.existsSync(target)) fs.unlinkSync(target);
+  } catch (err: any) {
+    log('RUNNER', `clearDetachedSentinel ERROR: ${err.message}`, { issue: issueId });
+  }
+}
+
+function loadDetachedSentinel(issueId: string): DetachedSentinel | null {
+  try {
+    const target = detachedSentinelFile(issueId);
+    if (!fs.existsSync(target)) return null;
+    return JSON.parse(fs.readFileSync(target, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 function isQueuedOrRunning(issueId: string): boolean {
@@ -1548,6 +1646,7 @@ ${childList}
 interface EligibilityResult {
   eligible: boolean;
   reason?: string;
+  isLongRun?: boolean;
 }
 
 async function getIssueExecutionEligibility(issueId: string): Promise<EligibilityResult> {
@@ -1559,6 +1658,7 @@ async function getIssueExecutionEligibility(issueId: string): Promise<Eligibilit
           identifier
           archivedAt
           state { name type }
+          labels { nodes { name } }
         }
       }
     `;
@@ -1570,6 +1670,7 @@ async function getIssueExecutionEligibility(issueId: string): Promise<Eligibilit
     }
 
     const { archivedAt, state } = data.issue;
+    const isLongRun = (data.issue.labels?.nodes || []).some((l: any) => l && l.name === LONG_RUN_LABEL);
 
     if (archivedAt) {
       removeFromQueue(issueId);
@@ -1590,9 +1691,10 @@ async function getIssueExecutionEligibility(issueId: string): Promise<Eligibilit
       return { eligible: false, reason: 'hold state (In Review) before run' };
     }
 
-    return { eligible: true };
+    return { eligible: true, isLongRun };
   } catch (err: any) {
-    // Fail open: if Linear API is unavailable, allow execution to proceed
+    // Fail open for execution, fail closed for long-run: if Linear API is unavailable, allow
+    // execution to proceed but on the normal synchronous path (isLongRun stays undefined/false).
     log('ERROR', `getIssueExecutionEligibility failed: ${err.message}`, { issue: issueId });
     return { eligible: true };
   }
@@ -1607,7 +1709,9 @@ interface TriggerResult {
   output: string;
 }
 
-async function triggerRun(issueId: string, options: TriggerOptions = {}): Promise<TriggerResult> {
+// Build the environment for a run_auto.sh launch: inject WEBHOOK_ISSUE_ID and resolve the
+// Linear project -> target repo (fail-open). Shared by triggerRun and triggerRunDetached.
+async function buildRunEnv(issueId: string): Promise<Record<string, string | undefined>> {
   // SECURITY: Pass issueId only via environment variable, never as shell argument
   const env: Record<string, string | undefined> = { ...process.env, WEBHOOK_ISSUE_ID: issueId };
 
@@ -1649,6 +1753,11 @@ async function triggerRun(issueId: string, options: TriggerOptions = {}): Promis
   } catch (err: any) {
     log('RUNNER', `project->repo resolution error (fail-open): ${err.message}`, { issue: issueId });
   }
+  return env;
+}
+
+async function triggerRun(issueId: string, options: TriggerOptions = {}): Promise<TriggerResult> {
+  const env = await buildRunEnv(issueId);
 
   const projectRoot = path.join(__dirname, '..');
   const startedAt = new Date().toISOString();
@@ -1701,6 +1810,40 @@ async function triggerRun(issueId: string, options: TriggerOptions = {}): Promis
   });
 }
 
+// long-run detached launch (SOT-914): spawn run_auto.sh in its own process group, fully detach
+// (unref + stdio ignore) and resolve IMMEDIATELY without awaiting close. The caller releases the
+// JS lock right away so the runner can advance; the detached run is tracked by an inflight entry
+// + a sentinel, and reclaimed by the reaper. Returns the child pid (undefined on spawn failure).
+async function triggerRunDetached(issueId: string, options: TriggerOptions = {}): Promise<{ pid: number | undefined }> {
+  const env = await buildRunEnv(issueId);
+  const projectRoot = path.join(__dirname, '..');
+  const startedAt = new Date().toISOString();
+
+  const args = ['scripts/ai/run_auto.sh'];
+  if (options.resume) {
+    args.push('--resume');
+  }
+
+  try {
+    const child = spawn('bash', args, {
+      env,
+      cwd: projectRoot,
+      detached: true,
+      stdio: 'ignore'
+    });
+    // Don't let the detached child keep the parent's event loop alive.
+    child.unref();
+    child.on('error', (err: any) => {
+      log('RUNNER', `Detached run_auto.sh spawn error=${err.message} startedAt=${startedAt}`, { issue: issueId });
+    });
+    log('RUNNER', `Spawned DETACHED run_auto.sh for issueId=${issueId} pid=${child.pid} startedAt=${startedAt}${options.resume ? ' (resume)' : ''}`, { issue: issueId });
+    return { pid: child.pid };
+  } catch (err: any) {
+    log('RUNNER', `Failed to spawn DETACHED run_auto.sh error=${err.message} startedAt=${startedAt}`, { issue: issueId });
+    return { pid: undefined };
+  }
+}
+
 interface ClassifyRunArgs {
   code: number;
   output: string;
@@ -1742,20 +1885,39 @@ function classifyRunResult({ code, output, completion }: ClassifyRunArgs): Class
   return { kind: RUN_RESULT.FAILED, code, classification };
 }
 
-// Returns true when the run was blocked by the global run_auto.sh OS flock
-// (another run is active). drainQueue uses this to stop the current pass instead
-// of hammering the same item, since no queued item can run while the lock is held.
-async function runItem(item: QueueItem): Promise<boolean> {
+// Outcome of a runItem call.
+// - lockConflict: the run was blocked by the global run_auto.sh OS flock (another run is active);
+//   drainQueue uses this to stop the current pass instead of hammering the same item.
+// - detached: the issue was launched in long-run detached mode (SOT-914); the JS lock should be
+//   released immediately but the inflight entry + sentinel must be KEPT (the reaper owns cleanup).
+interface RunItemOutcome {
+  lockConflict: boolean;
+  detached: boolean;
+}
+
+async function runItem(item: QueueItem): Promise<RunItemOutcome> {
   const { issueId } = item;
 
   // Check current Linear state before executing
   const eligibility = await getIssueExecutionEligibility(issueId);
   if (!eligibility.eligible) {
     log('RUN', `skipped: ${eligibility.reason}`, { trigger: item.trigger || 'queue', issue: issueId });
-    return false;
+    return { lockConflict: false, detached: false };
   }
 
   const isResume = item.reason === 'usage_limit';
+
+  // long-run detached mode (SOT-914): launch detached, record inflight + sentinel, and return
+  // immediately so the caller releases the lock right away (lock hold ≈ startup time, not sim time).
+  if (eligibility.isLongRun) {
+    log('RUN', `long-run detected (label="${LONG_RUN_LABEL}") — launching detached`, { trigger: item.trigger || 'queue', issue: issueId });
+    addInflight(issueId); // idempotent; ensures tracking regardless of caller
+    const { pid } = await triggerRunDetached(issueId, { resume: isResume });
+    writeDetachedSentinel(issueId, pid);
+    log('RUN', `detached run started pid=${pid ?? 'unknown'} — releasing lock`, { trigger: item.trigger || 'queue', issue: issueId });
+    return { lockConflict: false, detached: true };
+  }
+
   if (isResume) {
     log('RESUME', 'issue-rerun start', { issue: issueId, retryAt: item.retryAt || null });
     log('RUN', 'start (resume)', { trigger: item.trigger || 'queue', issue: issueId });
@@ -1798,7 +1960,7 @@ async function runItem(item: QueueItem): Promise<boolean> {
         queueGroup: item.queueGroup ?? null,
         queueGroupOrder: item.queueGroupOrder ?? null
       });
-      return true; // signal drainQueue to stop this pass
+      return { lockConflict: true, detached: false }; // signal drainQueue to stop this pass
     }
 
     case RUN_RESULT.USAGE_LIMIT_RETRY: {
@@ -1870,7 +2032,7 @@ async function runItem(item: QueueItem): Promise<boolean> {
       log('RUN', `failed exit=${result.code}`, { trigger: item.trigger || 'queue', issue: issueId });
       break;
   }
-  return false;
+  return { lockConflict: false, detached: false };
 }
 
 async function drainQueue(): Promise<void> {
@@ -1941,11 +2103,11 @@ async function drainQueue(): Promise<void> {
       });
       break;
     }
-    let lockConflict = false;
+    let outcome: RunItemOutcome = { lockConflict: false, detached: false };
     try {
       addInflight(item.issueId);
       setCurrentIssue(item);
-      lockConflict = await runItem(item);
+      outcome = await runItem(item);
       processedCount++;
       // Track this item's issueId as the last processed group anchor for child issues
       lastProcessedGroup = item.issueId || item.issueIdentifier || null;
@@ -1954,13 +2116,15 @@ async function drainQueue(): Promise<void> {
       lastProcessedGroup = null;
     } finally {
       clearCurrentIssue();
-      removeInflight(item.issueId);
+      // For a detached long-run, the heavy process is still running — KEEP the inflight entry
+      // (and its sentinel) so the reaper, not this finally, owns cleanup. Always release the lock.
+      if (!outcome.detached) removeInflight(item.issueId);
       releaseLock();
     }
 
     // A global run_auto.sh flock is held by another active run — no queued item can
     // run right now. Stop this drain pass; the backed-off item retries later.
-    if (lockConflict) {
+    if (outcome.lockConflict) {
       log('QUEUE', 'drain: run_auto.sh lock held by another run, stopping pass (backed off)', { issue: item.issueId });
       break;
     }
@@ -1994,6 +2158,8 @@ export {
   QUEUE_ITEM_TTL_DAYS,
   INFLIGHT_FILE,
   INFLIGHT_TTL_MS,
+  LONG_RUN_LABEL,
+  DETACHED_DIR,
   log,
   linearQuery,
   acquireLock,
@@ -2034,6 +2200,11 @@ export {
   removeInflight,
   isInflight,
   reapStaleInflight,
+  reapDeadDetachedSentinels,
+  detachedSentinelFile,
+  writeDetachedSentinel,
+  clearDetachedSentinel,
+  loadDetachedSentinel,
   isQueuedOrRunning,
   getCurrentIssue,
   clearCurrentIssue,
@@ -2042,6 +2213,7 @@ export {
   getIssueExecutionEligibility,
   getIssueProjectName,
   triggerRun,
+  triggerRunDetached,
   runItem,
   drainQueue,
   RUN_RESULT,
