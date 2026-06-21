@@ -89,6 +89,7 @@ Before running, write the full instruction into `prompts/codex/debug.md`.
 - **Bounded retry.** Retry a non-responsive worker AT MOST once before falling back. Never loop on a hung or failing worker.
 - **Quality unchanged.** All Quality Gates (lint / typecheck / test / diff review / acceptance criteria) apply identically whether the work was done by the worker or by Claude Code fallback.
 - **Disclosure / audit.** When Claude Code falls back, it MUST record (a) which worker was non-responsive, (b) the detected failure mode, and (c) that Claude Code performed the work directly — in the relevant worker report file (the audit sink). Do NOT post this fallback disclosure as a Linear comment: Linear receives only the work result. The human needs the outcome of the delegation, not the fallback mechanics.
+- **All-Claude mode (`ALL_CLAUDE_MODE`).** Setting the env flag `ALL_CLAUDE_MODE` to a truthy value (`1|true|yes|on`, case-insensitive) makes BOTH `scripts/ai/run_gemini.sh` and `scripts/ai/run_codex.sh` exit immediately with the non-response code `75`, so Claude Code intentionally performs ALL implementation and verification work directly under this policy. It is the superset of `GEMINI_DISABLED` (which disables only Gemini) and is evaluated before `GEMINI_DISABLED` and the usage-limit cooldown checks. Default off = workers run as usual. Use this when running everything on Claude.
 
 ---
 

@@ -190,6 +190,19 @@ JS のロックを長時間占有しないよう、起動直後にロックを�
 - 注意: 有効時は `long-run` の待機/長時間タスクも前景同期で走るため、SOT-925 の「wall-clock 膨張」トレード
   オフが復活する。安定性を優先して並列を一時停止する目的のフラグであり、恒常設定ではない。
 
+### 全Claude担当モード（ALL_CLAUDE_MODE / SOT-993）
+
+環境変数 `ALL_CLAUDE_MODE` を真値（`1` / `true` / `yes` / `on`、大小無視）にすると、`scripts/ai/run_gemini.sh`
+と `scripts/ai/run_codex.sh` の**両方**が CLI を起動せずワーカー非応答コード `75` で即終了する。これにより
+CLAUDE.md「Worker Non-Response Fallback Policy」が発動し、**実装も検証も Claude Code が直接担当する**。
+
+- `GEMINI_DISABLED`（Gemini のみ無効化）の上位版であり、Codex も含めて全ワーカー委譲を停止する単一マスター
+  スイッチ。Claude のプラン変更等で全作業を Claude に寄せたいときに env 1 つで切替えられる（可逆）。
+- 評価順は両スクリプトとも `WORKER_NONRESPONSE_EXIT=75` 定義直後、`GEMINI_DISABLED` / cooldown pre-check の
+  **前**。最初の意図的短絡として効く。
+- **既定は無効 = 後方互換**。未設定時は両ワーカーが従来どおり起動する。`RUNNER_STABLE_MODE`（並列の停止）とは
+  直交する別軸のフラグ（こちらはワーカー委譲そのものの停止）。
+
 ### 運用ルール: 待機 / 長時間タスクは `long-run` を付ける（SOT-925）
 
 **待機タスク（ScheduleWakeup 等で待つ）や長時間タスクには必ず `long-run` ラベルを付け、デタッチ実行に

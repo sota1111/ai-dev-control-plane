@@ -1,47 +1,38 @@
 # Worker Report
 
 ## Summary
-Task check + verification for **SOT-935「リファクタリング」** (脆弱性見直し＋リファクタ; plan then implement).
+SOT-993 `ALL_CLAUDE_MODE` verification passed for the requested shell behavior. Both runner scripts parse successfully, truthy `ALL_CLAUDE_MODE` exits with non-response code 75 before invoking Gemini/Codex CLI, and the master flag is placed immediately after `WORKER_NONRESPONSE_EXIT=75` before `GEMINI_DISABLED` / cooldown checks. Documentation references are present in `.env.example`, `CLAUDE.md`, and `docs/runner-queue.md`.
 
-**Worker non-response disclosure (audit sink):** the initial task check + verification were delegated
-to Codex CLI (`scripts/ai/run_codex.sh`) per policy, but Codex was **non-responsive** — exit code **75**
-(`CODEX_COOLDOWN_ACTIVE`, usage-limit cooldown until epoch 1782000900, ~7h out). Retrying is futile.
-Gemini CLI is a known permanently-ineligible tier (exit 75 IneligibleTierError). Per the Worker
-Non-Response Fallback Policy, Claude Code performed the task check, implementation, and verification
-directly. All Quality Gates were applied identically.
-
-**Verdict: SOT-935 is actionable.** Concrete vulnerability identified and fixed:
-`verifyLinearSignature` compared the HMAC-SHA256 signature with `===` (non-constant-time) → timing
-side-channel that can leak the expected signature byte-by-byte. Fixed via constant-time comparison.
+No implementation fixes were required.
 
 ## Changed Files
-- `src/lib/timingSafeEqual.ts` — new `timingSafeEqualStr(a, b)` helper using `crypto.timingSafeEqual`
-  (type-guards non-strings, returns false on length mismatch without throwing).
-- `src/webhook-server.ts` — `verifyLinearSignature` now uses `timingSafeEqualStr(signature, expected)`
-  instead of `signature === expected`.
-- `src/__tests__/timingSafeEqual.test.ts` — new unit tests (equal, unequal-same-length,
-  different-length no-throw, empty, non-string inputs).
-- `docs/ai/10_plan.md` — SOT-935 section: vulnerability finding + scoped refactor plan
-  (runner.ts god-file split deferred as follow-up; not auto-rewritten while the runner is live).
+- `docs/ai/60_worker_codex_report.md` - verification report updated.
 
 ## Commands Run
-- `npm run lint` → exit 0
-- `npm run typecheck` (tsc --noEmit) → exit 0
-- `npm test` → exit 0 (Test Suites: 30 passed, Tests: 439 passed, incl. new timingSafeEqual suite)
-- `bash scripts/ai/run_codex.sh` → exit 75 (cooldown; fallback to Claude Code)
+- `git status --short` - confirmed existing dirty worktree includes unrelated changes; only this report was edited by this worker.
+- `rg -n "ALL_CLAUDE_MODE|GEMINI_DISABLED|cooldown|WORKER_NONRESPONSE_EXIT" scripts/ai/run_gemini.sh scripts/ai/run_codex.sh .env.example CLAUDE.md docs/runner-queue.md` - confirmed code placement and documentation references.
+- `bash -n scripts/ai/run_gemini.sh` - pass, exit 0.
+- `bash -n scripts/ai/run_codex.sh` - pass, exit 0.
+- `command -v shellcheck || true` - no `shellcheck` found; skipped.
+- `test -f prompts/gemini/implement.md` - pass.
+- `test -f prompts/codex/debug.md` - pass.
+- `ALL_CLAUDE_MODE=1 TARGET_REPO=/workspaces/ai-dev-control-plane bash scripts/ai/run_gemini.sh; echo $?` - output included `ALL_CLAUDE_MODE: all worker delegation disabled by env flag, delegating to Claude`; exit 75.
+- `ALL_CLAUDE_MODE=true TARGET_REPO=/workspaces/ai-dev-control-plane bash scripts/ai/run_codex.sh; echo $?` - output included `ALL_CLAUDE_MODE: all worker delegation disabled by env flag, delegating to Claude`; exit 75.
+- `nl -ba scripts/ai/run_gemini.sh | sed -n '56,92p'` - confirmed `ALL_CLAUDE_MODE` case at lines 63-72, before `GEMINI_DISABLED` and cooldown.
+- `nl -ba scripts/ai/run_codex.sh | sed -n '56,90p'` - confirmed `ALL_CLAUDE_MODE` case at lines 63-72, before cooldown.
+- `npm run lint` - pass, exit 0.
+- `npm run typecheck` - pass, exit 0.
+- `npm test` - fail, exit 1. 29 suites passed, 1 suite failed. Failures are in `src/__tests__/runner.test.ts` detached-mode tests with `TypeError: Cannot read properties of undefined (reading 'on')` at `src/runner.ts:668`.
 
 ## Acceptance Criteria
-- [x] 脆弱性の見直し — HMAC `===` timing side-channel identified.
-- [x] 修正実装 — constant-time `crypto.timingSafeEqual` comparison applied to Linear webhook verify.
-- [x] テスト — unit tests for the constant-time comparison helper.
-- [x] Plan して実装 — plan recorded in 10_plan.md, then implemented in the same PR.
+- [x] bash -n 構文チェック pass (両スクリプト)
+- [x] ALL_CLAUDE_MODE=1 で run_gemini.sh exit 75（Gemini 未起動）
+- [x] ALL_CLAUDE_MODE truthy で run_codex.sh exit 75（Codex 未起動）
+- [x] master flag が GEMINI_DISABLED / cooldown より前に評価される
+- [x] .env.example / CLAUDE.md / docs/runner-queue.md に記載
 
 ## Risks
-- The large `src/runner.ts` god-file (~2700 lines) is the main "継ぎ接ぎ" factor but is NOT auto-rewritten
-  here — doing so on a live runner is high-risk. Recommended as a separate, responsibility-scoped
-  follow-up (per-module small PRs). Documented in 10_plan.md.
-- Unrelated untracked file `scripts/ai/mobile_check.mjs` (stray from an earlier SOT-856 mobile run) is
-  intentionally NOT committed.
+`npm test` currently fails in unrelated runner detached-mode tests (`src/__tests__/runner.test.ts`) because mocked child process stdout is undefined when `triggerRun` attaches `child.stdout.on(...)`. This was not modified for SOT-993 and is outside the requested minimal verification scope, but it remains a repository-level test failure.
 
 ## Next Action
 READY_FOR_REVIEW
