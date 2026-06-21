@@ -60,6 +60,17 @@ else
 fi
 WORKER_NONRESPONSE_EXIT=75
 
+# --- All-Claude mode master flag (SOT-993) ---
+# Claude が全作業を担当する運用モード。`ALL_CLAUDE_MODE` を真値にすると Gemini/Codex 両ワーカーを
+# 一括無効化し、実装も検証も Claude Code が CLAUDE.md「Worker Non-Response Fallback Policy」で代行する。
+# このマスターフラグは GEMINI_DISABLED や cooldown より先に評価される短絡。真値は 1/true/yes/on（大小無視）。
+case "$(printf '%s' "${ALL_CLAUDE_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|on)
+    echo "ALL_CLAUDE_MODE: all worker delegation disabled by env flag, delegating to Claude" >&2
+    exit "$WORKER_NONRESPONSE_EXIT"
+    ;;
+esac
+
 # --- Gemini disable flag (SOT-957) ---
 # Google のプラン変更等で Gemini CLI が使えない期間、`GEMINI_DISABLED` を真値にすると Gemini を
 # 起動せず非応答コード 75 で即終了する。これにより CLAUDE.md「Worker Non-Response Fallback Policy」で

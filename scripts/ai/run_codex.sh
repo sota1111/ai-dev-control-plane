@@ -60,6 +60,17 @@ else
 fi
 WORKER_NONRESPONSE_EXIT=75
 
+# --- All-Claude mode master flag (SOT-993) ---
+# Claude が全作業を担当する運用モード。`ALL_CLAUDE_MODE` を真値にすると Gemini/Codex 両ワーカーを
+# 一括無効化し、実装も検証も Claude Code が CLAUDE.md「Worker Non-Response Fallback Policy」で代行する。
+# このマスターフラグは cooldown pre-check より先に評価される短絡。真値は 1/true/yes/on（大小無視）。
+case "$(printf '%s' "${ALL_CLAUDE_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|on)
+    echo "ALL_CLAUDE_MODE: all worker delegation disabled by env flag, delegating to Claude" >&2
+    exit "$WORKER_NONRESPONSE_EXIT"
+    ;;
+esac
+
 # --- Codex usage-limit cooldown pre-check (auto fallback / auto resume) ---
 # While Codex is usage-limited we skip invoking it and exit with the dedicated
 # non-response code so the orchestrator delegates to Claude. Once the reset time
