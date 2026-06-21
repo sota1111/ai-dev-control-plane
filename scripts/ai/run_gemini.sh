@@ -60,6 +60,17 @@ else
 fi
 WORKER_NONRESPONSE_EXIT=75
 
+# --- Gemini disable flag (SOT-957) ---
+# Google のプラン変更等で Gemini CLI が使えない期間、`GEMINI_DISABLED` を真値にすると Gemini を
+# 起動せず非応答コード 75 で即終了する。これにより CLAUDE.md「Worker Non-Response Fallback Policy」で
+# Claude フォールバックに委譲される。真値は 1/true/yes/on（大文字小文字無視）。未設定や他の値は従来動作。
+case "$(printf '%s' "${GEMINI_DISABLED:-}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|on)
+    echo "GEMINI_DISABLED: Gemini CLI disabled by env flag, delegating to Claude" >&2
+    exit "$WORKER_NONRESPONSE_EXIT"
+    ;;
+esac
+
 # --- Gemini usage-limit cooldown pre-check (auto fallback / auto resume) ---
 if [ -f "$GEMINI_COOLDOWN_FILE" ]; then
   NOW_EPOCH="$(date +%s)"
