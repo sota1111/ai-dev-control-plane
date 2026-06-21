@@ -183,11 +183,28 @@ function sanitizeLaneToken(raw?: string | null): string {
 }
 
 /**
+ * Stable operation mode master switch (SOT-947). When `RUNNER_STABLE_MODE` is enabled, the runner is
+ * forced into a fully-serial "stable運用" mode: it overrides ALL parallel/detach toggles to their
+ * serial values — `RUNNER_MAX_PARALLEL` clamps to 1 (no N-slot pool), `RUNNER_SERIALIZE_SCOPE` forces
+ * 'repo' (no per-branch lanes), `RUNNER_DEFAULT_DETACH` forces false, and the `long-run` label detach
+ * in `runItem` is disabled (long-run issues run synchronously in the foreground). This is a single
+ * kill-switch the human can flip to temporarily disable every concurrency path without unsetting each
+ * variable. Default false ⇒ all other toggles behave exactly as before (byte-for-byte 後方互換).
+ * Accepts '1' or 'true' (trim, case-insensitive), mirroring `resolveDefaultDetach`.
+ */
+function resolveStableMode(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = (env.RUNNER_STABLE_MODE || '').trim().toLowerCase();
+  return v === '1' || v === 'true';
+}
+
+/**
  * Resolve the active serialization scope. Reads `RUNNER_SERIALIZE_SCOPE` from the given env
  * (or `process.env`); anything other than the explicit 'branch' value maps to 'repo' so the
- * default stays the backward-compatible per-repo serialization.
+ * default stays the backward-compatible per-repo serialization. Under `RUNNER_STABLE_MODE` the
+ * scope is forced to 'repo' (SOT-947) so 同一 repo is always serial regardless of the env value.
  */
 function resolveSerializeScope(env: NodeJS.ProcessEnv = process.env): string {
+  if (resolveStableMode(env)) return SERIALIZE_SCOPE_REPO;
   const raw = (env.RUNNER_SERIALIZE_SCOPE || '').trim().toLowerCase();
   return raw === SERIALIZE_SCOPE_BRANCH ? SERIALIZE_SCOPE_BRANCH : SERIALIZE_SCOPE_REPO;
 }
@@ -195,9 +212,11 @@ function resolveSerializeScope(env: NodeJS.ProcessEnv = process.env): string {
 /**
  * N-slot parallel pool size (SOT-931 案A, 3rd step). `RUNNER_MAX_PARALLEL` controls how many queued
  * items `drainQueue()` may dispatch concurrently into DISTINCT serialization lanes. Default 1 keeps
- * the historical fully-serial drain (一切の挙動不変). Values < 1 or non-numeric clamp to 1.
+ * the historical fully-serial drain (一切の挙動不変). Values < 1 or non-numeric clamp to 1. Under
+ * `RUNNER_STABLE_MODE` the pool is forced to 1 (SOT-947) regardless of the env value.
  */
 function resolveMaxParallel(env: NodeJS.ProcessEnv = process.env): number {
+  if (resolveStableMode(env)) return 1;
   const n = parseInt((env.RUNNER_MAX_PARALLEL || '').trim(), 10);
   return Number.isFinite(n) && n >= 1 ? n : 1;
 }
@@ -208,9 +227,11 @@ function resolveMaxParallel(env: NodeJS.ProcessEnv = process.env): number {
  * JS/lane lock is released immediately and the webhook returns without occupying a slot for the whole
  * run. Completion still flows through the existing done-marker → reapCompletedDetachedRuns →
  * processCompletedRun path. Default false ⇒ normal runs stay on the synchronous foreground path
- * (現行挙動と byte-for-byte 同一・後方互換). Accepts '1' or 'true' (trim, case-insensitive).
+ * (現行挙動と byte-for-byte 同一・後方互換). Accepts '1' or 'true' (trim, case-insensitive). Under
+ * `RUNNER_STABLE_MODE` this is forced false (SOT-947) regardless of the env value.
  */
 function resolveDefaultDetach(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (resolveStableMode(env)) return false;
   const v = (env.RUNNER_DEFAULT_DETACH || '').trim().toLowerCase();
   return v === '1' || v === 'true';
 }
@@ -631,11 +652,12 @@ async function triggerRun(issueId: string, options: TriggerOptions = {}): Promis
     args.push('--resume');
   }
 
-  // detached: true puts child in its own process group (POSIX)
+  // detached: true puts child in its own process group (POSIX). Stable mode keeps
+  // foreground runs attached so no detach-related process behavior remains active.
   const child = spawn('bash', args, {
     env,
     cwd: projectRoot,
-    detached: true,
+    detached: !resolveStableMode(),
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -799,9 +821,14 @@ async function runItem(item: QueueItem, options: TriggerOptions = {}): Promise<R
   //   - default-detach (SOT-934): RUNNER_DEFAULT_DETACH makes EVERY normal run detach too, so the
   //     webhook returns without occupying a slot for the whole run.
   // Both paths reuse the same triggerRunDetached + done-marker reaper completion flow.
+  // SOT-947: under RUNNER_STABLE_MODE the long-run detach is disabled (long-run issues run
+  // synchronously in the foreground). resolveDefaultDetach already returns false in stable mode, so
+  // gating isLongRun here fully disables every detach path for stable serial operation.
+  const stableMode = resolveStableMode();
+  const longRunDetach = !!eligibility.isLongRun && !stableMode;
   const defaultDetach = resolveDefaultDetach();
-  if (eligibility.isLongRun || defaultDetach) {
-    const detachReason = eligibility.isLongRun
+  if (longRunDetach || defaultDetach) {
+    const detachReason = longRunDetach
       ? `long-run detected (label="${LONG_RUN_LABEL}")`
       : 'default-detach enabled (RUNNER_DEFAULT_DETACH)';
     log('RUN', `${detachReason} — launching detached`, { trigger: item.trigger || 'queue', issue: issueId });
@@ -1213,6 +1240,7 @@ export {
   resolveSerializeScope,
   resolveMaxParallel,
   resolveDefaultDetach,
+  resolveStableMode,
   serializationLaneKey,
   resolveConcurrencyLane,
   runLanePool,

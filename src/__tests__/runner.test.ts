@@ -1710,6 +1710,113 @@ describe('runner', () => {
     });
   });
 
+  // SOT-947: RUNNER_STABLE_MODE master switch. A single env flag forces fully-serial "stable運用":
+  // it overrides every parallel/detach toggle (RUNNER_MAX_PARALLEL → 1, RUNNER_SERIALIZE_SCOPE → repo,
+  // RUNNER_DEFAULT_DETACH → false) AND disables the always-on `long-run` label detach so long-run
+  // issues run synchronously in the foreground. Default off keeps all toggles behaving as before.
+  describe('RUNNER_STABLE_MODE master switch (SOT-947)', () => {
+    let writeSpy: jest.Mock;
+    let prevStableMode: string | undefined;
+    let prevDefaultDetach: string | undefined;
+    beforeEach(() => {
+      writeSpy = jest.fn();
+      process.env.LINEAR_API_KEY = 'test-key';
+      prevStableMode = process.env.RUNNER_STABLE_MODE;
+      prevDefaultDetach = process.env.RUNNER_DEFAULT_DETACH;
+      delete process.env.RUNNER_STABLE_MODE;
+      delete process.env.RUNNER_DEFAULT_DETACH;
+    });
+    afterEach(() => {
+      if (prevStableMode === undefined) delete process.env.RUNNER_STABLE_MODE;
+      else process.env.RUNNER_STABLE_MODE = prevStableMode;
+      if (prevDefaultDetach === undefined) delete process.env.RUNNER_DEFAULT_DETACH;
+      else process.env.RUNNER_DEFAULT_DETACH = prevDefaultDetach;
+    });
+
+    function setupLinearMocks(responses: any[]) {
+      let index = 0;
+      (https.request as jest.Mock).mockImplementation((options: any, callback: any) => {
+        const responseData = JSON.stringify({ data: responses[index++] });
+        const res: any = {
+          on: jest.fn((event: any, cb: any) => {
+            if (event === 'data') cb(responseData);
+            if (event === 'end') cb();
+          })
+        };
+        callback(res);
+        return { on: jest.fn(), write: writeSpy, end: jest.fn(), destroy: jest.fn() };
+      });
+    }
+
+    function queueItem(issueId: string) {
+      return {
+        issueId,
+        trigger: 'webhook',
+        retryAt: null,
+        enqueuedAt: new Date().toISOString(),
+        priority: 2,
+        priorityRank: runner.getPriorityRank(2)
+      };
+    }
+
+    it('resolveStableMode reads RUNNER_STABLE_MODE (default off, accepts 1/true case-insensitively)', () => {
+      expect(runner.resolveStableMode({})).toBe(false);
+      expect(runner.resolveStableMode({ RUNNER_STABLE_MODE: '' })).toBe(false);
+      expect(runner.resolveStableMode({ RUNNER_STABLE_MODE: '0' })).toBe(false);
+      expect(runner.resolveStableMode({ RUNNER_STABLE_MODE: 'no' })).toBe(false);
+      expect(runner.resolveStableMode({ RUNNER_STABLE_MODE: '1' })).toBe(true);
+      expect(runner.resolveStableMode({ RUNNER_STABLE_MODE: 'true' })).toBe(true);
+      expect(runner.resolveStableMode({ RUNNER_STABLE_MODE: ' TRUE ' })).toBe(true);
+    });
+
+    it('stable mode overrides every parallel/detach toggle to its serial value', () => {
+      // With stable mode ON, the other env values are ignored.
+      expect(runner.resolveMaxParallel({ RUNNER_STABLE_MODE: '1', RUNNER_MAX_PARALLEL: '5' })).toBe(1);
+      expect(runner.resolveSerializeScope({ RUNNER_STABLE_MODE: '1', RUNNER_SERIALIZE_SCOPE: 'branch' }))
+        .toBe(runner.SERIALIZE_SCOPE_REPO);
+      expect(runner.resolveDefaultDetach({ RUNNER_STABLE_MODE: '1', RUNNER_DEFAULT_DETACH: '1' })).toBe(false);
+    });
+
+    it('without stable mode the parallel/detach toggles still take effect (no regression)', () => {
+      expect(runner.resolveMaxParallel({ RUNNER_MAX_PARALLEL: '5' })).toBe(5);
+      expect(runner.resolveSerializeScope({ RUNNER_SERIALIZE_SCOPE: 'branch' }))
+        .toBe(runner.SERIALIZE_SCOPE_BRANCH);
+      expect(runner.resolveDefaultDetach({ RUNNER_DEFAULT_DETACH: '1' })).toBe(true);
+    });
+
+    it('RUNNER_STABLE_MODE=1 → a long-run-labeled issue runs synchronously (no detach)', async () => {
+      process.env.RUNNER_STABLE_MODE = '1';
+      fs.existsSync.mockReturnValue(true);
+      const item: any = queueItem('SOT-947A');
+      (spawn as jest.Mock).mockImplementation(() => {
+        const child: any = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.pid = 24680;
+        process.nextTick(() => child.emit('close', 0, null));
+        return child;
+      });
+      setupLinearMocks([
+        // eligibility query: issue HAS the long-run label
+        { issue: { id: 'SOT-947A', state: { type: 'started', name: 'In Progress' }, labels: { nodes: [{ name: 'long-run' }] } } },
+        // buildRunEnv -> getIssueProjectName
+        { issue: { project: { name: 'ai-dev-control-plane' } } },
+        // post-run verifyTaskCompletion
+        { issue: { id: 'SOT-947A', state: { type: 'completed', name: 'Done' } } }
+      ]);
+
+      const outcome = await runner.runItem(item);
+
+      // long-run would normally detach, but stable mode forces the synchronous foreground path
+      expect(outcome.detached).toBe(false);
+      const spawnOpts: any = (spawn as jest.Mock).mock.calls[0][2];
+      expect(spawnOpts.detached).not.toBe(true);
+      const sentinelWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && (c[0] as string).includes('SOT-947A.json'));
+      expect(sentinelWrites.length).toBe(0);
+    });
+  });
+
   describe('detached completion → Resume re-injection (SOT-915)', () => {
     let writeSpy: jest.Mock;
     beforeEach(() => {
