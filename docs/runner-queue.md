@@ -171,6 +171,25 @@ JS のロックを長時間占有しないよう、起動直後にロックを�
 - 有効時は全通常 run がデタッチされるため、完了後処理は reaper（`reapCompletedDetachedRuns()`）が担う
   （long-run と同じモデル）。`long-run` ラベルや SOT-925 の運用ルールとは非競合（isLongRun 分岐は維持）。
 
+### 安定運用モード（RUNNER_STABLE_MODE / SOT-947）
+
+環境変数 `RUNNER_STABLE_MODE` を有効（`1` / `true`）にすると、runner を **完全直列の「安定運用モード」**
+に強制する単一マスタースイッチ。一時的に並列化を全停止したいときに、各トグルを個別に戻さず env 1 つで
+切替えられる（可逆）。有効時、他のすべての並列/デタッチトグルは**直列側の値に上書き**される:
+
+- `RUNNER_MAX_PARALLEL` → 強制 `1`（N スロット並列プール無効、`resolveMaxParallel` が先頭で 1 を返す）。
+- `RUNNER_SERIALIZE_SCOPE` → 強制 `repo`（per-branch lane 無効、同一 repo は常に直列）。
+- `RUNNER_DEFAULT_DETACH` → 強制 `false`（通常 run の既定デタッチ無効）。
+- **`long-run` ラベルのデタッチも無効化**: `runItem()` の分岐が `isLongRun && !stableMode` で gate され、
+  `long-run` ラベル付き Issue も同期（前景）パスで実行される。上記トグルと独立に常時 ON だった唯一の
+  並列経路を塞ぐため、これが安定運用モードの肝。
+
+- **既定は `false`（無効）= 後方互換**: 未設定時は各トグルが従来どおり動作し、挙動は byte-for-byte 同一。
+- lane / worktree / reaper の実行基盤自体は温存される（パスや関数は変更なし）。env を外せば即座に元の
+  並列/デタッチ挙動へ戻る。
+- 注意: 有効時は `long-run` の待機/長時間タスクも前景同期で走るため、SOT-925 の「wall-clock 膨張」トレード
+  オフが復活する。安定性を優先して並列を一時停止する目的のフラグであり、恒常設定ではない。
+
 ### 運用ルール: 待機 / 長時間タスクは `long-run` を付ける（SOT-925）
 
 **待機タスク（ScheduleWakeup 等で待つ）や長時間タスクには必ず `long-run` ラベルを付け、デタッチ実行に
