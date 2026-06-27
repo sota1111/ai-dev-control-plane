@@ -71,6 +71,22 @@ case "$(printf '%s' "${ALL_CLAUDE_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
     ;;
 esac
 
+# --- Worker-mode config selector (SOT-1333) ---
+# `WORKER_MODE` を設定から選ぶと、Codexのみ/Claudeのみ/Geminiのみの運用モードを切り替えられる。
+# 値（大小無視, 未設定/その他は all 扱い）:
+#   all          : Gemini・Codex 両方を起動（既定）
+#   claude-only  : 両ワーカーを起動しない（Claude が全担当, ALL_CLAUDE_MODE と等価）
+#   codex-only   : Codexのみ起動（Gemini は呼び出さない）
+#   gemini-only  : Geminiのみ起動（Codex は呼び出さない）
+# このスクリプト（Gemini側）は claude-only / codex-only のとき非応答コード75で即終了し、Gemini CLI を
+# 一切起動しない。評価は ALL_CLAUDE_MODE の直後・GEMINI_DISABLED / cooldown より先。
+case "$(printf '%s' "${WORKER_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
+  claude-only|codex-only)
+    echo "WORKER_MODE=${WORKER_MODE}: Gemini disabled by worker-mode config, delegating to Claude" >&2
+    exit "$WORKER_NONRESPONSE_EXIT"
+    ;;
+esac
+
 # --- Gemini disable flag (SOT-957) ---
 # Google のプラン変更等で Gemini CLI が使えない期間、`GEMINI_DISABLED` を真値にすると Gemini を
 # 起動せず非応答コード 75 で即終了する。これにより CLAUDE.md「Worker Non-Response Fallback Policy」で

@@ -149,8 +149,10 @@
 
 | 変数               | 効果                                                                                                   | 用途                                                       |
 | ------------------ | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| `WORKER_MODE`      | どのワーカー LLM を起動するかを設定から選ぶ単一スイッチ。値（大小無視, 既定 `all`）: `all`=両方起動 / `claude-only`=両方停止（Claude が全担当, `ALL_CLAUDE_MODE` 相当）/ `codex-only`=Codexのみ（Gemini を呼ばない）/ `gemini-only`=Geminiのみ（Codex を呼ばない）。無効側は対象 CLI を一切起動しない。`ALL_CLAUDE_MODE` の直後・個別フラグ/cooldown より先に評価。 | Codexのみ / Claudeのみ / Geminiのみモードを切り替えたいとき |
 | `ALL_CLAUDE_MODE`  | Gemini / Codex 両ワーカーを一括無効化し、実装も検証も Claude Code が代行する。`GEMINI_DISABLED` の上位互換で、cooldown チェックより先に評価される。 | 全作業を Claude Code だけで回したいとき                    |
 | `GEMINI_DISABLED`  | Gemini CLI のみを一時停止する（非応答コード `75` で即終了し、Claude フォールバックへ委譲）。            | Google のプラン変更等で Gemini CLI が使えない期間          |
+| `CODEX_DISABLED`   | Codex CLI のみを一時停止する（`GEMINI_DISABLED` と対称。非応答コード `75` で即終了し、Claude フォールバックへ委譲）。 | Codex CLI が使えない期間                                   |
 
 いずれのフラグも、ワーカーを非応答コード `75` で終了させることで、[役割分担](#役割分担)の「ワーカー非応答時のフォールバック」に基づき Claude Code が作業を代行する。
 

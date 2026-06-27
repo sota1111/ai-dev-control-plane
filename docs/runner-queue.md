@@ -203,6 +203,23 @@ CLAUDE.md「Worker Non-Response Fallback Policy」が発動し、**実装も検�
 - **既定は無効 = 後方互換**。未設定時は両ワーカーが従来どおり起動する。`RUNNER_STABLE_MODE`（並列の停止）とは
   直交する別軸のフラグ（こちらはワーカー委譲そのものの停止）。
 
+### ワーカーモード選択（WORKER_MODE / CODEX_DISABLED / SOT-1333）
+
+「Codexのみ / Claudeのみ / Geminiのみ」モードを設定から一括で選べるようにする単一スイッチ
+`WORKER_MODE`。無効化されたワーカーは該当スクリプトが非応答コード `75` で即終了し、対象 CLI を**一切起動
+しない**（→ Claude フォールバックに委譲）。
+
+- 値（大小無視, 未設定/その他は `all` 扱い）:
+  - `all` — Gemini・Codex 両方を起動（既定）。
+  - `claude-only` — 両ワーカーを起動しない（Claude が全担当, `ALL_CLAUDE_MODE` と等価）。
+  - `codex-only` — Codex のみ起動（Gemini は呼び出さない）。
+  - `gemini-only` — Gemini のみ起動（Codex は呼び出さない）。
+- 評価順: `run_gemini.sh` は `ALL_CLAUDE_MODE` → `WORKER_MODE` → `GEMINI_DISABLED` → cooldown。
+  `run_codex.sh` は `ALL_CLAUDE_MODE` → `WORKER_MODE` → `CODEX_DISABLED` → cooldown。
+- `CODEX_DISABLED` は `GEMINI_DISABLED` と対称な個別フラグ（真値 `1/true/yes/on`）。Codex CLI が使えない
+  期間に Codex のみを止める。
+- `antigravity-only` モードは Gemini→Antigravity 移行（SOT-1334）完了後に追加予定（本対応では対象外）。
+
 ### 運用ルール: 待機 / 長時間タスクは `long-run` を付ける（SOT-925）
 
 **待機タスク（ScheduleWakeup 等で待つ）や長時間タスクには必ず `long-run` ラベルを付け、デタッチ実行に

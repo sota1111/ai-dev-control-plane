@@ -71,6 +71,33 @@ case "$(printf '%s' "${ALL_CLAUDE_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
     ;;
 esac
 
+# --- Worker-mode config selector (SOT-1333) ---
+# `WORKER_MODE` を設定から選ぶと、Codexのみ/Claudeのみ/Geminiのみの運用モードを切り替えられる。
+# 値（大小無視, 未設定/その他は all 扱い）:
+#   all          : Gemini・Codex 両方を起動（既定）
+#   claude-only  : 両ワーカーを起動しない（Claude が全担当, ALL_CLAUDE_MODE と等価）
+#   codex-only   : Codexのみ起動（Gemini は呼び出さない）
+#   gemini-only  : Geminiのみ起動（Codex は呼び出さない）
+# このスクリプト（Codex側）は claude-only / gemini-only のとき非応答コード75で即終了し、Codex CLI を
+# 一切起動しない。評価は ALL_CLAUDE_MODE の直後・CODEX_DISABLED / cooldown より先。
+case "$(printf '%s' "${WORKER_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
+  claude-only|gemini-only)
+    echo "WORKER_MODE=${WORKER_MODE}: Codex disabled by worker-mode config, delegating to Claude" >&2
+    exit "$WORKER_NONRESPONSE_EXIT"
+    ;;
+esac
+
+# --- Codex disable flag (SOT-1333) ---
+# `GEMINI_DISABLED` と対称な個別フラグ。Codex CLI が使えない期間、`CODEX_DISABLED` を真値にすると
+# Codex を起動せず非応答コード75で即終了し、CLAUDE.md「Worker Non-Response Fallback Policy」で
+# Claude フォールバックに委譲される。真値は 1/true/yes/on（大文字小文字無視）。未設定や他の値は従来動作。
+case "$(printf '%s' "${CODEX_DISABLED:-}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|on)
+    echo "CODEX_DISABLED: Codex CLI disabled by env flag, delegating to Claude" >&2
+    exit "$WORKER_NONRESPONSE_EXIT"
+    ;;
+esac
+
 # --- Codex usage-limit cooldown pre-check (auto fallback / auto resume) ---
 # While Codex is usage-limited we skip invoking it and exit with the dedicated
 # non-response code so the orchestrator delegates to Claude. Once the reset time
