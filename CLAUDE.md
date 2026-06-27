@@ -3,7 +3,7 @@
 ## Overview
 
 Claude Code is the **sole interface between the human and all AI workers**.
-The human never speaks directly to Gemini CLI or Codex CLI.
+The human never speaks directly to Antigravity CLI or Codex CLI.
 From the human's perspective, Claude Code handles everything.
 
 ---
@@ -18,7 +18,7 @@ Claude Code focuses on **judgment, delegation, and final approval** — not dire
 - Single point of contact with the human
 - Reading and classifying Linear Issues
 - Judging whether child Issue decomposition is needed
-- Selecting the appropriate worker (Gemini CLI / Codex CLI)
+- Selecting the appropriate worker (Antigravity CLI / Codex CLI)
 - Writing instruction prompts for worker CLIs
 - Reviewing worker output reports
 - Final decision-making (quality gate)
@@ -42,11 +42,11 @@ Claude Code focuses on **judgment, delegation, and final approval** — not dire
 - Final report creation
 - Final judgment and approval
 
-### Gemini CLI (Implementation Worker)
+### Antigravity CLI (Implementation Worker)
 
 - Implementing features across multiple files
 - Creating UI, API, and business logic
-- Writing implementation result reports to `docs/ai/50_worker_gemini_report.md`
+- Writing implementation result reports to `docs/ai/50_worker_antigravity_report.md`
 
 ### Codex CLI (Debug & Verification Worker)
 
@@ -58,13 +58,13 @@ Claude Code focuses on **judgment, delegation, and final approval** — not dire
 
 ---
 
-## When to Use Gemini CLI
+## When to Use Antigravity CLI
 
-**MANDATORY**: Claude Code must ALWAYS invoke `scripts/ai/run_gemini.sh` for ALL implementation work (within any feature Issue), without exception — except under the Worker Non-Response Fallback Policy below.
+**MANDATORY**: Claude Code must ALWAYS invoke `scripts/ai/run_antigravity.sh` for ALL implementation work (within any feature Issue), without exception — except under the Worker Non-Response Fallback Policy below.
 
-Claude Code must NEVER write implementation code directly — except under the Worker Non-Response Fallback Policy below. All file creation, editing, and feature implementation must go through Gemini CLI.
+Claude Code must NEVER write implementation code directly — except under the Worker Non-Response Fallback Policy below. All file creation, editing, and feature implementation must go through Antigravity CLI.
 
-Before running, write the full instruction into `prompts/gemini/implement.md`.
+Before running, write the full instruction into `prompts/antigravity/implement.md`.
 
 ---
 
@@ -81,26 +81,26 @@ Before running, write the full instruction into `prompts/codex/debug.md`.
 ## Worker Non-Response Fallback Policy
 
 - **Definition of "non-response" (worker unavailable).** A worker run counts as non-responsive when ANY of these is true:
-  - the worker run script exits with the dedicated non-response code `75` (set by `scripts/ai/run_gemini.sh` / `scripts/ai/run_codex.sh`), or
+  - the worker run script exits with the dedicated non-response code `75` (set by `scripts/ai/run_antigravity.sh` / `scripts/ai/run_codex.sh`), or
   - the worker CLI exits non-zero (crash, auth failure, usage-limit, etc.), or
   - the worker invocation times out (exceeds the configured timeout), or
-  - the worker report file (`docs/ai/50_worker_gemini_report.md` for Gemini, `docs/ai/60_worker_codex_report.md` for Codex) is missing, empty, or lacks a `## Next Action` line after the run.
-- **Fallback rule.** Claude Code must FIRST attempt normal delegation. Only when a worker is non-responsive per the definition above, Claude Code MAY take over that worker's role and perform the implementation (Gemini's role) or verification/fix (Codex's role) directly, so the Issue is not blocked. This is an explicit, narrowly-scoped EXCEPTION to the otherwise-mandatory delegation rules.
+  - the worker report file (`docs/ai/50_worker_antigravity_report.md` for Antigravity, `docs/ai/60_worker_codex_report.md` for Codex) is missing, empty, or lacks a `## Next Action` line after the run.
+- **Fallback rule.** Claude Code must FIRST attempt normal delegation. Only when a worker is non-responsive per the definition above, Claude Code MAY take over that worker's role and perform the implementation (Antigravity's role) or verification/fix (Codex's role) directly, so the Issue is not blocked. This is an explicit, narrowly-scoped EXCEPTION to the otherwise-mandatory delegation rules.
 - **Bounded retry.** Retry a non-responsive worker AT MOST once before falling back. Never loop on a hung or failing worker.
 - **Quality unchanged.** All Quality Gates (lint / typecheck / test / diff review / acceptance criteria) apply identically whether the work was done by the worker or by Claude Code fallback.
 - **Disclosure / audit.** When Claude Code falls back, it MUST record (a) which worker was non-responsive, (b) the detected failure mode, and (c) that Claude Code performed the work directly — in the relevant worker report file (the audit sink). Do NOT post this fallback disclosure as a Linear comment: Linear receives only the work result. The human needs the outcome of the delegation, not the fallback mechanics.
-- **All-Claude mode (`ALL_CLAUDE_MODE`).** Setting the env flag `ALL_CLAUDE_MODE` to a truthy value (`1|true|yes|on`, case-insensitive) makes BOTH `scripts/ai/run_gemini.sh` and `scripts/ai/run_codex.sh` exit immediately with the non-response code `75`, so Claude Code intentionally performs ALL implementation and verification work directly under this policy. It is the superset of `GEMINI_DISABLED` (which disables only Gemini) and is evaluated before `GEMINI_DISABLED` and the usage-limit cooldown checks. Default off = workers run as usual. Use this when running everything on Claude.
-- **Worker-mode selector (`WORKER_MODE`, SOT-1333).** A single config setting chooses which worker LLMs run; the disabled worker's CLI is never invoked at all (its run script exits `75` and Claude Code takes over via this policy). Values (case-insensitive; default/unset = `all`): `all` (both run), `claude-only` (disable both — equivalent to `ALL_CLAUDE_MODE`), `codex-only` (run Codex only; Gemini disabled), `gemini-only` (run Gemini only; Codex disabled). Evaluated right after `ALL_CLAUDE_MODE`, before the individual disable flags and the cooldown checks. The future `antigravity-only` mode is deferred until the Gemini→Antigravity migration (SOT-1334) lands.
-- **Codex disable flag (`CODEX_DISABLED`, SOT-1333).** Symmetric to `GEMINI_DISABLED`: a truthy value (`1|true|yes|on`, case-insensitive) makes only `scripts/ai/run_codex.sh` exit with `75`, delegating verification to Claude Code while Codex CLI is unavailable. Default off.
+- **All-Claude mode (`ALL_CLAUDE_MODE`).** Setting the env flag `ALL_CLAUDE_MODE` to a truthy value (`1|true|yes|on`, case-insensitive) makes BOTH `scripts/ai/run_antigravity.sh` and `scripts/ai/run_codex.sh` exit immediately with the non-response code `75`, so Claude Code intentionally performs ALL implementation and verification work directly under this policy. It is the superset of `ANTIGRAVITY_DISABLED` (which disables only Antigravity) and is evaluated before `ANTIGRAVITY_DISABLED` and the usage-limit cooldown checks. Default off = workers run as usual. Use this when running everything on Claude.
+- **Worker-mode selector (`WORKER_MODE`, SOT-1333).** A single config setting chooses which worker LLMs run; the disabled worker's CLI is never invoked at all (its run script exits `75` and Claude Code takes over via this policy). Values (case-insensitive; default/unset = `all`): `all` (both run), `claude-only` (disable both — equivalent to `ALL_CLAUDE_MODE`), `codex-only` (run Codex only; Antigravity disabled), `antigravity-only` (run Antigravity only; Codex disabled). Evaluated right after `ALL_CLAUDE_MODE`, before the individual disable flags and the cooldown checks. (`antigravity-only` replaced the former `gemini-only` mode once the Gemini→Antigravity CLI migration (SOT-1334) landed.)
+- **Codex disable flag (`CODEX_DISABLED`, SOT-1333).** Symmetric to `ANTIGRAVITY_DISABLED`: a truthy value (`1|true|yes|on`, case-insensitive) makes only `scripts/ai/run_codex.sh` exit with `75`, delegating verification to Claude Code while Codex CLI is unavailable. Default off.
 
 ---
 
 ## Instruction Prompt Templates
 
-### Gemini CLI instruction template (`prompts/gemini/implement.md`)
+### Antigravity CLI instruction template (`prompts/antigravity/implement.md`)
 
 ```
-# Gemini Worker Instruction
+# Antigravity Worker Instruction
 
 You are an implementation worker. You do NOT interact with the human directly.
 Follow these instructions from Claude Code exactly.
@@ -121,7 +121,7 @@ Follow these instructions from Claude Code exactly.
 - Do not ask questions — make your best judgment
 
 ## Output
-Write your implementation report to `docs/ai/50_worker_gemini_report.md` using this format:
+Write your implementation report to `docs/ai/50_worker_antigravity_report.md` using this format:
 
 # Worker Report
 
@@ -156,7 +156,7 @@ Follow these instructions from Claude Code exactly.
 ## Context files to read first
 - docs/ai/00_project_context.md
 - docs/ai/40_acceptance.md
-- docs/ai/50_worker_gemini_report.md
+- docs/ai/50_worker_antigravity_report.md
 
 ## Tasks
 [Claude Code writes specific tasks here]
@@ -199,8 +199,8 @@ READY_FOR_REVIEW | NEEDS_DEBUG | NEEDS_USER_INPUT | BLOCKED
 ```
 Human request
   └─► Claude Code (requirements, plan, design, task decomposition)
-        ├─► prompts/gemini/implement.md ──► scripts/ai/run_gemini.sh ──► Gemini CLI
-        │       └─► docs/ai/50_worker_gemini_report.md
+        ├─► prompts/antigravity/implement.md ──► scripts/ai/run_antigravity.sh ──► Antigravity CLI
+        │       └─► docs/ai/50_worker_antigravity_report.md
         ├─► prompts/codex/debug.md ──► scripts/ai/run_codex.sh ──► Codex CLI
         │       └─► docs/ai/60_worker_codex_report.md
         └─► Claude Code reviews all reports ──► docs/ai/70_final_report.md ──► Human reply
@@ -212,7 +212,7 @@ Human request
 
 Before reporting results to the human, Claude Code must:
 
-1. Read `docs/ai/50_worker_gemini_report.md` and verify implementation completeness
+1. Read `docs/ai/50_worker_antigravity_report.md` and verify implementation completeness
 2. Read `docs/ai/60_worker_codex_report.md` and verify all checks pass
 3. Summarize findings in `docs/ai/70_final_report.md`
 4. If any critical issue remains unresolved, run another debug cycle before reporting
@@ -240,11 +240,11 @@ When implementing changes for any target project (e.g., booking-monitor), follow
    - If the repo already exists at that path, run `git pull origin main` to update it.
    - Example: `git clone https://github.com/sota1111/<project>.git /workspaces/<project>`
 
-2. **Instruct Gemini and Codex workers to operate in `/workspaces/<project-name>`**.
+2. **Instruct Antigravity and Codex workers to operate in `/workspaces/<project-name>`**.
    - Always specify the working directory at the top of worker instructions.
    - All file reads and writes by workers must target this path.
-   - Set `TARGET_REPO=/workspaces/<project-name>` before running `scripts/ai/run_gemini.sh` or `scripts/ai/run_codex.sh`.
-   - Do NOT use host OS workspace paths — Gemini CLI and Codex CLI cannot access these.
+   - Set `TARGET_REPO=/workspaces/<project-name>` before running `scripts/ai/run_antigravity.sh` or `scripts/ai/run_codex.sh`.
+   - Do NOT use host OS workspace paths — Antigravity CLI and Codex CLI cannot access these.
 
 3. **Commit and push changes from the cloned repo at `/workspaces/<project-name>`**.
    - Feature branches are created in that repo clone, not in `/workspaces/ai-dev-control-plane`.
@@ -284,7 +284,7 @@ The human user communicates through either:
 1. Direct Claude Code chat
 2. Linear issue / Linear comment
 
-The human user must not be asked to directly instruct Gemini CLI or Codex CLI.
+The human user must not be asked to directly instruct Antigravity CLI or Codex CLI.
 
 Claude Code remains the only orchestrator.
 
@@ -298,7 +298,7 @@ Claude Code is responsible for:
 - Posting progress comments
 - Linking implementation notes to local files
 - Creating or updating local AI harness files
-- Deciding whether to use Gemini CLI or Codex CLI internally
+- Deciding whether to use Antigravity CLI or Codex CLI internally
 - Reporting final results back to Linear
 
 ### Linear Issue Types
@@ -421,12 +421,12 @@ It should comment on Linear with the conflict and proposed action.
 
 **MANDATORY**: Claude Code must always delegate to the appropriate worker CLI. Direct implementation or verification by Claude Code is prohibited — except under the Worker Non-Response Fallback Policy above.
 
-- **ALL implementation work (inside any feature Issue)** → MUST use Gemini CLI (`scripts/ai/run_gemini.sh`)
+- **ALL implementation work (inside any feature Issue)** → MUST use Antigravity CLI (`scripts/ai/run_antigravity.sh`)
 - **ALL verification/debug work (inside any feature Issue)** → MUST use Codex CLI (`scripts/ai/run_codex.sh`)
 
 Claude Code must NEVER implement code or run tests directly, regardless of task complexity — except under the Worker Non-Response Fallback Policy above.
 
-Do not expose Gemini CLI or Codex CLI as user-facing agents in Linear comments.
+Do not expose Antigravity CLI or Codex CLI as user-facing agents in Linear comments.
 From the user's perspective, Claude Code is handling the task.
 
 ### Parallel Execution Policy
@@ -453,7 +453,7 @@ Claude の利用上限はアカウント全体（account-global）で共有さ�
 3. **生成量が多い作業（Claude 計算主体）は単線で受容**
    - 大量のコード生成・長文生成など Claude の計算が主体の作業は、並列化しても account-global 上限に N 倍速で当たるだけなので、**単線で受容**する（並列化しない）。
 
-この方針は既存の委譲フロー（Gemini=実装 / Codex=検証）と矛盾しない。read-only fan-out は Claude Code の調査・検証の補助であり、実装は引き続き Gemini、検証/修正は引き続き Codex に委譲する（Worker Non-Response Fallback Policy はそのまま適用）。
+この方針は既存の委譲フロー（Antigravity=実装 / Codex=検証）と矛盾しない。read-only fan-out は Claude Code の調査・検証の補助であり、実装は引き続き Antigravity、検証/修正は引き続き Codex に委譲する（Worker Non-Response Fallback Policy はそのまま適用）。
 
 ### Local Files Used For Linear Work
 
@@ -472,7 +472,7 @@ The file should include:
 - User instructions
 - Acceptance criteria
 - Claude Code plan
-- Gemini worker notes, if used
+- Antigravity worker notes, if used
 - Codex worker notes, if used
 - Verification result
 - Final report
@@ -614,7 +614,7 @@ Claude Code uses the MCP tool to register child Issues:
 子Issue（機能単位）の実行順序:
 
 1. 依存関係順に機能Issueを実行する
-2. 各機能Issue内の作業手順: Claude（方針整理）→ Gemini（実装）→ Codex（テスト・不具合確認）
+2. 各機能Issue内の作業手順: Claude（方針整理）→ Antigravity（実装）→ Codex（テスト・不具合確認）
 
 各機能Issue完了時に Status を `Done` に更新し、次の機能Issueへ進む。
 全機能Issue完了後、親Issue を `In Review` に変更。
@@ -655,11 +655,11 @@ Based on the classified task type, select the worker as follows:
 
 | Task Type | Primary Worker | Notes |
 |-----------|----------------|-------|
-| `PLAN` | Claude Code (then Gemini CLI if needed) | Claude Code structures the plan; delegate implementation to Gemini |
-| `IMPLEMENT` | Gemini CLI | Always delegate; never implement directly |
+| `PLAN` | Claude Code (then Antigravity CLI if needed) | Claude Code structures the plan; delegate implementation to Antigravity |
+| `IMPLEMENT` | Antigravity CLI | Always delegate; never implement directly |
 | `FIX` | Codex CLI | Small fixes go to Codex |
 | `DEBUG` | Codex CLI | Debugging and test fixing go to Codex |
-| `DOC` | Codex CLI (small) / Gemini CLI (large) | Use Codex for small edits, Gemini for large rewrites |
+| `DOC` | Codex CLI (small) / Antigravity CLI (large) | Use Codex for small edits, Antigravity for large rewrites |
 | `REVIEW` | Codex CLI (first pass) → Claude Code (final) | Codex does the diff; Claude Code makes the call |
 | `SECURITY` | Codex CLI (static check) → Claude Code (final) | Codex scans; Claude Code judges |
 
@@ -673,15 +673,15 @@ Post the classification as a Linear comment at the start of each Issue:
 
 ```
 タスク分類: <TYPE>
-担当AI: <TYPE>:<WORKER>   （例: IMPLEMENT:GEMINI）
+担当AI: <TYPE>:<WORKER>   （例: IMPLEMENT:ANTIGRAVITY）
 ```
 
 ### Worker Failure Re-Delegation Rules
 
 When a worker fails or produces incorrect results, Claude Code must re-delegate rather than fixing it directly:
 
-1. **Gemini implementation → test failure**: Re-delegate to Codex CLI as a `DEBUG` task
-2. **Codex fix → specification mismatch**: Re-delegate to Gemini CLI as `IMPLEMENT` or `PLAN`
+1. **Antigravity implementation → test failure**: Re-delegate to Codex CLI as a `DEBUG` task
+2. **Codex fix → specification mismatch**: Re-delegate to Antigravity CLI as `IMPLEMENT` or `PLAN`
 3. **2 or more consecutive failures**: Post an incomplete-reason comment to Linear and set the Issue to `Blocked`
 
 Claude Code must NOT chase failures directly with repeated tool calls or manual debugging.
@@ -906,6 +906,6 @@ Quality Gate 失敗時:
 
 1. 失敗した項目を特定
 2. 対応する子Issue を再オープン（または新規作成）
-3. Gemini で修正実装 → Codex で再検証
+3. Antigravity で修正実装 → Codex で再検証
 4. 全条件 pass まで繰り返す
 5. 3回連続失敗した場合、親Issue を `Blocked` にし、原因を Linear コメント

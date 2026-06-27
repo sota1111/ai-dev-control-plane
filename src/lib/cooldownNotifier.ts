@@ -8,7 +8,7 @@ export function resolveNotifyWebhook(notifyUrl?: string | null, fallbackUrl?: st
   return notifyUrl || fallbackUrl || null;
 }
 
-export function buildCooldownMessage(status: WorkerCooldownStatus, triggeredWorker?: 'gemini'|'codex'|'runner'): string {
+export function buildCooldownMessage(status: WorkerCooldownStatus, triggeredWorker?: 'antigravity'|'codex'|'runner'): string {
   const activeWorkers = status.workers.filter(w => w.active);
   
   if (activeWorkers.length === 0) {
@@ -27,13 +27,13 @@ export function buildCooldownMessage(status: WorkerCooldownStatus, triggeredWork
   }
 
   if (status.degraded) {
-    lines.push('⚠️ **DEGRADED: gemini と codex が同時に停止中**');
+    lines.push('⚠️ **DEGRADED: antigravity と codex が同時に停止中**');
   }
 
   return lines.join('\n');
 }
 
-export function buildUnknownResetMessage(worker: 'gemini'|'codex'|'runner'): string {
+export function buildUnknownResetMessage(worker: 'antigravity'|'codex'|'runner'): string {
   let lines: string[] = [];
   lines.push('⏳ **Worker Usage Limit**');
   lines.push(`Triggered by: \`${worker}\``);
@@ -42,7 +42,7 @@ export function buildUnknownResetMessage(worker: 'gemini'|'codex'|'runner'): str
   return lines.join('\n');
 }
 
-export async function notifyCooldown(opts?: { status?: WorkerCooldownStatus; webhookUrl?: string | null; triggeredWorker?: 'gemini'|'codex'|'runner' }): Promise<boolean> {
+export async function notifyCooldown(opts?: { status?: WorkerCooldownStatus; webhookUrl?: string | null; triggeredWorker?: 'antigravity'|'codex'|'runner' }): Promise<boolean> {
   try {
     const status = opts?.status || getWorkerCooldownStatus();
     let webhookUrl = opts?.webhookUrl;
@@ -66,7 +66,7 @@ export async function notifyCooldown(opts?: { status?: WorkerCooldownStatus; web
   }
 }
 
-export async function notifyUsageLimitUnknownReset(opts: { worker: 'gemini'|'codex'|'runner'; webhookUrl?: string | null }): Promise<boolean> {
+export async function notifyUsageLimitUnknownReset(opts: { worker: 'antigravity'|'codex'|'runner'; webhookUrl?: string | null }): Promise<boolean> {
   try {
     let webhookUrl = opts.webhookUrl;
 

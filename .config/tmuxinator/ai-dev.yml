@@ -12,12 +12,12 @@ windows:
   - codex:
       panes:
         - codex
-  - gemini:
+  - antigravity:
       panes:
-        - gemini
+        - agy
   - status:
       layout: even-vertical
       panes:
         - git status && echo "---" && git log --oneline -5
-        - echo "=== プロセス確認 ===" && ps aux | grep -E "node|ngrok|claude|codex|gemini" | grep -v grep || true
+        - echo "=== プロセス確認 ===" && ps aux | grep -E "node|ngrok|claude|codex|agy" | grep -v grep || true
         - echo "=== ログ確認 ===" && ls -la logs/ 2>/dev/null || echo "logsディレクトリなし"

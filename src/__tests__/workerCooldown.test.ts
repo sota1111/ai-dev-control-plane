@@ -56,23 +56,23 @@ describe('workerCooldown', () => {
       });
     });
 
-    it('identifies gemini as active', () => {
+    it('identifies antigravity as active', () => {
       const resumeAtEpoch = Math.floor(nowMs / 1000) + 3600; // +1 hour
       
-      fs.existsSync.mockImplementation((p: string) => p.includes('gemini.cooldown.json'));
+      fs.existsSync.mockImplementation((p: string) => p.includes('antigravity.cooldown.json'));
       fs.readFileSync.mockReturnValue(JSON.stringify({
         resumeAtEpoch,
         detectedAt: new Date(nowMs).toISOString(),
-        reason: 'gemini_usage_limit'
+        reason: 'antigravity_usage_limit'
       }));
 
       const status = getWorkerCooldownStatus(nowMs, tmpDir);
-      const gemini = status.workers.find(w => w.worker === 'gemini')!;
+      const antigravity = status.workers.find(w => w.worker === 'antigravity')!;
       
-      expect(gemini.active).toBe(true);
-      expect(gemini.resumeAt).toBe(new Date(resumeAtEpoch * 1000).toISOString());
-      expect(gemini.remainingSeconds).toBe(3600);
-      expect(gemini.remainingHuman).toBe('1h');
+      expect(antigravity.active).toBe(true);
+      expect(antigravity.resumeAt).toBe(new Date(resumeAtEpoch * 1000).toISOString());
+      expect(antigravity.remainingSeconds).toBe(3600);
+      expect(antigravity.remainingHuman).toBe('1h');
       expect(status.degraded).toBe(false);
     });
 
@@ -95,13 +95,13 @@ describe('workerCooldown', () => {
       expect(status.degraded).toBe(false);
     });
 
-    it('sets degraded=true when BOTH gemini and codex are active', () => {
-      const geminiEpoch = Math.floor(nowMs / 1000) + 3600;
+    it('sets degraded=true when BOTH antigravity and codex are active', () => {
+      const antigravityEpoch = Math.floor(nowMs / 1000) + 3600;
       const codexEpoch = Math.floor(nowMs / 1000) + 1800;
       
       fs.existsSync.mockReturnValue(true);
       fs.readFileSync.mockImplementation((p: string) => {
-        if (p.includes('gemini.cooldown.json')) return JSON.stringify({ resumeAtEpoch: geminiEpoch });
+        if (p.includes('antigravity.cooldown.json')) return JSON.stringify({ resumeAtEpoch: antigravityEpoch });
         if (p.includes('codex.cooldown.json')) return JSON.stringify({ resumeAtEpoch: codexEpoch });
         return '{}';
       });
@@ -109,7 +109,7 @@ describe('workerCooldown', () => {
       const status = getWorkerCooldownStatus(nowMs, tmpDir);
       
       expect(status.degraded).toBe(true);
-      expect(status.workers.find(w => w.worker === 'gemini')!.active).toBe(true);
+      expect(status.workers.find(w => w.worker === 'antigravity')!.active).toBe(true);
       expect(status.workers.find(w => w.worker === 'codex')!.active).toBe(true);
     });
 
@@ -130,7 +130,7 @@ describe('workerCooldown', () => {
       expect(r.remainingHuman).toBe('10m');
     });
 
-    it('treats expired gemini cooldown as inactive', () => {
+    it('treats expired antigravity cooldown as inactive', () => {
       const resumeAtEpoch = Math.floor(nowMs / 1000) - 10; // 10 seconds ago
       fs.existsSync.mockReturnValue(true);
       fs.readFileSync.mockReturnValue(JSON.stringify({
@@ -138,9 +138,9 @@ describe('workerCooldown', () => {
       }));
 
       const status = getWorkerCooldownStatus(nowMs, tmpDir);
-      const gemini = status.workers.find(w => w.worker === 'gemini')!;
+      const antigravity = status.workers.find(w => w.worker === 'antigravity')!;
       
-      expect(gemini.active).toBe(false);
+      expect(antigravity.active).toBe(false);
     });
 
     it('handles malformed JSON gracefully', () => {
@@ -148,9 +148,9 @@ describe('workerCooldown', () => {
       fs.readFileSync.mockReturnValue('invalid-json');
 
       const status = getWorkerCooldownStatus(nowMs, tmpDir);
-      const gemini = status.workers.find(w => w.worker === 'gemini')!;
+      const antigravity = status.workers.find(w => w.worker === 'antigravity')!;
       
-      expect(gemini.active).toBe(false);
+      expect(antigravity.active).toBe(false);
     });
   });
 });

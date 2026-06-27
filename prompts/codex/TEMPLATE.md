@@ -14,7 +14,7 @@ Follow these instructions from Claude Code exactly.
 
 - `docs/ai/00_project_context.md` — project background
 - `docs/ai/40_acceptance.md` — acceptance criteria
-- `docs/ai/50_worker_gemini_report.md` — Gemini's implementation report (read this first)
+- `docs/ai/50_worker_antigravity_report.md` — Antigravity's implementation report (read this first)
 
 ## Task
 

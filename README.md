@@ -24,7 +24,7 @@
 設計の根幹にある原則:
 
 1. **単一の窓口（Single Interface）**
-   人間が会話する相手は常に **Claude Code** ただ一つ。Gemini CLI / Codex CLI といったワーカーへ人間が直接話しかけることはない。人間から見れば「Claude Code がすべてをやってくれる」状態を保つ。
+   人間が会話する相手は常に **Claude Code** ただ一つ。Antigravity CLI / Codex CLI といったワーカーへ人間が直接話しかけることはない。人間から見れば「Claude Code がすべてをやってくれる」状態を保つ。
 
 2. **オーケストレーターは実装しない（Separation of Concerns）**
    Claude Code は **判断・委譲・最終承認** に専念する。多ファイル実装・lint/test の反復・長時間ログ解析などの重い作業は、それぞれ専用ワーカーへ渡す。Claude Code 自身は「何を・誰に・どうやらせるか」を決める。
@@ -50,7 +50,7 @@
         ▼
    Claude Code（管制塔）── 要件整理・設計・タスク分解・最終承認
         │
-        ├─ 実装は Gemini CLI へ委譲
+        ├─ 実装は Antigravity CLI へ委譲
         ├─ 検証は Codex CLI へ委譲
         └─ GitHub で PR 作成・マージ、Linear へ状態を同期
         ▲
@@ -90,7 +90,7 @@
                             └──────┬──────────┬───────┘
                        委譲(実装)  │          │  委譲(検証)
                     ┌──────────────▼──┐   ┌───▼──────────────┐
-                    │   Gemini CLI     │   │    Codex CLI      │
+                    │   Antigravity CLI     │   │    Codex CLI      │
                     │  実装ワーカー     │   │  デバッグ/検証     │
                     └──────────────────┘   └──────────────────┘
                                    │ PR / commit / merge
@@ -104,7 +104,7 @@
 | コンポーネント       | 役割                                 | 実体                                      |
 | -------------------- | ------------------------------------ | ----------------------------------------- |
 | **Claude Code**      | オーケストレーター（唯一の人間窓口） | `prompts/claude/auto_run.md` に従って動作 |
-| **Gemini CLI**       | 実装ワーカー                         | `scripts/ai/run_gemini.sh`                |
+| **Antigravity CLI**       | 実装ワーカー                         | `scripts/ai/run_antigravity.sh`                |
 | **Codex CLI**        | デバッグ・検証ワーカー               | `scripts/ai/run_codex.sh`                 |
 | **スケジューラー**   | Linear をポーリングして起動          | `scripts/ai/scheduler.sh`                 |
 | **Webhook サーバー** | Linear/Discord イベントで即時起動    | `src/webhook-server.ts`                   |
@@ -122,12 +122,12 @@
 | 担当            | やること                                                                                 | やらないこと                                                         |
 | --------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | **Claude Code** | 要件整理・設計・タスク分解・ワーカー指示・レビュー・品質ゲート・GitHub 操作・Linear 同期 | 多ファイル実装・lint/test の反復・長時間ログ解析・フル README 再構築 |
-| **Gemini CLI**  | 機能実装・UI/API/ビジネスロジック作成（各機能Issue内の実装担当）                         | スコープ外のリファクタ・設計変更                                     |
+| **Antigravity CLI**  | 機能実装・UI/API/ビジネスロジック作成（各機能Issue内の実装担当）                         | スコープ外のリファクタ・設計変更                                     |
 | **Codex CLI**   | lint/typecheck/test 実行・原因特定・最小修正・E2E 検証（各機能Issue内の検証担当）        | スコープ拡大・無関係なリファクタ                                     |
 
 ### ワーカー非応答時のフォールバック
 
-ワーカー（Gemini / Codex）が **非応答**（非応答コード `75` / クラッシュ / timeout / レポート欠落）の場合、Claude Code は CLAUDE.md「Worker Non-Response Fallback Policy」に従い、そのワーカーの作業（実装または検証・修正）を直接代行する。Issue をブロックさせないための例外措置であり、代行時も品質ゲート（lint / typecheck / test / 差分レビュー / 受入条件）は同一基準で適用する。詳細は `CLAUDE.md` を参照。
+ワーカー（Antigravity / Codex）が **非応答**（非応答コード `75` / クラッシュ / timeout / レポート欠落）の場合、Claude Code は CLAUDE.md「Worker Non-Response Fallback Policy」に従い、そのワーカーの作業（実装または検証・修正）を直接代行する。Issue をブロックさせないための例外措置であり、代行時も品質ゲート（lint / typecheck / test / 差分レビュー / 受入条件）は同一基準で適用する。詳細は `CLAUDE.md` を参照。
 
 ### タスク分解方針
 
@@ -137,7 +137,7 @@
 - 1つの子Issue = 1つの機能変更 = 1つ以上の意味あるcommit。実装・テスト・必要なドキュメント更新を同じIssueに含める。
 - Debug / Test は独立Issueにせず、各Issue本文の「検証内容」に含める。
 - 子Issue本文: 目的 / 変更範囲 / 実装内容 / 検証内容 / 想定commit / 受け入れ条件 / 関連する親Issue。
-- Claude / Gemini / Codex の役割はIssue分割単位ではなく、各機能Issue内の作業ステップ（方針整理→実装→検証）として扱う。
+- Claude / Antigravity / Codex の役割はIssue分割単位ではなく、各機能Issue内の作業ステップ（方針整理→実装→検証）として扱う。
 
 詳細は `CLAUDE.md` の Child Issue Registration Policy を参照。
 
@@ -145,14 +145,14 @@
 
 ## ワーカー制御フラグ
 
-ワーカー CLI の起動は環境変数で制御できる。いずれも真値は `1` / `true` / `yes` / `on`（大文字小文字を区別しない）。未設定時は従来どおりワーカーを起動する。実体は `scripts/ai/run_gemini.sh` / `scripts/ai/run_codex.sh`。
+ワーカー CLI の起動は環境変数で制御できる。いずれも真値は `1` / `true` / `yes` / `on`（大文字小文字を区別しない）。未設定時は従来どおりワーカーを起動する。実体は `scripts/ai/run_antigravity.sh` / `scripts/ai/run_codex.sh`。
 
 | 変数               | 効果                                                                                                   | 用途                                                       |
 | ------------------ | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------- |
-| `WORKER_MODE`      | どのワーカー LLM を起動するかを設定から選ぶ単一スイッチ。値（大小無視, 既定 `all`）: `all`=両方起動 / `claude-only`=両方停止（Claude が全担当, `ALL_CLAUDE_MODE` 相当）/ `codex-only`=Codexのみ（Gemini を呼ばない）/ `gemini-only`=Geminiのみ（Codex を呼ばない）。無効側は対象 CLI を一切起動しない。`ALL_CLAUDE_MODE` の直後・個別フラグ/cooldown より先に評価。 | Codexのみ / Claudeのみ / Geminiのみモードを切り替えたいとき |
-| `ALL_CLAUDE_MODE`  | Gemini / Codex 両ワーカーを一括無効化し、実装も検証も Claude Code が代行する。`GEMINI_DISABLED` の上位互換で、cooldown チェックより先に評価される。 | 全作業を Claude Code だけで回したいとき                    |
-| `GEMINI_DISABLED`  | Gemini CLI のみを一時停止する（非応答コード `75` で即終了し、Claude フォールバックへ委譲）。            | Google のプラン変更等で Gemini CLI が使えない期間          |
-| `CODEX_DISABLED`   | Codex CLI のみを一時停止する（`GEMINI_DISABLED` と対称。非応答コード `75` で即終了し、Claude フォールバックへ委譲）。 | Codex CLI が使えない期間                                   |
+| `WORKER_MODE`      | どのワーカー LLM を起動するかを設定から選ぶ単一スイッチ。値（大小無視, 既定 `all`）: `all`=両方起動 / `claude-only`=両方停止（Claude が全担当, `ALL_CLAUDE_MODE` 相当）/ `codex-only`=Codexのみ（Antigravity を呼ばない）/ `antigravity-only`=Antigravityのみ（Codex を呼ばない）。無効側は対象 CLI を一切起動しない。`ALL_CLAUDE_MODE` の直後・個別フラグ/cooldown より先に評価。 | Codexのみ / Claudeのみ / Antigravityのみモードを切り替えたいとき |
+| `ALL_CLAUDE_MODE`  | Antigravity / Codex 両ワーカーを一括無効化し、実装も検証も Claude Code が代行する。`ANTIGRAVITY_DISABLED` の上位互換で、cooldown チェックより先に評価される。 | 全作業を Claude Code だけで回したいとき                    |
+| `ANTIGRAVITY_DISABLED`  | Antigravity CLI のみを一時停止する（非応答コード `75` で即終了し、Claude フォールバックへ委譲）。            | Google のプラン変更等で Antigravity CLI が使えない期間          |
+| `CODEX_DISABLED`   | Codex CLI のみを一時停止する（`ANTIGRAVITY_DISABLED` と対称。非応答コード `75` で即終了し、Claude フォールバックへ委譲）。 | Codex CLI が使えない期間                                   |
 
 いずれのフラグも、ワーカーを非応答コード `75` で終了させることで、[役割分担](#役割分担)の「ワーカー非応答時のフォールバック」に基づき Claude Code が作業を代行する。
 
@@ -205,7 +205,7 @@ cp .env.example .env
 | ----------------------- | ------------------------------------------------------------------------- |
 | Linear（Claude 用 MCP） | `claude` を起動 → `/mcp` → linear を選択                                  |
 | Linear（Codex 用 MCP）  | `codex mcp login linear`                                                  |
-| Gemini CLI              | `gemini` を起動して認証                                                   |
+| Antigravity CLI              | `agy` を起動して認証                                                   |
 | Codex CLI               | `codex` を起動して認証                                                    |
 | GitHub CLI              | `GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web` |
 | Azure CLI               | `az login --use-device-code`                                              |

@@ -28,17 +28,17 @@ lane_path() {
   printf '%s/%s.%s.%s' "$dir" "$name" "$RUNNER_LANE" "$ext"
 }
 
-PROMPT_FILE="$(lane_path "$CONTROL_PLANE_DIR/prompts/gemini/implement.md")"
-REPORT_FILE="$(lane_path "$CONTROL_PLANE_DIR/docs/ai/50_worker_gemini_report.md")"
+PROMPT_FILE="$(lane_path "$CONTROL_PLANE_DIR/prompts/antigravity/implement.md")"
+REPORT_FILE="$(lane_path "$CONTROL_PLANE_DIR/docs/ai/50_worker_antigravity_report.md")"
 # Cooldown is account-global (worker usage limit is shared across lanes): NOT lane-suffixed.
-GEMINI_COOLDOWN_FILE="$CONTROL_PLANE_DIR/docs/ai/auto_logs/gemini.cooldown.json"
+ANTIGRAVITY_COOLDOWN_FILE="$CONTROL_PLANE_DIR/docs/ai/auto_logs/antigravity.cooldown.json"
 
 if [ ! -f "$PROMPT_FILE" ]; then
   echo "Prompt file not found: $PROMPT_FILE" >&2
   exit 1
 fi
 
-echo "== Gemini CLI: implementation worker =="
+echo "== Antigravity CLI: implementation worker =="
 
 # Per-lane WORKER_TIMEOUT (SOT-916). Priority (highest first):
 #  1) WORKER_TIMEOUT_<LANE>  — lane-specific override (lane upper-cased, `-` -> `_`)
@@ -61,9 +61,9 @@ fi
 WORKER_NONRESPONSE_EXIT=75
 
 # --- All-Claude mode master flag (SOT-993) ---
-# Claude が全作業を担当する運用モード。`ALL_CLAUDE_MODE` を真値にすると Gemini/Codex 両ワーカーを
+# Claude が全作業を担当する運用モード。`ALL_CLAUDE_MODE` を真値にすると Antigravity/Codex 両ワーカーを
 # 一括無効化し、実装も検証も Claude Code が CLAUDE.md「Worker Non-Response Fallback Policy」で代行する。
-# このマスターフラグは GEMINI_DISABLED や cooldown より先に評価される短絡。真値は 1/true/yes/on（大小無視）。
+# このマスターフラグは ANTIGRAVITY_DISABLED や cooldown より先に評価される短絡。真値は 1/true/yes/on（大小無視）。
 case "$(printf '%s' "${ALL_CLAUDE_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
   1|true|yes|on)
     echo "ALL_CLAUDE_MODE: all worker delegation disabled by env flag, delegating to Claude" >&2
@@ -71,75 +71,81 @@ case "$(printf '%s' "${ALL_CLAUDE_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
     ;;
 esac
 
-# --- Worker-mode config selector (SOT-1333) ---
-# `WORKER_MODE` を設定から選ぶと、Codexのみ/Claudeのみ/Geminiのみの運用モードを切り替えられる。
+# --- Worker-mode config selector (SOT-1333 / SOT-1334) ---
+# `WORKER_MODE` を設定から選ぶと、Codexのみ/Claudeのみ/Antigravityのみの運用モードを切り替えられる。
 # 値（大小無視, 未設定/その他は all 扱い）:
-#   all          : Gemini・Codex 両方を起動（既定）
-#   claude-only  : 両ワーカーを起動しない（Claude が全担当, ALL_CLAUDE_MODE と等価）
-#   codex-only   : Codexのみ起動（Gemini は呼び出さない）
-#   gemini-only  : Geminiのみ起動（Codex は呼び出さない）
-# このスクリプト（Gemini側）は claude-only / codex-only のとき非応答コード75で即終了し、Gemini CLI を
-# 一切起動しない。評価は ALL_CLAUDE_MODE の直後・GEMINI_DISABLED / cooldown より先。
+#   all              : Antigravity・Codex 両方を起動（既定）
+#   claude-only      : 両ワーカーを起動しない（Claude が全担当, ALL_CLAUDE_MODE と等価）
+#   codex-only       : Codexのみ起動（Antigravity は呼び出さない）
+#   antigravity-only : Antigravityのみ起動（Codex は呼び出さない）
+# このスクリプト（Antigravity側）は claude-only / codex-only のとき非応答コード75で即終了し、Antigravity CLI を
+# 一切起動しない。評価は ALL_CLAUDE_MODE の直後・ANTIGRAVITY_DISABLED / cooldown より先。
 case "$(printf '%s' "${WORKER_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
   claude-only|codex-only)
-    echo "WORKER_MODE=${WORKER_MODE}: Gemini disabled by worker-mode config, delegating to Claude" >&2
+    echo "WORKER_MODE=${WORKER_MODE}: Antigravity disabled by worker-mode config, delegating to Claude" >&2
     exit "$WORKER_NONRESPONSE_EXIT"
     ;;
 esac
 
-# --- Gemini disable flag (SOT-957) ---
-# Google のプラン変更等で Gemini CLI が使えない期間、`GEMINI_DISABLED` を真値にすると Gemini を
+# --- Antigravity disable flag (SOT-957 / SOT-1334) ---
+# Google のプラン変更等で Antigravity CLI が使えない期間、`ANTIGRAVITY_DISABLED` を真値にすると Antigravity を
 # 起動せず非応答コード 75 で即終了する。これにより CLAUDE.md「Worker Non-Response Fallback Policy」で
 # Claude フォールバックに委譲される。真値は 1/true/yes/on（大文字小文字無視）。未設定や他の値は従来動作。
-case "$(printf '%s' "${GEMINI_DISABLED:-}" | tr '[:upper:]' '[:lower:]')" in
+case "$(printf '%s' "${ANTIGRAVITY_DISABLED:-}" | tr '[:upper:]' '[:lower:]')" in
   1|true|yes|on)
-    echo "GEMINI_DISABLED: Gemini CLI disabled by env flag, delegating to Claude" >&2
+    echo "ANTIGRAVITY_DISABLED: Antigravity CLI disabled by env flag, delegating to Claude" >&2
     exit "$WORKER_NONRESPONSE_EXIT"
     ;;
 esac
 
-# --- Gemini usage-limit cooldown pre-check (auto fallback / auto resume) ---
-if [ -f "$GEMINI_COOLDOWN_FILE" ]; then
+# --- Antigravity usage-limit cooldown pre-check (auto fallback / auto resume) ---
+if [ -f "$ANTIGRAVITY_COOLDOWN_FILE" ]; then
   NOW_EPOCH="$(date +%s)"
-  RESUME_AT="$(node -e "try{const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(String(Number(d.resumeAtEpoch)||0));}catch(e){process.stdout.write('0');}" "$GEMINI_COOLDOWN_FILE" 2>/dev/null || echo 0)"
+  RESUME_AT="$(node -e "try{const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(String(Number(d.resumeAtEpoch)||0));}catch(e){process.stdout.write('0');}" "$ANTIGRAVITY_COOLDOWN_FILE" 2>/dev/null || echo 0)"
   if [ "$RESUME_AT" -gt 0 ] && [ "$NOW_EPOCH" -lt "$RESUME_AT" ]; then
-    echo "GEMINI_COOLDOWN_ACTIVE: gemini usage limit until epoch $RESUME_AT (now $NOW_EPOCH), delegating to Claude" >&2
+    echo "ANTIGRAVITY_COOLDOWN_ACTIVE: antigravity usage limit until epoch $RESUME_AT (now $NOW_EPOCH), delegating to Claude" >&2
     exit "$WORKER_NONRESPONSE_EXIT"
   fi
-  echo "Gemini cooldown expired (now $NOW_EPOCH >= resumeAt $RESUME_AT), clearing and resuming Gemini" >&2
-  rm -f "$GEMINI_COOLDOWN_FILE"
+  echo "Antigravity cooldown expired (now $NOW_EPOCH >= resumeAt $RESUME_AT), clearing and resuming Antigravity" >&2
+  rm -f "$ANTIGRAVITY_COOLDOWN_FILE"
 fi
 
+# Antigravity CLI (agy) flags (SOT-1334):
+#   -p / --print                   : run a single prompt non-interactively and print the response
+#   --add-dir DIR                  : add the target repo to the workspace (= old gemini --include-directories)
+#   --dangerously-skip-permissions : auto-approve all tool permissions (= old gemini --yolo)
+#   --print-timeout DURATION       : print-mode wait timeout (default 5m). Aligned to WORKER_TIMEOUT so
+#                                    long implementations are not cut off at agy's internal 5m default.
 if [ -n "${TARGET_REPO:-}" ]; then
   echo "Target repository: $TARGET_REPO"
   set +e
-  timeout "${WORKER_TIMEOUT}s" gemini --include-directories "$TARGET_REPO" --yolo -p "$(cat "$PROMPT_FILE")" 2>&1 | tee "$REPORT_FILE"
+  timeout "${WORKER_TIMEOUT}s" agy -p "$(cat "$PROMPT_FILE")" --add-dir "$TARGET_REPO" --dangerously-skip-permissions --print-timeout "${WORKER_TIMEOUT}s" 2>&1 | tee "$REPORT_FILE"
   EXIT_CODE="${PIPESTATUS[0]}"
   set -e
 else
   set +e
-  timeout "${WORKER_TIMEOUT}s" gemini --yolo -p "$(cat "$PROMPT_FILE")" 2>&1 | tee "$REPORT_FILE"
+  timeout "${WORKER_TIMEOUT}s" agy -p "$(cat "$PROMPT_FILE")" --dangerously-skip-permissions --print-timeout "${WORKER_TIMEOUT}s" 2>&1 | tee "$REPORT_FILE"
   EXIT_CODE="${PIPESTATUS[0]}"
   set -e
 fi
 
-# --- Gemini usage-limit detection (set cooldown, delegate to Claude) ---
+# --- Antigravity usage-limit detection (set cooldown, delegate to Claude) ---
 # Only treat as usage-limit when the run actually FAILED (non-zero exit). A real
-# Gemini quota/limit aborts the run, so EXIT_CODE != 0. Gating on this avoids
+# Antigravity quota/limit aborts the run, so EXIT_CODE != 0. Gating on this avoids
 # false positives when a successful run's report merely mentions these keywords
 # (e.g. while implementing usage-limit features, the report contains "usage limit").
 if [ "$EXIT_CODE" -ne 0 ] \
   && [ -f "$REPORT_FILE" ] \
   && grep -Ei "usage limit|quota exceeded|resource exhausted|rate limit|RESOURCE_EXHAUSTED|try again at|resets at|exhausted your daily quota|daily quota|429|too many requests|quota exceeded for quota metric|please retry in" "$REPORT_FILE" > /dev/null; then
-  mkdir -p "$(dirname "$GEMINI_COOLDOWN_FILE")"
+  mkdir -p "$(dirname "$ANTIGRAVITY_COOLDOWN_FILE")"
   RESUME_EPOCH="$( (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts parse-usage-limit-epoch < "$REPORT_FILE") 2>/dev/null || true)"
   if [ -n "$RESUME_EPOCH" ]; then
-    node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({resumeAtEpoch:Number(process.argv[2]),detectedAt:new Date().toISOString(),reason:'gemini_usage_limit'},null,2));" "$GEMINI_COOLDOWN_FILE" "$RESUME_EPOCH"
-    echo "GEMINI_USAGE_LIMIT: cooldown set until epoch $RESUME_EPOCH, delegating to Claude" >&2
-    (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-cooldown gemini) >/dev/null 2>&1 || true
+    node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({resumeAtEpoch:Number(process.argv[2]),detectedAt:new Date().toISOString(),reason:'antigravity_usage_limit'},null,2));" "$ANTIGRAVITY_COOLDOWN_FILE" "$RESUME_EPOCH"
+    echo "ANTIGRAVITY_USAGE_LIMIT: cooldown set until epoch $RESUME_EPOCH, delegating to Claude" >&2
+    (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-cooldown antigravity) >/dev/null 2>&1 || true
   else
-    echo "GEMINI_USAGE_LIMIT: detected but reset time unparseable, notifying Discord without cooldown" >&2
-    (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-usage-limit-unknown gemini) >/dev/null 2>&1 || true
+    echo "ANTIGRAVITY_USAGE_LIMIT: detected but reset time unparseable, notifying Discord without cooldown" >&2
+    (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-usage-limit-unknown antigravity) >/dev/null 2>&1 || true
   fi
   exit "$WORKER_NONRESPONSE_EXIT"
 fi
@@ -159,6 +165,6 @@ elif ! grep -q "## Next Action" "$REPORT_FILE"; then
 fi
 
 if [ -n "$REASON" ]; then
-  echo "WORKER_NONRESPONSE: gemini ($REASON)" >&2
+  echo "WORKER_NONRESPONSE: antigravity ($REASON)" >&2
   exit "$WORKER_NONRESPONSE_EXIT"
 fi

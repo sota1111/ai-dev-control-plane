@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Usage:
-#   bash scripts/ai/verify_after_gemini.sh
-#   TARGET_REPO=/workspaces/<project> bash scripts/ai/verify_after_gemini.sh
+#   bash scripts/ai/verify_after_antigravity.sh
+#   TARGET_REPO=/workspaces/<project> bash scripts/ai/verify_after_antigravity.sh
 
 cd "$(dirname "$0")/../.."
 
@@ -13,23 +13,23 @@ if [ -f .env ]; then
   source .env
 fi
 
-GEMINI_REPORT="docs/ai/50_worker_gemini_report.md"
+ANTIGRAVITY_REPORT="docs/ai/50_worker_antigravity_report.md"
 CODEX_PROMPT="prompts/codex/debug.md"
 CODEX_REPORT="docs/ai/60_worker_codex_report.md"
 FINAL_REPORT="docs/ai/70_final_report.md"
 
-if [ ! -f "$GEMINI_REPORT" ]; then
-  echo "Error: Gemini report not found at $GEMINI_REPORT" >&2
+if [ ! -f "$ANTIGRAVITY_REPORT" ]; then
+  echo "Error: Antigravity report not found at $ANTIGRAVITY_REPORT" >&2
   exit 1
 fi
 
-echo "Reading Gemini report: $GEMINI_REPORT"
-NEXT_ACTION=$(awk '/^## Next Action/{found=1; next} found && NF{print; exit}' "$GEMINI_REPORT" | tr -d ' \r\n')
+echo "Reading Antigravity report: $ANTIGRAVITY_REPORT"
+NEXT_ACTION=$(awk '/^## Next Action/{found=1; next} found && NF{print; exit}' "$ANTIGRAVITY_REPORT" | tr -d ' \r\n')
 
-echo "Gemini Next Action: $NEXT_ACTION"
+echo "Antigravity Next Action: $NEXT_ACTION"
 
 if [[ "$NEXT_ACTION" == "BLOCKED" || "$NEXT_ACTION" == "NEEDS_USER_INPUT" ]]; then
-  echo "Gemini report indicates $NEXT_ACTION. Skipping Codex verification."
+  echo "Antigravity report indicates $NEXT_ACTION. Skipping Codex verification."
   exit 0
 fi
 
@@ -48,11 +48,11 @@ You are a debugging and verification worker. You do NOT interact with the human 
 
 - docs/ai/00_project_context.md
 - docs/ai/40_acceptance.md
-- docs/ai/50_worker_gemini_report.md
+- docs/ai/50_worker_antigravity_report.md
 
 ## Task
 
-Verify the Gemini implementation. Read \`docs/ai/50_worker_gemini_report.md\` first.
+Verify the Antigravity implementation. Read \`docs/ai/50_worker_antigravity_report.md\` first.
 
 ## Verification Steps
 
@@ -66,9 +66,9 @@ npm run lint
 npm test
 \`\`\`
 
-### Step 3: Inspect changed files from Gemini report
+### Step 3: Inspect changed files from Antigravity report
 
-Read the "Changed Files" section in \`docs/ai/50_worker_gemini_report.md\`.
+Read the "Changed Files" section in \`docs/ai/50_worker_antigravity_report.md\`.
 For each changed file:
 - Verify the change matches the stated intention
 - Check for unintended modifications
@@ -76,13 +76,13 @@ For each changed file:
 
 ### Step 4: Check acceptance criteria
 
-Read the "Acceptance Criteria" section in \`docs/ai/50_worker_gemini_report.md\`.
+Read the "Acceptance Criteria" section in \`docs/ai/50_worker_antigravity_report.md\`.
 Verify each criterion is actually met in the code.
 
 ## Fix Constraints
 
 - Apply ONLY minimal fixes for lint or test failures
-- Do NOT expand scope beyond what Gemini implemented
+- Do NOT expand scope beyond what Antigravity implemented
 - Do NOT refactor unrelated code
 - Document every fix applied
 
@@ -106,9 +106,9 @@ fi
 echo "Generating final report: $FINAL_REPORT"
 CODEX_NEXT_ACTION=$(awk '/^## Next Action/{found=1; next} found && NF{print; exit}' "$CODEX_REPORT" | tr -d ' \r\n' || echo "UNKNOWN")
 
-# Extract changed files from Gemini report
+# Extract changed files from Antigravity report
 # We assume they are listed as bullet points under ## Changed Files
-CHANGED_FILES=$(sed -n '/^## Changed Files/,/^##/p' "$GEMINI_REPORT" | grep '^- ' || echo "None reported")
+CHANGED_FILES=$(sed -n '/^## Changed Files/,/^##/p' "$ANTIGRAVITY_REPORT" | grep '^- ' || echo "None reported")
 
 # Extract Codex summary/findings if possible
 # We'll take the first paragraph or list after the summary header if it exists
@@ -119,7 +119,7 @@ REASON="Verification stage completed."
 
 if [[ "$NEXT_ACTION" == "READY_FOR_REVIEW" && "$CODEX_NEXT_ACTION" == "READY_FOR_REVIEW" ]]; then
   RECOMMENDATION="APPROVE"
-  REASON="Both Gemini and Codex report READY_FOR_REVIEW."
+  REASON="Both Antigravity and Codex report READY_FOR_REVIEW."
 elif [[ "$CODEX_NEXT_ACTION" == "BLOCKED" ]]; then
   RECOMMENDATION="BLOCKED"
   REASON="Codex reported BLOCKED status."
@@ -134,7 +134,7 @@ Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 | Stage | Next Action |
 |-------|------------|
-| Gemini | $NEXT_ACTION |
+| Antigravity | $NEXT_ACTION |
 | Codex | $CODEX_NEXT_ACTION |
 
 ## Recommendation
@@ -152,4 +152,4 @@ $CHANGED_FILES
 $CODEX_FINDINGS
 EOF
 
-chmod +x scripts/ai/verify_after_gemini.sh
+chmod +x scripts/ai/verify_after_antigravity.sh

@@ -1,4 +1,4 @@
-# Gemini CLI / Claude Code: Issue-Rerun Resume Prompt
+# Antigravity CLI / Claude Code: Issue-Rerun Resume Prompt
 
 ## 概要 / Overview
 このプロンプトは、利用制限（Usage Limit）により中断されたタスクを再開するための専用プロンプトです。
@@ -6,7 +6,7 @@
 
 ## 認証の前提 / Authentication Assumptions
 READMEに記載の以下の認証は完了済みとみなします。再認証は不要です。
-- Linear MCP, Gemini CLI, Codex CLI, GitHub CLI, Azure CLI, gcloud
+- Linear MCP, Antigravity CLI, Codex CLI, GitHub CLI, Azure CLI, gcloud
 
 ## 再開時の必須フロー / Mandatory Resume Flow
 
@@ -40,7 +40,7 @@ READMEに記載の以下の認証は完了済みとみなします。再認証�
 - **一貫性の維持**: 既存の PR やブランチがある場合はそれを使用し、新しいものを無闇に作成しないでください。
 
 ## エージェントの責務境界 / Agent Responsibility Boundary
-- `auto_run.md` と同様の基準で Gemini (実装) / Codex (検証/不具合修正) への委譲を行ってください。これらはひとつの feature/commit Issue 内のステップとして実行されます。
+- `auto_run.md` と同様の基準で Antigravity (実装) / Codex (検証/不具合修正) への委譲を行ってください。これらはひとつの feature/commit Issue 内のステップとして実行されます。
 - すでにタスクチェック (Codex) が完了している場合は、再度実行する必要はありません。
 
 ## 権限エラーの処理 / Permission Error Handling

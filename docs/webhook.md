@@ -141,7 +141,7 @@ curl -X POST https://elitism-unnerving-gallstone.ngrok-free.dev/webhooks/linear 
 `npm run start:webhook` で起動した Webhook サーバーは、対象 Issue を共通実行キューに enqueue し、共通実行パイプラインで処理します。実行プロセスは独立したプロセスグループ（`detached: true`）で動作するため、以下の状況でも Webhook サーバー本体は終了しません：
 
 - `run_auto.sh` / `run_codex.sh` が失敗または Terminated（exit code 143 / SIGTERM）
-- Claude / Gemini / Codex のいずれかが強制終了
+- Claude / Antigravity / Codex のいずれかが強制終了
 - 子プロセスが SIGTERM を受け取った場合
 
 #### サーバーの停止方法

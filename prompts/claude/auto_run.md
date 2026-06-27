@@ -3,7 +3,7 @@
 The following authentication commands (from README) are assumed to have been completed on this machine. Do NOT attempt to re-authenticate.
 
 - Linear MCP: configured via `claude → /mcp → linear`
-- Gemini CLI: authenticated via `gemini`
+- Antigravity CLI: authenticated via `agy`
 - Codex CLI: authenticated via `codex`, Linear MCP via `codex mcp login linear`
 - GitHub CLI: authenticated via `gh auth login`
 - Azure CLI: authenticated via `az login --use-device-code`
@@ -39,8 +39,8 @@ Claude 自身の計算を並列に増やしても、同じ上限を N 倍速で�
 3. **生成量が多い作業（Claude 計算主体）は単線で受容**
    - 大量のコード/長文生成は並列化しても上限に N 倍速で当たるだけなので単線で受容する。
 
-この方針は既存の委譲フロー（Gemini=実装 / Codex=検証）と矛盾しない。read-only fan-out は
-Claude Code の調査・検証の補助であり、実装は Gemini、検証/修正は Codex への委譲を維持する。
+この方針は既存の委譲フロー（Antigravity=実装 / Codex=検証）と矛盾しない。read-only fan-out は
+Claude Code の調査・検証の補助であり、実装は Antigravity、検証/修正は Codex への委譲を維持する。
 
 ### lane 並行 / デタッチ実行モデル（案② / SOT-911）
 
@@ -115,7 +115,7 @@ Before starting work on any Issue, classify it and post the classification as a 
 
 ```
 タスク分類: PLAN | IMPLEMENT | FIX | DEBUG | DOC | REVIEW | SECURITY
-担当AI: <TYPE>:<WORKER>   （例: IMPLEMENT:GEMINI / DOC:CLAUDE-CODE）
+担当AI: <TYPE>:<WORKER>   （例: IMPLEMENT:ANTIGRAVITY / DOC:CLAUDE-CODE）
 ```
 
 **Task types:**
@@ -128,17 +128,17 @@ Before starting work on any Issue, classify it and post the classification as a 
 - `SECURITY`: Permission, secret, devcontainer, env var check
 
 **Worker selection:**
-- `PLAN` → Claude Code plans; delegate to Gemini CLI if needed
-- `IMPLEMENT` → Gemini CLI
+- `PLAN` → Claude Code plans; delegate to Antigravity CLI if needed
+- `IMPLEMENT` → Antigravity CLI
 - `FIX` → Codex CLI
 - `DEBUG` → Codex CLI
-- `DOC` → Codex CLI (small edit) or Gemini CLI (large rewrite)
+- `DOC` → Codex CLI (small edit) or Antigravity CLI (large rewrite)
 - `REVIEW` → Codex CLI first pass, then Claude Code final judgment
 - `SECURITY` → Codex CLI static check, then Claude Code final judgment
 
 **Worker failure re-delegation:**
-- Gemini implementation → test failure: re-delegate to Codex CLI as `DEBUG`
-- Codex fix → specification mismatch: re-delegate to Gemini CLI as `IMPLEMENT` or `PLAN`
+- Antigravity implementation → test failure: re-delegate to Codex CLI as `DEBUG`
+- Codex fix → specification mismatch: re-delegate to Antigravity CLI as `IMPLEMENT` or `PLAN`
 - 2+ consecutive failures: set Issue to `Blocked`, post reason to Linear
 
 **PLAN task terminal state (重要):**
@@ -192,7 +192,7 @@ Post your judgment as a Linear comment on the parent Issue:
    - Priority: inherit from parent
 3. Post a summary comment on the parent Issue listing all created child Issues
 4. Create local tracking file: `docs/ai/linear/<PARENT_ISSUE_ID>.md`
-5. Execute child (feature) Issues in dependency order. Within each feature Issue, run the worker steps in order: Claude（方針整理）→ Gemini（実装）→ Codex（テスト・不具合確認）.
+5. Execute child (feature) Issues in dependency order. Within each feature Issue, run the worker steps in order: Claude（方針整理）→ Antigravity（実装）→ Codex（テスト・不具合確認）.
 
 ### Step 2b: If decomposition is NOT needed
 
@@ -201,7 +201,7 @@ Post your judgment as a Linear comment on the parent Issue:
 3. Branch by task type:
    - **PLAN task**: write the planning artifact (方針・一覧・設計メモ) to the Linear issue (and `docs/ai/10_plan.md` / `docs/ai/20_design.md` if substantial). Do NOT create a PR, do NOT merge, do NOT set `Done`. Set the Issue to `In Review` and stop, awaiting human selection. Skip the Quality Gate and PR Creation section.
    - **Implementation task (IMPLEMENT / FIX / DEBUG / DOC)**:
-     1. Write Gemini or Codex instruction as appropriate for the task type
+     1. Write Antigravity or Codex instruction as appropriate for the task type
      2. Run the worker
      3. Commit, run quality gate, create PR, merge
      4. Mark parent Issue as `Done` and post Completion Report
@@ -215,12 +215,12 @@ For each child (feature/commit) Issue, in dependency order:
 1. Update child Issue status to `In Progress`
 2. Post a progress comment on the child Issue
 3. Claude Code: confirm scope/approach for this feature (write design notes to `docs/ai/20_design.md` only if non-trivial)
-4. Implementation (Gemini): write `prompts/gemini/implement.md`, run `scripts/ai/run_gemini.sh`, read `docs/ai/50_worker_gemini_report.md`
+4. Implementation (Antigravity): write `prompts/antigravity/implement.md`, run `scripts/ai/run_antigravity.sh`, read `docs/ai/50_worker_antigravity_report.md`
 5. Verification (Codex): write `prompts/codex/debug.md`, run `scripts/ai/run_codex.sh`, read `docs/ai/60_worker_codex_report.md`; if fixes were applied they are part of this same feature Issue
 6. Commit the feature: `git add -A && git commit -m "feat(<parent-id>): <feature summary>"` (1+ meaningful commits for this Issue)
 7. Mark the child Issue as `Done`
 
-Note: Debug and Test are NOT separate child Issues — they are the verification step (step 5) inside each feature Issue. Claude Code must still delegate all implementation to Gemini and all verification/fixes to Codex.
+Note: Debug and Test are NOT separate child Issues — they are the verification step (step 5) inside each feature Issue. Claude Code must still delegate all implementation to Antigravity and all verification/fixes to Codex.
 
 ---
 
@@ -277,7 +277,7 @@ After merge:
 If ANY quality check fails:
 
 - Identify failing item
-- Reopen the relevant feature/commit Issue (or add verification work to it) and re-run Gemini→Codex inside it
+- Reopen the relevant feature/commit Issue (or add verification work to it) and re-run Antigravity→Codex inside it
 - Re-run the fix cycle
 - If 3 consecutive failures, set parent Issue to `Blocked` with explanation
 

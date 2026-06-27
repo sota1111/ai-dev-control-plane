@@ -137,9 +137,9 @@ async function main() {
     }
     case 'notify-usage-limit-unknown': {
       await initSecrets(['DISCORD_WEBHOOK_URL_NOTIFY', 'DISCORD_WEBHOOK_URL']);
-      const worker = args[0] as 'gemini'|'codex'|'runner';
-      if (!['gemini', 'codex', 'runner'].includes(worker)) {
-        process.stderr.write('Usage: runner-cli.js notify-usage-limit-unknown <gemini|codex|runner>\n');
+      const worker = args[0] as 'antigravity'|'codex'|'runner';
+      if (!['antigravity', 'codex', 'runner'].includes(worker)) {
+        process.stderr.write('Usage: runner-cli.js notify-usage-limit-unknown <antigravity|codex|runner>\n');
         process.exit(1);
       }
       const ok = await notifyUsageLimitUnknownReset({ worker });
