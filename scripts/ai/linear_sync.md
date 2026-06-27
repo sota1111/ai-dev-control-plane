@@ -45,7 +45,7 @@ Always write comments in Japanese unless the issue is written in English.
 
 Comments should be concise and factual.
 
-Do not expose unnecessary internal details about Gemini CLI or Codex CLI.
+Do not expose unnecessary internal details about Antigravity CLI or Codex CLI.
 
 ## Completion Policy
 

@@ -1,6 +1,6 @@
-# Gemini Worker Instruction — Template
+# Antigravity Worker Instruction — Template
 
-<!-- USAGE: Copy this template to prompts/gemini/implement.md for each task, then fill in the [PLACEHOLDERS]. -->
+<!-- USAGE: Copy this template to prompts/antigravity/implement.md for each task, then fill in the [PLACEHOLDERS]. -->
 
 You are an implementation worker. You do NOT interact with the human directly.
 Follow these instructions from Claude Code exactly.
@@ -63,7 +63,7 @@ npm test
 
 ## Output
 
-Write your implementation report to `docs/ai/50_worker_gemini_report.md`:
+Write your implementation report to `docs/ai/50_worker_antigravity_report.md`:
 
 # Worker Report
 

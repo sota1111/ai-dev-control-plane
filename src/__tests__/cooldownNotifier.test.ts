@@ -53,7 +53,7 @@ describe('cooldownNotifier', () => {
       now: '2026-06-18T10:00:00Z',
       degraded: false,
       workers: [
-        { worker: 'gemini', active: true, resumeAt: '2026-06-18T11:00:00Z', remainingHuman: '1h' },
+        { worker: 'antigravity', active: true, resumeAt: '2026-06-18T11:00:00Z', remainingHuman: '1h' },
         { worker: 'codex', active: false, resumeAt: null, remainingHuman: null },
         { worker: 'runner', active: false, resumeAt: null, remainingHuman: null },
       ]
@@ -62,19 +62,19 @@ describe('cooldownNotifier', () => {
     it('builds message for active worker', () => {
       const msg = buildCooldownMessage(mockStatus);
       expect(msg).toContain('⏳ **Worker Cooldown Status**');
-      expect(msg).toContain('gemini: 復帰');
+      expect(msg).toContain('antigravity: 復帰');
       expect(msg).toContain('(残り 1h)');
     });
 
     it('includes triggered worker if provided', () => {
-      const msg = buildCooldownMessage(mockStatus, 'gemini');
-      expect(msg).toContain('Triggered by: `gemini`');
+      const msg = buildCooldownMessage(mockStatus, 'antigravity');
+      expect(msg).toContain('Triggered by: `antigravity`');
     });
 
     it('includes DEGRADED line when degraded is true', () => {
       const degradedStatus = { ...mockStatus, degraded: true };
       const msg = buildCooldownMessage(degradedStatus);
-      expect(msg).toContain('⚠️ **DEGRADED: gemini と codex が同時に停止中**');
+      expect(msg).toContain('⚠️ **DEGRADED: antigravity と codex が同時に停止中**');
     });
 
     it('returns a "all running" message when no workers are active', () => {
@@ -100,7 +100,7 @@ describe('cooldownNotifier', () => {
         now: '2026-06-18T10:00:00Z',
         degraded: false,
         workers: [
-          { worker: 'gemini', active: true, resumeAt: '2026-06-18T11:00:00Z', remainingHuman: '1h' },
+          { worker: 'antigravity', active: true, resumeAt: '2026-06-18T11:00:00Z', remainingHuman: '1h' },
           { worker: 'codex', active: false, resumeAt: null, remainingHuman: null },
           { worker: 'runner', active: false, resumeAt: null, remainingHuman: null },
         ]
@@ -128,23 +128,23 @@ describe('cooldownNotifier', () => {
 
   describe('buildUnknownResetMessage', () => {
     it('builds message for unknown reset', () => {
-      const msg = buildUnknownResetMessage('gemini');
+      const msg = buildUnknownResetMessage('antigravity');
       expect(msg).toContain('⏳ **Worker Usage Limit**');
-      expect(msg).toContain('Triggered by: `gemini`');
-      expect(msg).toContain('gemini: usage-limit を検知しました（復帰時間: 不明）');
+      expect(msg).toContain('Triggered by: `antigravity`');
+      expect(msg).toContain('antigravity: usage-limit を検知しました（復帰時間: 不明）');
     });
   });
 
   describe('notifyUsageLimitUnknownReset', () => {
     it('returns false and does nothing when no webhook is configured', async () => {
       mockSecrets.getSecret.mockReturnValue(null);
-      const result = await notifyUsageLimitUnknownReset({ worker: 'gemini' });
+      const result = await notifyUsageLimitUnknownReset({ worker: 'antigravity' });
       expect(result).toBe(false);
       expect(DiscordNotifierMock).not.toHaveBeenCalled();
     });
 
     it('sends notification when webhook is provided', async () => {
-      const result = await notifyUsageLimitUnknownReset({ worker: 'gemini', webhookUrl: 'https://example.com/webhook' });
+      const result = await notifyUsageLimitUnknownReset({ worker: 'antigravity', webhookUrl: 'https://example.com/webhook' });
       
       expect(result).toBe(true);
       expect(DiscordNotifierMock).toHaveBeenCalledWith('https://example.com/webhook');
@@ -158,7 +158,7 @@ describe('cooldownNotifier', () => {
         throw new Error('Test error');
       });
       
-      const result = await notifyUsageLimitUnknownReset({ worker: 'gemini' });
+      const result = await notifyUsageLimitUnknownReset({ worker: 'antigravity' });
       expect(result).toBe(false);
     });
   });

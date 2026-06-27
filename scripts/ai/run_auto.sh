@@ -170,7 +170,7 @@ ${RUNTIME_PROMPT}"
     RUNTIME_PROMPT="## Target Repository (resolved from Linear project)
 
 Target repository for this issue: ${WEBHOOK_TARGET_REPO} (project: ${WEBHOOK_PROJECT_NAME:-unknown}).
-When delegating to Gemini/Codex workers, set TARGET_REPO=${WEBHOOK_TARGET_REPO} before running scripts/ai/run_gemini.sh or scripts/ai/run_codex.sh.
+When delegating to Antigravity/Codex workers, set TARGET_REPO=${WEBHOOK_TARGET_REPO} before running scripts/ai/run_antigravity.sh or scripts/ai/run_codex.sh.
 
 ---
 
@@ -184,14 +184,14 @@ echo "Log: ${LOG_FILE}"
 echo ""
 
 # stream-json イベントから assistant のテキスト、ツール呼び出し、
-# Gemini/Codex の出力（tool_result）をリアルタイム抽出
+# Antigravity/Codex の出力（tool_result）をリアルタイム抽出
 _STREAM_FILTER='
 import sys, json
 
-WORKER_MARKERS = ("== Gemini CLI", "== Codex CLI")
+WORKER_MARKERS = ("== Antigravity CLI", "== Codex CLI")
 
 def emit_worker_result(content):
-    """tool_result の中身が Gemini/Codex 出力なら表示する"""
+    """tool_result の中身が Antigravity/Codex 出力なら表示する"""
     if isinstance(content, str):
         if content.startswith(WORKER_MARKERS):
             print(content, end="" if content.endswith("\n") else "\n", flush=True)
@@ -252,11 +252,11 @@ COMPLETION_UNVERIFIED=70
 if [ "$EXIT_CODE" -eq 0 ]; then
   # worker レポートの ## Next Action を確認する
   NEXT_ACTION=""
-  if [ -f "docs/ai/50_worker_gemini_report.md" ]; then
-    # 直近の Gemini レポート
-    NEXT_ACTION=$(grep "## Next Action" docs/ai/50_worker_gemini_report.md -A 1 | tail -n 1)
+  if [ -f "docs/ai/50_worker_antigravity_report.md" ]; then
+    # 直近の Antigravity レポート
+    NEXT_ACTION=$(grep "## Next Action" docs/ai/50_worker_antigravity_report.md -A 1 | tail -n 1)
   elif [ -f "docs/ai/60_worker_codex_report.md" ]; then
-    # Gemini がない場合は Codex レポート
+    # Antigravity がない場合は Codex レポート
     NEXT_ACTION=$(grep "## Next Action" docs/ai/60_worker_codex_report.md -A 1 | tail -n 1)
   fi
 

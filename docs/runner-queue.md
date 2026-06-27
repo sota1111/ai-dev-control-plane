@@ -118,8 +118,8 @@ webhook / startup-scan / Discord retry / scheduler の共通 queue は以下の�
 - `RUNNER_LANE` 未指定（= `default` lane）は **後方互換**: 従来の `runner.lock` / `runner.queue.json` を使う。
 - 非 default lane は lane 名を挟んだ独立パス: `runner.<lane>.lock` / `runner.<lane>.queue.json`。
 - lane 名は `[a-zA-Z0-9_-]` にサニタイズされ、`LOG_DIR` の外には出られない。
-- ワーカー成果物（Gemini/Codex のレポート・プロンプト）も lane 別パス、`WORKER_TIMEOUT` は per-lane
-  （long-run lane は長め）。詳細は `scripts/ai/run_gemini.sh` / `run_codex.sh`（SOT-916）。
+- ワーカー成果物（Antigravity/Codex のレポート・プロンプト）も lane 別パス、`WORKER_TIMEOUT` は per-lane
+  （long-run lane は長め）。詳細は `scripts/ai/run_antigravity.sh` / `run_codex.sh`（SOT-916）。
 
 ### 直列スコープの切替（RUNNER_SERIALIZE_SCOPE / SOT-931, 案A）
 
@@ -192,33 +192,33 @@ JS のロックを長時間占有しないよう、起動直後にロックを�
 
 ### 全Claude担当モード（ALL_CLAUDE_MODE / SOT-993）
 
-環境変数 `ALL_CLAUDE_MODE` を真値（`1` / `true` / `yes` / `on`、大小無視）にすると、`scripts/ai/run_gemini.sh`
+環境変数 `ALL_CLAUDE_MODE` を真値（`1` / `true` / `yes` / `on`、大小無視）にすると、`scripts/ai/run_antigravity.sh`
 と `scripts/ai/run_codex.sh` の**両方**が CLI を起動せずワーカー非応答コード `75` で即終了する。これにより
 CLAUDE.md「Worker Non-Response Fallback Policy」が発動し、**実装も検証も Claude Code が直接担当する**。
 
-- `GEMINI_DISABLED`（Gemini のみ無効化）の上位版であり、Codex も含めて全ワーカー委譲を停止する単一マスター
+- `ANTIGRAVITY_DISABLED`（Antigravity のみ無効化）の上位版であり、Codex も含めて全ワーカー委譲を停止する単一マスター
   スイッチ。Claude のプラン変更等で全作業を Claude に寄せたいときに env 1 つで切替えられる（可逆）。
-- 評価順は両スクリプトとも `WORKER_NONRESPONSE_EXIT=75` 定義直後、`GEMINI_DISABLED` / cooldown pre-check の
+- 評価順は両スクリプトとも `WORKER_NONRESPONSE_EXIT=75` 定義直後、`ANTIGRAVITY_DISABLED` / cooldown pre-check の
   **前**。最初の意図的短絡として効く。
 - **既定は無効 = 後方互換**。未設定時は両ワーカーが従来どおり起動する。`RUNNER_STABLE_MODE`（並列の停止）とは
   直交する別軸のフラグ（こちらはワーカー委譲そのものの停止）。
 
 ### ワーカーモード選択（WORKER_MODE / CODEX_DISABLED / SOT-1333）
 
-「Codexのみ / Claudeのみ / Geminiのみ」モードを設定から一括で選べるようにする単一スイッチ
+「Codexのみ / Claudeのみ / Antigravityのみ」モードを設定から一括で選べるようにする単一スイッチ
 `WORKER_MODE`。無効化されたワーカーは該当スクリプトが非応答コード `75` で即終了し、対象 CLI を**一切起動
 しない**（→ Claude フォールバックに委譲）。
 
 - 値（大小無視, 未設定/その他は `all` 扱い）:
-  - `all` — Gemini・Codex 両方を起動（既定）。
+  - `all` — Antigravity・Codex 両方を起動（既定）。
   - `claude-only` — 両ワーカーを起動しない（Claude が全担当, `ALL_CLAUDE_MODE` と等価）。
-  - `codex-only` — Codex のみ起動（Gemini は呼び出さない）。
-  - `gemini-only` — Gemini のみ起動（Codex は呼び出さない）。
-- 評価順: `run_gemini.sh` は `ALL_CLAUDE_MODE` → `WORKER_MODE` → `GEMINI_DISABLED` → cooldown。
+  - `codex-only` — Codex のみ起動（Antigravity は呼び出さない）。
+  - `antigravity-only` — Antigravity のみ起動（Codex は呼び出さない）。
+- 評価順: `run_antigravity.sh` は `ALL_CLAUDE_MODE` → `WORKER_MODE` → `ANTIGRAVITY_DISABLED` → cooldown。
   `run_codex.sh` は `ALL_CLAUDE_MODE` → `WORKER_MODE` → `CODEX_DISABLED` → cooldown。
-- `CODEX_DISABLED` は `GEMINI_DISABLED` と対称な個別フラグ（真値 `1/true/yes/on`）。Codex CLI が使えない
+- `CODEX_DISABLED` は `ANTIGRAVITY_DISABLED` と対称な個別フラグ（真値 `1/true/yes/on`）。Codex CLI が使えない
   期間に Codex のみを止める。
-- `antigravity-only` モードは Gemini→Antigravity 移行（SOT-1334）完了後に追加予定（本対応では対象外）。
+- `antigravity-only` は旧 `gemini-only` を置き換えるモード。Gemini→Antigravity CLI 移行（SOT-1334）完了に伴い有効化済み。
 
 ### 運用ルール: 待機 / 長時間タスクは `long-run` を付ける（SOT-925）
 

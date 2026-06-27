@@ -11,18 +11,18 @@ export const TYPES = {
 
 // Worker assignments
 export const WORKERS = {
-  gemini: 'gemini',
+  antigravity: 'antigravity',
   codex: 'codex',
   claude: 'claude-code',
 } as const;
 
 // Worker selection per type
 export const TYPE_TO_WORKER: Record<string, string> = {
-  IMPLEMENT: WORKERS.gemini,
+  IMPLEMENT: WORKERS.antigravity,
   FIX:       WORKERS.codex,
   DEBUG:     WORKERS.codex,
   PLAN:      WORKERS.claude,
-  DOC:       WORKERS.codex,   // small docs → codex; large → gemini (caller decides)
+  DOC:       WORKERS.codex,   // small docs → codex; large → antigravity (caller decides)
   REVIEW:    WORKERS.codex,
   SECURITY:  WORKERS.codex,
 };
@@ -129,7 +129,7 @@ export function classifyIssue(issue: Issue): ClassificationResult {
     return { type: TYPES.DOC, worker: TYPE_TO_WORKER.DOC, reason: 'Documentation keyword detected' };
   }
 
-  // 8. Default: IMPLEMENT/gemini
+  // 8. Default: IMPLEMENT/antigravity
   return { type: TYPES.IMPLEMENT, worker: TYPE_TO_WORKER.IMPLEMENT, reason: 'Default classification' };
 }
 

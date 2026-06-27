@@ -1,10 +1,10 @@
 import { classifyIssue, isProcessPrefixedTitle, suggestFeatureTitleHint } from '../lib/issueClassifier.js';
 
 describe('classifyIssue', () => {
-  test('[IMPLEMENT] prefix → IMPLEMENT/gemini', () => {
+  test('[IMPLEMENT] prefix → IMPLEMENT/antigravity', () => {
     const r = classifyIssue({ id: '1', title: '[IMPLEMENT] SOT-100 - ○○実装' });
     expect(r.type).toBe('IMPLEMENT');
-    expect(r.worker).toBe('gemini');
+    expect(r.worker).toBe('antigravity');
   });
 
   test('[DEBUG] prefix → DEBUG/codex', () => {
@@ -53,10 +53,10 @@ describe('classifyIssue', () => {
     expect(r.worker).toBe('codex');
   });
 
-  test('default → IMPLEMENT/gemini', () => {
+  test('default → IMPLEMENT/antigravity', () => {
     const r = classifyIssue({ id: '9', title: '新機能追加', description: '画面を追加する' });
     expect(r.type).toBe('IMPLEMENT');
-    expect(r.worker).toBe('gemini');
+    expect(r.worker).toBe('antigravity');
   });
 
   test('result has reason string', () => {
@@ -86,10 +86,10 @@ describe('classifyIssue', () => {
     expect(r.worker).toBe('claude-code');
   });
 
-  test('UI implementation tasks with "一覧" → IMPLEMENT/gemini (regression prevention)', () => {
+  test('UI implementation tasks with "一覧" → IMPLEMENT/antigravity (regression prevention)', () => {
     const r = classifyIssue({ id: '17', title: '宅配ボックス一覧画面作成' });
     expect(r.type).toBe('IMPLEMENT');
-    expect(r.worker).toBe('gemini');
+    expect(r.worker).toBe('antigravity');
   });
 
 });

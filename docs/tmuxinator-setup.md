@@ -53,7 +53,7 @@ tmuxinator start -p .config/tmuxinator/ai-auth.yml
 各 window で以下を順番に実行してください:
 
 1. **claude**: `claude` が起動 → `/mcp` を実行 → Linear を選択
-2. **gemini**: `gemini` で認証
+2. **antigravity**: `agy` で認証
 3. **codex**: `codex` で認証
 4. **codex-mcp**: `codex mcp login linear` で Linear 認証
 5. **gh**: `GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web` で GitHub CLI 認証
@@ -90,7 +90,7 @@ tmuxinator start -p .config/tmuxinator/ai-dev.yml
 - **webhook**: Webhook サーバー（`npm run dev:webhook`）と ngrok（`ngrok http 3000`）が別 pane で起動
 - **claude**: Claude CLI
 - **codex**: Codex CLI
-- **gemini**: Gemini CLI
+- **antigravity**: Antigravity CLI
 - **status**: git status・プロセス確認・ログ確認
 
 ### ngrok 公開URL の確認

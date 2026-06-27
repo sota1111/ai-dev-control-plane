@@ -5,7 +5,7 @@ import path from 'node:path';
 import * as runner from '../runner.js';
 
 export interface WorkerCooldown {
-  worker: 'gemini' | 'codex' | 'runner';
+  worker: 'antigravity' | 'codex' | 'runner';
   active: boolean;
   resumeAt: string | null;        // ISO8601
   resumeAtEpoch: number | null;   // seconds
@@ -15,8 +15,8 @@ export interface WorkerCooldown {
 
 export interface WorkerCooldownStatus {
   now: string;                    // ISO8601
-  degraded: boolean;              // true when BOTH gemini AND codex are active
-  workers: WorkerCooldown[];      // always 3 entries: gemini, codex, runner
+  degraded: boolean;              // true when BOTH antigravity AND codex are active
+  workers: WorkerCooldown[];      // always 3 entries: antigravity, codex, runner
 }
 
 /**
@@ -42,22 +42,22 @@ export function getWorkerCooldownStatus(nowMs: number = Date.now(), logDir?: str
   const effectiveLogDir = logDir || runner.LOG_DIR;
   
   const workers: WorkerCooldown[] = [
-    getJsonWorkerStatus('gemini', 'gemini.cooldown.json', nowMs, effectiveLogDir),
+    getJsonWorkerStatus('antigravity', 'antigravity.cooldown.json', nowMs, effectiveLogDir),
     getJsonWorkerStatus('codex', 'codex.cooldown.json', nowMs, effectiveLogDir),
     getRunnerStatus(nowMs)
   ];
   
-  const gemini = workers.find(w => w.worker === 'gemini')!;
+  const antigravity = workers.find(w => w.worker === 'antigravity')!;
   const codex = workers.find(w => w.worker === 'codex')!;
   
   return {
     now: now.toISOString(),
-    degraded: !!(gemini.active && codex.active),
+    degraded: !!(antigravity.active && codex.active),
     workers
   };
 }
 
-function getJsonWorkerStatus(worker: 'gemini' | 'codex', fileName: string, nowMs: number, logDir: string): WorkerCooldown {
+function getJsonWorkerStatus(worker: 'antigravity' | 'codex', fileName: string, nowMs: number, logDir: string): WorkerCooldown {
   const filePath = path.join(logDir, fileName);
   const inactive: WorkerCooldown = {
     worker,

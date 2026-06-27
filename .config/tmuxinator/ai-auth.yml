@@ -4,9 +4,9 @@ windows:
   - claude:
       panes:
         - echo "=== Claude 起動・MCP設定 ===" && echo "claudeを起動後、/mcp を実行してLinearを選択してください" && claude
-  - gemini:
+  - antigravity:
       panes:
-        - echo "=== Gemini 認証 ===" && gemini
+        - echo "=== Antigravity 認証 ===" && agy
   - codex:
       panes:
         - echo "=== Codex 認証 ===" && codex
