@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { spawn, execSync } from 'node:child_process';
+import * as appEnv from './config/env.js';
 import { classifyUsageLimit } from './lib/usageLimitParser.js';
 import { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } from './lib/resumeMetadata.js';
 import * as queueOrdering from './lib/queueOrdering.js';
@@ -311,24 +312,24 @@ const HISTORY_FILE = path.join(LOG_DIR, 'runner.queue.history.json');
 const MAX_QUEUE_HISTORY = 50;  // cap on persisted past-queue (dequeued) entries
 const USAGE_LIMIT_FILE = path.join(LOG_DIR, 'runner.usage-limit.json');
 const COOLDOWN_FILE = path.join(LOG_DIR, 'runner.cooldown.json');
-const USAGE_LIMIT_RETRY_BUFFER_SECONDS = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
+const USAGE_LIMIT_RETRY_BUFFER_SECONDS = appEnv.usageLimitRetryBufferSeconds();
 const MAX_DRAIN_ITEMS = 20;  // safety guard against infinite drain loops
 // run_auto.sh のOS flock（同時に1プロセスのみ）を別の実行が保持しているとき、
 // drain から起動した run_auto.sh は exit 75 を返す。グローバルロックなので他のキュー項目も
 // 同様に弾かれる。即時 null 再投入だと drain が同一Issueを MAX_DRAIN_ITEMS 回連打して
 // コンソールを溢れさせるため、この秒数だけ retryAt バックオフを付けて再投入し drain を止める。
-const LOCK_CONFLICT_BACKOFF_MS = parseInt(process.env.LOCK_CONFLICT_BACKOFF_MS || '60000', 10);
+const LOCK_CONFLICT_BACKOFF_MS = appEnv.lockConflictBackoffMs();
 const LOG_FILE = path.join(LOG_DIR, 'auto_runner.log');
 const STALE_LOCK_MS = 30 * 60 * 1000;  // 30 minutes
 const LINEAR_API_URL = 'https://api.linear.app/graphql';
-const QUEUE_ITEM_TTL_DAYS = parseInt(process.env.QUEUE_ITEM_TTL_DAYS || '7', 10);
+const QUEUE_ITEM_TTL_DAYS = appEnv.queueItemTtlDays();
 const INFLIGHT_FILE = path.join(LOG_DIR, 'runner.inflight.json');
 const CURRENT_ISSUE_FILE = path.join(LOG_DIR, 'current-issue.json');
 // Leaked inflight entries (process crashed without cleanup) older than this are reaped.
-const INFLIGHT_TTL_MS = parseInt(process.env.INFLIGHT_TTL_MS || String(2 * 60 * 60 * 1000), 10); // 2 hours
+const INFLIGHT_TTL_MS = appEnv.inflightTtlMs(); // 2 hours
 // long-run detached execution (SOT-914 / SOT-911 案②): issues carrying this Linear label are
 // launched detached so the JS lock is released immediately (lock hold ≈ startup time, not sim time).
-const LONG_RUN_LABEL = process.env.LONG_RUN_LABEL || 'long-run';
+const LONG_RUN_LABEL = appEnv.longRunLabel();
 // Per-issue sentinel files for in-flight detached runs ({ issueId, pid, startedAt }).
 const DETACHED_DIR = path.join(LOG_DIR, 'detached');
 
