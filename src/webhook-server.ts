@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import dotenv from 'dotenv';
 import { getSecret, initSecrets } from './config/secrets.js';
+import * as appEnv from './config/env.js';
 import { DiscordNotifier } from './lib/discordNotifier.js';
 import { verifyDiscordSignature } from './lib/discordInteractions.js';
 import { timingSafeEqualStr } from './lib/timingSafeEqual.js';
@@ -80,8 +81,8 @@ app.use((err: any, req: any, res: any, next: any) => {
   next(err);
 });
 
-const PORT = process.env.PORT || 3000;
-const QUEUE_DRAIN_INTERVAL_MS = parseInt(process.env.QUEUE_DRAIN_INTERVAL_MS || '300000', 10); // 既定5分
+const PORT = appEnv.port();
+const QUEUE_DRAIN_INTERVAL_MS = appEnv.queueDrainIntervalMs(); // 既定5分
 
 let _periodicDrainRunning = false; // in-process 再入ガード（interval callback の重なり防止）
 let _reaperRunning = false;        // reaper 再入ガード
@@ -92,7 +93,7 @@ let _lastStrandedScanAt = 0;       // 直近で取り残し In-Progress の Line
 // 1回だけ Linear 再スキャンを許可し、In Progress のまま取り残された Issue の starvation を防ぐ。
 // テストで per-test に差し替えられるよう、モジュールロード時の const にはせず関数内で都度読む。
 function reaperStrandedMaxIntervalMs(): number {
-  return parseInt(process.env.REAPER_STRANDED_MAX_INTERVAL_MS || '300000', 10); // 既定5分
+  return appEnv.reaperStrandedMaxIntervalMs(); // 既定5分
 }
 
 // 期限到来済み（due）のキュー項目が1つでもあるか
@@ -157,7 +158,7 @@ async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
 // セーフティネットとしても動作する。
 async function runReaperTick(): Promise<void> {
   if (_reaperRunning) return;
-  if (process.env.WEBHOOK_REAPER_ENABLED === 'false') return; // 既定有効・明示falseで無効化
+  if (!appEnv.webhookReaperEnabled()) return; // 既定有効・明示falseで無効化
 
   // cooldown 明け検知のため、early-return の前に前回状態を更新する
   const cooldownActive = runner.getUsageLimitCooldownUntil() !== null;
@@ -561,7 +562,7 @@ app.post('/webhooks/discord', (req: any, res: any) => {
 
 async function runBootstrapScan(): Promise<void> {
   // 既定有効・明示 false で無効化（reaper の WEBHOOK_REAPER_ENABLED と既定方針を揃える）。
-  const enabled = process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED !== 'false';
+  const enabled = appEnv.webhookBootstrapScanEnabled();
   if (!enabled) {
     runner.log('BOOTSTRAP', 'startup scan disabled (WEBHOOK_BOOTSTRAP_SCAN_ENABLED=false)');
     return;

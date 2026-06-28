@@ -1,3 +1,5 @@
+import * as appEnv from '../config/env.js';
+
 /**
  * Internal helper to parse raw usage limit reset time from text and returns the Unix epoch (seconds).
  */
@@ -85,7 +87,7 @@ function parseRawResetEpoch(text: string, nowMs: number): number | null {
  * @returns {number | null} - Unix epoch (seconds) or null if not applicable
  */
 export function parseUsageLimitResetEpoch(text: string, nowMs: number = Date.now()): number | null {
-  const buffer = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
+  const buffer = appEnv.usageLimitRetryBufferSeconds();
   const rawEpoch = parseRawResetEpoch(text, nowMs);
   if (rawEpoch === null) return null;
   return rawEpoch + buffer;
@@ -128,8 +130,8 @@ function hasHttpStatus(lowerText: string, code: string): boolean {
  * @param {number} nowMs
  */
 export function classifyUsageLimit(text: string, nowMs: number = Date.now()): UsageLimitResult {
-  const buffer = parseInt(process.env.USAGE_LIMIT_RETRY_BUFFER_SECONDS || '600', 10);
-  const overloadBuffer = parseInt(process.env.OVERLOAD_RETRY_BUFFER_SECONDS || '3600', 10);
+  const buffer = appEnv.usageLimitRetryBufferSeconds();
+  const overloadBuffer = appEnv.overloadRetryBufferSeconds();
   const lowerText = text.toLowerCase();
   
   const result: UsageLimitResult = {
