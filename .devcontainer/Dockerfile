@@ -86,3 +86,51 @@ RUN apt-get update \
     && chmod +x /etc/profile.d/flutter.sh \
     && chown -R 1000:1000 /opt/flutter \
     && su vscode -c "/opt/flutter/bin/flutter --version && /opt/flutter/bin/flutter --disable-analytics"
+
+# ---------------------------------------------------------------------------
+# Android SDK + JDK (SOT-1362)
+#   SOT-1360 の meal-planner Android ビルド検証時に稼働コンテナへ一時導入した
+#   JDK / Android SDK を、再ビルド後も残るよう恒久化する。用途は Flutter の
+#   Android ビルド（flutter build apk）。検証済みの稼働コンテナと同一バージョンを
+#   pin する。SDK は /opt/android-sdk に置き、remoteUser=vscode(uid 1000) が
+#   ライセンス更新やパッケージ追加を行えるよう所有権を付与する。
+# ---------------------------------------------------------------------------
+ARG ANDROID_CMDLINE_TOOLS=12266719
+ARG ANDROID_PLATFORM_PRIMARY=36
+ARG ANDROID_PLATFORM_SECONDARY=35
+ARG ANDROID_BUILD_TOOLS_PRIMARY=36.0.0
+ARG ANDROID_BUILD_TOOLS_SECONDARY=35.0.0
+ARG ANDROID_NDK_VERSION=28.2.13676358
+ARG ANDROID_CMAKE_VERSION=3.22.1
+
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV ANDROID_HOME=/opt/android-sdk
+ENV ANDROID_SDK_ROOT=/opt/android-sdk
+ENV PATH="/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:${PATH}"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openjdk-17-jdk-headless \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/android-sdk/cmdline-tools \
+    && curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS}_latest.zip" -o /tmp/cmdline-tools.zip \
+    && unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-tools \
+    && mv /tmp/cmdline-tools/cmdline-tools /opt/android-sdk/cmdline-tools/latest \
+    && rm -rf /tmp/cmdline-tools.zip /tmp/cmdline-tools \
+    && yes | /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null \
+    && /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager \
+        "platform-tools" \
+        "platforms;android-${ANDROID_PLATFORM_PRIMARY}" \
+        "platforms;android-${ANDROID_PLATFORM_SECONDARY}" \
+        "build-tools;${ANDROID_BUILD_TOOLS_PRIMARY}" \
+        "build-tools;${ANDROID_BUILD_TOOLS_SECONDARY}" \
+        "ndk;${ANDROID_NDK_VERSION}" \
+        "cmake;${ANDROID_CMAKE_VERSION}" > /dev/null \
+    && printf '%s\n' \
+        'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64' \
+        'export ANDROID_HOME=/opt/android-sdk' \
+        'export ANDROID_SDK_ROOT=/opt/android-sdk' \
+        'export PATH="/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:$PATH"' \
+        > /etc/profile.d/android-sdk.sh \
+    && chmod +x /etc/profile.d/android-sdk.sh \
+    && chown -R 1000:1000 /opt/android-sdk \
+    && su vscode -c "/opt/flutter/bin/flutter config --android-sdk /opt/android-sdk --jdk-dir /usr/lib/jvm/java-17-openjdk-amd64"
