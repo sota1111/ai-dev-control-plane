@@ -4,6 +4,7 @@ FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 # Version pins — bump these in one place
 # ---------------------------------------------------------------------------
 ARG NODE_MAJOR=20
+ARG FLUTTER_VERSION=3.44.4
 
 # ---------------------------------------------------------------------------
 # Base build / runtime dependencies
@@ -67,3 +68,21 @@ RUN mkdir -p /etc/apt/keyrings \
     && apt-get update \
     && apt-get install -y --no-install-recommends azure-cli \
     && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Flutter SDK (SOT-1362)
+#   稼働コンテナを再ビルドしても Flutter 環境が残るよう恒久化する。
+#   用途は analyze / test / web のみ（このコンテナは headless のため、
+#   Android SDK / Chrome / Linux desktop toolchain は意図的に導入しない）。
+#   全ユーザーの PATH に通し、remoteUser=vscode(uid 1000) が SDK キャッシュ
+#   （/opt/flutter/bin/cache）に書き込めるよう所有権を付与する。
+# ---------------------------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends unzip xz-utils \
+    && rm -rf /var/lib/apt/lists/* \
+    && git clone --depth 1 -b ${FLUTTER_VERSION} https://github.com/flutter/flutter.git /opt/flutter \
+    && git config --system --add safe.directory /opt/flutter \
+    && echo 'export PATH="/opt/flutter/bin:$PATH"' > /etc/profile.d/flutter.sh \
+    && chmod +x /etc/profile.d/flutter.sh \
+    && chown -R 1000:1000 /opt/flutter \
+    && su vscode -c "/opt/flutter/bin/flutter --version && /opt/flutter/bin/flutter --disable-analytics"
