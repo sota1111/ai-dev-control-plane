@@ -481,7 +481,9 @@ app.post('/webhooks/linear', (req: any, res: any) => {
       });
       // Refresh queued items' priority from Linear before selecting. Priority-only changes do not
       // fire a webhook, so a recently-bumped Urgent/High issue would otherwise stay behind a lower
-      // priority item. Fail-open: never block execution on a refresh error.
+      // priority item. As of SOT-1352 this also re-sorts the queue into priority order, so the
+      // persisted queue reflects priority at webhook-receive time (enqueue() likewise sorts on write).
+      // Fail-open: never block execution on a refresh error.
       try {
         await runner.refreshQueuePriorities();
       } catch (e: any) {
