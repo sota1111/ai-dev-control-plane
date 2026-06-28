@@ -145,7 +145,7 @@ Before starting work on any Issue, classify it and post the classification as a 
 - `PLAN` タスクは成果物（方針・一覧・設計メモ等）を作成したら、PR作成・merge・`Done` には進めない。
 - 成果物を提示したうえで対象Issueを **`In Review`** に設定し、人間のレビュー/選択を待って停止する。
 - PLANの成果物は Linear コメント、および必要に応じて `docs/ai/10_plan.md` / `docs/ai/20_design.md` に記録する。
-- IMPLEMENT / FIX / DEBUG など実装系タスクは従来どおり PR → merge → `Done` に進める（この例外の対象外）。
+- IMPLEMENT / FIX / DEBUG など実装系タスクは PR → merge まで進めるが、その後は `Done` にせず **`In Review`** に設定して人間のレビューを待つ。
 
 ---
 
@@ -204,7 +204,7 @@ Post your judgment as a Linear comment on the parent Issue:
      1. Write Antigravity or Codex instruction as appropriate for the task type
      2. Run the worker
      3. Commit, run quality gate, create PR, merge
-     4. Mark parent Issue as `Done` and post Completion Report
+     4. Set parent Issue to `In Review` (await human review — do NOT set `Done`) and post Completion Report
 
 ---
 
@@ -271,7 +271,7 @@ gh pr merge <PR_NUMBER> --merge --delete-branch
 After merge:
 
 - Pull latest main: `git -C <repo-path> pull origin main`
-- Update parent Issue status to `Done`
+- Update parent Issue status to `In Review` (await human review — do NOT set `Done`)
 - Post Completion Report comment on parent Issue (summary, changed files, verification results)
 
 If ANY quality check fails:
@@ -326,7 +326,7 @@ Examples of permission errors that trigger this protocol:
 
 Terminate when ANY of the following is true:
 
-- All child Issues are Done, PR is merged, and parent Issue is set to `Done`
+- All child Issues are Done, PR is merged, and parent Issue is set to `In Review` (awaiting human review; the human moves it to `Done`)
 - A PLAN task has produced its planning artifact and the Issue is set to `In Review` (no PR/merge/Done expected for PLAN)
 - A blocking condition cannot be resolved (parent set to Blocked with explanation)
 - No actionable issues remain in Linear

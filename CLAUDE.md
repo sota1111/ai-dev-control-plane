@@ -381,7 +381,7 @@ Status: In Progress
 ```markdown
 ## Completion Report
 
-Status: Done
+Status: In Review
 
 ### Summary
 
@@ -665,7 +665,7 @@ Based on the classified task type, select the worker as follows:
 
 > **PLAN terminal state:** PLAN タスクは成果物（方針・一覧・設計）を作成したら PR/merge/`Done` に進めず、
 > 対象Issueを `In Review` にして停止し、人間のレビュー/選択を待つ。実装系（IMPLEMENT/FIX/DEBUG）は
-> 従来どおり PR→merge→`Done`。
+> PR→merge まで進め、その後は `Done` にせず `In Review` にして人間のレビューを待つ。
 
 ### Classification Comment
 
@@ -820,7 +820,7 @@ git -C <repo-path> pull origin main
 
 Merge 後:
 
-- 親Issue Status を `Done` に変更
+- 親Issue Status を `In Review` に変更（人間のレビュー待ち。`Done` には自動で進めない）
 - 親Issue に Completion Report をコメント
 - feature branch を削除
 
@@ -848,7 +848,7 @@ GitHub でのイベント完了後、Claude Code が Linear に状態を同期�
 | Branch 作成           | 親Issue に「作業ブランチ作成」コメント              |
 | PR 作成               | 親Issue Status → `In Progress`、PR リンクコメント   |
 | PR 更新（push）       | 親Issue に差分サマリコメント                        |
-| PR Merge              | 親Issue Status → `Done`、Completion Report コメント |
+| PR Merge              | 親Issue Status → `In Review`、Completion Report コメント |
 | PR Close (not merged) | 親Issue Status → `Blocked`、理由コメント            |
 
 ### Sync Comment Format
