@@ -15,6 +15,7 @@ import { classifyIssue } from './lib/issueClassifier.js';
 import { getWorkerCooldownStatus } from './lib/workerCooldown.js';
 import { initSecrets } from './config/secrets.js';
 import { notifyCooldown, notifyUsageLimitUnknownReset } from './lib/cooldownNotifier.js';
+import { notifyWorkerReport } from './lib/workerReportNotifier.js';
 
 const [,, command, ...args] = process.argv;
 
@@ -147,8 +148,21 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'notify-worker-report': {
+      await initSecrets(['DISCORD_WEBHOOK_URL_NOTIFY', 'DISCORD_WEBHOOK_URL']);
+      const worker = args[0] as 'antigravity' | 'codex';
+      if (!['antigravity', 'codex'].includes(worker)) {
+        process.stderr.write('Usage: runner-cli.js notify-worker-report <antigravity|codex> [reportPath]\n');
+        process.exit(1);
+      }
+      const reportPath = args[1];
+      const ok = await notifyWorkerReport({ worker, reportPath });
+      process.stdout.write(`Notification ${ok ? 'sent' : 'skipped/failed'}\n`);
+      process.exit(0);
+      break;
+    }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report\n`);
       process.exit(1);
     }
   }
