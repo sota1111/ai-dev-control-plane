@@ -76,7 +76,11 @@ RUN mkdir -p /etc/apt/keyrings \
 #   Android SDK / Chrome / Linux desktop toolchain は意図的に導入しない）。
 #   全ユーザーの PATH に通し、remoteUser=vscode(uid 1000) が SDK キャッシュ
 #   （/opt/flutter/bin/cache）に書き込めるよう所有権を付与する。
+#   PATH は profile.d（ログインシェル用）に加えて ENV でも設定し、CI やスクリプト
+#   などの非対話シェルでも `flutter analyze` / `flutter test` を実行できるようにする
+#   （Android SDK ブロックと同じ ENV 方式に揃える / SOT-1362）。
 # ---------------------------------------------------------------------------
+ENV PATH="/opt/flutter/bin:${PATH}"
 RUN apt-get update \
     && apt-get install -y --no-install-recommends unzip xz-utils \
     && rm -rf /var/lib/apt/lists/* \
