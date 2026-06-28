@@ -1,38 +1,39 @@
 # Worker Report
 
 ## Summary
-SOT-993 `ALL_CLAUDE_MODE` verification passed for the requested shell behavior. Both runner scripts parse successfully, truthy `ALL_CLAUDE_MODE` exits with non-response code 75 before invoking Gemini/Codex CLI, and the master flag is placed immediately after `WORKER_NONRESPONSE_EXIT=75` before `GEMINI_DISABLED` / cooldown checks. Documentation references are present in `.env.example`, `CLAUDE.md`, and `docs/runner-queue.md`.
+SOT-1340 のタスク確認（初期チェック）と実装後検証の両方を扱う。Codex はクールダウン中（usage limit）で
+非応答のため、Worker Non-Response Fallback Policy に従い Claude Code が直接代行した。
 
-No implementation fixes were required.
+検証結果: 本変更は `.devcontainer/Dockerfile` と `.devcontainer/devcontainer.json` のみのリファクタで、
+JSON 妥当性・lint・typecheck は pass。devcontainer の機能的 gemini 依存は除去済み（説明コメントのみ残置）。
+
+## Fallback Disclosure (audit)
+- 非応答ワーカー: **Codex** — `CODEX_COOLDOWN_ACTIVE`（usage limit, exit 75）。タスク確認実行時・検証実行時とも
+  クールダウン中。
+- 検出した失敗モード: 非応答コード 75（クールダウン）。
+- 対応: タスク確認および検証を Claude Code が直接代行（read-only 確認 + 品質ゲート実行）。
 
 ## Changed Files
-- `docs/ai/60_worker_codex_report.md` - verification report updated.
+- none（検証のみ。実装は SOT-1340 の `.devcontainer/` 変更、`docs/ai/50_worker_antigravity_report.md` 参照）
 
 ## Commands Run
-- `git status --short` - confirmed existing dirty worktree includes unrelated changes; only this report was edited by this worker.
-- `rg -n "ALL_CLAUDE_MODE|GEMINI_DISABLED|cooldown|WORKER_NONRESPONSE_EXIT" scripts/ai/run_gemini.sh scripts/ai/run_codex.sh .env.example CLAUDE.md docs/runner-queue.md` - confirmed code placement and documentation references.
-- `bash -n scripts/ai/run_gemini.sh` - pass, exit 0.
-- `bash -n scripts/ai/run_codex.sh` - pass, exit 0.
-- `command -v shellcheck || true` - no `shellcheck` found; skipped.
-- `test -f prompts/gemini/implement.md` - pass.
-- `test -f prompts/codex/debug.md` - pass.
-- `ALL_CLAUDE_MODE=1 TARGET_REPO=/workspaces/ai-dev-control-plane bash scripts/ai/run_gemini.sh; echo $?` - output included `ALL_CLAUDE_MODE: all worker delegation disabled by env flag, delegating to Claude`; exit 75.
-- `ALL_CLAUDE_MODE=true TARGET_REPO=/workspaces/ai-dev-control-plane bash scripts/ai/run_codex.sh; echo $?` - output included `ALL_CLAUDE_MODE: all worker delegation disabled by env flag, delegating to Claude`; exit 75.
-- `nl -ba scripts/ai/run_gemini.sh | sed -n '56,92p'` - confirmed `ALL_CLAUDE_MODE` case at lines 63-72, before `GEMINI_DISABLED` and cooldown.
-- `nl -ba scripts/ai/run_codex.sh | sed -n '56,90p'` - confirmed `ALL_CLAUDE_MODE` case at lines 63-72, before cooldown.
-- `npm run lint` - pass, exit 0.
-- `npm run typecheck` - pass, exit 0.
-- `npm test` - fail, exit 1. 29 suites passed, 1 suite failed. Failures are in `src/__tests__/runner.test.ts` detached-mode tests with `TypeError: Cannot read properties of undefined (reading 'on')` at `src/runner.ts:668`.
+- `python3 -c "import json; json.load(open('.devcontainer/devcontainer.json'))"` → devcontainer.json OK
+- `grep -ri gemini .devcontainer/` → 機能的参照なし（移行を説明する Dockerfile コメントのみ）
+- `npm run lint` → exit 0
+- `npm run typecheck` → exit 0
+- `npm test` → 440 passed / 3 failed
+  - 失敗3件は runner detached 系（SOT-914/934/918 の spawn-mock テスト）で main 既存・本 devcontainer 変更とは無関係。
+    本差分は `.devcontainer/` のみで src/ には一切触れていない。
 
 ## Acceptance Criteria
-- [x] bash -n 構文チェック pass (両スクリプト)
-- [x] ALL_CLAUDE_MODE=1 で run_gemini.sh exit 75（Gemini 未起動）
-- [x] ALL_CLAUDE_MODE truthy で run_codex.sh exit 75（Codex 未起動）
-- [x] master flag が GEMINI_DISABLED / cooldown より前に評価される
-- [x] .env.example / CLAUDE.md / docs/runner-queue.md に記載
+- [x] Issue は actionable（In Progress / コメントなし / usage-limit ラベルなし / 未回答 QUESTION なし）
+- [x] devcontainer の staleness（gemini-cli vs agy）を確認・是正
+- [x] 保守性課題（廃止 CLI 導入・古いコメント・バージョンpin・config ボリューム名）を列挙し対応
+- [x] JSON 妥当性 / lint / typecheck pass
 
 ## Risks
-`npm test` currently fails in unrelated runner detached-mode tests (`src/__tests__/runner.test.ts`) because mocked child process stdout is undefined when `triggerRun` attaches `child.stdout.on(...)`. This was not modified for SOT-993 and is outside the requested minimal verification scope, but it remains a repository-level test failure.
+- コンテナ再ビルドは本環境で不可 → 最終検証は人間の Rebuild Container。
+- `agy` のビルド時非対話インストールと認証永続化は未検証（破壊的影響はなく、最悪ケースは再認証のみ）。
 
 ## Next Action
 READY_FOR_REVIEW

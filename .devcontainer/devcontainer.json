@@ -10,7 +10,7 @@
   "mounts": [
     "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
     "source=codex-config-${devcontainerId},target=/home/vscode/.codex,type=volume",
-    "source=gemini-config-${devcontainerId},target=/home/vscode/.gemini,type=volume",
+    "source=antigravity-config-${devcontainerId},target=/home/vscode/.config/antigravity,type=volume",
     "source=/home/ubuntu/dev/2026,target=/home/vscode/dev/2026,type=bind,consistency=cached"
   ],
   "customizations": {
@@ -26,5 +26,5 @@
       }
     }
   },
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.codex /home/vscode/.gemini || true && node --version && npm --version && claude --version || true && codex --version || true && gemini --version || true && az --version || true"
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.codex /home/vscode/.config/antigravity || true && node --version && npm --version && claude --version || true && codex --version || true && agy --version || true && az --version || true"
 }
