@@ -164,3 +164,6 @@ if [ -n "$REASON" ]; then
   echo "WORKER_NONRESPONSE: codex ($REASON)" >&2
   exit "$WORKER_NONRESPONSE_EXIT"
 fi
+
+# SOT-1349: post the worker report to Discord (best-effort; never affects worker success)
+(cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-worker-report codex "$REPORT_FILE") >/dev/null 2>&1 || true
