@@ -2,7 +2,6 @@
 
 import fs from 'node:fs';
 import { DiscordNotifier } from './discordNotifier.js';
-import { resolveNotifyWebhook } from './cooldownNotifier.js';
 import { getSecret } from '../config/secrets.js';
 
 export type WorkerName = 'antigravity' | 'codex';
@@ -51,7 +50,7 @@ export async function notifyWorkerReport(opts: {
 
     let webhookUrl = opts.webhookUrl;
     if (webhookUrl === undefined) {
-      webhookUrl = resolveNotifyWebhook(getSecret('DISCORD_WEBHOOK_URL_NOTIFY'), getSecret('DISCORD_WEBHOOK_URL'));
+      webhookUrl = getSecret('DISCORD_WEBHOOK_URL');
     }
 
     if (!webhookUrl) {

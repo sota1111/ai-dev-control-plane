@@ -72,10 +72,10 @@ describe('workerReportNotifier', () => {
 
     it('resolves the webhook from secrets when not provided', async () => {
       mockSecrets.getSecret.mockImplementation((key: unknown) =>
-        key === 'DISCORD_WEBHOOK_URL_NOTIFY' ? 'https://example.com/notify' : null);
+        key === 'DISCORD_WEBHOOK_URL' ? 'https://example.com/webhook' : null);
       const result = await notifyWorkerReport({ worker: 'antigravity', report: 'output' });
       expect(result).toBe(true);
-      expect(DiscordNotifierMock).toHaveBeenCalledWith('https://example.com/notify');
+      expect(DiscordNotifierMock).toHaveBeenCalledWith('https://example.com/webhook');
     });
 
     it('reads the report content from reportPath', async () => {
