@@ -15,7 +15,6 @@ const mockRunner = {
   setIssueInProgress: (jest.fn() as any).mockResolvedValue(undefined),
   postUsageLimitComment: (jest.fn() as any).mockResolvedValue(undefined),
   addUsageLimitLabel: (jest.fn() as any).mockResolvedValue(undefined),
-  addCheckLabel: (jest.fn() as any).mockResolvedValue(undefined),
   finalizeParentIfChildrenComplete: (jest.fn() as any).mockResolvedValue(false),
   notifyUsageLimitToAllActiveIssues: (jest.fn() as any).mockResolvedValue(undefined),
   removeUsageLimitLabel: (jest.fn() as any).mockResolvedValue(undefined),
@@ -193,37 +192,6 @@ describe('webhook usage limit retry', () => {
     expect(res.body.reason).toBe("terminal state: Done");
     expect(runner.enqueue).not.toHaveBeenCalled();
     expect(runner.runItem).not.toHaveBeenCalled();
-  });
-
-  test("adds check label when issue reaches Done (SOT-908)", async () => {
-    const runner: any = mockRunner;
-    const donePayload = {
-      type: "Issue",
-      action: "update",
-      data: { identifier: "TEST-DONE2", title: "done task", state: { name: "Done", type: "completed" }, labels: [] }
-    };
-
-    const res = await request(app).post("/webhooks/linear").send(donePayload);
-    // setImmediate fire-and-forget — let it flush
-    await new Promise(resolve => originalSetTimeout(resolve, 20));
-
-    expect(res.status).toBe(200);
-    expect(runner.addCheckLabel).toHaveBeenCalledWith("TEST-DONE2");
-  });
-
-  test("does NOT add check label for Canceled terminal state", async () => {
-    const runner: any = mockRunner;
-    const canceledPayload = {
-      type: "Issue",
-      action: "update",
-      data: { identifier: "TEST-CANCELED", title: "canceled task", state: { name: "Canceled", type: "canceled" }, labels: [] }
-    };
-
-    const res = await request(app).post("/webhooks/linear").send(canceledPayload);
-    await new Promise(resolve => originalSetTimeout(resolve, 20));
-
-    expect(res.status).toBe(200);
-    expect(runner.addCheckLabel).not.toHaveBeenCalled();
   });
 
   test('does not call setIssueInProgress (Claude Code handles In Progress)', async () => {
