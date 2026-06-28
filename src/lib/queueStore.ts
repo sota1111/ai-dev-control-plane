@@ -158,7 +158,7 @@ export function normalizeQueue(queue: QueueItem[]): QueueItem[] {
       queueGroupOrder: item.queueGroupOrder || existing.queueGroupOrder || null
     });
   }
-  return Array.from(map.values());
+  return queueOrdering.sortQueueByPriority(Array.from(map.values()));
 }
 
 export async function syncQueueWithLinear(): Promise<void> {
@@ -255,7 +255,7 @@ export async function refreshQueuePriorities(): Promise<void> {
     }
 
     if (changed.length > 0) {
-      saveQueue(queue);
+      saveQueue(queueOrdering.sortQueueByPriority(queue));
       log('QUEUE', `refreshQueuePriorities: updated ${changed.length} item(s)`, { changed: changed.join(',') });
     }
   } catch (err: any) {
@@ -402,7 +402,7 @@ export function enqueue(issueId: string, trigger: string | null, retryAt: string
           ...(queueGroupOrder !== null ? { queueGroupOrder } : {})
         } : {})
       };
-      saveQueue(queue);
+      saveQueue(queueOrdering.sortQueueByPriority(queue));
       log('QUEUE', 'enqueue: updated existing item', { issue: issueId, trigger, retryAt: mergedRetryAt });
       return;
     }
@@ -425,7 +425,7 @@ export function enqueue(issueId: string, trigger: string | null, retryAt: string
       queueGroup: resolvedQueueGroup,
       queueGroupOrder: queueGroupOrder ?? null
     });
-    saveQueue(queue);
+    saveQueue(queueOrdering.sortQueueByPriority(queue));
     log('QUEUE', 'enqueued', { issue: issueId, trigger });
   } catch (err: any) {
     log('QUEUE', `enqueue ERROR: ${err.message}`, { issue: issueId });

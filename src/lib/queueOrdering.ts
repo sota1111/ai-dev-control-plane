@@ -38,6 +38,39 @@ export function effectiveRank(item: QueueItem): number {
 }
 
 /**
+ * Enqueue-time ordering (SOT-1352).
+ *
+ * Returns a NEW array (the input is never mutated) sorted ascending by the STATIC priority
+ * dimensions only: effectiveRank → retryAt → enqueuedAt. This is applied when a webhook enqueues
+ * an item so the persisted queue is always stored in priority order, instead of evaluating priority
+ * only at execution (dequeue) time.
+ *
+ * The DYNAMIC rules that genuinely depend on runtime state — `retryAt` readiness gating,
+ * `lastProcessedGroup` group continuation, and Urgent override — still live in
+ * `selectNextReadyIndex` and run at dequeue time; this helper deliberately does NOT use `now` or
+ * `queueGroup`. The comparator is stable (returns 0 on a full tie), so equal items keep input order.
+ */
+export function sortQueueByPriority<T extends QueueItem>(queue: T[]): T[] {
+  return [...queue].sort((a, b) => {
+    const rankA = effectiveRank(a);
+    const rankB = effectiveRank(b);
+    if (rankA !== rankB) return rankA - rankB;
+
+    // retryAt ascending; null/missing = earliest
+    const retryA = a.retryAt ? new Date(a.retryAt).getTime() : -Infinity;
+    const retryB = b.retryAt ? new Date(b.retryAt).getTime() : -Infinity;
+    if (retryA !== retryB) return retryA - retryB;
+
+    // enqueuedAt ascending; null/missing = earliest
+    const enqA = a.enqueuedAt ? new Date(a.enqueuedAt).getTime() : 0;
+    const enqB = b.enqueuedAt ? new Date(b.enqueuedAt).getTime() : 0;
+    if (enqA !== enqB) return enqA - enqB;
+
+    return 0;
+  });
+}
+
+/**
  * Selects the index of the next item to execute from the queue.
  * 
  * Logic (Step1 -> Step2 -> Step3):

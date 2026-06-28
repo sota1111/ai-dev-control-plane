@@ -113,4 +113,74 @@ describe('queueOrdering', () => {
       expect(waiting.map((i: any) => i.issueId)).toEqual(['waiting-early', 'waiting-late']);
     });
   });
+
+  describe('sortQueueByPriority', () => {
+    test('sorts by rank ascending (urgent first, none last)', () => {
+      const queue = [
+        { issueId: 'medium', priority: 3 },
+        { issueId: 'urgent', priority: 1 },
+        { issueId: 'high', priority: 2 }
+      ];
+      expect(queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId))
+        .toEqual(['urgent', 'high', 'medium']);
+    });
+
+    test('priorityRank overrides priority via effectiveRank', () => {
+      const queue = [
+        { issueId: 'low-priority', priority: 4 },
+        { issueId: 'bumped', priority: 4, priorityRank: 1 }
+      ];
+      expect(queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId))
+        .toEqual(['bumped', 'low-priority']);
+    });
+
+    test('no priority (0/null/undefined) sorts last', () => {
+      const queue = [
+        { issueId: 'none-zero', priority: 0 },
+        { issueId: 'low', priority: 4 },
+        { issueId: 'none-null', priority: null },
+        { issueId: 'none-undef' }
+      ];
+      const sorted = queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId);
+      expect(sorted[0]).toBe('low');
+      expect(sorted.slice(1).sort()).toEqual(['none-null', 'none-undef', 'none-zero']);
+    });
+
+    test('rank tie broken by retryAt ascending, null treated as earliest', () => {
+      const queue = [
+        { issueId: 'future-retry', priority: 3, retryAt: '2023-01-01T13:00:00Z' },
+        { issueId: 'no-retry', priority: 3 }
+      ];
+      expect(queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId))
+        .toEqual(['no-retry', 'future-retry']);
+    });
+
+    test('rank+retryAt tie broken by enqueuedAt ascending', () => {
+      const queue = [
+        { issueId: 'later', priority: 3, enqueuedAt: '2023-01-01T11:00:00Z' },
+        { issueId: 'earlier', priority: 3, enqueuedAt: '2023-01-01T10:00:00Z' }
+      ];
+      expect(queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId))
+        .toEqual(['earlier', 'later']);
+    });
+
+    test('is stable for fully-equal items (keeps input order)', () => {
+      const queue = [
+        { issueId: 'a', priority: 3, enqueuedAt: '2023-01-01T10:00:00Z' },
+        { issueId: 'b', priority: 3, enqueuedAt: '2023-01-01T10:00:00Z' }
+      ];
+      expect(queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId))
+        .toEqual(['a', 'b']);
+    });
+
+    test('does not mutate the input array and returns a new array', () => {
+      const queue = [
+        { issueId: 'medium', priority: 3 },
+        { issueId: 'urgent', priority: 1 }
+      ];
+      const result = queueOrdering.sortQueueByPriority(queue);
+      expect(result).not.toBe(queue);
+      expect(queue.map((i: any) => i.issueId)).toEqual(['medium', 'urgent']);
+    });
+  });
 });
