@@ -149,7 +149,7 @@ async function main() {
       break;
     }
     case 'notify-worker-report': {
-      await initSecrets(['DISCORD_WEBHOOK_URL_NOTIFY', 'DISCORD_WEBHOOK_URL']);
+      await initSecrets(['DISCORD_WEBHOOK_URL']);
       const worker = args[0] as 'antigravity' | 'codex';
       if (!['antigravity', 'codex'].includes(worker)) {
         process.stderr.write('Usage: runner-cli.js notify-worker-report <antigravity|codex> [reportPath]\n');
