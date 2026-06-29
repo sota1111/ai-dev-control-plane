@@ -258,6 +258,13 @@ After ALL child Issues are Done:
 If ALL pass:
 
 - `git push origin feat/<issue-id>-<short-description>`
+- **If the parent Issue has the `Bug` label**: before opening the PR, create a GitHub Issue
+  for the bug (`gh issue create --title "<Linear title>" --body "<description + 受け入れ条件 +
+  Linear URL>"`; add `--label bug` only if that label exists in the repo), note its number
+  `<N>`, and include `Closes #<N>` in the PR body so the PR links to and auto-closes the
+  GitHub Issue on merge. Post the GitHub Issue URL as a comment on the Linear issue.
+  Creating/linking the GitHub Issue is best-effort — never block the PR on it.
+  (See CLAUDE.md "Bug Issue Registration (Bug ラベル時)".)
 - Create PR via GitHub CLI or MCP tool
 - Post PR link as comment on parent Issue
 - Update parent Issue status to `In Review`

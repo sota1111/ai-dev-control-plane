@@ -747,6 +747,39 @@ PR を作成してよい条件（すべて満たすこと）:
 
 1つでも満たさない場合、PR は作成せず、失敗した子Issue を再オープンして修正サイクルを回す。
 
+### Bug Issue Registration (Bug ラベル時)
+
+対象 Linear Issue に **`Bug` ラベル**が付いている場合、通常の PR フローに加えて GitHub Issue を
+作成し、PR と紐づける。これにより不具合は GitHub 上でも追跡され、PR の merge で自動クローズされる。
+
+適用条件:
+- PR を作成する実装系タスク（IMPLEMENT / FIX / DEBUG / DOC）のみ。PLAN タスクは PR を作らないため
+  GitHub Issue も作成しない。
+- 親 Linear Issue 1 件につき GitHub Issue 1 件（子Issue ごとには作らない）。
+- Quality Gate 通過後、PR 作成の直前に実行する（中断時の孤児 Issue を避けるため）。
+
+手順:
+
+1. GitHub Issue を作成し、Issue 番号 `<N>` を控える:
+
+   ```bash
+   gh issue create \
+     --title "<Linear Issue Title>" \
+     --body "<Linear Issue の説明 + 受け入れ条件 + Linear URL + Linear ID>" \
+     --label bug
+   ```
+
+   - `--label bug` は対象リポジトリに `bug` ラベルが存在する場合のみ付与する。存在しなければ
+     `--label` を省略する（ラベル不在で失敗させない）。
+
+2. PR Body に **closing keyword** `Closes #<N>` を含め、PR と GitHub Issue を紐づける
+   （merge で GitHub Issue が自動クローズされる）。下記 PR Body Template の "Related Issues" を参照。
+
+3. 作成した GitHub Issue の URL を親 Linear Issue にコメントで記録する。
+
+GitHub Issue の作成・紐づけに失敗しても PR フロー自体は止めない（best-effort）。失敗時は親 Linear
+Issue にその旨をコメントし、PR は通常どおり作成・merge する。
+
 ### PR Creation Procedure
 
 ```bash
@@ -780,6 +813,7 @@ PR 作成後:
 
 - Parent: <親Issue ID>
 - Children: <子Issue ID 一覧>
+- Closes #<GitHub Issue 番号>   <!-- Bug ラベル時のみ。PR と GitHub Issue を紐づけ自動クローズ -->
 
 ## Quality Gate Results
 
