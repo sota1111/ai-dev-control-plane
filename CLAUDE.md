@@ -780,6 +780,39 @@ PR を作成してよい条件（すべて満たすこと）:
 GitHub Issue の作成・紐づけに失敗しても PR フロー自体は止めない（best-effort）。失敗時は親 Linear
 Issue にその旨をコメントし、PR は通常どおり作成・merge する。
 
+### Snapshot Attachment (snapshot ラベル時)
+
+対象 Linear Issue に **`snapshot` ラベル**が付いている場合、通常の PR フローに加えて、**変更後
+（after）の画面スクリーンショット**を撮影し、PR と Linear Issue の両方に画像として添付する。
+これにより、画面に対する変更が視覚的に追跡・レビューできる。
+
+適用条件:
+- PR を作成する実装系タスク（IMPLEMENT / FIX / DEBUG / DOC）のみ。PLAN タスクは PR を作らないため
+  スクショ添付も行わない。
+- 親 Linear Issue 1 件につき、変更を反映した画面のスクショを最低 1 枚（複数画面に渡る場合は該当
+  画面ごと）。
+- Quality Gate 通過後、PR 作成の直前に実行する。
+
+手順:
+
+1. **after スクショの撮影。** 対象プロジェクトの既存 e2e / Playwright モックハーネス
+   （`installApiMocks` / `login` 等）を流用した一時 spec で、変更後の対象画面を撮影する。
+   - 撮影画像はリポジトリ内（例: `docs/screenshots/`）に commit し、commit SHA を控える。
+   - UI を伴わない変更（バックエンドのみ・ドキュメントのみ等で可視画面が無い場合）は撮影を省略し、
+     その旨を Linear にコメントで記録する（無理にスクショを作らない）。
+
+2. **PR への添付。** PR Body に、commit SHA を含む永続 URL
+   （`https://raw.githubusercontent.com/<owner>/<repo>/<commit-sha>/docs/screenshots/<file>`）で
+   `![after](...)` として画像を埋め込む。下記 PR Body Template の "Snapshot" を参照。
+
+3. **Linear への添付。** `mcp__linear-server__prepare_attachment_upload` → 返却された署名付き URL
+   へ `curl -X PUT`（署名ヘッダは verbatim、60 秒以内）→ `mcp__linear-server__create_attachment_from_upload`
+   で Issue に添付する。`uploads.linear.app` の URL は Issue コメントに `![after](...)` として
+   インライン表示する。
+
+スクショの撮影・添付に失敗しても PR フロー自体は止めない（best-effort）。失敗時は親 Linear Issue に
+その旨をコメントし、PR は通常どおり作成・merge する。
+
 ### PR Creation Procedure
 
 ```bash
@@ -822,6 +855,11 @@ PR 作成後:
 - [x] Unit Test: pass
 - [x] E2E Test: pass / N/A
 - [x] Diff Review: no unintended changes
+
+## Snapshot
+
+<!-- snapshot ラベル時のみ。変更後（after）画面のスクショを commit SHA 永続 URL で埋め込む -->
+![after](https://raw.githubusercontent.com/<owner>/<repo>/<commit-sha>/docs/screenshots/<file>)
 
 ## Acceptance Criteria
 
