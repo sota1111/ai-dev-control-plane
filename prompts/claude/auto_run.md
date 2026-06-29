@@ -265,6 +265,16 @@ If ALL pass:
   GitHub Issue on merge. Post the GitHub Issue URL as a comment on the Linear issue.
   Creating/linking the GitHub Issue is best-effort — never block the PR on it.
   (See CLAUDE.md "Bug Issue Registration (Bug ラベル時)".)
+- **If the parent Issue has the `snapshot` label**: before opening the PR, capture an
+  "after change" screenshot of the changed screen (reuse the project's existing Playwright/e2e
+  mock harness — `installApiMocks` / `login`), commit it under `docs/screenshots/`, and attach it
+  to (a) the PR body via a `raw.githubusercontent.com/<owner>/<repo>/<commit-sha>/...` URL
+  (`![after](...)`, see the PR Body Template "Snapshot" section) and (b) the Linear issue via
+  `prepare_attachment_upload` → `curl -X PUT` (signed headers verbatim, within 60s) →
+  `create_attachment_from_upload`, posting the `uploads.linear.app` URL inline in a comment.
+  If the change has no visible UI, skip the screenshot and note that on the Linear issue.
+  Capturing/attaching the screenshot is best-effort — never block the PR on it.
+  (See CLAUDE.md "Snapshot Attachment (snapshot ラベル時)".)
 - Create PR via GitHub CLI or MCP tool
 - Post PR link as comment on parent Issue
 - Update parent Issue status to `In Review`
