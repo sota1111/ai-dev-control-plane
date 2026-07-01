@@ -53,7 +53,7 @@ const originalSecret = process.env.LINEAR_WEBHOOK_SECRET;
 process.env.LINEAR_WEBHOOK_SECRET = '';
 
 const webhookServer: any = await import('../webhook-server.js');
-const { app, runPeriodicDrainTick, startPeriodicDrain, runReaperTick } = webhookServer;
+const { app, runPeriodicDrainTick, startPeriodicDrain, runReaperTick, scheduleIssueEvent, _debounceTimers, _resetDebounceTimers } = webhookServer;
 
 // Helper: create a mock spawn child that emits given stdout, stderr, then closes
 function mockSpawnChild({ stdout = '', stderr = '', exitCode = 0 } = {}) {
@@ -1007,5 +1007,80 @@ describe('periodic drain', () => {
     // We already checked typeof timer.unref === 'function' in implementation
     clearInterval(timer);
     setIntervalSpy.mockRestore();
+  });
+});
+
+// SOT-1437 / P2: per-issue webhook debounce/coalesce.
+describe('webhook per-issue debounce/coalesce (SOT-1437)', () => {
+  const originalDebounce = process.env.WEBHOOK_DEBOUNCE_MS;
+  const runner: any = mockRunner;
+
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const meta = (priority: number | null = null) => ({
+    priority,
+    priorityLabel: null,
+    parentIssueId: null,
+    parentIssueIdentifier: null,
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    _resetDebounceTimers();
+    runner.acquireLock.mockReturnValue(true);
+    runner.hasPendingIssues.mockResolvedValue(true);
+    runner.isLocked.mockReturnValue(false);
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+    runner.dequeue.mockReturnValue(null); // stop after enqueue+dequeue (no runItem)
+    runner.loadQueue.mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    _resetDebounceTimers();
+    if (originalDebounce === undefined) delete process.env.WEBHOOK_DEBOUNCE_MS;
+    else process.env.WEBHOOK_DEBOUNCE_MS = originalDebounce;
+  });
+
+  test('coalesces a burst of same-issue events into a single processing pass', async () => {
+    process.env.WEBHOOK_DEBOUNCE_MS = '30';
+    scheduleIssueEvent('CO-1', meta());
+    scheduleIssueEvent('CO-1', meta());
+    scheduleIssueEvent('CO-1', meta());
+    // Only one pending timer while inside the window (coalesced).
+    expect(_debounceTimers.size).toBe(1);
+    await wait(60);
+    // Processing ran exactly once → enqueue called once for CO-1.
+    const co1Enqueues = runner.enqueue.mock.calls.filter((c: any[]) => c[0] === 'CO-1');
+    expect(co1Enqueues).toHaveLength(1);
+    expect(_debounceTimers.size).toBe(0);
+  });
+
+  test('distinct issues each get their own single deferred processing', async () => {
+    process.env.WEBHOOK_DEBOUNCE_MS = '30';
+    scheduleIssueEvent('A-1', meta());
+    scheduleIssueEvent('B-1', meta());
+    expect(_debounceTimers.size).toBe(2);
+    await wait(60);
+    expect(runner.enqueue.mock.calls.filter((c: any[]) => c[0] === 'A-1')).toHaveLength(1);
+    expect(runner.enqueue.mock.calls.filter((c: any[]) => c[0] === 'B-1')).toHaveLength(1);
+  });
+
+  test('latest event wins (most recent meta is used)', async () => {
+    process.env.WEBHOOK_DEBOUNCE_MS = '30';
+    scheduleIssueEvent('LW-1', meta(3));
+    scheduleIssueEvent('LW-1', meta(1)); // bumped to Urgent last
+    await wait(60);
+    const call = runner.enqueue.mock.calls.find((c: any[]) => c[0] === 'LW-1');
+    expect(call).toBeDefined();
+    // enqueue(id, 'webhook', retryAt, { priority, ... }) — latest priority (1) must be used.
+    expect(call[3].priority).toBe(1);
+  });
+
+  test('default (WEBHOOK_DEBOUNCE_MS unset/0) processes immediately with no debounce timer', async () => {
+    delete process.env.WEBHOOK_DEBOUNCE_MS;
+    scheduleIssueEvent('IMM-1', meta());
+    // No debounce timer is created in immediate mode.
+    expect(_debounceTimers.size).toBe(0);
+    await wait(20); // let setImmediate + async processing settle
+    expect(runner.enqueue.mock.calls.filter((c: any[]) => c[0] === 'IMM-1')).toHaveLength(1);
   });
 });

@@ -76,6 +76,17 @@ export function webhookReaperEnabled(env: Env = process.env): boolean {
   return env.WEBHOOK_REAPER_ENABLED !== 'false';
 }
 
+/**
+ * WEBHOOK_DEBOUNCE_MS — per-issue webhook debounce/coalesce window (default 0 = disabled).
+ * When > 0, a burst of accepted events for the SAME issue collapses into a single deferred
+ * processing pass after the quiet window (latest event wins). Default 0 keeps the historical
+ * immediate `setImmediate` behavior (backward compatible). Negative/NaN is treated as 0.
+ */
+export function webhookDebounceMs(env: Env = process.env): number {
+  const v = intEnv(env, 'WEBHOOK_DEBOUNCE_MS', 0);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
 /** WEBHOOK_BOOTSTRAP_SCAN_ENABLED — bootstrap scan is on by default; only the literal 'false' disables it. */
 export function webhookBootstrapScanEnabled(env: Env = process.env): boolean {
   return env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED !== 'false';
