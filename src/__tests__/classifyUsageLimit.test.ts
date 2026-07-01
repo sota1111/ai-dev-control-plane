@@ -35,12 +35,14 @@ describe('classifyUsageLimit', () => {
       "try again at Jun 21st, 2026 12:05 AM.";
     const result = classifyUsageLimit(codexMsg, NOW_MS);
 
+    // SOT-1446: resetAt stays the true (far-future) reported reset, but retryAt is capped to at
+    // most 5h out (NOW_MS + MAX_COOLDOWN_SECONDS default 18000s) so the worker is never stranded.
     expect(result).toMatchObject({
       type: 'session_limit',
       retryable: true,
       confidence: 'high',
       resetAt: '2026-06-21T00:05:00.000Z',
-      retryAt: '2026-06-21T00:15:00.000Z'
+      retryAt: '2026-06-16T17:00:00.000Z'
     });
   });
 
@@ -178,5 +180,43 @@ describe('classifyUsageLimit', () => {
     const result = classifyUsageLimit('pid=125034 API Error: 503 Service Unavailable', NOW_MS);
     expect(result.type).toBe('model_unavailable');
     expect(result.retryable).toBe(true);
+  });
+
+  describe('SOT-1446 cooldown cap (retry within at most 5h)', () => {
+    const MAX = 18000; // default MAX_COOLDOWN_SECONDS = 5h
+
+    it('caps a far-future session-limit retry to NOW + 5h without touching resetAt', () => {
+      const result = classifyUsageLimit(
+        "You've hit your usage limit. try again at Jun 21st, 2027 9:00 PM.",
+        NOW_MS
+      );
+      const retryMs = new Date(result.retryAt!).getTime();
+      expect(retryMs).toBe(NOW_MS + MAX * 1000);
+      expect(retryMs).toBeGreaterThan(NOW_MS);
+      // resetAt stays the true far-future reported reset — only the retry is capped.
+      expect(new Date(result.resetAt!).getUTCFullYear()).toBe(2027);
+    });
+
+    it('does NOT cap a normal near-term reset (~3.5h out)', () => {
+      const result = classifyUsageLimit(
+        "You've hit your session limit. Your limit will reset at 3:30pm (UTC).",
+        NOW_MS
+      );
+      // 15:40 UTC = 3h40m out < 5h → unchanged.
+      expect(result.retryAt).toBe('2026-06-16T15:40:00.000Z');
+    });
+
+    it('honours a MAX_COOLDOWN_SECONDS override', () => {
+      process.env.MAX_COOLDOWN_SECONDS = '3600';
+      try {
+        const result = classifyUsageLimit(
+          "You've hit your usage limit. try again at Jun 21st, 2027 9:00 PM.",
+          NOW_MS
+        );
+        expect(new Date(result.retryAt!).getTime()).toBe(NOW_MS + 3600 * 1000);
+      } finally {
+        delete process.env.MAX_COOLDOWN_SECONDS;
+      }
+    });
   });
 });

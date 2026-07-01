@@ -10,7 +10,7 @@ const __dirname = dirname(__filename);
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 import * as runner from './runner.js';
-import { parseUsageLimitResetEpoch } from './lib/usageLimitParser.js';
+import { parseUsageLimitResetEpoch, capRetryEpoch } from './lib/usageLimitParser.js';
 import { classifyIssue } from './lib/issueClassifier.js';
 import { getWorkerCooldownStatus } from './lib/workerCooldown.js';
 import { initSecrets } from './config/secrets.js';
@@ -73,7 +73,9 @@ async function main() {
       }
       const epoch = parseUsageLimitResetEpoch(input);
       if (epoch !== null) {
-        process.stdout.write(String(epoch));
+        // SOT-1446: cap the emitted worker-cooldown resume epoch to at most 5h out, so a
+        // misparsed / far-future reset can't strand the worker for days.
+        process.stdout.write(String(capRetryEpoch(epoch)));
         process.exit(0);
       } else {
         process.exit(1);

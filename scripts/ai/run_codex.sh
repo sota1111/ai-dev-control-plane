@@ -105,12 +105,20 @@ esac
 if [ -f "$CODEX_COOLDOWN_FILE" ]; then
   NOW_EPOCH="$(date +%s)"
   RESUME_AT="$(node -e "try{const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(String(Number(d.resumeAtEpoch)||0));}catch(e){process.stdout.write('0');}" "$CODEX_COOLDOWN_FILE" 2>/dev/null || echo 0)"
-  if [ "$RESUME_AT" -gt 0 ] && [ "$NOW_EPOCH" -lt "$RESUME_AT" ]; then
+  # SOT-1446: self-heal a cooldown scheduled absurdly far out (misparsed/far-future reset). No
+  # cooldown may keep a worker idle longer than MAX_COOLDOWN_SECONDS (default 18000s=5h); if the
+  # stored resumeAt is beyond that ceiling, treat it as stale, clear it, and resume Codex now.
+  MAX_COOLDOWN_SECONDS="${MAX_COOLDOWN_SECONDS:-18000}"
+  if [ "$RESUME_AT" -gt 0 ] && [ "$((RESUME_AT - NOW_EPOCH))" -gt "$MAX_COOLDOWN_SECONDS" ]; then
+    echo "CODEX_COOLDOWN_CAPPED: resumeAt $RESUME_AT is >${MAX_COOLDOWN_SECONDS}s out (now $NOW_EPOCH), clearing stale cooldown and resuming Codex" >&2
+    rm -f "$CODEX_COOLDOWN_FILE"
+  elif [ "$RESUME_AT" -gt 0 ] && [ "$NOW_EPOCH" -lt "$RESUME_AT" ]; then
     echo "CODEX_COOLDOWN_ACTIVE: codex usage limit until epoch $RESUME_AT (now $NOW_EPOCH), delegating to Claude" >&2
     exit "$WORKER_NONRESPONSE_EXIT"
+  else
+    echo "Codex cooldown expired (now $NOW_EPOCH >= resumeAt $RESUME_AT), clearing and resuming Codex" >&2
+    rm -f "$CODEX_COOLDOWN_FILE"
   fi
-  echo "Codex cooldown expired (now $NOW_EPOCH >= resumeAt $RESUME_AT), clearing and resuming Codex" >&2
-  rm -f "$CODEX_COOLDOWN_FILE"
 fi
 
 # --- Codex auth-unhealthy pre-run check (SOT-1441 / P1) ---

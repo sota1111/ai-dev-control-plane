@@ -1,6 +1,22 @@
 import * as appEnv from '../config/env.js';
 
 /**
+ * SOT-1446: never let a cooldown retry be scheduled more than MAX_COOLDOWN_SECONDS in the future,
+ * so a misparsed / far-future reset can't strand a worker (observed: a Codex cooldown set ~185 days
+ * out). Caps the given retry epoch (seconds) to now + maxCooldownSeconds. Only the RETRY/resume
+ * time is capped — the reported reset time (resetAt) is left untouched.
+ *
+ * Exported so the cooldown-emit call sites (runner-cli `parse-usage-limit-epoch` for the worker
+ * cooldown files, and classifyUsageLimit for the harness cooldown) share one ceiling. Kept OUT of
+ * the pure parser (parseUsageLimitResetEpoch / parseRawResetEpoch) so timezone/date parsing stays
+ * independently testable.
+ */
+export function capRetryEpoch(epochSeconds: number, nowMs: number = Date.now()): number {
+  const maxAt = Math.floor(nowMs / 1000) + appEnv.maxCooldownSeconds();
+  return Math.min(epochSeconds, maxAt);
+}
+
+/**
  * Internal helper to parse raw usage limit reset time from text and returns the Unix epoch (seconds).
  */
 
@@ -164,7 +180,7 @@ export function classifyUsageLimit(text: string, nowMs: number = Date.now()): Us
       result.retryable = true;
       result.confidence = 'high';
       result.resetAt = new Date(rawEpoch * 1000).toISOString();
-      result.retryAt = new Date((rawEpoch + buffer) * 1000).toISOString();
+      result.retryAt = new Date(capRetryEpoch(rawEpoch + buffer, nowMs) * 1000).toISOString();
       return result;
     }
   }
@@ -179,7 +195,7 @@ export function classifyUsageLimit(text: string, nowMs: number = Date.now()): Us
     const retryAfterMatch = text.match(/retry-after:\s*(\d+)/i);
     const retryAfterSeconds = retryAfterMatch ? parseInt(retryAfterMatch[1], 10) : buffer;
     
-    result.retryAt = new Date(nowMs + (retryAfterSeconds * 1000)).toISOString();
+    result.retryAt = new Date(capRetryEpoch(Math.floor(nowMs / 1000) + retryAfterSeconds, nowMs) * 1000).toISOString();
     return result;
   }
 
@@ -208,7 +224,7 @@ export function classifyUsageLimit(text: string, nowMs: number = Date.now()): Us
     result.type = 'model_unavailable';
     result.retryable = true;
     result.confidence = 'medium';
-    result.retryAt = new Date(nowMs + (overloadBuffer * 1000)).toISOString();
+    result.retryAt = new Date(capRetryEpoch(Math.floor(nowMs / 1000) + overloadBuffer, nowMs) * 1000).toISOString();
     return result;
   }
 
@@ -219,7 +235,7 @@ export function classifyUsageLimit(text: string, nowMs: number = Date.now()): Us
     result.retryable = true;
     result.confidence = 'medium';
     const backoff = Math.min(buffer, 120);
-    result.retryAt = new Date(nowMs + (backoff * 1000)).toISOString();
+    result.retryAt = new Date(capRetryEpoch(Math.floor(nowMs / 1000) + backoff, nowMs) * 1000).toISOString();
     return result;
   }
 
