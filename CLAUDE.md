@@ -92,6 +92,19 @@ Before running, write the full instruction into `prompts/codex/debug.md`.
 - **All-Claude mode (`ALL_CLAUDE_MODE`).** Setting the env flag `ALL_CLAUDE_MODE` to a truthy value (`1|true|yes|on`, case-insensitive) makes BOTH `scripts/ai/run_antigravity.sh` and `scripts/ai/run_codex.sh` exit immediately with the non-response code `75`, so Claude Code intentionally performs ALL implementation and verification work directly under this policy. It is the superset of `ANTIGRAVITY_DISABLED` (which disables only Antigravity) and is evaluated before `ANTIGRAVITY_DISABLED` and the usage-limit cooldown checks. Default off = workers run as usual. Use this when running everything on Claude.
 - **Worker-mode selector (`WORKER_MODE`, SOT-1333).** A single config setting chooses which worker LLMs run; the disabled worker's CLI is never invoked at all (its run script exits `75` and Claude Code takes over via this policy). Values (case-insensitive; default/unset = `all`): `all` (both run), `claude-only` (disable both — equivalent to `ALL_CLAUDE_MODE`), `codex-only` (run Codex only; Antigravity disabled), `antigravity-only` (run Antigravity only; Codex disabled). Evaluated right after `ALL_CLAUDE_MODE`, before the individual disable flags and the cooldown checks. (`antigravity-only` replaced the former `gemini-only` mode once the Gemini→Antigravity CLI migration (SOT-1334) landed.)
 - **Codex disable flag (`CODEX_DISABLED`, SOT-1333).** Symmetric to `ANTIGRAVITY_DISABLED`: a truthy value (`1|true|yes|on`, case-insensitive) makes only `scripts/ai/run_codex.sh` exit with `75`, delegating verification to Claude Code while Codex CLI is unavailable. Default off.
+- **Per-role worker assignment (`config/worker_roles.json`, SOT-1459).** The env flags above switch a worker on/off *globally, for every role at once*. To assign a worker *per role*, edit the file `config/worker_roles.json` (an editable JSON, **not `.env`**). It maps each harness role — `task-check`, `decomposition`, `implementation`, `verification`, `acceptance` — to the worker that handles it (`claude` | `codex` | `antigravity`); keys starting with `__` are documentation and ignored. When Claude Code invokes a run script for a role, it sets `WORKER_ROLE=<role>`; `scripts/ai/run_codex.sh` and `scripts/ai/run_antigravity.sh` read this file and, if the role is assigned to a *different* worker than the script's own (e.g. `verification` set to `claude`, or `implementation` set to `codex`), exit `75` so Claude Code takes over via this policy. This lets you, for example, keep implementation on Antigravity while routing verification to Claude. **Precedence:** the global switches `ALL_CLAUDE_MODE` and `WORKER_MODE` still win — the per-role check runs *after* them and *before* the individual `CODEX_DISABLED`/`ANTIGRAVITY_DISABLED` flags and the usage-limit cooldown. Fail-open: if `WORKER_ROLE` is unset, the role is unknown, or the file is missing/invalid, the script behaves as before. Loading/validation helper: `src/lib/workerRoles.ts` (`loadWorkerRolesConfig` / `resolveRoleWorker`). Decomposition and acceptance are Claude-owned roles by default; setting them to `codex`/`antigravity` routes that role's worker-script invocation accordingly, otherwise Claude Code performs them directly.
+
+### Roles the orchestrator maps to workers (SOT-1459)
+
+When acting on a feature Issue, Claude Code assigns each role to the worker configured in `config/worker_roles.json` and, when delegating to a run script, passes `WORKER_ROLE=<role>`:
+
+| Role (config key) | 役割 | Default worker | Run script |
+| --- | --- | --- | --- |
+| `task-check` | タスク確認 | `codex` | `run_codex.sh` |
+| `decomposition` | タスク分割 | `claude` | (Claude Code直接) |
+| `implementation` | 実装 | `antigravity` | `run_antigravity.sh` |
+| `verification` | 検証 | `codex` | `run_codex.sh` |
+| `acceptance` | 受け入れ | `claude` | (Claude Code直接) |
 
 ---
 

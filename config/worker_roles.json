@@ -1,0 +1,8 @@
+{
+  "__doc__": "SOT-1459 per-role worker assignment. Editable file (NOT .env) mapping each harness role to the worker that handles it. Valid roles: task-check | decomposition | implementation | verification | acceptance. Valid workers: claude | codex | antigravity. Edit a value to reroute that role to a different worker; the run scripts (scripts/ai/run_codex.sh, scripts/ai/run_antigravity.sh) honor it when invoked with WORKER_ROLE=<role>. If a role's worker is not this script's worker (e.g. verification set to claude/antigravity), the script exits with non-response code 75 and Claude Code takes over per the Worker Non-Response Fallback Policy. Precedence: the global env kill-switches ALL_CLAUDE_MODE and WORKER_MODE still override this file; this per-role config is evaluated after them and before the individual disable flags / usage-limit cooldown. Keys starting with __ are ignored.",
+  "task-check": "codex",
+  "decomposition": "claude",
+  "implementation": "antigravity",
+  "verification": "codex",
+  "acceptance": "claude"
+}
