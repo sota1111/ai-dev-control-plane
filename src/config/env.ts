@@ -15,6 +15,8 @@
  * inject an env object. Do not cache values at module load.
  */
 
+import { type LogLevel, parseLogLevel } from '../lib/logRotation.js';
+
 type Env = NodeJS.ProcessEnv;
 
 /**
@@ -115,4 +117,27 @@ export function linearRetryBaseMs(env: Env = process.env): number {
 export function workerAuthUnhealthyTtlSeconds(env: Env = process.env): number {
   const v = intEnv(env, 'WORKER_AUTH_UNHEALTHY_TTL_SECONDS', 900);
   return Number.isFinite(v) && v > 0 ? v : 900;
+}
+
+/**
+ * LOG_LEVEL — minimum severity written to the runner log (SOT-1421). Lines whose tag maps below
+ * this threshold are dropped. Default 'info' (so `[OUTCOME]` lines are always kept — P5 unaffected).
+ */
+export function logLevel(env: Env = process.env): LogLevel {
+  return parseLogLevel(env.LOG_LEVEL);
+}
+
+/**
+ * LOG_MAX_BYTES — size threshold that triggers rotation of `auto_runner.log` (SOT-1421).
+ * Default 10MB. A value <= 0 disables rotation (passed through, not clamped to the default).
+ */
+export function logMaxBytes(env: Env = process.env): number {
+  const v = intEnv(env, 'LOG_MAX_BYTES', 10 * 1024 * 1024);
+  return Number.isFinite(v) ? v : 10 * 1024 * 1024;
+}
+
+/** LOG_MAX_FILES — max rotated generations of the runner log to keep (SOT-1421). Default 5, min 1. */
+export function logMaxFiles(env: Env = process.env): number {
+  const v = intEnv(env, 'LOG_MAX_FILES', 5);
+  return Number.isFinite(v) && v >= 1 ? v : 5;
 }

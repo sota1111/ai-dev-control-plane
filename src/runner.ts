@@ -88,6 +88,7 @@ import {
   isQueued,
 } from './lib/queueStore.js';
 import { parseOutcomeLines, summarizeOutcomes, type OutcomeSummary } from './lib/outcomeStats.js';
+import { levelForTag, shouldLog, rotateIfNeeded, listLogFilesNewestFirst } from './lib/logRotation.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -338,12 +339,16 @@ function log(tag: string, message: string, context: Record<string, any> = {}) {
     if (!fs.existsSync(LOG_DIR)) {
       fs.mkdirSync(LOG_DIR, { recursive: true });
     }
+    // SOT-1421: drop lines below the configured LOG_LEVEL threshold (default 'info' keeps [OUTCOME]).
+    if (!shouldLog(levelForTag(tag), appEnv.logLevel())) return;
     const timestamp = new Date().toISOString().replace('T', ' ').split('.')[0];
     const contextStr = Object.entries(context)
       .filter(([_, v]) => v !== undefined && v !== null)
       .map(([k, v]) => `${k}=${v}`)
       .join(' ');
     const line = `[${timestamp}] [${tag}] ${contextStr ? contextStr + ' ' : ''}${message}\n`;
+    // SOT-1421: size-based rotation so auto_runner.log never grows unbounded.
+    rotateIfNeeded(LOG_FILE, appEnv.logMaxBytes(), appEnv.logMaxFiles());
     fs.appendFileSync(LOG_FILE, line);
   } catch (err: any) {
     console.error(`[RUNNER:LOG_ERROR] ${err.message}`);
@@ -355,11 +360,15 @@ function log(tag: string, message: string, context: Record<string, any> = {}) {
  * processCompletedRun, optionally windowed to the last `windowMs`. Used by the Discord /status
  * "recent outcomes" line and available for ad-hoc inspection. Fail-open: returns a zeroed summary
  * if the log is missing/unreadable (never throws).
+ *
+ * SOT-1421: reads the base log AND its rotated generations (`.1`, `.2`, …) so outcome history is
+ * not lost when the log rotates — the recent window may straddle a rotation boundary.
  */
 function getRecentOutcomeSummary(windowMs?: number): OutcomeSummary {
   try {
-    if (!fs.existsSync(LOG_FILE)) return summarizeOutcomes([]);
-    const text = fs.readFileSync(LOG_FILE, 'utf8');
+    const files = listLogFilesNewestFirst(LOG_FILE, appEnv.logMaxFiles());
+    if (files.length === 0) return summarizeOutcomes([]);
+    const text = files.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
     const records = parseOutcomeLines(text);
     const sinceMs = windowMs && windowMs > 0 ? Date.now() - windowMs : undefined;
     return summarizeOutcomes(records, { sinceMs });
