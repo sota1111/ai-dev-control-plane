@@ -6,6 +6,7 @@ const mockRunner = {
   fetchActiveIssues: (jest.fn() as any).mockResolvedValue([]),
   loadQueue: jest.fn().mockReturnValue([]),
   getUsageLimitCooldownUntil: jest.fn().mockReturnValue(null),
+  getRecentOutcomeSummary: jest.fn().mockReturnValue({ total: 0, byOutcome: {}, successRate: 0, usageLimitRate: 0, failureRate: 0 }),
   linearQuery: jest.fn(),
   log: jest.fn(),
   LOG_DIR: '/tmp/test_logs',
@@ -83,6 +84,21 @@ describe('handleStatus', () => {
     (runner.getCurrentIssue as any).mockReturnValueOnce(null);
     const result = await handlers.handleStatus();
     expect(result.content).toContain('**実行中**: なし');
+  });
+
+  // SOT-1439 / P5: /status surfaces the recent-outcome summary.
+  test('includes the last-24h outcome summary line', async () => {
+    (runner.getRecentOutcomeSummary as any).mockReturnValueOnce({
+      total: 3,
+      byOutcome: { TASK_COMPLETED: 2, FAILED: 1 },
+      successRate: 2 / 3,
+      usageLimitRate: 0,
+      failureRate: 1 / 3,
+    });
+    const result = await handlers.handleStatus();
+    expect(result.content).toContain('直近24hのoutcome');
+    expect(result.content).toContain('3件');
+    expect(runner.getRecentOutcomeSummary).toHaveBeenCalledWith(24 * 60 * 60 * 1000);
   });
 });
 

@@ -16,6 +16,7 @@ import { getWorkerCooldownStatus } from './lib/workerCooldown.js';
 import { initSecrets } from './config/secrets.js';
 import { notifyCooldown, notifyUsageLimitUnknownReset } from './lib/cooldownNotifier.js';
 import { notifyWorkerReport } from './lib/workerReportNotifier.js';
+import { formatOutcomeSummary } from './lib/outcomeStats.js';
 
 const [,, command, ...args] = process.argv;
 
@@ -161,8 +162,25 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'aggregate-outcomes': {
+      // SOT-1439 / P5: parse the runner log's structured [OUTCOME] lines and print aggregate stats.
+      // Usage: runner-cli.js aggregate-outcomes [windowHours] [--json]
+      //   windowHours: only count outcomes from the last N hours (default: all). `0`/omit = all.
+      const windowHours = args[0] && /^\d+(\.\d+)?$/.test(args[0]) ? parseFloat(args[0]) : 0;
+      const asJson = args.includes('--json');
+      const windowMs = windowHours > 0 ? windowHours * 60 * 60 * 1000 : undefined;
+      const summary = runner.getRecentOutcomeSummary(windowMs);
+      if (asJson) {
+        process.stdout.write(JSON.stringify({ windowHours: windowHours || null, ...summary }, null, 2) + '\n');
+      } else {
+        const scope = windowHours > 0 ? `last ${windowHours}h` : 'all-time';
+        process.stdout.write(`[OUTCOMES ${scope}] ${formatOutcomeSummary(summary)}\n`);
+      }
+      process.exit(0);
+      break;
+    }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report, aggregate-outcomes\n`);
       process.exit(1);
     }
   }
