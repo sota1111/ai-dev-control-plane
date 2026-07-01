@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { parseUsageLimitResetEpoch } from '../lib/usageLimitParser.js';
+import { parseUsageLimitResetEpoch, capRetryEpoch } from '../lib/usageLimitParser.js';
 
 describe('parseUsageLimitResetEpoch', () => {
   const REF_MS = 1749722400000; // 2026-06-12T10:00:00Z
@@ -106,5 +106,33 @@ describe('parseUsageLimitResetEpoch', () => {
     );
     const expectedReset = Math.floor(Date.UTC(2027, 0, 2, 21, 0, 0) / 1000);
     expect(result).toBe(expectedReset + BUFFER);
+  });
+});
+
+describe('capRetryEpoch (SOT-1446 worker-cooldown ceiling)', () => {
+  const NOW_MS = Date.UTC(2026, 5, 16, 12, 0, 0);
+  const NOW_S = Math.floor(NOW_MS / 1000);
+  const MAX = 18000; // default 5h
+
+  afterEach(() => { delete process.env.MAX_COOLDOWN_SECONDS; });
+
+  test('caps a far-future resume epoch to now + 5h', () => {
+    const farFuture = NOW_S + 185 * 24 * 3600; // ~185 days out (the observed stuck value)
+    expect(capRetryEpoch(farFuture, NOW_MS)).toBe(NOW_S + MAX);
+  });
+
+  test('leaves a near-term resume epoch unchanged', () => {
+    const near = NOW_S + 1800; // 30 min out
+    expect(capRetryEpoch(near, NOW_MS)).toBe(near);
+  });
+
+  test('respects a MAX_COOLDOWN_SECONDS override', () => {
+    process.env.MAX_COOLDOWN_SECONDS = '3600';
+    expect(capRetryEpoch(NOW_S + 100000, NOW_MS)).toBe(NOW_S + 3600);
+  });
+
+  test('a non-positive override falls back to the 5h default', () => {
+    process.env.MAX_COOLDOWN_SECONDS = '0';
+    expect(capRetryEpoch(NOW_S + 100000, NOW_MS)).toBe(NOW_S + MAX);
   });
 });

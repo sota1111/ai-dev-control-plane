@@ -38,6 +38,16 @@ export function overloadRetryBufferSeconds(env: Env = process.env): number {
   return intEnv(env, 'OVERLOAD_RETRY_BUFFER_SECONDS', 3600);
 }
 
+/**
+ * MAX_COOLDOWN_SECONDS — hard ceiling on any usage-limit cooldown retry (default 18000s = 5h, SOT-1446).
+ * A misparsed / far-future reset must never strand a worker: every cooldown retry is capped to
+ * now + this value. A non-positive/invalid override makes no sense (must always cap) → falls back to 5h.
+ */
+export function maxCooldownSeconds(env: Env = process.env): number {
+  const v = intEnv(env, 'MAX_COOLDOWN_SECONDS', 18000);
+  return Number.isFinite(v) && v > 0 ? v : 18000;
+}
+
 /** LOCK_CONFLICT_BACKOFF_MS — re-enqueue backoff when run_auto.sh flock is held (default 60000ms). */
 export function lockConflictBackoffMs(env: Env = process.env): number {
   return intEnv(env, 'LOCK_CONFLICT_BACKOFF_MS', 60000);

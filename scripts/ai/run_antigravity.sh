@@ -102,12 +102,20 @@ esac
 if [ -f "$ANTIGRAVITY_COOLDOWN_FILE" ]; then
   NOW_EPOCH="$(date +%s)"
   RESUME_AT="$(node -e "try{const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(String(Number(d.resumeAtEpoch)||0));}catch(e){process.stdout.write('0');}" "$ANTIGRAVITY_COOLDOWN_FILE" 2>/dev/null || echo 0)"
-  if [ "$RESUME_AT" -gt 0 ] && [ "$NOW_EPOCH" -lt "$RESUME_AT" ]; then
+  # SOT-1446: self-heal a cooldown scheduled absurdly far out (misparsed/far-future reset). No
+  # cooldown may keep a worker idle longer than MAX_COOLDOWN_SECONDS (default 18000s=5h); if the
+  # stored resumeAt is beyond that ceiling, treat it as stale, clear it, and resume Antigravity now.
+  MAX_COOLDOWN_SECONDS="${MAX_COOLDOWN_SECONDS:-18000}"
+  if [ "$RESUME_AT" -gt 0 ] && [ "$((RESUME_AT - NOW_EPOCH))" -gt "$MAX_COOLDOWN_SECONDS" ]; then
+    echo "ANTIGRAVITY_COOLDOWN_CAPPED: resumeAt $RESUME_AT is >${MAX_COOLDOWN_SECONDS}s out (now $NOW_EPOCH), clearing stale cooldown and resuming Antigravity" >&2
+    rm -f "$ANTIGRAVITY_COOLDOWN_FILE"
+  elif [ "$RESUME_AT" -gt 0 ] && [ "$NOW_EPOCH" -lt "$RESUME_AT" ]; then
     echo "ANTIGRAVITY_COOLDOWN_ACTIVE: antigravity usage limit until epoch $RESUME_AT (now $NOW_EPOCH), delegating to Claude" >&2
     exit "$WORKER_NONRESPONSE_EXIT"
+  else
+    echo "Antigravity cooldown expired (now $NOW_EPOCH >= resumeAt $RESUME_AT), clearing and resuming Antigravity" >&2
+    rm -f "$ANTIGRAVITY_COOLDOWN_FILE"
   fi
-  echo "Antigravity cooldown expired (now $NOW_EPOCH >= resumeAt $RESUME_AT), clearing and resuming Antigravity" >&2
-  rm -f "$ANTIGRAVITY_COOLDOWN_FILE"
 fi
 
 # --- Antigravity auth-unhealthy pre-run check (SOT-1441 / P1) ---
