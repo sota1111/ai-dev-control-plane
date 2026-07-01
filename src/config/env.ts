@@ -91,3 +91,18 @@ export function webhookDebounceMs(env: Env = process.env): number {
 export function webhookBootstrapScanEnabled(env: Env = process.env): boolean {
   return env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED !== 'false';
 }
+
+/**
+ * LINEAR_RETRY_MAX — max RETRIES (in addition to the first attempt) for transient Linear API errors
+ * (timeout / socket / 5xx / 429). Default 2. Clamped to >= 0; NaN → 0 (disabled).
+ */
+export function linearRetryMax(env: Env = process.env): number {
+  const v = intEnv(env, 'LINEAR_RETRY_MAX', 2);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/** LINEAR_RETRY_BASE_MS — base backoff delay (ms) for the exponential retry (default 300). */
+export function linearRetryBaseMs(env: Env = process.env): number {
+  const v = intEnv(env, 'LINEAR_RETRY_BASE_MS', 300);
+  return Number.isFinite(v) && v > 0 ? v : 300;
+}
