@@ -148,6 +148,61 @@ describe('Linear Integration', () => {
       expect(linearMock.calls[3].variables.labelIds).toContain(labelId);
     });
 
+    // SOT-1460: usage-limit label is added ONLY to In Progress issues (not Todo / In Review),
+    // even though In Review is also a `started` type. Comments still go to all active issues.
+    it('notifyUsageLimitToAllActiveIssues labels only In Progress, not Todo / In Review', async () => {
+      const resetEpoch = 1623912000;
+      const labelId = 'label-ul';
+
+      // 1. Fetch active issues (Todo / In Progress / In Review) — now selects state.name.
+      linearMock.enqueue({ data: { issues: { nodes: [
+        { id: 'todo-1', state: { name: 'Todo' } },
+        { id: 'ip-1', state: { name: 'In Progress' } },
+        { id: 'ir-1', state: { name: 'In Review' } },
+      ] } } });
+
+      // For each issue postUsageLimitComment runs 3 calls (get uuid / fetch comments / create).
+      // addUsageLimitLabel runs only for the In Progress issue (3 calls: details / label search / update).
+
+      // --- todo-1: comment only ---
+      linearMock.enqueue({ data: { issue: { id: 'todo-1' } } });
+      linearMock.enqueue({ data: { issue: { comments: { nodes: [] } } } });
+      linearMock.enqueue({ data: { commentCreate: { success: true } } });
+
+      // --- ip-1: comment + label ---
+      linearMock.enqueue({ data: { issue: { id: 'ip-1' } } });
+      linearMock.enqueue({ data: { issue: { comments: { nodes: [] } } } });
+      linearMock.enqueue({ data: { commentCreate: { success: true } } });
+      linearMock.enqueue({ data: { issue: { id: 'ip-1', labelIds: [], team: { id: 'team-1' } } } });
+      linearMock.enqueue({ data: { issueLabels: { nodes: [{ id: labelId }] } } });
+      linearMock.enqueue({ data: { issueUpdate: { success: true } } });
+
+      // --- ir-1: comment only ---
+      linearMock.enqueue({ data: { issue: { id: 'ir-1' } } });
+      linearMock.enqueue({ data: { issue: { comments: { nodes: [] } } } });
+      linearMock.enqueue({ data: { commentCreate: { success: true } } });
+
+      await runner.notifyUsageLimitToAllActiveIssues(resetEpoch);
+
+      // Fetch query still filters on both types but now also requests state name.
+      expect(linearMock.calls[0].query).toContain('type: { in: ["unstarted","started"] }');
+      expect(linearMock.calls[0].query).toContain('state { name }');
+
+      // Exactly one label-add mutation, and it targets the In Progress issue's uuid.
+      const labelUpdates = linearMock.calls.filter(
+        (c) => c.query.includes('issueUpdate') && c.variables && Array.isArray(c.variables.labelIds)
+      );
+      expect(labelUpdates).toHaveLength(1);
+      expect(labelUpdates[0].variables.id).toBe('ip-1');
+      expect(labelUpdates[0].variables.labelIds).toContain(labelId);
+
+      // The label-search query (addUsageLimitLabel-only) ran exactly once → Todo / In Review skipped.
+      const labelSearches = linearMock.calls.filter((c) =>
+        c.query.includes('issueLabels(filter: { name: { eq: "usage-limit" } })')
+      );
+      expect(labelSearches).toHaveLength(1);
+    });
+
     // SOT-1438 / P3: reaper In Review exclusion at the query layer.
     it('fetchActiveIssues() default includes In Review and does not add a name exclusion', async () => {
       linearMock.enqueue({ data: { issues: { nodes: [
