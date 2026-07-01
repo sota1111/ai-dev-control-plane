@@ -931,6 +931,12 @@ Merge 後:
 - 親Issue Status を `In Review` に変更（人間のレビュー待ち。`Done` には自動で進めない）
 - 親Issue に Completion Report をコメント
 - feature branch を削除
+- **自動redeploy（best-effort, SOT-1421 / P6）**: merge 後に `scripts/ai/redeploy_after_merge.sh
+  <repo-or-project> [localPath]` を呼び、対象repoにdeployコマンドが設定されていれば起動する。
+  既定は無効（`REDEPLOY_ENABLED` が真値のときのみ実行）で、deployコマンドは `REDEPLOY_CMD` か
+  `config/deploy_commands.json`（キー=repoスラッグ/プロジェクト名）で設定する。未設定・未有効・
+  deploy失敗のいずれでも exit 0（best-effort。merge/flow を止めない）。実deployは環境の
+  credential依存のため、credentialのある環境で有効化する。失敗時はその旨を Linear に記録する。
 
 ### Merge 失敗時
 
