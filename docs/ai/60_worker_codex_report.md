@@ -1,63 +1,40 @@
-# Worker Report — Task Check (SOT-1421: implement all P1–P8)
+# Worker Report
 
 ## Summary
-SOT-1421 is **actionable**. It was a PLAN issue (improvement proposal P1–P8 for THIS harness);
-the human commented "P1〜P8を全て実装してください。" and moved it back to Todo. Claude Code
-re-classified it IMPLEMENT and set it In Progress. Baseline quality gate captured below.
+- Verification for SOT-1459 "役割ごとの切り替え" (per-role worker assignment via `config/worker_roles.json`).
+- Fallback disclosure: the verification role was delegated to Codex CLI first (`WORKER_ROLE=verification bash scripts/ai/run_codex.sh`). Codex was **non-responsive**: it exited with the dedicated non-response code `75` because `ALL_CLAUDE_MODE=1` / `WORKER_MODE=claude-only` are set. Per the Worker Non-Response Fallback Policy, Claude Code performed the verification directly. Quality gates are applied identically.
+- Result: implementation is complete and passes the quality gate. READY_FOR_REVIEW.
 
-## Fallback Disclosure (audit)
-- Non-responsive worker: **Codex CLI** (task check).
-- Detected failure mode: usage-limit cooldown — `scripts/ai/run_codex.sh` exited with the
-  dedicated non-response code **75** (`CODEX_COOLDOWN_ACTIVE ... until epoch 1798924200`,
-  ~185 days out). Retry skipped (deterministic future-epoch gate).
-- Action: per Worker Non-Response Fallback Policy, Claude Code performed the task check directly.
+## Changed Files (SOT-1459 implementation under verification)
+- `config/worker_roles.json` — new editable role→worker map (task-check=codex, decomposition=claude, implementation=antigravity, verification=codex, acceptance=claude); `__doc__` key ignored.
+- `src/lib/workerRoles.ts` — loader/validator (`loadWorkerRolesConfig`, `resolveRoleWorker`, `resolveRoleWorkerCli`); fail-open on missing/invalid file.
+- `src/__tests__/workerRoles.test.ts` — unit tests for load/validate/resolve.
+- `scripts/ai/run_codex.sh`, `scripts/ai/run_antigravity.sh` — per-role gate block (after WORKER_MODE, before individual disable flags/cooldown): if `WORKER_ROLE`'s assigned worker ≠ this script's worker, exit `75`.
+- `CLAUDE.md` — documents the per-role config and the role→worker mapping table.
+- `docs/ai/60_worker_codex_report.md` — this audit report.
 
-## Changed Files
-- none (task check only)
-
-## Commands Run (baseline gate on clean main)
-- `npm run lint` → **exit 0**.
-- `npm run typecheck` (`tsc --noEmit`) → **exit 0**.
-- `npm test` (jest) → **exit 1**: 451 passed, **3 failed** (all in `src/__tests__/runner.test.ts`).
-  - Failing: SOT-914 "long-run label → detached launch…", SOT-934 "RUNNER_DEFAULT_DETACH=1…",
-    SOT-918 "launches several wait tasks detached…".
-  - Root cause: `TypeError: Cannot read properties of undefined (reading 'on')` at
-    `child.stdout.on` (`src/runner.ts:668`) — the spawn **mock** in these detached tests returns a
-    child with no `stdout`. **Pre-existing on clean main** (source unmodified; only docs changed).
-    Unrelated to P1–P8. This is the accepted baseline: gate = 451 pass / 3 pre-existing detached-spawn
-    mock failures.
-
-## Findings — per-proposal file anchors & feasibility
-- **P1 worker availability** — `scripts/ai/run_antigravity.sh`, `scripts/ai/run_codex.sh`,
-  `src/lib/workerCooldown.ts`, `src/lib/cooldown.ts`, `src/lib/cooldownNotifier.ts`.
-  Cooldown-aware scheduling + pre-run auth health check + alert separation are self-contained code.
-  OAuth **token persistence** depends on external Antigravity auth infra → partial (health-check +
-  clearer disclosure implementable; token minting is out of repo scope).
-- **P2 webhook debounce/coalesce** — `src/webhook-server.ts`, `src/lib/queueStore.ts`. Self-contained.
-- **P3 reaper In Review exclusion** — `src/runner.ts` (reaper poll / In Review skip),
-  `src/lib/issueState.ts`. Self-contained.
-- **P4 requirement-clarification step** — policy/prompt: `CLAUDE.md`, `scripts/ai/run_auto.sh`
-  prompt. Self-contained (docs/prompt).
-- **P5 observability** — structured `[RUNNER] outcome=…` in `src/runner.ts`; daily aggregation
-  script under `scripts/ai/`; Discord `/status` in `src/lib/discordCommandHandlers.ts`. Self-contained.
-- **P6 auto-redeploy (CD)** — merge flow; needs per-target-repo deploy credentials → external infra.
-  A best-effort post-merge redeploy hook/script is implementable; actual deploy not verifiable here.
-- **P7 Linear label/API backoff** — `src/lib/linearApi.ts` (retry/backoff; addCheckLabel parent-label
-  filtering). Self-contained.
-- **P8 facet issue clustering** — decomposition policy (`CLAUDE.md` Child Issue Registration).
-  Self-contained (policy).
+## Commands Run (Claude Code fallback)
+- `npm run lint` → exit 0 (pass)
+- `npm run typecheck` → exit 0 (pass)
+- `npm test` → exit 1: 513 passed, 3 failed. The 3 failures are `src/__tests__/runner.test.ts` (SOT-914 long-run detached, SOT-934 default-detach, SOT-918 parallel wait-task) — a pre-existing baseline of detached-spawn mock failures, entirely disjoint from the SOT-1459 change surface (no `runner.ts` touched). The new `src/__tests__/workerRoles.test.ts` suite passes.
+- Functional smoke test of the per-role gate (with `ALL_CLAUDE_MODE`/`WORKER_MODE` unset so the block is reached):
+  - `run_codex.sh` + `WORKER_ROLE=implementation` (→antigravity): exit `75` with delegation message. ✓
+  - `run_antigravity.sh` + `WORKER_ROLE=verification` (→codex): exit `75` with delegation message. ✓
+  - `run_codex.sh` + `WORKER_ROLE=verification` (→codex): proceeds past the gate (no early exit). ✓
+  - `WORKER_ROLE` unset: fail-open, no per-role delegation. ✓
+- No E2E: repository has no `e2e` npm script (N/A).
 
 ## Acceptance Criteria
-- [x] SOT-1421 is actionable
-- [x] Baseline gate captured (lint 0 / typecheck 0 / test 451 pass, 3 pre-existing fail)
-- [x] Per-proposal file anchors identified; P6 (deploy creds) & P1 (OAuth minting) flagged as
-      partially external-infra-bound
+- [x] Each harness role (task-check / decomposition / implementation / verification / acceptance) can be assigned to a worker (claude | codex | antigravity).
+- [x] Assignment is controlled by an editable file (`config/worker_roles.json`), NOT `.env`.
+- [x] Run scripts honor `WORKER_ROLE=<role>` and exit `75` (delegating to Claude) when the role's worker differs from the script's own worker.
+- [x] Global env kill-switches (`ALL_CLAUDE_MODE`, `WORKER_MODE`) still take precedence; per-role check runs after them and before individual disable flags / cooldown.
+- [x] Fail-open: unset `WORKER_ROLE`, unknown role, or missing/invalid file → legacy behavior.
+- [x] Lint / typecheck pass; new unit tests pass; docs updated.
 
 ## Risks
-- P6 and the OAuth-persistence portion of P1 depend on credentials/infra outside this repo; those
-  parts are delivered as best-effort scaffolding, not end-to-end verified deploys.
-- Modifying the harness that is currently running: changes take effect on the next invocation
-  (scripts/modules are re-read), so low risk of mid-run breakage, but each child keeps the gate green.
+- Inline node one-liner in the run scripts duplicates the role/worker lists from `src/lib/workerRoles.ts`. Kept intentionally self-contained (no build/import dependency in the shell path); the TS module + tests are the source of truth for the logic and stay in sync via review.
+- The orchestrator must pass `WORKER_ROLE=<role>` for the per-role config to have effect; otherwise scripts fail open to legacy behavior (documented).
 
 ## Next Action
 READY_FOR_REVIEW

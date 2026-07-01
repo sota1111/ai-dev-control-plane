@@ -87,6 +87,32 @@ case "$(printf '%s' "${WORKER_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
     ;;
 esac
 
+# --- Per-role worker assignment (SOT-1459) ---
+# 役割ごとにワーカーを割り当てる編集可能ファイル `config/worker_roles.json`（.env ではない）を参照する。
+# 呼び出し側が `WORKER_ROLE=<task-check|verification|...>` を渡したとき、その役割の割当ワーカーが codex
+# でなければ（= claude / antigravity に振られていれば）Codex を起動せず非応答コード 75 で委譲する。
+# WORKER_ROLE 未設定・不明ロール・設定ファイル不備のときは何もせず従来動作（後方互換・フェイルオープン）。
+# 評価は WORKER_MODE の後・CODEX_DISABLED / cooldown の前。グローバル env スイッチが常に優先される。
+WORKER_ROLES_FILE="${WORKER_ROLES_FILE:-$CONTROL_PLANE_DIR/config/worker_roles.json}"
+if [ -n "${WORKER_ROLE:-}" ]; then
+  ROLE_WORKER="$(node -e '
+    const fs = require("fs");
+    const [file, role] = process.argv.slice(1);
+    const ROLES = ["task-check", "decomposition", "implementation", "verification", "acceptance"];
+    const WORKERS = ["claude", "codex", "antigravity"];
+    if (!ROLES.includes(role)) { process.stdout.write(""); process.exit(0); }
+    try {
+      const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+      const w = cfg[role];
+      process.stdout.write(WORKERS.includes(w) ? String(w) : "");
+    } catch (e) { process.stdout.write(""); }
+  ' "$WORKER_ROLES_FILE" "$WORKER_ROLE" 2>/dev/null || echo '')"
+  if [ -n "$ROLE_WORKER" ] && [ "$ROLE_WORKER" != "codex" ]; then
+    echo "WORKER_ROLE=$WORKER_ROLE assigned to '$ROLE_WORKER' (not codex) by config/worker_roles.json, delegating to Claude" >&2
+    exit "$WORKER_NONRESPONSE_EXIT"
+  fi
+fi
+
 # --- Codex disable flag (SOT-1333) ---
 # `ANTIGRAVITY_DISABLED` と対称な個別フラグ。Codex CLI が使えない期間、`CODEX_DISABLED` を真値にすると
 # Codex を起動せず非応答コード75で即終了し、CLAUDE.md「Worker Non-Response Fallback Policy」で
