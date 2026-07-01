@@ -651,7 +651,7 @@ describe('runBootstrapScan', () => {
 
     await runBootstrapScan();
 
-    expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50);
+    expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50, { excludeHold: true });
     expect(runner.enqueue).toHaveBeenCalledWith('SOT-100', 'webhook-bootstrap', null, expect.objectContaining({ priority: 2 }));
   });
 
@@ -682,7 +682,7 @@ describe('runBootstrapScan', () => {
 
     await runBootstrapScan();
 
-    expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50);
+    expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50, { excludeHold: true });
     expect(runner.enqueue).toHaveBeenCalledWith('SOT-100', 'webhook-bootstrap', null, expect.objectContaining({ priority: 2 }));
     expect(runner.enqueue).toHaveBeenCalledWith('SOT-101', 'webhook-bootstrap', null, expect.objectContaining({ priority: 3 }));
     expect(runner.drainQueue).toHaveBeenCalled();
@@ -818,7 +818,7 @@ describe('reaper (runReaperTick)', () => {
 
     await runReaperTick();
 
-    expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50);
+    expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50, { excludeHold: true });
     expect(runner.enqueue).toHaveBeenCalledWith('SOT-200', 'webhook-reaper', null, expect.objectContaining({ priority: 2 }));
     expect(runner.drainQueue).toHaveBeenCalled();
   });
@@ -854,7 +854,7 @@ describe('reaper (runReaperTick)', () => {
       { identifier: 'SOT-201', priority: 1, priorityLabel: 'Urgent', parentIssueId: null, parentIssueIdentifier: null },
     ]);
     await runReaperTick();
-    expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50);
+    expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50, { excludeHold: true });
     expect(runner.enqueue).toHaveBeenCalledWith('SOT-201', 'webhook-reaper', null, expect.objectContaining({ priority: 1 }));
     expect(runner.drainQueue).toHaveBeenCalled();
   });

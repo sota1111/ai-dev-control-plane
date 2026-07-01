@@ -138,5 +138,35 @@ describe('Linear Integration', () => {
       expect(linearMock.calls[3].query).toContain('issueUpdate');
       expect(linearMock.calls[3].variables.labelIds).toContain(labelId);
     });
+
+    // SOT-1438 / P3: reaper In Review exclusion at the query layer.
+    it('fetchActiveIssues() default includes In Review and does not add a name exclusion', async () => {
+      linearMock.enqueue({ data: { issues: { nodes: [
+        { id: 'u1', identifier: 'ENG-1', state: { type: 'unstarted', name: 'Todo' } },
+        { id: 'u2', identifier: 'ENG-2', state: { type: 'started', name: 'In Review' } },
+      ] } } });
+
+      const result = await runner.fetchActiveIssues(50);
+
+      expect(linearMock.calls[0].query).not.toContain('nin');
+      // No excludeHold → In Review is returned unchanged.
+      expect(result.map((r) => r.identifier)).toEqual(['ENG-1', 'ENG-2']);
+    });
+
+    it('fetchActiveIssues(first, { excludeHold: true }) excludes In Review by query + JS filter', async () => {
+      linearMock.enqueue({ data: { issues: { nodes: [
+        { id: 'u1', identifier: 'ENG-1', state: { type: 'unstarted', name: 'Todo' } },
+        { id: 'u2', identifier: 'ENG-2', state: { type: 'started', name: 'In Progress' } },
+        // Server-side name filter would omit this, but include it to prove the JS backstop drops it too.
+        { id: 'u3', identifier: 'ENG-3', state: { type: 'started', name: 'In Review' } },
+      ] } } });
+
+      const result = await runner.fetchActiveIssues(50, { excludeHold: true });
+
+      // Query-level exclusion present.
+      expect(linearMock.calls[0].query).toContain('name: { nin: ["In Review"] }');
+      // In Review dropped; the two actionable issues remain.
+      expect(result.map((r) => r.identifier)).toEqual(['ENG-1', 'ENG-2']);
+    });
   });
 });

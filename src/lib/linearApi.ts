@@ -203,10 +203,28 @@ export async function hasPendingIssues(): Promise<boolean> {
   }
 }
 
-export async function fetchActiveIssues(first: number = 50): Promise<IssueQueueMetadata[]> {
+/**
+ * Fetch active (unstarted/started) issues.
+ *
+ * SOT-1438 / P3: pass `{ excludeHold: true }` from the reaper / bootstrap scan path so hold-state
+ * issues (In Review) are excluded at the QUERY layer instead of being fetched and then per-item
+ * `isHoldState`-skipped by every consumer (that per-item skip logged ~6,430 no-op lines). In Review
+ * shares the `started` state type with In Progress, so it can't be dropped by `type`; we exclude it
+ * by workflow-state name in the GraphQL filter, plus a JS `isHoldState` filter as a belt-and-suspenders
+ * guard. Display / queue-sync callers keep the default (In Review included) so nothing else changes.
+ */
+export async function fetchActiveIssues(
+  first: number = 50,
+  opts: { excludeHold?: boolean } = {}
+): Promise<IssueQueueMetadata[]> {
+  const excludeHold = opts.excludeHold === true;
+  // In Review (hold) exclusion is name-based because its state type is "started" like In Progress.
+  const stateFilter = excludeHold
+    ? 'state: { type: { in: ["unstarted","started"] }, name: { nin: ["In Review"] } }'
+    : 'state: { type: { in: ["unstarted","started"] } }';
   const query = `
     query($first: Int!) {
-      issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: $first) {
+      issues(filter: { ${stateFilter} }, first: $first) {
         nodes {
           id
           identifier
@@ -226,6 +244,7 @@ export async function fetchActiveIssues(first: number = 50): Promise<IssueQueueM
   const data: any = await linearQuery(query, { first });
   return (data.issues?.nodes || [])
     .filter((issue: any) => !issue.archivedAt)
+    .filter((issue: any) => !excludeHold || !isHoldState(issue.state))
     .map((issue: any) => ({
       id: issue.id,
       identifier: issue.identifier,

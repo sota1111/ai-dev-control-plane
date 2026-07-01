@@ -109,7 +109,9 @@ function hasDueQueueItem(): boolean {
 async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
   let issues: any[] = [];
   try {
-    issues = await runner.fetchActiveIssues(50);
+    // SOT-1438 / P3: exclude hold-state (In Review) at the query layer so we don't fetch them and
+    // then per-item skip+log them on every reaper/bootstrap tick (~6,430 no-op skip lines).
+    issues = await runner.fetchActiveIssues(50, { excludeHold: true });
   } catch (err: any) {
     runner.log('SCAN', `fetchActiveIssues error: ${err.message}`);
     return 0;
@@ -130,8 +132,9 @@ async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
       continue;
     }
 
-    // In Review は人間のレビュー待ちの保留状態。type が "started" のため fetchActiveIssues に
-    // 含まれるが、自動実行の対象外なので再投入しない（SOT-841 のような終端Issueの再実行ループ防止）。
+    // In Review は人間のレビュー待ちの保留状態。SOT-1438/P3 で fetchActiveIssues({excludeHold})
+    // がクエリ層で除外するため通常ここには来ないが、防御的バックストップとして残す（万一混入しても
+    // 自動実行の対象外として再投入しない。SOT-841 のような終端Issueの再実行ループ防止）。
     if (isHoldState({ name: stateName })) {
       runner.log('SCAN', `${trigger}: skip ${identifier} (hold state In Review)`);
       continue;
