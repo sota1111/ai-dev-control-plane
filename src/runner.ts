@@ -548,12 +548,18 @@ function isQueuedOrRunning(issueId: string): boolean {
 async function notifyUsageLimitToAllActiveIssues(epochSeconds: number): Promise<void> {
   try {
     const data: any = await linearQuery(
-      '{ issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: 50) { nodes { id } } }'
+      '{ issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: 50) { nodes { id state { name } } } }'
     );
     const issues = data.issues?.nodes || [];
     for (const issue of issues) {
       await postUsageLimitComment(issue.id, epochSeconds).catch(() => {});
-      await addUsageLimitLabel(issue.id).catch(() => {});
+      // SOT-1460: the usage-limit label belongs only on In Progress issues. In Progress AND
+      // In Review are both `started` type (and Todo is `unstarted`), so a type filter alone would
+      // wrongly label Todo / In Review too. Guard on the exact state name. Todo / In Review never
+      // get the label; In Progress issues get it removed again on resume by the work-start flow.
+      if (issue.state?.name === 'In Progress') {
+        await addUsageLimitLabel(issue.id).catch(() => {});
+      }
     }
     log('RUNNER', `notifyUsageLimitToAllActiveIssues done for ${issues.length} issue(s)`);
   } catch (err: any) {
