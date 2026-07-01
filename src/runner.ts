@@ -87,6 +87,7 @@ import {
   removeFromQueue,
   isQueued,
 } from './lib/queueStore.js';
+import { parseOutcomeLines, summarizeOutcomes, type OutcomeSummary } from './lib/outcomeStats.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -346,6 +347,24 @@ function log(tag: string, message: string, context: Record<string, any> = {}) {
     fs.appendFileSync(LOG_FILE, line);
   } catch (err: any) {
     console.error(`[RUNNER:LOG_ERROR] ${err.message}`);
+  }
+}
+
+/**
+ * SOT-1439 / P5: read the runner log and summarize the structured `[OUTCOME]` lines emitted by
+ * processCompletedRun, optionally windowed to the last `windowMs`. Used by the Discord /status
+ * "recent outcomes" line and available for ad-hoc inspection. Fail-open: returns a zeroed summary
+ * if the log is missing/unreadable (never throws).
+ */
+function getRecentOutcomeSummary(windowMs?: number): OutcomeSummary {
+  try {
+    if (!fs.existsSync(LOG_FILE)) return summarizeOutcomes([]);
+    const text = fs.readFileSync(LOG_FILE, 'utf8');
+    const records = parseOutcomeLines(text);
+    const sinceMs = windowMs && windowMs > 0 ? Date.now() - windowMs : undefined;
+    return summarizeOutcomes(records, { sinceMs });
+  } catch {
+    return summarizeOutcomes([]);
   }
 }
 
@@ -862,6 +881,17 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
   const completion = code === 0 ? await verifyTaskCompletion(issueId, output) : null;
   const result = classifyRunResult({ code, output, completion });
 
+  // SOT-1439 / P5: emit a single structured, machine-parseable outcome line for every completed run
+  // (both the synchronous path and the detached-completion reaper feed through here). This is the
+  // source of truth for the daily aggregation (success/unverified/usage-limit/failed rates) and the
+  // Discord /status "recent outcomes" summary. Keep it a stable, greppable `[OUTCOME] ... outcome=<kind>`.
+  log('OUTCOME', `run outcome ${result.kind}`, {
+    issue: issueId,
+    trigger: item.trigger || 'queue',
+    outcome: result.kind,
+    code: result.code,
+  });
+
   switch (result.kind) {
     case RUN_RESULT.TASK_COMPLETED:
       log('RUN', 'completed successfully', { trigger: item.trigger || 'queue', issue: issueId });
@@ -1254,6 +1284,7 @@ export {
   COOLDOWN_FILE,
   USAGE_LIMIT_FILE,
   LOG_FILE,
+  getRecentOutcomeSummary,
   STALE_LOCK_MS,
   LINEAR_API_URL,
   USAGE_LIMIT_RETRY_BUFFER_SECONDS,

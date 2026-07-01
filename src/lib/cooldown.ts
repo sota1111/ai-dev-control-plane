@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { sanitizeLabelIds } from './linearApi.js';
 
 /**
  * Usage-limit cooldown + Linear label/comment helpers extracted from runner.ts (SOT-935 R2).
@@ -122,7 +123,7 @@ export async function addUsageLimitLabel(issueId: string): Promise<void> {
             success
           }
         }
-      `, { id: uuid, labelIds: [...labelIds, labelId] });
+      `, { id: uuid, labelIds: sanitizeLabelIds([...labelIds, labelId]) });
     }
   } catch (err: any) {
     log('ERROR', `addUsageLimitLabel failed: ${err.message}`, { issue: issueId });
@@ -140,7 +141,7 @@ export async function removeUsageLimitLabel(issueId: string): Promise<void> {
     const labelId = labelsData.issueLabels.nodes[0]?.id;
 
     if (labelId && labelIds.includes(labelId)) {
-      const filteredIds = labelIds.filter((id: string) => id !== labelId);
+      const filteredIds = sanitizeLabelIds(labelIds.filter((id: string) => id !== labelId));
       await linearQuery(`
         mutation($id: String!, $labelIds: [String!]!) {
           issueUpdate(id: $id, input: { labelIds: $labelIds }) {

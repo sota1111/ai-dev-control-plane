@@ -258,6 +258,26 @@ When implementing changes for any target project (e.g., booking-monitor), follow
 - If a task cannot be completed safely, explain why and propose an alternative
 - Ask for clarification when requirements are ambiguous before starting implementation
 
+### Requirement-Clarification Step (着手前の要件明確化, SOT-1421 / P4)
+
+Terse one-line requirements are the single biggest source of wasted work: their interpretation drifts,
+so the same Issue is reopened 2–5 times. Before implementing an ambiguous Issue, do this ONCE up front:
+
+1. **State your interpretation.** Post a Linear comment that restates, in one or two lines, exactly
+   what you understand the requirement to mean and what you will change (files/behavior).
+2. **List the ambiguities.** Bullet any assumptions or points where the requirement could reasonably
+   mean more than one thing.
+3. **Decide whether to proceed or stop:**
+   - If there is a single obviously-correct reading (or a safe conventional default), state the
+     interpretation, proceed, and note it in the completion report for the human to confirm.
+   - If interpretations genuinely diverge in a way that changes the deliverable, present the options
+     and set the Issue to `In Review`, stopping for the human to choose. Do NOT guess-and-reopen.
+4. **Autonomous mode:** the interpretation/ambiguity note is a Linear comment (the only report channel).
+   Never block waiting for a reply when a safe default exists — proceed on the default and disclose it.
+
+This applies to feature/FIX/IMPLEMENT Issues with a vague scope; skip it for Issues whose scope is
+already unambiguous.
+
 ---
 
 ## Linear Operating Policy
@@ -542,6 +562,22 @@ Claude Code must explicitly judge at the start of each Issue and post the judgme
 - Investigations, wording fixes, comment edits, minor refactoring
 - Single bug fix with clear reproduction conditions and fix location
 - A single feature whose implementation, tests, and docs belong together (keep them in one feature Issue)
+
+### Facet Issue Clustering (関連Issueの親配下クラスタリング, SOT-1421 / P8)
+
+When one feature area accumulates many small, related Issues over time (e.g. the "締切調査 (deadline
+investigation)" cluster spanned 12+ separate Issues), the scattering multiplies context re-derivation
+and duplicate review cost. When you notice several Issues that are facets of the same feature/domain:
+
+- **Prefer clustering under one parent.** Create (or reuse) a parent Issue for the feature area and
+  register the related Issues as its sub-issues, rather than leaving them as independent top-level
+  Issues. Inherit the parent's Project/Priority per the Registration Procedure below.
+- **Signal for clustering:** the Issues share a file group / component, repeatedly reopen against each
+  other, or their titles reference the same feature noun (a "facet" of one thing).
+- **Do NOT over-cluster:** genuinely independent features stay separate. Only group Issues that are
+  facets of a single feature/domain and would otherwise fragment progress tracking.
+- This is an organizing judgment applied when triaging, not a reason to fabricate parent/child links
+  between unrelated work.
 
 ### Child Issue Naming Convention
 
@@ -895,6 +931,12 @@ Merge 後:
 - 親Issue Status を `In Review` に変更（人間のレビュー待ち。`Done` には自動で進めない）
 - 親Issue に Completion Report をコメント
 - feature branch を削除
+- **自動redeploy（best-effort, SOT-1421 / P6）**: merge 後に `scripts/ai/redeploy_after_merge.sh
+  <repo-or-project> [localPath]` を呼び、対象repoにdeployコマンドが設定されていれば起動する。
+  既定は無効（`REDEPLOY_ENABLED` が真値のときのみ実行）で、deployコマンドは `REDEPLOY_CMD` か
+  `config/deploy_commands.json`（キー=repoスラッグ/プロジェクト名）で設定する。未設定・未有効・
+  deploy失敗のいずれでも exit 0（best-effort。merge/flow を止めない）。実deployは環境の
+  credential依存のため、credentialのある環境で有効化する。失敗時はその旨を Linear に記録する。
 
 ### Merge 失敗時
 

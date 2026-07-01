@@ -76,7 +76,43 @@ export function webhookReaperEnabled(env: Env = process.env): boolean {
   return env.WEBHOOK_REAPER_ENABLED !== 'false';
 }
 
+/**
+ * WEBHOOK_DEBOUNCE_MS — per-issue webhook debounce/coalesce window (default 0 = disabled).
+ * When > 0, a burst of accepted events for the SAME issue collapses into a single deferred
+ * processing pass after the quiet window (latest event wins). Default 0 keeps the historical
+ * immediate `setImmediate` behavior (backward compatible). Negative/NaN is treated as 0.
+ */
+export function webhookDebounceMs(env: Env = process.env): number {
+  const v = intEnv(env, 'WEBHOOK_DEBOUNCE_MS', 0);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
 /** WEBHOOK_BOOTSTRAP_SCAN_ENABLED — bootstrap scan is on by default; only the literal 'false' disables it. */
 export function webhookBootstrapScanEnabled(env: Env = process.env): boolean {
   return env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED !== 'false';
+}
+
+/**
+ * LINEAR_RETRY_MAX — max RETRIES (in addition to the first attempt) for transient Linear API errors
+ * (timeout / socket / 5xx / 429). Default 2. Clamped to >= 0; NaN → 0 (disabled).
+ */
+export function linearRetryMax(env: Env = process.env): number {
+  const v = intEnv(env, 'LINEAR_RETRY_MAX', 2);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/** LINEAR_RETRY_BASE_MS — base backoff delay (ms) for the exponential retry (default 300). */
+export function linearRetryBaseMs(env: Env = process.env): number {
+  const v = intEnv(env, 'LINEAR_RETRY_BASE_MS', 300);
+  return Number.isFinite(v) && v > 0 ? v : 300;
+}
+
+/**
+ * WORKER_AUTH_UNHEALTHY_TTL_SECONDS — how long a worker (antigravity/codex) is treated as
+ * auth-unhealthy after a chronic auth failure, so subsequent runs skip invoking the CLI instead of
+ * repeatedly hitting the same auth error (SOT-1441 / P1). Default 900s (15m). <=0/NaN → 900.
+ */
+export function workerAuthUnhealthyTtlSeconds(env: Env = process.env): number {
+  const v = intEnv(env, 'WORKER_AUTH_UNHEALTHY_TTL_SECONDS', 900);
+  return Number.isFinite(v) && v > 0 ? v : 900;
 }

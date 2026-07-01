@@ -26,6 +26,7 @@ const https = await import('node:https');
 const fs = await import('node:fs');
 const runner = await import('../runner.js');
 const { installLinearHttpMock } = await import('../__test_helpers__/linearMock.js');
+const { sanitizeLabelIds } = await import('../lib/linearApi.js');
 
 describe('Linear Integration', () => {
   let linearMock;
@@ -68,10 +69,18 @@ describe('Linear Integration', () => {
     });
 
     it('throws error on non-2xx HTTP response', async () => {
-      linearMock.enqueueRaw('Internal Server Error', 500);
-
-      await expect(runner.linearQuery('{ issues { id } }'))
-        .rejects.toThrow('Failed to parse Linear API response');
+      // SOT-1440: 5xx is now classified as a transient HTTP error. Disable retry here so this
+      // stays a single-attempt "non-2xx throws" assertion.
+      const origMax = process.env.LINEAR_RETRY_MAX;
+      process.env.LINEAR_RETRY_MAX = '0';
+      try {
+        linearMock.enqueueRaw('Internal Server Error', 500);
+        await expect(runner.linearQuery('{ issues { id } }'))
+          .rejects.toThrow('Linear API HTTP 500');
+      } finally {
+        if (origMax === undefined) delete process.env.LINEAR_RETRY_MAX;
+        else process.env.LINEAR_RETRY_MAX = origMax;
+      }
     });
 
     it('throws error when LINEAR_API_KEY is missing', async () => {
@@ -137,6 +146,76 @@ describe('Linear Integration', () => {
       // Check issue update
       expect(linearMock.calls[3].query).toContain('issueUpdate');
       expect(linearMock.calls[3].variables.labelIds).toContain(labelId);
+    });
+
+    // SOT-1438 / P3: reaper In Review exclusion at the query layer.
+    it('fetchActiveIssues() default includes In Review and does not add a name exclusion', async () => {
+      linearMock.enqueue({ data: { issues: { nodes: [
+        { id: 'u1', identifier: 'ENG-1', state: { type: 'unstarted', name: 'Todo' } },
+        { id: 'u2', identifier: 'ENG-2', state: { type: 'started', name: 'In Review' } },
+      ] } } });
+
+      const result = await runner.fetchActiveIssues(50);
+
+      expect(linearMock.calls[0].query).not.toContain('nin');
+      // No excludeHold → In Review is returned unchanged.
+      expect(result.map((r) => r.identifier)).toEqual(['ENG-1', 'ENG-2']);
+    });
+
+    it('fetchActiveIssues(first, { excludeHold: true }) excludes In Review by query + JS filter', async () => {
+      linearMock.enqueue({ data: { issues: { nodes: [
+        { id: 'u1', identifier: 'ENG-1', state: { type: 'unstarted', name: 'Todo' } },
+        { id: 'u2', identifier: 'ENG-2', state: { type: 'started', name: 'In Progress' } },
+        // Server-side name filter would omit this, but include it to prove the JS backstop drops it too.
+        { id: 'u3', identifier: 'ENG-3', state: { type: 'started', name: 'In Review' } },
+      ] } } });
+
+      const result = await runner.fetchActiveIssues(50, { excludeHold: true });
+
+      // Query-level exclusion present.
+      expect(linearMock.calls[0].query).toContain('name: { nin: ["In Review"] }');
+      // In Review dropped; the two actionable issues remain.
+      expect(result.map((r) => r.identifier)).toEqual(['ENG-1', 'ENG-2']);
+    });
+  });
+
+  // SOT-1440 / P7: transient-error backoff retry + labelIds sanitize.
+  describe('linearQuery retry + sanitizeLabelIds (SOT-1440)', () => {
+    const origBase = process.env.LINEAR_RETRY_BASE_MS;
+    beforeEach(() => { process.env.LINEAR_RETRY_BASE_MS = '1'; }); // keep backoff tiny in tests
+    afterEach(() => {
+      if (origBase === undefined) delete process.env.LINEAR_RETRY_BASE_MS;
+      else process.env.LINEAR_RETRY_BASE_MS = origBase;
+    });
+
+    it('retries a transient 503 then succeeds', async () => {
+      linearMock.enqueue({ data: { ok: true } }, 503); // transient
+      linearMock.enqueue({ data: { ok: true, n: 2 } }, 200); // success on retry
+
+      const result = await runner.linearQuery('query { ok }');
+
+      expect(result).toEqual({ ok: true, n: 2 });
+      expect(linearMock.calls).toHaveLength(2); // one retry
+    });
+
+    it('does NOT retry a permanent GraphQL error', async () => {
+      linearMock.enqueue({ errors: [{ message: 'validation failed' }] }, 200);
+
+      await expect(runner.linearQuery('mutation { x }')).rejects.toThrow('validation failed');
+      expect(linearMock.calls).toHaveLength(1); // no retry
+    });
+
+    it('retries: 0 disables retry even for transient errors', async () => {
+      linearMock.enqueue({ data: { ok: true } }, 503);
+
+      await expect(runner.linearQuery('query { ok }', {}, { retries: 0 })).rejects.toThrow();
+      expect(linearMock.calls).toHaveLength(1);
+    });
+
+    it('sanitizeLabelIds dedupes and drops empty/non-string ids', () => {
+      expect(sanitizeLabelIds(['a', 'a', ' b ', '', null, undefined, 5, 'c'])).toEqual(['a', 'b', 'c']);
+      expect(sanitizeLabelIds([])).toEqual([]);
+      expect(sanitizeLabelIds(null)).toEqual([]);
     });
   });
 });

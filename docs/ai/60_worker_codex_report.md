@@ -1,39 +1,63 @@
-# Worker Report
+# Worker Report — Task Check (SOT-1421: implement all P1–P8)
 
 ## Summary
-SOT-1340 のタスク確認（初期チェック）と実装後検証の両方を扱う。Codex はクールダウン中（usage limit）で
-非応答のため、Worker Non-Response Fallback Policy に従い Claude Code が直接代行した。
-
-検証結果: 本変更は `.devcontainer/Dockerfile` と `.devcontainer/devcontainer.json` のみのリファクタで、
-JSON 妥当性・lint・typecheck は pass。devcontainer の機能的 gemini 依存は除去済み（説明コメントのみ残置）。
+SOT-1421 is **actionable**. It was a PLAN issue (improvement proposal P1–P8 for THIS harness);
+the human commented "P1〜P8を全て実装してください。" and moved it back to Todo. Claude Code
+re-classified it IMPLEMENT and set it In Progress. Baseline quality gate captured below.
 
 ## Fallback Disclosure (audit)
-- 非応答ワーカー: **Codex** — `CODEX_COOLDOWN_ACTIVE`（usage limit, exit 75）。タスク確認実行時・検証実行時とも
-  クールダウン中。
-- 検出した失敗モード: 非応答コード 75（クールダウン）。
-- 対応: タスク確認および検証を Claude Code が直接代行（read-only 確認 + 品質ゲート実行）。
+- Non-responsive worker: **Codex CLI** (task check).
+- Detected failure mode: usage-limit cooldown — `scripts/ai/run_codex.sh` exited with the
+  dedicated non-response code **75** (`CODEX_COOLDOWN_ACTIVE ... until epoch 1798924200`,
+  ~185 days out). Retry skipped (deterministic future-epoch gate).
+- Action: per Worker Non-Response Fallback Policy, Claude Code performed the task check directly.
 
 ## Changed Files
-- none（検証のみ。実装は SOT-1340 の `.devcontainer/` 変更、`docs/ai/50_worker_antigravity_report.md` 参照）
+- none (task check only)
 
-## Commands Run
-- `python3 -c "import json; json.load(open('.devcontainer/devcontainer.json'))"` → devcontainer.json OK
-- `grep -ri gemini .devcontainer/` → 機能的参照なし（移行を説明する Dockerfile コメントのみ）
-- `npm run lint` → exit 0
-- `npm run typecheck` → exit 0
-- `npm test` → 440 passed / 3 failed
-  - 失敗3件は runner detached 系（SOT-914/934/918 の spawn-mock テスト）で main 既存・本 devcontainer 変更とは無関係。
-    本差分は `.devcontainer/` のみで src/ には一切触れていない。
+## Commands Run (baseline gate on clean main)
+- `npm run lint` → **exit 0**.
+- `npm run typecheck` (`tsc --noEmit`) → **exit 0**.
+- `npm test` (jest) → **exit 1**: 451 passed, **3 failed** (all in `src/__tests__/runner.test.ts`).
+  - Failing: SOT-914 "long-run label → detached launch…", SOT-934 "RUNNER_DEFAULT_DETACH=1…",
+    SOT-918 "launches several wait tasks detached…".
+  - Root cause: `TypeError: Cannot read properties of undefined (reading 'on')` at
+    `child.stdout.on` (`src/runner.ts:668`) — the spawn **mock** in these detached tests returns a
+    child with no `stdout`. **Pre-existing on clean main** (source unmodified; only docs changed).
+    Unrelated to P1–P8. This is the accepted baseline: gate = 451 pass / 3 pre-existing detached-spawn
+    mock failures.
+
+## Findings — per-proposal file anchors & feasibility
+- **P1 worker availability** — `scripts/ai/run_antigravity.sh`, `scripts/ai/run_codex.sh`,
+  `src/lib/workerCooldown.ts`, `src/lib/cooldown.ts`, `src/lib/cooldownNotifier.ts`.
+  Cooldown-aware scheduling + pre-run auth health check + alert separation are self-contained code.
+  OAuth **token persistence** depends on external Antigravity auth infra → partial (health-check +
+  clearer disclosure implementable; token minting is out of repo scope).
+- **P2 webhook debounce/coalesce** — `src/webhook-server.ts`, `src/lib/queueStore.ts`. Self-contained.
+- **P3 reaper In Review exclusion** — `src/runner.ts` (reaper poll / In Review skip),
+  `src/lib/issueState.ts`. Self-contained.
+- **P4 requirement-clarification step** — policy/prompt: `CLAUDE.md`, `scripts/ai/run_auto.sh`
+  prompt. Self-contained (docs/prompt).
+- **P5 observability** — structured `[RUNNER] outcome=…` in `src/runner.ts`; daily aggregation
+  script under `scripts/ai/`; Discord `/status` in `src/lib/discordCommandHandlers.ts`. Self-contained.
+- **P6 auto-redeploy (CD)** — merge flow; needs per-target-repo deploy credentials → external infra.
+  A best-effort post-merge redeploy hook/script is implementable; actual deploy not verifiable here.
+- **P7 Linear label/API backoff** — `src/lib/linearApi.ts` (retry/backoff; addCheckLabel parent-label
+  filtering). Self-contained.
+- **P8 facet issue clustering** — decomposition policy (`CLAUDE.md` Child Issue Registration).
+  Self-contained (policy).
 
 ## Acceptance Criteria
-- [x] Issue は actionable（In Progress / コメントなし / usage-limit ラベルなし / 未回答 QUESTION なし）
-- [x] devcontainer の staleness（gemini-cli vs agy）を確認・是正
-- [x] 保守性課題（廃止 CLI 導入・古いコメント・バージョンpin・config ボリューム名）を列挙し対応
-- [x] JSON 妥当性 / lint / typecheck pass
+- [x] SOT-1421 is actionable
+- [x] Baseline gate captured (lint 0 / typecheck 0 / test 451 pass, 3 pre-existing fail)
+- [x] Per-proposal file anchors identified; P6 (deploy creds) & P1 (OAuth minting) flagged as
+      partially external-infra-bound
 
 ## Risks
-- コンテナ再ビルドは本環境で不可 → 最終検証は人間の Rebuild Container。
-- `agy` のビルド時非対話インストールと認証永続化は未検証（破壊的影響はなく、最悪ケースは再認証のみ）。
+- P6 and the OAuth-persistence portion of P1 depend on credentials/infra outside this repo; those
+  parts are delivered as best-effort scaffolding, not end-to-end verified deploys.
+- Modifying the harness that is currently running: changes take effect on the next invocation
+  (scripts/modules are re-read), so low risk of mid-run breakage, but each child keeps the gate green.
 
 ## Next Action
 READY_FOR_REVIEW

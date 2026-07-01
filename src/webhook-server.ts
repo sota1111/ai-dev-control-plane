@@ -109,7 +109,9 @@ function hasDueQueueItem(): boolean {
 async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
   let issues: any[] = [];
   try {
-    issues = await runner.fetchActiveIssues(50);
+    // SOT-1438 / P3: exclude hold-state (In Review) at the query layer so we don't fetch them and
+    // then per-item skip+log them on every reaper/bootstrap tick (~6,430 no-op skip lines).
+    issues = await runner.fetchActiveIssues(50, { excludeHold: true });
   } catch (err: any) {
     runner.log('SCAN', `fetchActiveIssues error: ${err.message}`);
     return 0;
@@ -130,8 +132,9 @@ async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
       continue;
     }
 
-    // In Review は人間のレビュー待ちの保留状態。type が "started" のため fetchActiveIssues に
-    // 含まれるが、自動実行の対象外なので再投入しない（SOT-841 のような終端Issueの再実行ループ防止）。
+    // In Review は人間のレビュー待ちの保留状態。SOT-1438/P3 で fetchActiveIssues({excludeHold})
+    // がクエリ層で除外するため通常ここには来ないが、防御的バックストップとして残す（万一混入しても
+    // 自動実行の対象外として再投入しない。SOT-841 のような終端Issueの再実行ループ防止）。
     if (isHoldState({ name: stateName })) {
       runner.log('SCAN', `${trigger}: skip ${identifier} (hold state In Review)`);
       continue;
@@ -415,104 +418,152 @@ app.post('/webhooks/linear', (req: any, res: any) => {
 
   res.status(200).json({ status: "accepted", issueId: issueId });
 
-  setImmediate(async () => {
-    try {
-      const issuePriority = body.data?.priority ?? null;
-      const issuePriorityLabel = body.data?.priorityLabel ?? null;
-      const parentIssueId = body.data?.parent?.id ?? null;
-      const parentIssueIdentifier = body.data?.parent?.identifier ?? null;
-      const isUrgent = issuePriority === 1;
+  // 同一 issue のイベントバーストを1回の処理に集約する（SOT-1437 / P2）。
+  // WEBHOOK_DEBOUNCE_MS=0（既定）のときは従来通り setImmediate で即時処理し、後方互換を保つ。
+  const meta: IssueEventMeta = {
+    priority: body.data?.priority ?? null,
+    priorityLabel: body.data?.priorityLabel ?? null,
+    parentIssueId: body.data?.parent?.id ?? null,
+    parentIssueIdentifier: body.data?.parent?.identifier ?? null,
+  };
+  scheduleIssueEvent(issueId, meta);
+});
 
-      const cooldown = runner.getUsageLimitCooldownUntil();
-      if (cooldown) {
-        const cooldownRetryAt = cooldown.retryAt;
-        runner.enqueue(issueId, 'webhook', cooldownRetryAt, {
-          priority: issuePriority,
-          priorityLabel: issuePriorityLabel,
-          parentIssueId,
-          parentIssueIdentifier
-        });
-        runner.log('WEBHOOK', `usage limit cooldown active, queued until ${cooldownRetryAt}`, { issue: issueId });
-        return;
-      }
+interface IssueEventMeta {
+  priority: number | null;
+  priorityLabel: string | null;
+  parentIssueId: string | null;
+  parentIssueIdentifier: string | null;
+}
 
-      if (!isUrgent && runner.isLocked()) {
-        // Non-Urgent while locked: enqueue for later drain
-        runner.enqueue(issueId, 'webhook', null, {
-          priority: issuePriority,
-          priorityLabel: issuePriorityLabel,
-          parentIssueId,
-          parentIssueIdentifier
-        });
-        runner.log('WEBHOOK', `non-Urgent issue (priority=${issuePriority}) queued while locked, queue size=${runner.loadQueue().length}`, { issue: issueId });
-        return;
-      }
+// 同一 issue に対する未発火の debounce タイマー（issueId -> timer）。coalesce（最新イベント優先）用。
+const _debounceTimers = new Map<string, NodeJS.Timeout>();
 
-      // Linear 全体チェック: Todo/In Progress Issue がなければ起動しない
-      let hasPending = true;
-      try {
-        hasPending = await runner.hasPendingIssues();
-      } catch (e: any) {
-        runner.log('WEBHOOK', `hasPendingIssues error (fail-open): ${e.message}`, { issue: issueId });
-      }
-      if (!hasPending) {
-        runner.log('WEBHOOK', 'no pending issues in Linear, skipping run', { issue: issueId });
-        return;
-      }
+// debounce/coalesce の窓に従って issue イベント処理をスケジュールする。
+// - 窓 <= 0: 従来の即時処理（setImmediate）。
+// - 窓 > 0: 同一 issue の既存タイマーを解除して張り直し（＝バーストを1回に集約、最新 meta が勝つ）。
+function scheduleIssueEvent(issueId: string, meta: IssueEventMeta): void {
+  const windowMs = appEnv.webhookDebounceMs();
+  if (windowMs <= 0) {
+    setImmediate(() => {
+      processIssueEvent(issueId, meta).catch((err: any) => {
+        runner.log('WEBHOOK', `processing error: ${err.message}`, { issue: issueId });
+      });
+    });
+    return;
+  }
 
-      // キューに追加してすぐ取り出す
+  const existing = _debounceTimers.get(issueId);
+  if (existing) {
+    clearTimeout(existing);
+    runner.log('WEBHOOK', `debounce: coalescing burst for ${issueId} (window ${windowMs}ms)`, { issue: issueId });
+  }
+  const timer = setTimeout(() => {
+    _debounceTimers.delete(issueId);
+    processIssueEvent(issueId, meta).catch((err: any) => {
+      runner.log('WEBHOOK', `processing error: ${err.message}`, { issue: issueId });
+    });
+  }, windowMs);
+  if (typeof (timer as any).unref === 'function') (timer as any).unref(); // プロセス終了を妨げない
+  _debounceTimers.set(issueId, timer);
+}
+
+// 受理済み issue イベントの実処理（enqueue → dequeue → lock → runItem → drain）。
+// setImmediate / debounce タイマーの双方から同一経路で呼ばれる（挙動は従来と同一）。
+async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise<void> {
+  try {
+    const { priority: issuePriority, priorityLabel: issuePriorityLabel, parentIssueId, parentIssueIdentifier } = meta;
+    const isUrgent = issuePriority === 1;
+
+    const cooldown = runner.getUsageLimitCooldownUntil();
+    if (cooldown) {
+      const cooldownRetryAt = cooldown.retryAt;
+      runner.enqueue(issueId, 'webhook', cooldownRetryAt, {
+        priority: issuePriority,
+        priorityLabel: issuePriorityLabel,
+        parentIssueId,
+        parentIssueIdentifier
+      });
+      runner.log('WEBHOOK', `usage limit cooldown active, queued until ${cooldownRetryAt}`, { issue: issueId });
+      return;
+    }
+
+    if (!isUrgent && runner.isLocked()) {
+      // Non-Urgent while locked: enqueue for later drain
       runner.enqueue(issueId, 'webhook', null, {
         priority: issuePriority,
         priorityLabel: issuePriorityLabel,
         parentIssueId,
         parentIssueIdentifier
       });
-      // Refresh queued items' priority from Linear before selecting. Priority-only changes do not
-      // fire a webhook, so a recently-bumped Urgent/High issue would otherwise stay behind a lower
-      // priority item. As of SOT-1352 this also re-sorts the queue into priority order, so the
-      // persisted queue reflects priority at webhook-receive time (enqueue() likewise sorts on write).
-      // Fail-open: never block execution on a refresh error.
-      try {
-        await runner.refreshQueuePriorities();
-      } catch (e: any) {
-        runner.log('WEBHOOK', `refreshQueuePriorities error (fail-open): ${e.message}`, { issue: issueId });
-      }
-
-      const item = runner.dequeue();
-      if (!item) return;
-      const queuedIssueId = item.issueId;
-
-      // ロック取得
-      const locked = runner.acquireLock({ trigger: 'webhook', issue: queuedIssueId });
-      if (!locked) {
-        runner.log('WEBHOOK', 'SKIPPED_LOCKED — re-enqueuing', { issue: queuedIssueId });
-        runner.enqueue(queuedIssueId, 'webhook', null, {
-          priority: item.priority ?? null,
-          priorityLabel: item.priorityLabel ?? null,
-          parentIssueId: item.parentIssueId ?? null,
-          parentIssueIdentifier: item.parentIssueIdentifier ?? null
-        });
-        return;
-      }
-
-      try {
-        await runner.runItem(item);
-      } finally {
-        runner.releaseLock();
-        // After main task: drain remaining queue
-        const queueSize = runner.loadQueue().length;
-        if (queueSize > 0) {
-          runner.log('QUEUE', `main task done, draining ${queueSize} remaining item(s)`);
-          await runner.drainQueue();
-        } else {
-          runner.log('QUEUE', 'main task done, queue empty — no drain needed');
-        }
-      }
-    } catch (err: any) {
-      runner.log('WEBHOOK', `processing error: ${err.message}`, { issue: issueId });
+      runner.log('WEBHOOK', `non-Urgent issue (priority=${issuePriority}) queued while locked, queue size=${runner.loadQueue().length}`, { issue: issueId });
+      return;
     }
-  });
-});
+
+    // Linear 全体チェック: Todo/In Progress Issue がなければ起動しない
+    let hasPending = true;
+    try {
+      hasPending = await runner.hasPendingIssues();
+    } catch (e: any) {
+      runner.log('WEBHOOK', `hasPendingIssues error (fail-open): ${e.message}`, { issue: issueId });
+    }
+    if (!hasPending) {
+      runner.log('WEBHOOK', 'no pending issues in Linear, skipping run', { issue: issueId });
+      return;
+    }
+
+    // キューに追加してすぐ取り出す
+    runner.enqueue(issueId, 'webhook', null, {
+      priority: issuePriority,
+      priorityLabel: issuePriorityLabel,
+      parentIssueId,
+      parentIssueIdentifier
+    });
+    // Refresh queued items' priority from Linear before selecting. Priority-only changes do not
+    // fire a webhook, so a recently-bumped Urgent/High issue would otherwise stay behind a lower
+    // priority item. As of SOT-1352 this also re-sorts the queue into priority order, so the
+    // persisted queue reflects priority at webhook-receive time (enqueue() likewise sorts on write).
+    // Fail-open: never block execution on a refresh error.
+    try {
+      await runner.refreshQueuePriorities();
+    } catch (e: any) {
+      runner.log('WEBHOOK', `refreshQueuePriorities error (fail-open): ${e.message}`, { issue: issueId });
+    }
+
+    const item = runner.dequeue();
+    if (!item) return;
+    const queuedIssueId = item.issueId;
+
+    // ロック取得
+    const locked = runner.acquireLock({ trigger: 'webhook', issue: queuedIssueId });
+    if (!locked) {
+      runner.log('WEBHOOK', 'SKIPPED_LOCKED — re-enqueuing', { issue: queuedIssueId });
+      runner.enqueue(queuedIssueId, 'webhook', null, {
+        priority: item.priority ?? null,
+        priorityLabel: item.priorityLabel ?? null,
+        parentIssueId: item.parentIssueId ?? null,
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null
+      });
+      return;
+    }
+
+    try {
+      await runner.runItem(item);
+    } finally {
+      runner.releaseLock();
+      // After main task: drain remaining queue
+      const queueSize = runner.loadQueue().length;
+      if (queueSize > 0) {
+        runner.log('QUEUE', `main task done, draining ${queueSize} remaining item(s)`);
+        await runner.drainQueue();
+      } else {
+        runner.log('QUEUE', 'main task done, queue empty — no drain needed');
+      }
+    }
+  } catch (err: any) {
+    runner.log('WEBHOOK', `processing error: ${err.message}`, { issue: issueId });
+  }
+}
 
 app.post('/webhooks/discord', (req: any, res: any) => {
   const publicKey = getSecret('DISCORD_PUBLIC_KEY');
@@ -618,4 +669,10 @@ if (isMain) {
   })();
 }
 
-export { app, runBootstrapScan, hasDueQueueItem, runPeriodicDrainTick, startPeriodicDrain, scanAndEnqueueActiveIssues, runReaperTick };
+// テスト用に debounce タイマー Map を全消去する（各テストの分離用）。
+function _resetDebounceTimers(): void {
+  for (const timer of _debounceTimers.values()) clearTimeout(timer);
+  _debounceTimers.clear();
+}
+
+export { app, runBootstrapScan, hasDueQueueItem, runPeriodicDrainTick, startPeriodicDrain, scanAndEnqueueActiveIssues, runReaperTick, processIssueEvent, scheduleIssueEvent, _debounceTimers, _resetDebounceTimers };

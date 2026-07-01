@@ -2,6 +2,7 @@ import https from 'node:https';
 import { getSecret } from '../config/secrets.js';
 import { getPriorityRank } from './queueOrdering.js';
 import { isTerminalState, isHoldState } from './issueState.js';
+import * as appEnv from '../config/env.js';
 import type { IssueQueueMetadata } from '../runner.js';
 
 /**
@@ -47,7 +48,26 @@ export interface EligibilityResult {
 // Marker embedded in the auto-finalization comment so we never finalize a parent twice.
 const PARENT_FINALIZED_MARKER = '<!-- auto-parent-finalized -->';
 
-export async function linearQuery(query: string, variables: Record<string, any> = {}): Promise<any> {
+// SOT-1440 / P7: mark transient (retryable) transport errors so linearQuery can retry them with
+// backoff. GraphQL user/validation errors are marked NON-transient (permanent) and never retried.
+class LinearTransientError extends Error {
+  transient = true;
+}
+
+/**
+ * Classify whether an error thrown by linearQueryOnce is transient (worth retrying). Transient =
+ * transport-level: timeout, socket reset/hang-up, DNS, or 5xx/429. GraphQL validation/user errors
+ * (json.errors) are NOT transient.
+ */
+function isTransientLinearError(err: any): boolean {
+  if (err instanceof LinearTransientError) return true;
+  const msg = String(err?.message || err || '').toLowerCase();
+  return /timeout|socket hang up|econnreset|econnrefused|etimedout|enotfound|eai_again|network|502|503|504|429|rate limit|too many requests/.test(msg);
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function linearQueryOnce(query: string, variables: Record<string, any>): Promise<any> {
   const { linearApiUrl } = requireDeps();
   const apiKey = getSecret('LINEAR_API_KEY');
   if (!apiKey) throw new Error('LINEAR_API_KEY not set');
@@ -71,10 +91,15 @@ export async function linearQuery(query: string, variables: Record<string, any> 
       let data = '';
       res.on('data', (chunk: any) => { data += chunk; });
       res.on('end', () => {
+        // Retry on 5xx / 429 status even when a body is returned.
+        if (res.statusCode && (res.statusCode >= 500 || res.statusCode === 429)) {
+          reject(new LinearTransientError(`Linear API HTTP ${res.statusCode}`));
+          return;
+        }
         try {
           const json = JSON.parse(data);
           if (json.errors) {
-            reject(new Error(json.errors[0].message));
+            reject(new Error(json.errors[0].message)); // GraphQL error = permanent, not retried
           } else {
             resolve(json.data);
           }
@@ -84,14 +109,68 @@ export async function linearQuery(query: string, variables: Record<string, any> 
       });
     });
 
-    req.on('error', (err: any) => { reject(err); });
+    req.on('error', (err: any) => { reject(new LinearTransientError(err?.message || 'socket error')); });
     req.on('timeout', () => {
       req.destroy();
-      reject(new Error('Linear API timeout'));
+      reject(new LinearTransientError('Linear API timeout'));
     });
     req.write(body);
     req.end();
   });
+}
+
+/**
+ * Execute a Linear GraphQL query/mutation. SOT-1440 / P7: transient transport failures (timeout,
+ * socket, 5xx, 429) are retried with exponential backoff + jitter (LINEAR_RETRY_MAX / _BASE_MS).
+ * GraphQL validation errors are permanent and returned immediately (never retried). Callers that
+ * must not retry a non-idempotent mutation on timeout can pass `{ retries: 0 }`.
+ *
+ * Note on idempotency: the retried writes here (state/label updates) are idempotent; the only
+ * non-idempotent write (comment creation) is duplicate-guarded by its callers (postUsageLimitComment
+ * / the parent-finalized marker), so a rare double-post is already prevented.
+ */
+export async function linearQuery(
+  query: string,
+  variables: Record<string, any> = {},
+  opts: { retries?: number } = {}
+): Promise<any> {
+  const maxRetries = opts.retries !== undefined ? Math.max(0, opts.retries) : appEnv.linearRetryMax();
+  const baseMs = appEnv.linearRetryBaseMs();
+  let attempt = 0;
+  // Try once, then up to maxRetries more times on transient errors.
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      return await linearQueryOnce(query, variables);
+    } catch (err: any) {
+      if (attempt >= maxRetries || !isTransientLinearError(err)) throw err;
+      // Exponential backoff with full jitter: delay ∈ [0, base * 2^attempt].
+      const delay = Math.floor(Math.random() * (baseMs * Math.pow(2, attempt)));
+      try {
+        requireDeps().log('LINEAR', `transient error (${err.message}); retry ${attempt + 1}/${maxRetries} in ${delay}ms`);
+      } catch { /* deps/log optional */ }
+      await sleep(delay);
+      attempt++;
+    }
+  }
+}
+
+/**
+ * SOT-1440 / P7: sanitize an issue's labelIds before writing them back via issueUpdate(labelIds).
+ * Drops falsy/empty/non-string ids and de-duplicates, which prevents "invalid id" / duplicate
+ * errors when reading an issue's labelIds and re-submitting them with an added label.
+ */
+export function sanitizeLabelIds(ids: any[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of Array.isArray(ids) ? ids : []) {
+    if (typeof id !== 'string') continue;
+    const trimmed = id.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
 }
 
 // Linear issue が属するプロジェクト名を取得する。取得不能・未設定時は null（never throws）。
@@ -203,10 +282,28 @@ export async function hasPendingIssues(): Promise<boolean> {
   }
 }
 
-export async function fetchActiveIssues(first: number = 50): Promise<IssueQueueMetadata[]> {
+/**
+ * Fetch active (unstarted/started) issues.
+ *
+ * SOT-1438 / P3: pass `{ excludeHold: true }` from the reaper / bootstrap scan path so hold-state
+ * issues (In Review) are excluded at the QUERY layer instead of being fetched and then per-item
+ * `isHoldState`-skipped by every consumer (that per-item skip logged ~6,430 no-op lines). In Review
+ * shares the `started` state type with In Progress, so it can't be dropped by `type`; we exclude it
+ * by workflow-state name in the GraphQL filter, plus a JS `isHoldState` filter as a belt-and-suspenders
+ * guard. Display / queue-sync callers keep the default (In Review included) so nothing else changes.
+ */
+export async function fetchActiveIssues(
+  first: number = 50,
+  opts: { excludeHold?: boolean } = {}
+): Promise<IssueQueueMetadata[]> {
+  const excludeHold = opts.excludeHold === true;
+  // In Review (hold) exclusion is name-based because its state type is "started" like In Progress.
+  const stateFilter = excludeHold
+    ? 'state: { type: { in: ["unstarted","started"] }, name: { nin: ["In Review"] } }'
+    : 'state: { type: { in: ["unstarted","started"] } }';
   const query = `
     query($first: Int!) {
-      issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: $first) {
+      issues(filter: { ${stateFilter} }, first: $first) {
         nodes {
           id
           identifier
@@ -226,6 +323,7 @@ export async function fetchActiveIssues(first: number = 50): Promise<IssueQueueM
   const data: any = await linearQuery(query, { first });
   return (data.issues?.nodes || [])
     .filter((issue: any) => !issue.archivedAt)
+    .filter((issue: any) => !excludeHold || !isHoldState(issue.state))
     .map((issue: any) => ({
       id: issue.id,
       identifier: issue.identifier,

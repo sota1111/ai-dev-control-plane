@@ -1,0 +1,4 @@
+{
+  "__doc__": "SOT-1421/P6 optional deploy-command map for redeploy_after_merge.sh. Keys are a repo slug (owner/name) or a project name (from project_repos.json); values are the shell deploy command run in the repo's localPath after a merge. Empty by default = every merge skips redeploy (best-effort). Deploy stays OFF unless REDEPLOY_ENABLED is truthy AND a command is configured. Keys starting with __ are ignored.",
+  "__example__": "gcloud run deploy my-service --source . --region us-central1 --quiet"
+}

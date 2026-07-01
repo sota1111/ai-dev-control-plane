@@ -5,6 +5,7 @@ import * as queueOrdering from './queueOrdering.js';
 import { isPaused, setPaused, clearPause, getPauseInfo } from './discordPauseState.js';
 import * as sessionContinue from './sessionContinue.js';
 import { isHoldState } from './issueState.js';
+import { formatOutcomeSummary } from './outcomeStats.js';
 
 const ISSUE_ID_PATTERN = /^SOT-\d+$/i;
 const MAX_BODY_LENGTH = 1000;
@@ -122,6 +123,18 @@ async function handleStatus(): Promise<CommandResult> {
       ? `⏸ 一時停止中（${pauseInfo && pauseInfo.pausedAt ? new Date(pauseInfo.pausedAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '不明'}）`
       : '▶ 実行可能';
 
+    // SOT-1439 / P5: surface the last 24h of structured run outcomes (success / usage-limit / failure).
+    // Defensive: only if the runner exposes the helper (older mocks may not) and never let it break /status.
+    let outcomeInfo = 'なし';
+    try {
+      if (typeof (runner as any).getRecentOutcomeSummary === 'function') {
+        const summary = (runner as any).getRecentOutcomeSummary(24 * 60 * 60 * 1000);
+        outcomeInfo = formatOutcomeSummary(summary);
+      }
+    } catch (e: any) {
+      runner.log('DISCORD', `handleStatus outcome summary error (non-fatal): ${e.message}`);
+    }
+
     const content = [
       '## 実行状態',
       `**ロック**: ${lockInfo}`,
@@ -130,6 +143,7 @@ async function handleStatus(): Promise<CommandResult> {
       `**Cooldown**: ${cooldownInfo}`,
       `**Session-Continue**: ${sessionInfo}`,
       `**Pause状態**: ${pauseStatus}`,
+      `**直近24hのoutcome**: ${outcomeInfo}`,
     ].join('\n');
 
     return { content: truncate(content) };
