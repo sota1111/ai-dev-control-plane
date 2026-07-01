@@ -113,6 +113,21 @@ if [ -f "$CODEX_COOLDOWN_FILE" ]; then
   rm -f "$CODEX_COOLDOWN_FILE"
 fi
 
+# --- Codex auth-unhealthy pre-run check (SOT-1441 / P1) ---
+# A CHRONIC auth failure (distinct from a transient usage-limit cooldown) marks Codex auth-unhealthy
+# for a short TTL. While the marker is fresh, skip invoking the CLI (which would just re-hit the same
+# auth error) and delegate to Claude. Once the TTL expires we clear it and retry.
+CODEX_AUTH_UNHEALTHY_FILE="$CONTROL_PLANE_DIR/docs/ai/auto_logs/codex.auth_unhealthy.json"
+if [ -f "$CODEX_AUTH_UNHEALTHY_FILE" ]; then
+  NOW_EPOCH="$(date +%s)"
+  EXPIRES_AT="$(node -e "try{const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(String(Number(d.expiresAtEpoch)||0));}catch(e){process.stdout.write('0');}" "$CODEX_AUTH_UNHEALTHY_FILE" 2>/dev/null || echo 0)"
+  if [ "$EXPIRES_AT" -gt 0 ] && [ "$NOW_EPOCH" -lt "$EXPIRES_AT" ]; then
+    echo "CODEX_AUTH_UNHEALTHY: chronic auth failure marker active until epoch $EXPIRES_AT (now $NOW_EPOCH), delegating to Claude" >&2
+    exit "$WORKER_NONRESPONSE_EXIT"
+  fi
+  rm -f "$CODEX_AUTH_UNHEALTHY_FILE"
+fi
+
 if [ -n "${TARGET_REPO:-}" ]; then
   echo "Target repository: $TARGET_REPO"
   cd "$TARGET_REPO"
@@ -144,6 +159,14 @@ if [ -f "$REPORT_FILE" ] \
     (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-usage-limit-unknown codex) >/dev/null 2>&1 || true
   fi
   exit "$WORKER_NONRESPONSE_EXIT"
+fi
+
+# --- Codex chronic auth-failure detection (SOT-1441 / P1) ---
+# On a non-zero exit that is NOT a usage-limit (handled above), classify the report. A chronic auth
+# failure marks Codex auth-unhealthy (short TTL) so subsequent runs skip fast, with a separated alert
+# (chronic vs transient). Best-effort; never blocks the fallback exit below.
+if [ "$EXIT_CODE" -ne 0 ] && [ -f "$REPORT_FILE" ]; then
+  (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts worker-health-record codex "$EXIT_CODE" < "$REPORT_FILE") >/dev/null 2>&1 || true
 fi
 
 # Validation logic

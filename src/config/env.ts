@@ -106,3 +106,13 @@ export function linearRetryBaseMs(env: Env = process.env): number {
   const v = intEnv(env, 'LINEAR_RETRY_BASE_MS', 300);
   return Number.isFinite(v) && v > 0 ? v : 300;
 }
+
+/**
+ * WORKER_AUTH_UNHEALTHY_TTL_SECONDS — how long a worker (antigravity/codex) is treated as
+ * auth-unhealthy after a chronic auth failure, so subsequent runs skip invoking the CLI instead of
+ * repeatedly hitting the same auth error (SOT-1441 / P1). Default 900s (15m). <=0/NaN → 900.
+ */
+export function workerAuthUnhealthyTtlSeconds(env: Env = process.env): number {
+  const v = intEnv(env, 'WORKER_AUTH_UNHEALTHY_TTL_SECONDS', 900);
+  return Number.isFinite(v) && v > 0 ? v : 900;
+}
