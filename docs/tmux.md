@@ -51,6 +51,7 @@ ln -s /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-dev.yml  ~/.config/
 | ----------- | ------------------------------------------------------------- |
 | `claude`    | `claude`（起動後 `/mcp` → Linear を選択して MCP 設定）        |
 | `antigravity` | `agy`                                                      |
+| `antigravity-mcp` | `~/.gemini/config/mcp_config.json` に linear MCP を用意し `npx -y mcp-remote https://mcp.linear.app/mcp` で agy の Linear MCP を認証（再認証は `rm -rf ~/.mcp-auth`） |
 | `codex`     | `codex`                                                       |
 | `codex-mcp` | `codex mcp login linear`                                      |
 | `gh`        | `GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web` |

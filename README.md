@@ -206,6 +206,7 @@ cp .env.example .env
 | Linear（Claude 用 MCP） | `claude` を起動 → `/mcp` → linear を選択                                  |
 | Linear（Codex 用 MCP）  | `codex mcp login linear`                                                  |
 | Antigravity CLI              | `agy` を起動して認証                                                   |
+| Linear（Antigravity 用 MCP） | `~/.gemini/config/mcp_config.json` に linear MCP を用意し `npx -y mcp-remote https://mcp.linear.app/mcp` で認証（再認証は `rm -rf ~/.mcp-auth`） |
 | Codex CLI               | `codex` を起動して認証                                                    |
 | GitHub CLI              | `GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web` |
 | Azure CLI               | `az login --use-device-code`                                              |
