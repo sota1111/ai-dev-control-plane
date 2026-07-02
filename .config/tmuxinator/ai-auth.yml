@@ -7,6 +7,16 @@ windows:
   - antigravity:
       panes:
         - echo "=== Antigravity 認証 ===" && agy
+  - antigravity-mcp:
+      panes:
+        - >-
+          echo "=== Antigravity (agy) MCP Linear 認証 ===" &&
+          mkdir -p ~/.gemini/config &&
+          { [ -f ~/.gemini/config/mcp_config.json ] && echo "既存の ~/.gemini/config/mcp_config.json を使用（上書きしません）" || printf '%s\n' '{ "mcpServers": { "linear": { "command": "npx", "args": ["-y", "mcp-remote", "https://mcp.linear.app/mcp"] } } }' > ~/.gemini/config/mcp_config.json; } &&
+          echo "MCP設定: ~/.gemini/config/mcp_config.json" &&
+          echo "再認証したい場合は rm -rf ~/.mcp-auth 後に再実行してください" &&
+          echo "ブラウザで Linear 認証を完了後、agy を起動し /mcp で linear が表示されれば設定完了です" &&
+          npx -y mcp-remote https://mcp.linear.app/mcp
   - codex:
       panes:
         - echo "=== Codex 認証 ===" && codex

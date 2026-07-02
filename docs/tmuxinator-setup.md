@@ -54,12 +54,13 @@ tmuxinator start -p .config/tmuxinator/ai-auth.yml
 
 1. **claude**: `claude` が起動 → `/mcp` を実行 → Linear を選択
 2. **antigravity**: `agy` で認証
-3. **codex**: `codex` で認証
-4. **codex-mcp**: `codex mcp login linear` で Linear 認証
-5. **gh**: `GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web` で GitHub CLI 認証
-6. **azure**: `az login --use-device-code` で Azure CLI 認証（ブラウザでコード入力）
-7. **gcloud**: `gcloud auth login --no-launch-browser` で認証
-8. **gcloud-adc**: `gcloud auth application-default login --no-launch-browser` で ADC 認証（必要な場合のみ）
+3. **antigravity-mcp**: agy の Linear MCP 認証。`~/.gemini/config/mcp_config.json` に linear MCP 設定を用意し（既存ファイルは上書きしない）、`npx -y mcp-remote https://mcp.linear.app/mcp` を実行 → ブラウザで Linear 認証。認証後は `agy` を起動し `/mcp` に `linear` が出れば設定完了（再認証は `rm -rf ~/.mcp-auth` 後に再実行）
+4. **codex**: `codex` で認証
+5. **codex-mcp**: `codex mcp login linear` で Linear 認証
+6. **gh**: `GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web` で GitHub CLI 認証
+7. **azure**: `az login --use-device-code` で Azure CLI 認証（ブラウザでコード入力）
+8. **gcloud**: `gcloud auth login --no-launch-browser` で認証
+9. **gcloud-adc**: `gcloud auth application-default login --no-launch-browser` で ADC 認証（必要な場合のみ）
 
 ### gcloud ADC について
 
