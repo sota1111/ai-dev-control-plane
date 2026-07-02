@@ -184,23 +184,52 @@ echo "Log: ${LOG_FILE}"
 echo ""
 
 # stream-json イベントから assistant のテキスト、ツール呼び出し、
-# Antigravity/Codex の出力（tool_result）をリアルタイム抽出
+# Antigravity/Codex の出力（tool_result）をリアルタイム抽出。
+#
+# SOT-1457: すべての行に「誰が作業しているか」を示すアクタータグ [<actor>] を付ける。
+#   - orchestrator（Claude Code 本体）のナレーション/ツール呼び出し → [<model>]（既定 [opus]）
+#   - 実際の Codex 出力（== Codex CLI バナー）              → [codex]
+#   - 実際の Antigravity 出力（== Antigravity CLI バナー）   → [antigravity]
+# これにより「Codex が実際には動いていない run」では実体のある [codex] 行が出ず、
+# 委譲バイパス（"delegating to Claude"）だけが [codex] で残るため、
+# codex が作業していないことがログから判別できる。orchestrator が "Codex is still
+# running..." と語っても [opus] タグが付くので、発話者が Claude 本体だと分かる。
+# runner.ts が付ける [RUN:<id>] と合成され [RUN:<id>] [opus] / [RUN:<id>] [codex] になる。
 _STREAM_FILTER='
-import sys, json
+import sys, json, os
 
 WORKER_MARKERS = ("== Antigravity CLI", "== Codex CLI")
+# orchestrator（Claude Code 本体）のアクター名。run_auto.sh の --model と揃える。
+ORCH = os.environ.get("CLAUDE_MODEL") or "opus"
+
+def tag_lines(actor, text):
+    """text の各行に [actor] を付けて出力する（空行はスキップ）。"""
+    for ln in text.splitlines():
+        if ln.strip() == "":
+            continue
+        print(f"[{actor}] {ln}", flush=True)
+
+def worker_actor(text):
+    """worker バナーから codex / antigravity を判定する。"""
+    if text.startswith("== Codex CLI"):
+        return "codex"
+    if text.startswith("== Antigravity CLI"):
+        return "antigravity"
+    return None
 
 def emit_worker_result(content):
-    """tool_result の中身が Antigravity/Codex 出力なら表示する"""
+    """tool_result の中身が Antigravity/Codex 出力なら worker アクター付きで表示する"""
     if isinstance(content, str):
-        if content.startswith(WORKER_MARKERS):
-            print(content, end="" if content.endswith("\n") else "\n", flush=True)
+        actor = worker_actor(content)
+        if actor:
+            tag_lines(actor, content)
     elif isinstance(content, list):
         for c in content:
             if isinstance(c, dict) and c.get("type") == "text":
                 txt = c.get("text", "")
-                if txt.startswith(WORKER_MARKERS):
-                    print(txt, end="" if txt.endswith("\n") else "\n", flush=True)
+                actor = worker_actor(txt)
+                if actor:
+                    tag_lines(actor, txt)
 
 for line in sys.stdin:
     line = line.strip()
@@ -215,7 +244,7 @@ for line in sys.stdin:
                 if bt == "text":
                     txt = blk.get("text", "")
                     if txt.strip():
-                        print(txt, end="" if txt.endswith("\n") else "\n", flush=True)
+                        tag_lines(ORCH, txt)
                 elif bt == "tool_use":
                     name = blk.get("name", "?")
                     inp = blk.get("input", {})
@@ -223,22 +252,24 @@ for line in sys.stdin:
                          inp.get("path") or inp.get("query") or
                          inp.get("pattern") or "")
                     if d:
-                        print(f"[{name}] {str(d)[:120]}", flush=True)
+                        print(f"[{ORCH}] [{name}] {str(d)[:120]}", flush=True)
                     else:
-                        print(f"[{name}]", flush=True)
+                        print(f"[{ORCH}] [{name}]", flush=True)
         elif t == "user":
             for blk in ev.get("message", {}).get("content", []):
                 if blk.get("type") == "tool_result":
                     emit_worker_result(blk.get("content", ""))
         elif t == "result" and ev.get("is_error"):
-            print("ERROR: " + ev.get("result", ""), flush=True)
+            tag_lines(ORCH, "ERROR: " + ev.get("result", ""))
     except Exception:
         if line:
             print(line, flush=True)
 '
 
+CLAUDE_MODEL="${CLAUDE_MODEL:-opus}"
+export CLAUDE_MODEL
 claude \
-  --model opus \
+  --model "$CLAUDE_MODEL" \
   --dangerously-skip-permissions \
   --output-format stream-json \
   --verbose \

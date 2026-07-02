@@ -277,3 +277,23 @@ scheduler / webhook / Discord のいずれも共通の挙動:
 docs/ai/auto_logs/scheduler.log   # スケジューラー動作ログ
 docs/ai/auto_logs/run_*.log       # 各 Claude 実行ログ（run_auto.sh が生成、タイムスタンプ付き）
 ```
+
+### アクタータグ（誰が作業しているか, SOT-1457）
+
+`run_auto.sh` のストリームフィルタは、ログの各行に「誰がその行を出力したか」を示す
+アクタータグ `[<actor>]` を付ける。
+
+- `[opus]`（= `CLAUDE_MODEL`, 既定 `opus`）: orchestrator（Claude Code 本体）のナレーション・
+  ツール呼び出し。例: `[opus] [Bash] git status`、`[opus] Codex is still running...`。
+- `[codex]`: 実際に起動した Codex CLI の出力（`== Codex CLI` バナー由来）。
+- `[antigravity]`: 実際に起動した Antigravity CLI の出力（`== Antigravity CLI` バナー由来）。
+
+`runner.ts` が付ける `[RUN:<issue-id>]` と合成され、`[RUN:SOT-1461] [opus] ...` /
+`[RUN:SOT-1461] [codex] ...` の形になる。これにより:
+
+- **誰が作業しているか**が行単位で分かる（orchestrator が "Codex is ..." と語っても `[opus]` タグが
+  付くので発話者が Claude 本体だと判別できる）。
+- **Codex/Antigravity が実際には動いていない run**（`ALL_CLAUDE_MODE` / `WORKER_MODE=claude-only`
+  等で worker が終了コード75を返す場合）では、実体のある `[codex]` / `[antigravity]` の作業行が出ず、
+  委譲バイパス（`delegating to Claude`）のバナー行だけが残るため、worker が非稼働であることが
+  ログから判別できる。
