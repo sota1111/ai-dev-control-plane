@@ -187,20 +187,31 @@ echo ""
 # Antigravity/Codex の出力（tool_result）をリアルタイム抽出。
 #
 # SOT-1457: すべての行に「誰が作業しているか」を示すアクタータグ [<actor>] を付ける。
-#   - orchestrator（Claude Code 本体）のナレーション/ツール呼び出し → [<model>]（既定 [opus]）
+#   - orchestrator（Claude Code 本体）のナレーション/ツール呼び出し → [<model>]（既定 [opus], sonnet 対応）
 #   - 実際の Codex 出力（== Codex CLI バナー）              → [codex]
-#   - 実際の Antigravity 出力（== Antigravity CLI バナー）   → [antigravity]
+#   - 実際の Antigravity 出力（== Antigravity CLI バナー）   → [agy]
 # これにより「Codex が実際には動いていない run」では実体のある [codex] 行が出ず、
 # 委譲バイパス（"delegating to Claude"）だけが [codex] で残るため、
 # codex が作業していないことがログから判別できる。orchestrator が "Codex is still
-# running..." と語っても [opus] タグが付くので、発話者が Claude 本体だと分かる。
+# running..." と語っても [opus]/[sonnet] タグが付くので、発話者が Claude 本体だと分かる。
 # runner.ts が付ける [RUN:<id>] と合成され [RUN:<id>] [opus] / [RUN:<id>] [codex] になる。
 _STREAM_FILTER='
 import sys, json, os
 
 WORKER_MARKERS = ("== Antigravity CLI", "== Codex CLI")
+
+def orch_actor():
+    """orchestrator（Claude 本体）のアクター名を短い名前に正規化する。
+    CLAUDE_MODEL が claude-opus-4-8 / opus / claude-sonnet-4-6 / sonnet / haiku
+    のいずれでも [opus] / [sonnet] / [haiku] に揃える（既定 opus）。"""
+    m = (os.environ.get("CLAUDE_MODEL") or "opus").lower()
+    for short in ("opus", "sonnet", "haiku"):
+        if short in m:
+            return short
+    return m
+
 # orchestrator（Claude Code 本体）のアクター名。run_auto.sh の --model と揃える。
-ORCH = os.environ.get("CLAUDE_MODEL") or "opus"
+ORCH = orch_actor()
 
 def tag_lines(actor, text):
     """text の各行に [actor] を付けて出力する（空行はスキップ）。"""
@@ -210,11 +221,11 @@ def tag_lines(actor, text):
         print(f"[{actor}] {ln}", flush=True)
 
 def worker_actor(text):
-    """worker バナーから codex / antigravity を判定する。"""
+    """worker バナーから codex / agy(Antigravity) を判定する。"""
     if text.startswith("== Codex CLI"):
         return "codex"
     if text.startswith("== Antigravity CLI"):
-        return "antigravity"
+        return "agy"
     return None
 
 def emit_worker_result(content):
