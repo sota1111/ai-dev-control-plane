@@ -98,7 +98,7 @@ if [ -n "${WORKER_ROLE:-}" ]; then
   ROLE_WORKER="$(node -e '
     const fs = require("fs");
     const [file, role] = process.argv.slice(1);
-    const ROLES = ["task-check", "decomposition", "implementation", "verification", "acceptance"];
+    const ROLES = ["task-check", "decomposition", "implementation", "verification", "acceptance", "github", "linear-report"];
     const WORKERS = ["claude", "codex", "antigravity"];
     if (!ROLES.includes(role)) { process.stdout.write(""); process.exit(0); }
     try {
