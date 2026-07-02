@@ -23,6 +23,8 @@ const VALID = JSON.stringify({
   implementation: 'antigravity',
   verification: 'codex',
   acceptance: 'claude',
+  github: 'claude',
+  'linear-report': 'claude',
 });
 
 describe('loadWorkerRolesConfig', () => {
@@ -35,6 +37,8 @@ describe('loadWorkerRolesConfig', () => {
       implementation: 'antigravity',
       verification: 'codex',
       acceptance: 'claude',
+      github: 'claude',
+      'linear-report': 'claude',
     });
   });
 
@@ -85,6 +89,8 @@ describe('resolveRoleWorker', () => {
     expect(resolveRoleWorker('verification', p)).toBe('codex');
     expect(resolveRoleWorker('implementation', p)).toBe('antigravity');
     expect(resolveRoleWorker('acceptance', p)).toBe('claude');
+    expect(resolveRoleWorker('github', p)).toBe('claude');
+    expect(resolveRoleWorker('linear-report', p)).toBe('claude');
   });
 
   test('returns null for an unknown role (no override)', () => {
@@ -104,6 +110,8 @@ describe('resolveRoleWorker', () => {
         implementation: 'antigravity',
         verification: 'claude',
         acceptance: 'claude',
+        github: 'claude',
+        'linear-report': 'claude',
       }),
     );
     expect(resolveRoleWorker('verification', p)).toBe('claude');

@@ -1,8 +1,10 @@
 // SOT-1459: per-role worker assignment resolver.
 //
 // The harness splits work into roles (task-check / decomposition / implementation / verification /
-// acceptance). Which worker handles each role is configured in an editable file — `config/worker_roles.json`
-// — NOT in `.env`. This module loads and validates that file and resolves a role → worker.
+// acceptance / github / linear-report). Which worker handles each role is configured in an editable
+// file — `config/worker_roles.json` — NOT in `.env`. This module loads and validates that file and
+// resolves a role → worker. `github` (branch/PR/merge) and `linear-report` (Linear state sync +
+// progress reporting) are Claude-owned by default but may be reassigned like any other role.
 //
 // The run scripts (`scripts/ai/run_codex.sh`, `scripts/ai/run_antigravity.sh`) consult the same file
 // (via an inline node one-liner using `resolveRoleWorkerCli` below) so that, e.g., verification can be
@@ -27,6 +29,8 @@ export const WORKER_ROLES = [
   'implementation',
   'verification',
   'acceptance',
+  'github',
+  'linear-report',
 ] as const;
 export type WorkerRole = (typeof WORKER_ROLES)[number];
 
