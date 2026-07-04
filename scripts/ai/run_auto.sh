@@ -88,29 +88,62 @@ fi
 # 追加できなくなる。autonomous runner は子Issueを作成するため、上限に近づいたら
 # 自動でアーカイブを実行して容量を確保する。
 #   ISSUE_CAP_TRIGGER: この件数以上で「追加不可」とみなしアーカイブを実行（既定 245）
+#   ISSUE_CAP_PREFLIGHT: 0/false/no/off でプリフライト全体を無効化（既定 有効）
+#   ISSUE_CAP_PREFLIGHT_TTL: 直近スキャン結果のキャッシュ秒数（既定 3600=1h, SOT-1514 / P3）。
+#     TTL 内かつ前回件数が trigger 未満なら Linear への全Issue件数スキャン（毎run のネットワーク
+#     往復）をスキップする。閾値近傍（>= trigger）や TTL 切れ時のみ再スキャンし、アーカイブ実行後は
+#     件数が変わるためキャッシュを破棄して次回再スキャンさせる。
 # アーカイブは親150/全200を維持する archive_linear_issues.sh に委譲する。
 # 失敗（APIキー未設定・取得失敗・アーカイブ失敗）は警告のみで run は継続する。
 ISSUE_CAP_TRIGGER="${ISSUE_CAP_TRIGGER:-245}"
-if [ -z "${LINEAR_API_KEY:-}" ]; then
+ISSUE_CAP_PREFLIGHT_TTL="${ISSUE_CAP_PREFLIGHT_TTL:-3600}"
+ISSUE_CAP_CACHE_FILE="${LOG_DIR}/issue_count_cache.json"
+_preflight_enabled=1
+case "$(printf '%s' "${ISSUE_CAP_PREFLIGHT:-1}" | tr '[:upper:]' '[:lower:]')" in
+  0|false|no|off) _preflight_enabled=0 ;;
+esac
+if [ "$_preflight_enabled" -eq 0 ]; then
+  echo "[CAPACITY] preflight disabled by ISSUE_CAP_PREFLIGHT; skipping"
+elif [ -z "${LINEAR_API_KEY:-}" ]; then
   echo "[CAPACITY] WARN LINEAR_API_KEY unset; skipping capacity preflight"
 else
-  set +e
-  ISSUE_TOTAL="$(bash scripts/ai/archive_linear_issues.sh --print-total 2>/dev/null)"
-  PRINT_TOTAL_RC=$?
-  set -e
-  if [ "$PRINT_TOTAL_RC" -ne 0 ] || ! [[ "$ISSUE_TOTAL" =~ ^[0-9]+$ ]]; then
-    echo "[CAPACITY] WARN could not determine issue count (rc=${PRINT_TOTAL_RC}, value='${ISSUE_TOTAL}'); continuing"
-  elif [ "$ISSUE_TOTAL" -ge "$ISSUE_CAP_TRIGGER" ]; then
-    echo "[CAPACITY] Linear issues=${ISSUE_TOTAL} >= trigger=${ISSUE_CAP_TRIGGER}; running archive to free space"
-    set +e
-    bash scripts/ai/archive_linear_issues.sh --execute
-    ARCHIVE_RC=$?
-    set -e
-    if [ "$ARCHIVE_RC" -ne 0 ]; then
-      echo "[CAPACITY] WARN archive failed (rc=${ARCHIVE_RC}); continuing"
-    fi
+  # TTL キャッシュ: 前回件数が新鮮（age < TTL）かつ trigger 未満ならネットワークスキャンを省く。
+  NOW_EPOCH="$(date +%s)"
+  CACHED_TOTAL=""
+  CACHE_AGE=""
+  if [ -f "$ISSUE_CAP_CACHE_FILE" ]; then
+    CACHED_TOTAL="$(node -e "try{const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(String(Number(d.total)));}catch(e){process.stdout.write('');}" "$ISSUE_CAP_CACHE_FILE" 2>/dev/null || echo '')"
+    CACHED_TS="$(node -e "try{const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(String(Number(d.ts)||0));}catch(e){process.stdout.write('0');}" "$ISSUE_CAP_CACHE_FILE" 2>/dev/null || echo 0)"
+    if [[ "$CACHED_TS" =~ ^[0-9]+$ ]] && [ "$CACHED_TS" -gt 0 ]; then CACHE_AGE="$((NOW_EPOCH - CACHED_TS))"; fi
+  fi
+  if [[ "$CACHED_TOTAL" =~ ^[0-9]+$ ]] && [ -n "$CACHE_AGE" ] && [ "$CACHE_AGE" -ge 0 ] \
+     && [ "$CACHE_AGE" -lt "$ISSUE_CAP_PREFLIGHT_TTL" ] && [ "$CACHED_TOTAL" -lt "$ISSUE_CAP_TRIGGER" ]; then
+    echo "[CAPACITY] cached issues=${CACHED_TOTAL} < trigger=${ISSUE_CAP_TRIGGER} (age ${CACHE_AGE}s < ttl ${ISSUE_CAP_PREFLIGHT_TTL}s); skipping scan"
   else
-    echo "[CAPACITY] Linear issues=${ISSUE_TOTAL} < trigger=${ISSUE_CAP_TRIGGER}; ok"
+    set +e
+    ISSUE_TOTAL="$(bash scripts/ai/archive_linear_issues.sh --print-total 2>/dev/null)"
+    PRINT_TOTAL_RC=$?
+    set -e
+    if [ "$PRINT_TOTAL_RC" -ne 0 ] || ! [[ "$ISSUE_TOTAL" =~ ^[0-9]+$ ]]; then
+      echo "[CAPACITY] WARN could not determine issue count (rc=${PRINT_TOTAL_RC}, value='${ISSUE_TOTAL}'); continuing"
+    else
+      node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({total:Number(process.argv[2]),ts:Number(process.argv[3])}));" "$ISSUE_CAP_CACHE_FILE" "$ISSUE_TOTAL" "$NOW_EPOCH" 2>/dev/null || true
+      if [ "$ISSUE_TOTAL" -ge "$ISSUE_CAP_TRIGGER" ]; then
+        echo "[CAPACITY] Linear issues=${ISSUE_TOTAL} >= trigger=${ISSUE_CAP_TRIGGER}; running archive to free space"
+        set +e
+        bash scripts/ai/archive_linear_issues.sh --execute
+        ARCHIVE_RC=$?
+        set -e
+        if [ "$ARCHIVE_RC" -ne 0 ]; then
+          echo "[CAPACITY] WARN archive failed (rc=${ARCHIVE_RC}); continuing"
+        else
+          # アーカイブで件数が変化したのでキャッシュを破棄し次回再スキャンさせる
+          rm -f "$ISSUE_CAP_CACHE_FILE"
+        fi
+      else
+        echo "[CAPACITY] Linear issues=${ISSUE_TOTAL} < trigger=${ISSUE_CAP_TRIGGER}; ok"
+      fi
+    fi
   fi
 fi
 # ─────────────────────────────────────────────────────────────────────────────
