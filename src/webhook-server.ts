@@ -617,7 +617,17 @@ async function runBootstrapScan(): Promise<void> {
   const startedAt = new Date().toISOString();
   runner.log('BOOTSTRAP', `startup scan started at ${startedAt}`);
 
-  // クラッシュ回収: 起動時に取り残された inflight を回収する。
+  // SOT-1438: 起動時に leaked 状態（前スパナの SIGKILL 等で取り残された inflight / 死んだ PID の lock /
+  // 古い current-issue）を即回収する。foreground run は新プロセスの子なので起動直後は存在しない＝
+  // 生きた detached run に紐づかない inflight は leaked。これで「webhook 受信するが起動しない」を防ぐ。
+  // 生きている detached run は保持される。reapStaleInflight（TTL 待ち）より先に実行。
+  try {
+    runner.reconcileStaleStateAtStartup();
+  } catch (err: any) {
+    runner.log('BOOTSTRAP', `startup reconcileStaleState error (non-fatal): ${err.message}`);
+  }
+
+  // クラッシュ回収: 起動時に取り残された inflight を回収する（TTL 経路。reconcile の補完）。
   let reapedIds: string[] = [];
   try {
     reapedIds = runner.reapStaleInflight();

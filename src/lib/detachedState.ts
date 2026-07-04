@@ -117,6 +117,47 @@ export function reapStaleInflight(): string[] {
   return reaped;
 }
 
+// Startup reconciliation (SOT-1438): on a FRESH process start, an inflight entry is only legitimate if
+// a DETACHED run for it is still alive (its sentinel PID responds). Foreground runs are children of the
+// spawner (webhook-server / scheduler); on a fresh start none survive, so their inflight is leaked
+// (e.g. after a SIGKILL of the spawner) and would otherwise make isQueuedOrRunning() skip that issue's
+// webhooks until the multi-hour inflight TTL. Reap every inflight entry NOT backed by a live sentinel
+// and drop its sentinel. Unlike reapStaleInflight this ignores the TTL (a fresh start is proof no
+// foreground run survived) but still keeps genuinely-alive detached runs. Best-effort; never throws.
+export function reapLeakedInflightAtStartup(): string[] {
+  const { log } = requireDeps();
+  const reaped: string[] = [];
+  try {
+    const records = loadInflightRecords();
+    if (records.length === 0) return reaped;
+    const kept: InflightEntry[] = [];
+    for (const r of records) {
+      const sentinel = loadDetachedSentinel(r.issueId);
+      let alive = false;
+      if (sentinel && sentinel.pid != null) {
+        try {
+          process.kill(sentinel.pid, 0);
+          alive = true;
+        } catch (e: any) {
+          alive = e.code !== 'ESRCH'; // EPERM etc. → process exists
+        }
+      }
+      if (alive) kept.push(r);
+      else {
+        reaped.push(r.issueId);
+        clearDetachedSentinel(r.issueId);
+      }
+    }
+    if (reaped.length > 0) {
+      saveInflightRecords(kept);
+      log('RUNNER', `startup: reaped ${reaped.length} leaked inflight entr${reaped.length === 1 ? 'y' : 'ies'} not backed by a live run: ${reaped.join(', ')}`);
+    }
+  } catch (err: any) {
+    log('RUNNER', `reapLeakedInflightAtStartup ERROR: ${err.message}`);
+  }
+  return reaped;
+}
+
 // Remove detached sentinels whose recorded PID is dead. Returns the cleared issueIds.
 export function reapDeadDetachedSentinels(): string[] {
   const { detachedDir, log } = requireDeps();
