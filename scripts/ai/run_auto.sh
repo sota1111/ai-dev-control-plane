@@ -167,6 +167,29 @@ COMPLETION_UNVERIFIED=70
 # （キュー走査）や `PIPELINE_MODE=0` のときは、後方互換のためレガシーの単一オーケストレータ起動へ退避する。
 plog() { echo "[pipeline] $*" | tee -a "$LOG_FILE"; }
 
+# Worker output filter for the pipeline (SOT-1457 の tag 付与を案B 用に復活): strip ANSI color escapes
+# (workers emit \x1b[..m colored output → Discord/ログに生エスケープが出るのを防ぐ) and prefix each
+# line with the ACTOR tag inferred from the worker banner (== Codex/Antigravity/Claude CLI ==), so the
+# Discord/ログ行が `[agy] ...` のように読める。runner.ts が更に `[RUN:<id>]` を前置する。
+_PIPE_TAG_FILTER='
+import sys, re
+ANSI = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+actor = "dispatch"
+def worker_of(s):
+    if s.startswith("== Codex CLI"): return "codex"
+    if s.startswith("== Antigravity CLI"): return "agy"
+    if s.startswith("== Claude CLI"): return "claude"
+    return None
+for raw in sys.stdin:
+    line = ANSI.sub("", raw.rstrip("\n"))
+    w = worker_of(line.lstrip())
+    if w:
+        actor = w
+    if line.strip() == "":
+        continue
+    print(f"[{actor}] {line}", flush=True)
+'
+
 # runner-cli helper (mirror run_codex.sh): prefer the local tsx binary, fall back to npx.
 _PIPE_TSX_BIN="node_modules/.bin/tsx"
 run_cli() {
@@ -222,12 +245,13 @@ run_role_pipeline() {
       return "$COMPLETION_UNVERIFIED"
     fi
 
-    # Run the dispatcher; show on the terminal, append to the log, AND capture output to parse the
-    # winning report path. (tee writes to stdout too, so the run is visible live — do NOT redirect to
-    # /dev/null, which previously hid all worker output from the terminal.)
+    # Run the dispatcher through the tag/ANSI filter; show on the terminal, append to the log, AND
+    # capture output to parse the winning report path. The filter strips ANSI color escapes and tags
+    # each line with the worker actor ([codex]/[agy]/[claude]) so Discord/log lines read cleanly.
+    # PIPESTATUS[0] is the dispatcher's exit code (run_worker.sh), unaffected by the filter/tee.
     local cap; cap="$(mktemp)"
     set +e
-    bash scripts/ai/run_worker.sh "$role" 2>&1 | tee -a "$LOG_FILE" "$cap"
+    bash scripts/ai/run_worker.sh "$role" 2>&1 | python3 -u -c "$_PIPE_TAG_FILTER" | tee -a "$LOG_FILE" "$cap"
     local rc=${PIPESTATUS[0]}
     set -e
 

@@ -322,6 +322,15 @@ const MAX_DRAIN_ITEMS = 20;  // safety guard against infinite drain loops
 const LOCK_CONFLICT_BACKOFF_MS = appEnv.lockConflictBackoffMs();
 const LOG_FILE = path.join(LOG_DIR, 'auto_runner.log');
 const STALE_LOCK_MS = 30 * 60 * 1000;  // 30 minutes
+
+// SOT-1457: strip ANSI/VT100 escape sequences (colors, cursor moves) from worker output before it is
+// logged and mirrored to Discord — worker CLIs emit \x1b[..m colored text which otherwise shows up as
+// raw `␛[1m…` garbage in the log/Discord. Covers CSI (`\x1b[…`) and simple two-char escapes.
+// eslint-disable-next-line no-control-regex
+const ANSI_ESCAPE_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g;
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_ESCAPE_RE, '');
+}
 const LINEAR_API_URL = 'https://api.linear.app/graphql';
 const QUEUE_ITEM_TTL_DAYS = appEnv.queueItemTtlDays();
 const INFLIGHT_FILE = path.join(LOG_DIR, 'runner.inflight.json');
@@ -700,13 +709,13 @@ async function triggerRun(issueId: string, options: TriggerOptions = {}): Promis
   let output = '';
 
   child.stdout.on('data', (data: any) => {
-    const str = data.toString();
+    const str = stripAnsi(data.toString());
     output += str;
     log('RUN', str.trim(), { issue: issueId });
     process.stdout.write(`[RUN:${issueId}] ${str}`);
   });
   child.stderr.on('data', (data: any) => {
-    const str = data.toString();
+    const str = stripAnsi(data.toString());
     output += str;
     log('RUN', `stderr: ${str.trim()}`, { issue: issueId });
     process.stderr.write(`[RUN:${issueId}] ${str}`);
