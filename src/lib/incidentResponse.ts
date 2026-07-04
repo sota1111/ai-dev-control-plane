@@ -58,12 +58,137 @@ export function shouldTriggerIncident(history: HealthState[], threshold: number)
   return history.slice(-n).every((s) => s === 'unhealthy');
 }
 
+/**
+ * Failure taxonomy used to decide whether an incident is *update-related* (i.e. plausibly caused by
+ * the current deployment and therefore fixable by rolling back to the previous revision):
+ *   - `server-error` (5xx)         — the deployed app itself is erroring ⇒ update-related.
+ *   - `unreachable`  (no response) — connection refused / reset / timeout / DNS ⇒ a broken deploy that
+ *                                    never came up ⇒ update-related.
+ *   - `not-found`    (404)         — a route the deploy removed/renamed ⇒ update-related.
+ *   - `client-error` (other 4xx)   — 400/401/403/429 etc.: auth / rate-limit / bad request. Rolling
+ *                                    back the deployment does NOT fix these ⇒ NOT update-related.
+ *   - `unknown`      (other)       — unexpected 2xx/3xx or anything else; not attributed to the update.
+ */
+export type FailureClass = 'server-error' | 'unreachable' | 'not-found' | 'client-error' | 'unknown';
+
+/** Failure classes treated as update-related (rollback-eligible) by default. */
+export const DEFAULT_ROLLBACK_ON: FailureClass[] = ['server-error', 'unreachable', 'not-found'];
+
+/**
+ * Classify *why* a probe failed, so rollback can be limited to update-related errors. A probe that is
+ * `ok` and matched the expected status is not a failure ⇒ `unknown` (no rollback).
+ */
+export function classifyFailure(result: ProbeResult, expectStatus: number): FailureClass {
+  const expect = expectStatus || 200;
+  // No HTTP response at all (curl error, connection refused, timeout, DNS) → the service is unreachable.
+  if (result.httpStatus == null) return 'unreachable';
+  const s = result.httpStatus;
+  if (s >= 500 && s <= 599) return 'server-error';
+  if (s === 404) return 'not-found';
+  if (s >= 400 && s <= 499) return 'client-error';
+  // Any other status that isn't the expected one is unexpected but not obviously update-related.
+  if (s !== expect) return 'unknown';
+  return 'unknown';
+}
+
+export interface RollbackPolicy {
+  /** failure classes considered update-related ⇒ rollback-eligible. Defaults to DEFAULT_ROLLBACK_ON. */
+  rollbackOn?: FailureClass[];
+  /**
+   * ms after the current revision was deployed within which a failure is attributed to that deploy.
+   * 0 / undefined disables the correlation gate (error-class gate alone decides).
+   */
+  deployCorrelationWindowMs?: number;
+}
+
+export interface RollbackDecisionInput {
+  failureClass: FailureClass;
+  policy: RollbackPolicy;
+  /** ISO time the current (serving) revision was deployed, or null/undefined if unknown. */
+  currentRevisionDeployedAt?: string | null;
+  /** ISO time the incident was detected. */
+  detectedAt: string;
+}
+
+export interface RollbackDecision {
+  /** whether an automatic rollback should be executed for this incident. */
+  rollback: boolean;
+  /** whether the incident is attributed to the current update/deployment. */
+  updateRelated: boolean;
+  failureClass: FailureClass;
+  /** human-readable justification, recorded in the postmortem. */
+  reason: string;
+}
+
+/**
+ * Decide whether to roll back, limiting rollback to *update-related* errors (SOT-1520 REOPEN#4).
+ *
+ * Two gates:
+ *   1. **Error-class gate** — only failure classes in `rollbackOn` (default: server-error / unreachable
+ *      / not-found) are update-related. Client errors (4xx auth/rate/bad-request) and unknown states
+ *      are NOT fixed by reverting the deploy, so they never trigger a rollback (alert only).
+ *   2. **Deploy-correlation gate** (optional) — when `deployCorrelationWindowMs > 0` and the current
+ *      revision's deploy time is known, the failure must have begun within that window after the deploy
+ *      to count as update-related. A revision that served healthily for far longer and only now fails is
+ *      unlikely to be broken *by the update*. When the deploy time is unknown, this gate is skipped and
+ *      the error-class gate alone decides.
+ */
+export function decideRollback(input: RollbackDecisionInput): RollbackDecision {
+  const { failureClass, policy, currentRevisionDeployedAt, detectedAt } = input;
+  const allowed = policy.rollbackOn && policy.rollbackOn.length > 0 ? policy.rollbackOn : DEFAULT_ROLLBACK_ON;
+
+  if (!allowed.includes(failureClass)) {
+    return {
+      rollback: false,
+      updateRelated: false,
+      failureClass,
+      reason: `failure class '${failureClass}' is not update-related (not in rollbackOn=[${allowed.join(
+        ', '
+      )}]) — a rollback would not fix it; alert only`,
+    };
+  }
+
+  const windowMs = Math.max(0, Math.floor(policy.deployCorrelationWindowMs || 0));
+  if (windowMs > 0 && currentRevisionDeployedAt) {
+    const deployed = Date.parse(currentRevisionDeployedAt);
+    const detected = Date.parse(detectedAt);
+    if (Number.isFinite(deployed) && Number.isFinite(detected)) {
+      const ageMs = detected - deployed;
+      if (ageMs > windowMs) {
+        return {
+          rollback: false,
+          updateRelated: false,
+          failureClass,
+          reason: `failure began ${ageMs}ms after the current revision was deployed, beyond the correlation window ${windowMs}ms — the running revision had been healthy well past its deploy, so this is likely NOT caused by the update; alert only`,
+        };
+      }
+      return {
+        rollback: true,
+        updateRelated: true,
+        failureClass,
+        reason: `update-related '${failureClass}' failure within ${ageMs}ms of deploy (window ${windowMs}ms) — rollback to the previous revision`,
+      };
+    }
+  }
+
+  return {
+    rollback: true,
+    updateRelated: true,
+    failureClass,
+    reason: `update-related failure class '${failureClass}' — rollback eligible${
+      windowMs > 0 ? ' (deploy time unknown; correlation gate skipped)' : ''
+    }`,
+  };
+}
+
 export interface RemediationOutcome {
   attempted: boolean;
   /** whether auto-remediation was authorized (INCIDENT_AUTO_REMEDIATE); false ⇒ dry-run only. */
   enabled: boolean;
   command: string | null;
   exitCode: number | null;
+  /** the rollback decision (why remediation ran or was skipped). Absent on older records. */
+  decision?: RollbackDecision;
 }
 
 export interface RecoveryOutcome {
@@ -127,13 +252,23 @@ export function renderPostmortem(rec: IncidentRecord): string {
   const recov = rec.recovery;
   const recovered = recov?.state === 'healthy';
 
-  const remediationLine = !rem?.command
-    ? '_(no rollback command configured — none attempted)_'
-    : !rem.enabled
-      ? `dry-run only (auto-remediation disabled) — would run: \`${rem.command}\``
-      : rem.attempted
-        ? `executed \`${rem.command}\` → exit \`${rem.exitCode ?? 'n/a'}\``
-        : `configured (\`${rem.command}\`) but not attempted`;
+  const decision = rem?.decision;
+  const decisionLine = decision
+    ? `- **Rollback decision:** ${decision.rollback ? '✅ rollback' : '⛔ no rollback'} — ${
+        decision.updateRelated ? 'update-related' : 'NOT update-related'
+      } (failure class \`${decision.failureClass}\`): ${decision.reason}`
+    : null;
+
+  const remediationLine =
+    decision && !decision.rollback
+      ? `skipped — error not update-related, so no rollback (\`${rem?.command ?? 'n/a'}\`)`
+      : !rem?.command
+        ? '_(no rollback command configured — none attempted)_'
+        : !rem.enabled
+          ? `dry-run only (auto-remediation disabled) — would run: \`${rem.command}\``
+          : rem.attempted
+            ? `executed \`${rem.command}\` → exit \`${rem.exitCode ?? 'n/a'}\``
+            : `configured (\`${rem.command}\`) but not attempted`;
 
   const recoveryLine = !recov?.attempted
     ? '_(remediation not attempted — recovery not re-probed)_'
@@ -164,6 +299,7 @@ export function renderPostmortem(rec: IncidentRecord): string {
     '',
     '## ③ 処置 (Remediation / rollback / degradation)',
     '',
+    ...(decisionLine ? [decisionLine] : []),
     `- ${remediationLine}`,
     '',
     '## ④ 回復確認 (Recovery verification)',

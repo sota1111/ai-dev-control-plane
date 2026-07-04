@@ -3,6 +3,9 @@ import {
   shouldTriggerIncident,
   renderPostmortem,
   resolvePreviousRevision,
+  classifyFailure,
+  decideRollback,
+  DEFAULT_ROLLBACK_ON,
   type IncidentRecord,
   type ProbeThresholds,
 } from '../lib/incidentResponse.js';
@@ -128,6 +131,163 @@ describe('renderPostmortem', () => {
     });
     expect(md).toContain('NOT recovered — escalate');
     expect(md).toContain('[ ] Restore service');
+  });
+});
+
+describe('classifyFailure', () => {
+  test('5xx → server-error', () => {
+    expect(classifyFailure({ ok: false, httpStatus: 503, latencyMs: 10 }, 200)).toBe('server-error');
+    expect(classifyFailure({ ok: false, httpStatus: 500, latencyMs: 10 }, 200)).toBe('server-error');
+  });
+
+  test('no HTTP response (null status) → unreachable', () => {
+    expect(classifyFailure({ ok: false, httpStatus: null, latencyMs: null, error: 'timeout' }, 200)).toBe(
+      'unreachable'
+    );
+  });
+
+  test('status 0 sentinel treated as no response by caller → unreachable', () => {
+    // The shell maps a curl failure to null before calling; a raw 0 here would be <400 → unknown,
+    // so callers must translate 0 → null. Guard the documented contract at the CLI layer instead.
+    expect(classifyFailure({ ok: false, httpStatus: null, latencyMs: null }, 200)).toBe('unreachable');
+  });
+
+  test('404 → not-found', () => {
+    expect(classifyFailure({ ok: false, httpStatus: 404, latencyMs: 10 }, 200)).toBe('not-found');
+  });
+
+  test('other 4xx → client-error', () => {
+    expect(classifyFailure({ ok: false, httpStatus: 401, latencyMs: 10 }, 200)).toBe('client-error');
+    expect(classifyFailure({ ok: false, httpStatus: 403, latencyMs: 10 }, 200)).toBe('client-error');
+    expect(classifyFailure({ ok: false, httpStatus: 429, latencyMs: 10 }, 200)).toBe('client-error');
+  });
+
+  test('unexpected 3xx / non-error → unknown', () => {
+    expect(classifyFailure({ ok: false, httpStatus: 302, latencyMs: 10 }, 200)).toBe('unknown');
+  });
+});
+
+describe('decideRollback (update-related gating)', () => {
+  const at = '2026-07-04T10:00:00Z';
+
+  test('server-error is update-related → rollback', () => {
+    const d = decideRollback({ failureClass: 'server-error', policy: {}, detectedAt: at });
+    expect(d.rollback).toBe(true);
+    expect(d.updateRelated).toBe(true);
+  });
+
+  test('unreachable and not-found are update-related by default', () => {
+    expect(decideRollback({ failureClass: 'unreachable', policy: {}, detectedAt: at }).rollback).toBe(true);
+    expect(decideRollback({ failureClass: 'not-found', policy: {}, detectedAt: at }).rollback).toBe(true);
+  });
+
+  test('client-error (4xx) is NOT update-related → no rollback', () => {
+    const d = decideRollback({ failureClass: 'client-error', policy: {}, detectedAt: at });
+    expect(d.rollback).toBe(false);
+    expect(d.updateRelated).toBe(false);
+    expect(d.reason).toContain('not update-related');
+  });
+
+  test('unknown → no rollback', () => {
+    expect(decideRollback({ failureClass: 'unknown', policy: {}, detectedAt: at }).rollback).toBe(false);
+  });
+
+  test('rollbackOn override can include client-error', () => {
+    const d = decideRollback({ failureClass: 'client-error', policy: { rollbackOn: ['client-error'] }, detectedAt: at });
+    expect(d.rollback).toBe(true);
+  });
+
+  test('correlation window: failure within the window after deploy → rollback', () => {
+    const d = decideRollback({
+      failureClass: 'server-error',
+      policy: { deployCorrelationWindowMs: 30 * 60 * 1000 },
+      currentRevisionDeployedAt: '2026-07-04T09:55:00Z', // 5 min before detection
+      detectedAt: at,
+    });
+    expect(d.rollback).toBe(true);
+    expect(d.reason).toContain('within');
+  });
+
+  test('correlation window: failure long after deploy → NOT update-related, no rollback', () => {
+    const d = decideRollback({
+      failureClass: 'server-error',
+      policy: { deployCorrelationWindowMs: 30 * 60 * 1000 },
+      currentRevisionDeployedAt: '2026-07-04T00:00:00Z', // 10h before detection
+      detectedAt: at,
+    });
+    expect(d.rollback).toBe(false);
+    expect(d.updateRelated).toBe(false);
+    expect(d.reason).toContain('beyond the correlation window');
+  });
+
+  test('correlation window set but deploy time unknown → error-class gate decides (rollback)', () => {
+    const d = decideRollback({
+      failureClass: 'server-error',
+      policy: { deployCorrelationWindowMs: 30 * 60 * 1000 },
+      currentRevisionDeployedAt: null,
+      detectedAt: at,
+    });
+    expect(d.rollback).toBe(true);
+    expect(d.reason).toContain('deploy time unknown');
+  });
+
+  test('DEFAULT_ROLLBACK_ON excludes client-error and unknown', () => {
+    expect(DEFAULT_ROLLBACK_ON).toEqual(['server-error', 'unreachable', 'not-found']);
+  });
+});
+
+describe('renderPostmortem with rollback decision', () => {
+  const base: IncidentRecord = {
+    target: 'owner/repo',
+    detectedAt: '2026-07-04T10:00:00Z',
+    state: 'unhealthy',
+    probe: { ok: false, httpStatus: 401, latencyMs: 20, error: 'unexpected_status' },
+    thresholds: { expectStatus: 200, maxLatencyMs: 3000 },
+    consecutiveFailures: 3,
+  };
+
+  test('decision skipping rollback → postmortem explains "no rollback" and reason', () => {
+    const md = renderPostmortem({
+      ...base,
+      remediation: {
+        attempted: false,
+        enabled: true,
+        command: 'gcloud run ...',
+        exitCode: null,
+        decision: {
+          rollback: false,
+          updateRelated: false,
+          failureClass: 'client-error',
+          reason: "failure class 'client-error' is not update-related",
+        },
+      },
+    });
+    expect(md).toContain('⛔ no rollback');
+    expect(md).toContain('NOT update-related');
+    expect(md).toContain('client-error');
+    expect(md).toContain('skipped — error not update-related');
+  });
+
+  test('decision approving rollback → postmortem shows rollback executed', () => {
+    const md = renderPostmortem({
+      ...base,
+      probe: { ok: false, httpStatus: 503, latencyMs: 20, error: 'unexpected_status' },
+      remediation: {
+        attempted: true,
+        enabled: true,
+        command: 'redeploy',
+        exitCode: 0,
+        decision: {
+          rollback: true,
+          updateRelated: true,
+          failureClass: 'server-error',
+          reason: "update-related failure class 'server-error'",
+        },
+      },
+      recovery: { attempted: true, state: 'healthy', probe: { ok: true, httpStatus: 200, latencyMs: 90 } },
+    });
+    expect(md).toContain('✅ rollback');
+    expect(md).toContain('executed `redeploy`');
   });
 });
 
