@@ -1,10 +1,10 @@
 {
-  "__doc__": "SOT-1459 per-role worker assignment. Editable file (NOT .env) mapping each harness role to the worker that handles it. Valid roles: task-check | decomposition | implementation | verification | acceptance | github | linear-report. Valid workers: claude | codex | antigravity. Edit a value to reroute that role to a different worker; the run scripts (scripts/ai/run_codex.sh, scripts/ai/run_antigravity.sh) honor it when invoked with WORKER_ROLE=<role>. If a role's worker is not this script's worker (e.g. verification set to claude/antigravity), the script exits with non-response code 75 and Claude Code takes over per the Worker Non-Response Fallback Policy. github (branch/PR/merge) and linear-report (Linear state sync + progress reporting) are Claude-owned by default; reassigning them to codex/antigravity routes that role's worker-script invocation accordingly. Precedence: the global env kill-switches ALL_CLAUDE_MODE and WORKER_MODE still override this file; this per-role config is evaluated after them and before the individual disable flags / usage-limit cooldown. Keys starting with __ are ignored.",
-  "task-check": "codex",
-  "decomposition": "claude",
-  "implementation": "antigravity",
-  "verification": "codex",
-  "acceptance": "claude",
-  "github": "claude",
-  "linear-report": "claude"
+  "__doc__": "SOT-1459 per-role worker assignment. Editable file (NOT .env). Each harness role maps to an ORDERED PRIORITY CHAIN of workers: index 0 = primary (tried first), the rest = fallback order tried on non-response / usage-limit. Valid roles: task-check | decomposition | implementation | verification | acceptance | github | linear-report. Valid workers: claude | codex | antigravity. A bare string is accepted as a single-element chain (backward compatible). The dispatcher scripts/ai/run_worker.sh <role> reads this chain and invokes each worker's run script (run_codex.sh / run_claude.sh / run_antigravity.sh) in order: if a worker is non-responsive (exit 75) or hits its usage limit, the dispatcher hands off to the NEXT worker in the chain, passing the partial report so work continues. Consecutive invocations of the SAME worker reuse that CLI's session so the conversation/prompt cache stays warm. The former global env kill-switches (ALL_CLAUDE_MODE, WORKER_MODE) have been removed; this file is the single top-level worker selector. The per-worker availability flags (CODEX_DISABLED / ANTIGRAVITY_DISABLED / CLAUDE_DISABLED) and usage-limit cooldown are evaluated per worker, after chain selection. Keys starting with __ are ignored.",
+  "task-check": ["codex", "claude", "antigravity"],
+  "decomposition": ["claude", "codex", "antigravity"],
+  "implementation": ["antigravity", "codex", "claude"],
+  "verification": ["codex", "claude", "antigravity"],
+  "acceptance": ["claude", "codex", "antigravity"],
+  "github": ["claude", "codex", "antigravity"],
+  "linear-report": ["claude", "codex", "antigravity"]
 }

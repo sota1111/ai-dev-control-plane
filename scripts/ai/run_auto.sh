@@ -67,6 +67,11 @@ fi
 mkdir -p "$LOG_DIR"
 mkdir -p docs/ai/linear
 
+# SOT-1459: scope same-worker session cache reuse to a single run. Clearing the per-run worker
+# session markers at start means dispatched claude/codex/antigravity workers begin a fresh session
+# for this issue (warm cache within the run, no leakage of one issue's context into the next).
+rm -f "$LOG_DIR"/claude_worker_session*.id "$LOG_DIR"/*_worker_session*.marker 2>/dev/null || true
+
 if [[ "$DRY_RUN" == true ]]; then
   echo "== Dry run: prompt contents ($PROMPT_FILE) =="
   cat "$PROMPT_FILE"
@@ -148,6 +153,138 @@ else
 fi
 # ─────────────────────────────────────────────────────────────────────────────
 
+COMPLETION_UNVERIFIED=70
+
+# ── 完全スクリプト駆動ロールパイプライン（案B / SOT-1459） ─────────────────────────
+# run_auto.sh 自身が task-check → decomposition → implementation → verification → acceptance →
+# github → linear-report を順に `scripts/ai/run_worker.sh <role>` で実行する。各ロールの worker 選択・
+# 優先度チェーン・フォールバック・usage-limit 引き継ぎ・同一AIキャッシュ再利用はディスパッチャが担う。
+# Claude を「全工程を統括する単一オーケストレータ」としては起動せず、各ロールを個別の委譲 worker として
+# 回す。これにより「AI が AI を呼ぶ」構造を排し、工程順序はスクリプトが確定的に駆動する。
+#
+# 適用条件: 対象 issue が確定していること（WEBHOOK_ISSUE_ID / --resume）。runner.ts は常に
+# WEBHOOK_ISSUE_ID を注入するため、autonomous 経路は必ずこのパイプラインを通る。issue 未指定の手動起動
+# （キュー走査）や `PIPELINE_MODE=0` のときは、後方互換のためレガシーの単一オーケストレータ起動へ退避する。
+plog() { echo "[pipeline] $*" | tee -a "$LOG_FILE"; }
+
+run_role_pipeline() {
+  local issue="$1"
+  local target_repo="${WEBHOOK_TARGET_REPO:-${TARGET_REPO:-}}"
+  [ -n "$target_repo" ] && export TARGET_REPO="$target_repo"
+
+  # 各ロールプロンプト（prompts/roles/<role>.md）が読む共有コンテキストを書き出す。
+  mkdir -p docs/ai/pipeline
+  {
+    echo "# Pipeline Context (run $TIMESTAMP)"
+    echo ""
+    echo "- Target Linear issue: $issue"
+    echo "- Target repository: ${target_repo:-<none: operate in this control-plane repo>}"
+    echo "- Project: ${WEBHOOK_PROJECT_NAME:-unknown}"
+    echo "- Mode: $([ "${RESUME_MODE:-false}" = true ] && echo 'resume (continue previous usage-limited run)' || echo normal)"
+    echo "- Resume metadata (if resume): docs/ai/auto_logs/resume/$issue.json"
+    echo ""
+    echo "Process ONLY this issue. Do not select or process other Linear issues."
+  } > docs/ai/pipeline/context.md
+
+  local roles=(task-check decomposition implementation verification acceptance github linear-report)
+  local n=${#roles[@]}
+  local impl_index=2 verify_index=3
+  local i=0 debug_cycles=0
+  local MAX_DEBUG_CYCLES="${PIPELINE_MAX_DEBUG_CYCLES:-2}"
+
+  while [ "$i" -lt "$n" ]; do
+    local role="${roles[$i]}"
+    plog "── role[$i]: $role (issue $issue) ──"
+
+    if [ ! -s "prompts/roles/$role.md" ]; then
+      plog "PIPELINE_STOP: missing canonical prompt prompts/roles/$role.md"
+      return "$COMPLETION_UNVERIFIED"
+    fi
+
+    # Run the dispatcher; stream to the log AND capture output to parse the winning report path.
+    local cap; cap="$(mktemp)"
+    set +e
+    bash scripts/ai/run_worker.sh "$role" 2>&1 | tee -a "$LOG_FILE" "$cap" >/dev/null
+    local rc=${PIPESTATUS[0]}
+    set -e
+
+    local report; report="$(grep -oE 'WORKER_DISPATCH_DONE role=[^ ]+ worker=[^ ]+ report=[^ ]+' "$cap" 2>/dev/null | sed 's/.*report=//' | tail -1 || true)"
+    rm -f "$cap"
+
+    if [ "$rc" -ne 0 ] || [ -z "$report" ] || [ ! -f "$report" ]; then
+      plog "PIPELINE_STOP: role=$role dispatcher rc=$rc (chain exhausted / no report) → needs attention"
+      return "$COMPLETION_UNVERIFIED"
+    fi
+
+    local na; na="$(grep -A1 '## Next Action' "$report" 2>/dev/null | tail -n1 | tr -d ' \r\t' || true)"
+    plog "role=$role next_action='${na:-<none>}' report=$report"
+
+    case "$role" in
+      task-check)
+        case "$na" in
+          *READY_FOR_REVIEW*) ;;  # actionable → proceed
+          *) plog "PIPELINE_DONE: task-check reports not-actionable ('$na') → success no-op"; return 0 ;;
+        esac
+        ;;
+      verification|acceptance)
+        case "$na" in
+          *READY_FOR_REVIEW*) ;;  # passed → proceed
+          *NEEDS_DEBUG*)
+            if [ "$debug_cycles" -lt "$MAX_DEBUG_CYCLES" ]; then
+              debug_cycles=$((debug_cycles + 1))
+              plog "PIPELINE_LOOP: $role NEEDS_DEBUG → re-run implementation (cycle $debug_cycles/$MAX_DEBUG_CYCLES)"
+              i="$impl_index"; continue
+            fi
+            plog "PIPELINE_STOP: $role still NEEDS_DEBUG after $MAX_DEBUG_CYCLES cycles → needs attention"
+            return "$COMPLETION_UNVERIFIED"
+            ;;
+          *) plog "PIPELINE_STOP: $role '$na' → stop (needs human)"; return "$COMPLETION_UNVERIFIED" ;;
+        esac
+        ;;
+      *)
+        case "$na" in
+          *READY_FOR_REVIEW*) ;;  # proceed
+          *NEEDS_DEBUG*)
+            if [ "$debug_cycles" -lt "$MAX_DEBUG_CYCLES" ]; then
+              debug_cycles=$((debug_cycles + 1))
+              plog "PIPELINE_LOOP: $role NEEDS_DEBUG → re-run verification (cycle $debug_cycles/$MAX_DEBUG_CYCLES)"
+              i="$verify_index"; continue
+            fi
+            return "$COMPLETION_UNVERIFIED"
+            ;;
+          *) plog "PIPELINE_STOP: $role '$na' → stop (needs human)"; return "$COMPLETION_UNVERIFIED" ;;
+        esac
+        ;;
+    esac
+
+    i=$((i + 1))
+  done
+
+  plog "PIPELINE_DONE: all roles completed for $issue"
+  return 0
+}
+
+TARGET_ISSUE="${RESUME_ISSUE:-${WEBHOOK_ISSUE_ID:-}}"
+PIPELINE_ENABLED=1
+case "$(printf '%s' "${PIPELINE_MODE:-1}" | tr '[:upper:]' '[:lower:]')" in
+  0|false|no|off) PIPELINE_ENABLED=0 ;;
+esac
+
+if [ "$PIPELINE_ENABLED" -eq 1 ] && [ -n "$TARGET_ISSUE" ]; then
+  echo "== Auto Runner: script-driven role pipeline (issue $TARGET_ISSUE) =="
+  echo "Start: ${TIMESTAMP}"
+  echo "Log: ${LOG_FILE}"
+  echo ""
+  set +e
+  run_role_pipeline "$TARGET_ISSUE"
+  EXIT_CODE=$?
+  set -e
+  echo ""
+  echo "== Finished pipeline: $(date +"%Y%m%d_%H%M%S") (exit: ${EXIT_CODE}) =="
+  exit "$EXIT_CODE"
+fi
+
+# ── レガシー経路（issue 未指定 or PIPELINE_MODE=0）: 単一 Claude オーケストレータ起動 ──────────────
 RUNTIME_PROMPT="$(cat "$PROMPT_FILE")"
 
 if [[ "$RESUME_MODE" == true ]]; then
@@ -188,9 +325,23 @@ This run was triggered by Linear webhook for Issue: ${WEBHOOK_ISSUE_ID}
 
 Mandatory behavior:
 - Process only ${WEBHOOK_ISSUE_ID}. Do not search for or select other Linear issues.
-- Perform the initial task check exactly once. The task check must be delegated to Codex CLI before Claude Code starts decomposition.
-- For the Codex task check, write instructions to prompts/codex/debug.md, run scripts/ai/run_codex.sh, and read docs/ai/60_worker_codex_report.md. The check should verify the target issue status, latest comments, labels, acceptance criteria, and whether it is actionable.
-- After the Codex task check is complete, Claude Code owns decomposition, child issue registration, worker delegation, Linear status updates, PR flow, and final reporting.
+- Perform the initial task check exactly once, via the dispatcher (NOT by calling a worker directly).
+  Write the task-check instruction to prompts/roles/task-check.md, then run
+  \`scripts/ai/run_worker.sh task-check\`. The dispatcher tries the task-check priority chain from
+  config/worker_roles.json (default codex → claude → antigravity), hands off to the next worker on
+  non-response / usage-limit, and prints \`WORKER_DISPATCH_DONE role=task-check worker=<w> report=<path>\`.
+  Read that report path for the result (target issue status, latest comments, labels, acceptance
+  criteria, and whether it is actionable).
+- ROUTE ALL ROLE WORK THROUGH THE DISPATCHER. For every role (task-check, decomposition, implementation,
+  verification, acceptance, github, linear-report), write the instruction to prompts/roles/<role>.md and
+  run \`scripts/ai/run_worker.sh <role>\`. NEVER call scripts/ai/run_codex.sh, scripts/ai/run_antigravity.sh,
+  or a nested claude directly — the dispatcher owns worker selection, priority-chain fallback, same-AI
+  session/cache reuse, and usage-limit handoff. Read the report path printed as WORKER_DISPATCH_DONE.
+  If the dispatcher prints WORKER_DISPATCH_EXHAUSTED (exit 75, every worker in the chain non-responsive),
+  perform that role's work yourself per the Worker Non-Response Fallback Policy.
+- After the task check is complete, Claude Code owns sequencing the remaining roles (decomposition, child
+  issue registration, Linear status updates, PR flow, and final reporting) — each executed through the
+  dispatcher as above.
 - When ${WEBHOOK_ISSUE_ID} reaches a terminal outcome for this run, or there is no actionable work (e.g. already terminal, or on hold In Review), this is a SUCCESS: exit immediately with 0. Reserve a non-zero exit for actual errors only. Do not re-check the Linear queue and do not continue to another issue.
 
 ---
@@ -203,7 +354,7 @@ ${RUNTIME_PROMPT}"
     RUNTIME_PROMPT="## Target Repository (resolved from Linear project)
 
 Target repository for this issue: ${WEBHOOK_TARGET_REPO} (project: ${WEBHOOK_PROJECT_NAME:-unknown}).
-When delegating to Antigravity/Codex workers, set TARGET_REPO=${WEBHOOK_TARGET_REPO} before running scripts/ai/run_antigravity.sh or scripts/ai/run_codex.sh.
+When dispatching worker roles, set TARGET_REPO=${WEBHOOK_TARGET_REPO} before running scripts/ai/run_worker.sh <role> (the dispatcher forwards TARGET_REPO to whichever worker it selects).
 
 ---
 

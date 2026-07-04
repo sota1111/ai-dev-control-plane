@@ -83,34 +83,43 @@
         │                   │  scheduler.sh（定期監視）│
         │                   │  webhook-server.ts（即時）│
         │                   └───────────┬────────────┘
-        │                               │ runner-cli queue/drain
-        │                   ┌───────────▼────────────┐
-        └───────────────────│      Claude Code        │  管制塔（唯一の窓口）
-                            │  - 要件/設計/タスク分解   │
-                            │  - 品質ゲート/最終承認    │
-                            └──────┬──────────┬───────┘
-                       委譲(実装)  │          │  委譲(検証)
-                    ┌──────────────▼──┐   ┌───▼──────────────┐
-                    │   Antigravity CLI     │   │    Codex CLI      │
-                    │  実装ワーカー     │   │  デバッグ/検証     │
-                    └──────────────────┘   └──────────────────┘
-                                   │ PR / commit / merge
-                            ┌──────▼──────┐
-                            │   GitHub     │  成果物・変更履歴
-                            └─────────────┘
+        │                               │ runner.ts が issue を選び WEBHOOK_ISSUE_ID を注入
+        │                   ┌───────────▼─────────────────────────────┐
+        └───────────────────│  run_auto.sh — スクリプト駆動パイプライン │  工程順序はスクリプトが確定駆動
+                            │  task-check→decomposition→implementation │
+                            │  →verification→acceptance→github→report  │
+                            └───────────────┬─────────────────────────┘
+                                            │ 各ロールごとに
+                                 ┌──────────▼───────────┐
+                                 │  run_worker.sh <role> │  ディスパッチャ（唯一の入口）
+                                 │  config/worker_roles  │  優先度チェーンで worker 選択
+                                 │  .json のチェーンを読む │  非応答(75)→次候補へ引き継ぎ
+                                 └──┬────────┬────────┬──┘
+                          run_codex │  run_claude │ run_antigravity
+                        ┌───────────▼┐ ┌────────▼┐ ┌▼──────────────┐
+                        │  Codex CLI  │ │ Claude  │ │ Antigravity   │
+                        │  検証/確認  │ │ worker  │ │ CLI 実装      │
+                        └─────────────┘ └─────────┘ └───────────────┘
+                                            │ PR / commit / merge（github ロール）
+                                     ┌──────▼──────┐
+                                     │   GitHub     │  成果物・変更履歴
+                                     └─────────────┘
 ```
 
 主要コンポーネント:
 
 | コンポーネント       | 役割                                 | 実体                                      |
 | -------------------- | ------------------------------------ | ----------------------------------------- |
-| **Claude Code**      | オーケストレーター（唯一の人間窓口） | `prompts/claude/auto_run.md` に従って動作 |
-| **Antigravity CLI**       | 実装ワーカー                         | `scripts/ai/run_antigravity.sh`                |
+| **自律実行パイプライン** | 対象 issue の全工程を順次駆動（案B） | `scripts/ai/run_auto.sh`                  |
+| **ワーカーディスパッチャ** | 役割ごとに優先度チェーンで worker を選択・フォールバック | `scripts/ai/run_worker.sh`         |
+| **Antigravity CLI**  | 実装ワーカー                         | `scripts/ai/run_antigravity.sh`           |
 | **Codex CLI**        | デバッグ・検証ワーカー               | `scripts/ai/run_codex.sh`                 |
+| **Claude worker**    | 委譲された Claude ワーカー（チェーンが claude を選んだとき） | `scripts/ai/run_claude.sh`   |
+| **役割割当**         | 各役割 → 優先度チェーン（唯一の上位スイッチ） | `config/worker_roles.json`            |
+| **役割プロンプト**   | ロール別・worker 非依存の指示（committed 静的） | `prompts/roles/<role>.md`          |
 | **スケジューラー**   | Linear をポーリングして起動          | `scripts/ai/scheduler.sh`                 |
 | **Webhook サーバー** | Linear/Discord イベントで即時起動    | `src/webhook-server.ts`                   |
 | **Discord Bot**      | 遠隔での状態確認・制御               | `src/lib/discord*.ts`                     |
-| **自律実行ランナー** | Claude Code を起動する実行エントリ   | `scripts/ai/run_auto.sh`                  |
 | **Linear**           | 指示・進捗・状態の管理場所           | 外部 SaaS（MCP / API / Webhook 連携）     |
 | **GitHub**           | 成果物・履歴の保管庫                 | 外部 SaaS（`gh` CLI 連携）                |
 
@@ -122,9 +131,25 @@
 
 | 担当            | やること                                                                                 | やらないこと                                                         |
 | --------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| **Claude Code** | 要件整理・設計・タスク分解・ワーカー指示・レビュー・品質ゲート・GitHub 操作・Linear 同期 | 多ファイル実装・lint/test の反復・長時間ログ解析・フル README 再構築 |
-| **Antigravity CLI**  | 機能実装・UI/API/ビジネスロジック作成（各機能Issue内の実装担当）                         | スコープ外のリファクタ・設計変更                                     |
-| **Codex CLI**   | lint/typecheck/test 実行・原因特定・最小修正・E2E 検証（各機能Issue内の検証担当）        | スコープ拡大・無関係なリファクタ                                     |
+| **Claude worker** | 方針整理・分解判断・受け入れ確認・GitHub 操作・Linear 同期（役割の worker として委譲実行）| チェーンで claude 以外が選ばれた役割の実行                           |
+| **Antigravity CLI**  | 機能実装・UI/API/ビジネスロジック作成（implementation ロール）                        | スコープ外のリファクタ・設計変更                                     |
+| **Codex CLI**   | lint/typecheck/test 実行・原因特定・最小修正・E2E 検証（task-check / verification ロール）| スコープ拡大・無関係なリファクタ                                     |
+
+### ロールパイプライン & ディスパッチ（案B / 既定）
+
+対象 issue が確定した autonomous run では、**`run_auto.sh` 自身がスクリプトとして全工程を順次駆動**する
+（AI が単一オーケストレータとして全体を統括しない）。工程順:
+**task-check → decomposition → implementation → verification → acceptance → github → linear-report**。
+
+- 各ロールは **`scripts/ai/run_worker.sh <role>`**（唯一の入口）に委譲。ディスパッチャが
+  `config/worker_roles.json` の**優先度チェーン**で worker を選び、非応答（exit 75）/ usage-limit なら
+  部分レポートを渡して次候補へ引き継ぐ。役割の指示は committed な `prompts/roles/<role>.md`。
+- `run_auto.sh` は各ロール後に勝者レポートの `## Next Action` でゲート判定する:
+  task-check が非アクション→成功 no-op で停止 / verification・acceptance の `NEEDS_DEBUG`→implementation へ
+  ループ（上限 `PIPELINE_MAX_DEBUG_CYCLES`、既定 2）/ `BLOCKED`・チェーン全滅→停止（exit 70、要人間）。
+- `PIPELINE_MODE=0` または issue 未指定（手動キュー走査）は、レガシーの単一 Claude オーケストレータ起動へ退避。
+
+詳細は [`CLAUDE.md`](./CLAUDE.md) の「Worker Dispatch」節、および [`docs/runner-queue.md`](./docs/runner-queue.md) を参照。
 
 ### ワーカー非応答時のフォールバック
 
@@ -146,16 +171,29 @@
 
 ## ワーカー制御フラグ
 
-ワーカー CLI の起動は環境変数で制御できる。いずれも真値は `1` / `true` / `yes` / `on`（大文字小文字を区別しない）。未設定時は従来どおりワーカーを起動する。実体は `scripts/ai/run_antigravity.sh` / `scripts/ai/run_codex.sh`。
+どのワーカーが各役割を担当するかは、**`config/worker_roles.json` が唯一の上位スイッチ**である。各役割は
+**順序付きの優先度チェーン**（例: `"task-check": ["codex","claude","antigravity"]`。先頭=第一候補、以降=
+フォールバック順）にワーカーを割り当てる。ディスパッチャ `scripts/ai/run_worker.sh <role>` がこのチェーンを
+読み、先頭から順にワーカーの run スクリプト（`run_codex.sh` / `run_claude.sh` / `run_antigravity.sh`）を起動し、
+**非応答（exit 75）や usage-limit なら次の候補へ引き継ぐ**（部分レポートを渡して継続）。**AI が AI を直接呼ばず、
+必ずこのスクリプトを噛ませる**のが原則。同一ワーカーが連続する場合はその CLI の会話セッションを再利用して
+プロンプトキャッシュを温存する（claude=`--session-id`/`--resume`、codex=`exec resume --last`、
+antigravity=`--continue`。`WORKER_SESSION_REUSE=0` で無効化、セッションは 1 run 単位で `run_auto.sh` 開始時に
+リセット）。全作業を Claude だけで回すには
+全役割を `["claude"]` に。かつてのグローバル env kill-switch `ALL_CLAUDE_MODE` / `WORKER_MODE` は廃止された。
+
+以下の env フラグは、チェーン選択の**後**に各ワーカーの run スクリプト内で評価される「ワーカー一時停止
+（worker is down）」用のエスケープハッチであり、役割割当を上書きしない。真値は `1` / `true` / `yes` / `on`（大小無視）。
 
 | 変数               | 効果                                                                                                   | 用途                                                       |
 | ------------------ | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------- |
-| `WORKER_MODE`      | どのワーカー LLM を起動するかを設定から選ぶ単一スイッチ。値（大小無視, 既定 `all`）: `all`=両方起動 / `claude-only`=両方停止（Claude が全担当, `ALL_CLAUDE_MODE` 相当）/ `codex-only`=Codexのみ（Antigravity を呼ばない）/ `antigravity-only`=Antigravityのみ（Codex を呼ばない）。無効側は対象 CLI を一切起動しない。`ALL_CLAUDE_MODE` の直後・個別フラグ/cooldown より先に評価。 | Codexのみ / Claudeのみ / Antigravityのみモードを切り替えたいとき |
-| `ALL_CLAUDE_MODE`  | Antigravity / Codex 両ワーカーを一括無効化し、実装も検証も Claude Code が代行する。`ANTIGRAVITY_DISABLED` の上位互換で、cooldown チェックより先に評価される。 | 全作業を Claude Code だけで回したいとき                    |
-| `ANTIGRAVITY_DISABLED`  | Antigravity CLI のみを一時停止する（非応答コード `75` で即終了し、Claude フォールバックへ委譲）。            | Google のプラン変更等で Antigravity CLI が使えない期間          |
-| `CODEX_DISABLED`   | Codex CLI のみを一時停止する（`ANTIGRAVITY_DISABLED` と対称。非応答コード `75` で即終了し、Claude フォールバックへ委譲）。 | Codex CLI が使えない期間                                   |
+| `ANTIGRAVITY_DISABLED`  | Antigravity worker を一時停止（`run_antigravity.sh` が `75` で終了 → 次候補へ引き継ぎ）。                | Google のプラン変更等で Antigravity CLI が使えない期間          |
+| `CODEX_DISABLED`   | Codex worker を一時停止（`run_codex.sh` が `75` で終了 → 次候補へ引き継ぎ）。                              | Codex CLI が使えない期間                                   |
+| `CLAUDE_DISABLED`  | 委譲された Claude worker を一時停止（`run_claude.sh` が `75` で終了 → 次候補へ引き継ぎ）。                  | Claude worker を一時的に外したい期間                        |
 
-いずれのフラグも、ワーカーを非応答コード `75` で終了させることで、[役割分担](#役割分担)の「ワーカー非応答時のフォールバック」に基づき Claude Code が作業を代行する。
+いずれのフラグも、ワーカーを非応答コード `75` で終了させることでディスパッチャがチェーン内の次候補へ引き継ぐ。
+チェーン全体が非応答（`WORKER_DISPATCH_EXHAUSTED`）のときのみ、[役割分担](#役割分担)の「ワーカー非応答時の
+フォールバック」に基づき Claude Code が作業を代行する。
 
 ### 実行レーン / 並列制御フラグ
 

@@ -46,6 +46,9 @@ PROMPT_FILE="$(lane_path "$CONTROL_PLANE_DIR/prompts/antigravity/implement.md")"
 REPORT_FILE="$(lane_path "$CONTROL_PLANE_DIR/docs/ai/50_worker_antigravity_report.md")"
 # Cooldown is account-global (worker usage limit is shared across lanes): NOT lane-suffixed.
 ANTIGRAVITY_COOLDOWN_FILE="$CONTROL_PLANE_DIR/docs/ai/auto_logs/antigravity.cooldown.json"
+# Same-AI session reuse marker (SOT-1459): present once this run has created an Antigravity
+# conversation, so a later same-run invocation continues it (warm cache). run_auto.sh clears it per run.
+ANTIGRAVITY_SESSION_MARKER="$(lane_path "$CONTROL_PLANE_DIR/docs/ai/auto_logs/antigravity_worker_session.marker")"
 
 if [ ! -f "$PROMPT_FILE" ]; then
   echo "Prompt file not found: $PROMPT_FILE" >&2
@@ -74,42 +77,15 @@ else
 fi
 WORKER_NONRESPONSE_EXIT=75
 
-# --- All-Claude mode master flag (SOT-993) ---
-# Claude が全作業を担当する運用モード。`ALL_CLAUDE_MODE` を真値にすると Antigravity/Codex 両ワーカーを
-# 一括無効化し、実装も検証も Claude Code が CLAUDE.md「Worker Non-Response Fallback Policy」で代行する。
-# このマスターフラグは ANTIGRAVITY_DISABLED や cooldown より先に評価される短絡。真値は 1/true/yes/on（大小無視）。
-case "$(printf '%s' "${ALL_CLAUDE_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
-  1|true|yes|on)
-    echo "ALL_CLAUDE_MODE: all worker delegation disabled by env flag, delegating to Claude" >&2
-    exit "$WORKER_NONRESPONSE_EXIT"
-    ;;
-esac
-
-# --- Worker-mode config selector (SOT-1333 / SOT-1334) ---
-# `WORKER_MODE` を設定から選ぶと、Codexのみ/Claudeのみ/Antigravityのみの運用モードを切り替えられる。
-# 値（大小無視, 未設定/その他は all 扱い）:
-#   all              : Antigravity・Codex 両方を起動（既定）
-#   claude-only      : 両ワーカーを起動しない（Claude が全担当, ALL_CLAUDE_MODE と等価）
-#   codex-only       : Codexのみ起動（Antigravity は呼び出さない）
-#   antigravity-only : Antigravityのみ起動（Codex は呼び出さない）
-# このスクリプト（Antigravity側）は claude-only / codex-only のとき非応答コード75で即終了し、Antigravity CLI を
-# 一切起動しない。評価は ALL_CLAUDE_MODE の直後・ANTIGRAVITY_DISABLED / cooldown より先。
-case "$(printf '%s' "${WORKER_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
-  claude-only|codex-only)
-    echo "WORKER_MODE=${WORKER_MODE}: Antigravity disabled by worker-mode config, delegating to Claude" >&2
-    exit "$WORKER_NONRESPONSE_EXIT"
-    ;;
-esac
-
-# --- Per-role worker assignment (SOT-1459) ---
-# 役割ごとにワーカーを割り当てる編集可能ファイル `config/worker_roles.json`（.env ではない）を参照する。
-# 呼び出し側が `WORKER_ROLE=<implementation|...>` を渡したとき、その役割の割当ワーカーが antigravity
-# でなければ（= claude / codex に振られていれば）Antigravity を起動せず非応答コード 75 で委譲する。
-# WORKER_ROLE 未設定・不明ロール・設定ファイル不備のときは何もせず従来動作（後方互換・フェイルオープン）。
-# 評価は WORKER_MODE の後・ANTIGRAVITY_DISABLED / cooldown の前。グローバル env スイッチが常に優先される。
+# --- Per-role gate (DIRECT invocation only; SOT-1459) ---
+# Worker selection is owned by the dispatcher `scripts/ai/run_worker.sh`, which reads the role's
+# ordered chain from config/worker_roles.json and sets RUN_WORKER_DISPATCH=1 when it picks a worker.
+# Under dispatch we therefore skip this gate. For a DIRECT/legacy call with WORKER_ROLE set, exit 75
+# if `antigravity` is not in the role's chain (fail-open on unset/unknown/broken config). Evaluated
+# before ANTIGRAVITY_DISABLED (per-worker availability) / cooldown.
 WORKER_ROLES_FILE="${WORKER_ROLES_FILE:-$CONTROL_PLANE_DIR/config/worker_roles.json}"
-if [ -n "${WORKER_ROLE:-}" ]; then
-  ROLE_WORKER="$(node -e '
+if [ "${RUN_WORKER_DISPATCH:-}" != "1" ] && [ -n "${WORKER_ROLE:-}" ]; then
+  ROLE_CHAIN="$(node -e '
     const fs = require("fs");
     const [file, role] = process.argv.slice(1);
     const ROLES = ["task-check", "decomposition", "implementation", "verification", "acceptance", "github", "linear-report"];
@@ -117,12 +93,12 @@ if [ -n "${WORKER_ROLE:-}" ]; then
     if (!ROLES.includes(role)) { process.stdout.write(""); process.exit(0); }
     try {
       const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
-      const w = cfg[role];
-      process.stdout.write(WORKERS.includes(w) ? String(w) : "");
+      const raw = Array.isArray(cfg[role]) ? cfg[role] : [cfg[role]];
+      process.stdout.write(raw.filter(w => WORKERS.includes(w)).join(" "));
     } catch (e) { process.stdout.write(""); }
   ' "$WORKER_ROLES_FILE" "$WORKER_ROLE" 2>/dev/null || echo '')"
-  if [ -n "$ROLE_WORKER" ] && [ "$ROLE_WORKER" != "antigravity" ]; then
-    echo "WORKER_ROLE=$WORKER_ROLE assigned to '$ROLE_WORKER' (not antigravity) by config/worker_roles.json, delegating to Claude" >&2
+  if [ -n "$ROLE_CHAIN" ] && [[ " $ROLE_CHAIN " != *" antigravity "* ]]; then
+    echo "WORKER_ROLE=$WORKER_ROLE chain '[$ROLE_CHAIN]' does not include antigravity, delegating to Claude" >&2
     exit "$WORKER_NONRESPONSE_EXIT"
   fi
 fi
@@ -179,17 +155,71 @@ fi
 #   --dangerously-skip-permissions : auto-approve all tool permissions (= old gemini --yolo)
 #   --print-timeout DURATION       : print-mode wait timeout (default 5m). Aligned to WORKER_TIMEOUT so
 #                                    long implementations are not cut off at agy's internal 5m default.
-if [ -n "${TARGET_REPO:-}" ]; then
-  echo "Target repository: $TARGET_REPO"
-  set +e
-  timeout "${WORKER_TIMEOUT}s" agy -p "$(cat "$PROMPT_FILE")" --add-dir "$TARGET_REPO" --dangerously-skip-permissions --print-timeout "${WORKER_TIMEOUT}s" 2>&1 | tee "$REPORT_FILE"
-  EXIT_CODE="${PIPESTATUS[0]}"
-  set -e
+# --- Handoff context (SOT-1459) ---
+# On a mid-processing handoff, the dispatcher (run_worker.sh) points WORKER_HANDOFF_REPORT at the
+# previous worker's partial report so Antigravity continues its work instead of restarting.
+PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
+if [ -n "${WORKER_HANDOFF_REPORT:-}" ] && [ -s "${WORKER_HANDOFF_REPORT:-/nonexistent}" ]; then
+  PROMPT_CONTENT="## Handoff from previous worker (${WORKER_HANDOFF_FROM:-unknown})
+
+The previous worker could not finish (non-response / usage limit). Continue its work — do NOT restart
+from scratch. Its partial report follows; pick up where it left off and produce the final report.
+
+<<<PREVIOUS_WORKER_REPORT
+$(cat "$WORKER_HANDOFF_REPORT")
+PREVIOUS_WORKER_REPORT
+
+---
+
+$PROMPT_CONTENT"
+fi
+
+[ -n "${TARGET_REPO:-}" ] && echo "Target repository: $TARGET_REPO"
+
+# Base agy args (shared by fresh + resume). --add-dir only when a target repo is set.
+AGY_ARGS=(-p "$PROMPT_CONTENT" --dangerously-skip-permissions --print-timeout "${WORKER_TIMEOUT}s")
+[ -n "${TARGET_REPO:-}" ] && AGY_ARGS+=(--add-dir "$TARGET_REPO")
+
+# Same-AI session reuse (SOT-1459): if this run already created an Antigravity conversation, continue
+# the most recent one (`--continue`) so consecutive Antigravity roles share a warm cache. Disable with
+# WORKER_SESSION_REUSE=0. If resume fails to produce a valid report (and it is not a usage limit), fall
+# back once to a fresh conversation so a stale/broken conversation can never wedge the worker.
+run_agy_cli() {
+  if [ "$1" = "resume" ]; then
+    timeout "${WORKER_TIMEOUT}s" agy "${AGY_ARGS[@]}" --continue 2>&1 | tee "$REPORT_FILE"
+  else
+    timeout "${WORKER_TIMEOUT}s" agy "${AGY_ARGS[@]}" 2>&1 | tee "$REPORT_FILE"
+  fi
+  return "${PIPESTATUS[0]}"
+}
+
+_REUSE_ENABLED=1
+case "$(printf '%s' "${WORKER_SESSION_REUSE:-1}" | tr '[:upper:]' '[:lower:]')" in
+  0|false|no|off) _REUSE_ENABLED=0 ;;
+esac
+
+set +e
+if [ "$_REUSE_ENABLED" -eq 1 ] && [ -f "$ANTIGRAVITY_SESSION_MARKER" ]; then
+  echo "ANTIGRAVITY_SESSION_REUSE: continuing most recent Antigravity conversation (warm cache)" >&2
+  run_agy_cli resume
+  EXIT_CODE=$?
+  if [ "$EXIT_CODE" -ne 0 ] \
+    && ! grep -q "## Next Action" "$REPORT_FILE" 2>/dev/null \
+    && ! grep -Ei "usage limit|quota exceeded|resource exhausted|rate limit|RESOURCE_EXHAUSTED" "$REPORT_FILE" 2>/dev/null; then
+    echo "ANTIGRAVITY_RESUME_FALLBACK: --continue failed (exit $EXIT_CODE); retrying with a fresh conversation" >&2
+    run_agy_cli fresh
+    EXIT_CODE=$?
+  fi
 else
-  set +e
-  timeout "${WORKER_TIMEOUT}s" agy -p "$(cat "$PROMPT_FILE")" --dangerously-skip-permissions --print-timeout "${WORKER_TIMEOUT}s" 2>&1 | tee "$REPORT_FILE"
-  EXIT_CODE="${PIPESTATUS[0]}"
-  set -e
+  run_agy_cli fresh
+  EXIT_CODE=$?
+fi
+set -e
+
+# Record that this run now has an Antigravity conversation so the next same-run call can continue it.
+if [ "$EXIT_CODE" -eq 0 ]; then
+  mkdir -p "$(dirname "$ANTIGRAVITY_SESSION_MARKER")" 2>/dev/null || true
+  : > "$ANTIGRAVITY_SESSION_MARKER" 2>/dev/null || true
 fi
 
 # --- Antigravity usage-limit detection (set cooldown, delegate to Claude) ---
