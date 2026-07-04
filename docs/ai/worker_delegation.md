@@ -2,142 +2,94 @@
 
 ## Overview
 
-Claude Code is the sole orchestrator. Gemini CLI and Codex CLI are workers.
-Humans interact only with Claude Code — never directly with workers.
+There is **no single "sole orchestrator."** Every harness role is **configured individually** and
+executed via the dispatcher. `config/worker_roles.json` maps each role to an **ordered priority chain**
+of workers (`claude` | `codex` | `antigravity`), and the dispatcher `scripts/ai/run_worker.sh <role>`
+runs them. For a targeted issue, `scripts/ai/run_auto.sh` itself sequences the whole lifecycle as a
+script (案B) — Claude participates only as the worker its chain selects for a given role, not as an
+all-controlling orchestrator. (The former Gemini CLI worker was replaced by the Antigravity CLI, `agy`,
+in the SOT-1334 migration.)
 
-## Role Assignments
+Humans steer the system through Linear/Discord and per-issue directives — not by talking to a worker CLI.
 
-### Claude Code (Orchestrator)
+## Roles and workers
 
-**Responsibilities:**
-- Reading and classifying Linear Issues
-- Judging whether child Issue decomposition is needed
-- Writing worker instruction prompts
-- Reviewing worker reports
-- Final quality gate decisions
-- GitHub operations (branch, PR, merge)
-- Linear state sync
+Roles (`config/worker_roles.json` keys): `task-check`, `decomposition`, `implementation`,
+`verification`, `acceptance`, `github`, `linear-report`.
 
-**Claude Code does NOT:**
-- Write multi-file implementation code
-- Run lint/test/typecheck cycles directly
-- Perform long-running log analysis
-- Do first-pass PR diff reviews
+Workers and their run scripts / reports:
 
-**Claude Code MAY directly perform:**
-- 1-2 line wording fixes
-- Linear comments and status updates
-- PR creation and merge
-- Final report writing
+| Worker | Run script | Report file | CLI |
+|--------|-----------|-------------|-----|
+| `codex` | `scripts/ai/run_codex.sh` | `docs/ai/60_worker_codex_report.md` | `codex` |
+| `claude` | `scripts/ai/run_claude.sh` | `docs/ai/55_worker_claude_report.md` | `claude` (dispatched worker) |
+| `antigravity` | `scripts/ai/run_antigravity.sh` | `docs/ai/50_worker_antigravity_report.md` | `agy` |
 
-### Gemini CLI (Implementation Worker)
+Default priority chains (committed in `config/worker_roles.json`, primary first then fallbacks):
 
-**Trigger:** Implementation work inside any feature/commit Issue — new features, multi-file changes, large doc rewrites (worker role is a step inside the Issue, not a separate Issue)
+| Role | Default chain |
+|------|---------------|
+| `task-check` | `["codex","claude","antigravity"]` |
+| `decomposition` | `["claude","codex","antigravity"]` |
+| `implementation` | `["antigravity","codex","claude"]` |
+| `verification` | `["codex","claude","antigravity"]` |
+| `acceptance` | `["claude","codex","antigravity"]` |
+| `github` | `["claude","codex","antigravity"]` |
+| `linear-report` | `["claude","codex","antigravity"]` |
 
-**Receives:** `prompts/gemini/implement.md` (written by Claude Code)
+Edit `config/worker_roles.json` to reassign any role (each role is set individually). To run everything
+on one worker, set every role to that worker (e.g. all `["claude"]`). The former global switches
+`ALL_CLAUDE_MODE` / `WORKER_MODE` were removed.
 
-**Produces:** `docs/ai/50_worker_gemini_report.md`
+## Dispatcher: `scripts/ai/run_worker.sh <role>`
 
-**Must include in instructions:**
-- Working directory
-- Target files (explicit list)
-- Allowed change scope
-- Prohibited actions
-- Verification commands to run
-- Completion criteria
+The single entry point for role work — **AI never calls a worker CLI directly**. It:
 
-**Must include in report:**
-- Summary of implementation
-- Changed files list
-- Commands run with output
-- Acceptance criteria check
-- Unverified items (for Codex)
-- Codex verification points
-- Next action
+1. reads the role's chain from `config/worker_roles.json` (or a per-issue override — see below);
+2. copies the canonical, worker-agnostic instruction `prompts/roles/<role>.md` into the selected
+   worker's prompt file (`prompts/codex/debug.md` / `prompts/claude/worker.md` /
+   `prompts/antigravity/implement.md`);
+3. runs each worker in chain order; on **non-response / usage-limit** (exit `75`) it **hands off** to
+   the next worker, passing the partial report so work continues (no restart);
+4. stops on the first success and prints `WORKER_DISPATCH_DONE role=<role> worker=<w> report=<path>`;
+   if every worker is non-responsive prints `WORKER_DISPATCH_EXHAUSTED` and exits `75`.
 
-### Codex CLI (Verification Worker)
+Same-worker consecutive invocations reuse that CLI's session for a warm prompt cache (claude
+`--session-id`/`--resume`, codex `exec resume --last`, antigravity `--continue`; disable with
+`WORKER_SESSION_REUSE=0`). A dispatched Claude worker is constrained to its single role/issue and must
+not orchestrate or launch runs.
 
-**Trigger:** Verification work inside any feature/commit Issue — after Gemini implementation, test/lint failures, security checks, PR diff reviews (worker role is a step inside the Issue, not a separate Issue)
+## Script-driven pipeline: `scripts/ai/run_auto.sh`
 
-**Receives:** `prompts/codex/debug.md` (written by Claude Code)
+For a targeted issue (autonomous runs always inject `WEBHOOK_ISSUE_ID`), `run_auto.sh` runs the roles
+in order — task-check → decomposition → implementation → verification → acceptance → github →
+linear-report — each through `run_worker.sh <role>`, gating on the winning report's `## Next Action`:
 
-**Produces:** `docs/ai/60_worker_codex_report.md`
+- `task-check` not-actionable → stop as a successful no-op;
+- `verification`/`acceptance` `NEEDS_DEBUG` → loop back to `implementation` (bounded by
+  `PIPELINE_MAX_DEBUG_CYCLES`, default 2);
+- `BLOCKED` / `NEEDS_USER_INPUT` / chain exhausted → stop (needs human);
+- all `READY_FOR_REVIEW` → complete.
 
-**Must include in instructions:**
-- Verification steps (lint, test, e2e)
-- Target files to inspect
-- Fix constraints (minimal fixes only)
-- Completion criteria
+`PIPELINE_MODE=0` (or a run with no issue id) falls back to a legacy single Claude-orchestrator launch.
 
-**Must include in report:**
-- Verification results
-- Failure logs with exact errors
-- Reproduction steps
-- Fix applied (if any)
-- Pre-PR checklist
-- Next action
+## Per-issue worker override from Linear
 
-> Note: Task types route work INSIDE a feature/commit Issue. They do NOT define child-Issue decomposition boundaries — child Issues are feature/commit units, not `[IMPLEMENT]`/`[DEBUG]` phases.
+A Linear issue description or comment can reroute roles for its own run only:
 
-## Task Type → Worker Mapping
+```
+workers: implementation=codex, verification=claude
+```
 
-| Task Type | Primary Worker | Notes |
-|-----------|---------------|-------|
-| IMPLEMENT | Gemini CLI | Always delegate; never implement directly |
-| FIX | Codex CLI | Small fixes |
-| DEBUG | Codex CLI | Test failures, log analysis |
-| PLAN | Claude Code → Gemini (if needed) | Claude Code designs, Gemini implements |
-| DOC | Codex CLI (small) / Gemini CLI (large) | |
-| REVIEW | Codex CLI → Claude Code (final) | |
-| SECURITY | Codex CLI → Claude Code (final) | |
+`run_auto.sh` resolves this via `runner-cli resolve-worker-roles`, merges onto the base config, and
+points `WORKER_ROLES_FILE` at the per-issue config. Newest occurrence wins; unmentioned roles keep the
+default. Parser: `src/lib/workerRoleDirective.ts`.
 
-## Delegation Decision Rules
+## Worker report contract
 
-### Delegate to Gemini when:
-- New feature implementation across multiple files
-- New module/class/component creation
-- Test file creation
-- Large documentation rewrites
-- Multi-file refactoring with clear spec
-
-### Delegate to Codex when:
-- Running lint/typecheck/tests
-- Investigating test failures
-- Analyzing error logs
-- Verifying Gemini's implementation
-- PR diff review
-- Security/credential checks
-- Minimal bug fixes (1-2 lines, clear cause)
-
-### Handle in Claude Code when:
-- Requires judgment about scope or requirements
-- Multiple repos or control-plane systems involved
-- queue/lock/webhook/usage-limit orchestration changes
-- Issue decomposition decisions
-- Final approval and merge
-
-## Worker Failure Re-Delegation
-
-1. Gemini implementation → test failure: Re-delegate to Codex as DEBUG
-2. Codex fix → spec mismatch: Re-delegate to Gemini as IMPLEMENT or PLAN
-3. 2+ consecutive failures: Set Issue to Blocked, post reason to Linear
-
-## Script Reference
-
-| Script | Purpose | Output |
-|--------|---------|--------|
-| `scripts/ai/run_gemini.sh` | Run Gemini implementation worker | `docs/ai/50_worker_gemini_report.md` |
-| `scripts/ai/run_codex.sh` | Run Codex debug/verification worker | `docs/ai/60_worker_codex_report.md` |
-
-### run_gemini.sh behavior:
-- Reads prompt from: `prompts/gemini/implement.md`
-- If `TARGET_REPO` is set: passes `--include-directories $TARGET_REPO`
-- Output: written to `docs/ai/50_worker_gemini_report.md` AND stdout
-
-### run_codex.sh behavior:
-- Reads prompt from: `prompts/codex/debug.md`
-- If `TARGET_REPO` is set: `cd $TARGET_REPO` before running
-- Output: written to `docs/ai/60_worker_codex_report.md` AND stdout
+Every worker report ends with a `## Next Action` line: `READY_FOR_REVIEW | NEEDS_DEBUG |
+NEEDS_USER_INPUT | BLOCKED`. Missing/empty report, missing `## Next Action`, non-zero exit, or timeout
+all count as non-response (exit `75`) and trigger chain hand-off.
 
 ## Project → Repository Resolution
 
@@ -152,21 +104,5 @@ Humans interact only with Claude Code — never directly with workers.
 - CLI: `tsx src/project-repo-cli.ts "<projectName>" [--json]`（localPath を出力、不明は exit 1）
 - runner 配線: `src/runner.ts triggerRun()` が issue の project を取得し解決、解決できれば
   `run_auto.sh` の spawn env に `WEBHOOK_PROJECT_NAME` / `WEBHOOK_TARGET_REPO`(=localPath) を注入。
-  `run_auto.sh` は Webhook Single-Issue Mode で「Target Repository」指示行をプロンプトに追記する。
+  パイプラインはこれを `docs/ai/pipeline/context.md` に載せ、各ロールの worker に `TARGET_REPO` として渡す。
   取得・解決失敗時は env を変えず従来動作（fail-open）。
-
-## Workflow Sequence
-
-```
-1. Claude Code: Read & classify Linear Issue
-2. Claude Code: Decompose into feature/commit units (only if needed)
-3. For each feature/commit Issue (worker roles are steps inside the Issue):
-   a. Claude Code: plan scope, write prompts/gemini/implement.md
-   b. run_gemini.sh → Gemini implements → read docs/ai/50_worker_gemini_report.md
-   c. Claude Code: write prompts/codex/debug.md
-   d. run_codex.sh → Codex verifies/debugs → read docs/ai/60_worker_codex_report.md
-   e. Claude Code: git add/commit (1+ meaningful commits for this Issue)
-4. Claude Code: Quality gate check
-5. Claude Code: git push, create PR, merge
-6. Claude Code: Update Linear status, post Completion Report
-```
