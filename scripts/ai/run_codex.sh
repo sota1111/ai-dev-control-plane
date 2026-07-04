@@ -46,6 +46,9 @@ PROMPT_FILE="$(lane_path "$CONTROL_PLANE_DIR/prompts/codex/debug.md")"
 REPORT_FILE="$(lane_path "$CONTROL_PLANE_DIR/docs/ai/60_worker_codex_report.md")"
 # Cooldown is account-global (worker usage limit is shared across lanes): NOT lane-suffixed.
 CODEX_COOLDOWN_FILE="$CONTROL_PLANE_DIR/docs/ai/auto_logs/codex.cooldown.json"
+# Same-AI session reuse marker (SOT-1459): present once this run has created a Codex session, so a
+# later same-run Codex invocation resumes it (warm prompt cache). run_auto.sh clears it per run.
+CODEX_SESSION_MARKER="$(lane_path "$CONTROL_PLANE_DIR/docs/ai/auto_logs/codex_worker_session.marker")"
 
 if [ ! -f "$PROMPT_FILE" ]; then
   echo "Prompt file not found: $PROMPT_FILE" >&2
@@ -74,42 +77,15 @@ else
 fi
 WORKER_NONRESPONSE_EXIT=75
 
-# --- All-Claude mode master flag (SOT-993) ---
-# Claude が全作業を担当する運用モード。`ALL_CLAUDE_MODE` を真値にすると Antigravity/Codex 両ワーカーを
-# 一括無効化し、実装も検証も Claude Code が CLAUDE.md「Worker Non-Response Fallback Policy」で代行する。
-# このマスターフラグは cooldown pre-check より先に評価される短絡。真値は 1/true/yes/on（大小無視）。
-case "$(printf '%s' "${ALL_CLAUDE_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
-  1|true|yes|on)
-    echo "ALL_CLAUDE_MODE: all worker delegation disabled by env flag, delegating to Claude" >&2
-    exit "$WORKER_NONRESPONSE_EXIT"
-    ;;
-esac
-
-# --- Worker-mode config selector (SOT-1333 / SOT-1334) ---
-# `WORKER_MODE` を設定から選ぶと、Codexのみ/Claudeのみ/Antigravityのみの運用モードを切り替えられる。
-# 値（大小無視, 未設定/その他は all 扱い）:
-#   all              : Antigravity・Codex 両方を起動（既定）
-#   claude-only      : 両ワーカーを起動しない（Claude が全担当, ALL_CLAUDE_MODE と等価）
-#   codex-only       : Codexのみ起動（Antigravity は呼び出さない）
-#   antigravity-only : Antigravityのみ起動（Codex は呼び出さない）
-# このスクリプト（Codex側）は claude-only / antigravity-only のとき非応答コード75で即終了し、Codex CLI を
-# 一切起動しない。評価は ALL_CLAUDE_MODE の直後・CODEX_DISABLED / cooldown より先。
-case "$(printf '%s' "${WORKER_MODE:-}" | tr '[:upper:]' '[:lower:]')" in
-  claude-only|antigravity-only)
-    echo "WORKER_MODE=${WORKER_MODE}: Codex disabled by worker-mode config, delegating to Claude" >&2
-    exit "$WORKER_NONRESPONSE_EXIT"
-    ;;
-esac
-
-# --- Per-role worker assignment (SOT-1459) ---
-# 役割ごとにワーカーを割り当てる編集可能ファイル `config/worker_roles.json`（.env ではない）を参照する。
-# 呼び出し側が `WORKER_ROLE=<task-check|verification|...>` を渡したとき、その役割の割当ワーカーが codex
-# でなければ（= claude / antigravity に振られていれば）Codex を起動せず非応答コード 75 で委譲する。
-# WORKER_ROLE 未設定・不明ロール・設定ファイル不備のときは何もせず従来動作（後方互換・フェイルオープン）。
-# 評価は WORKER_MODE の後・CODEX_DISABLED / cooldown の前。グローバル env スイッチが常に優先される。
+# --- Per-role gate (DIRECT invocation only; SOT-1459) ---
+# Worker selection is owned by the dispatcher `scripts/ai/run_worker.sh`, which reads the role's
+# ordered chain from config/worker_roles.json and sets RUN_WORKER_DISPATCH=1 when it picks a worker.
+# Under dispatch we therefore skip this gate. For a DIRECT/legacy call with WORKER_ROLE set, exit 75
+# if `codex` is not in the role's chain (fail-open on unset/unknown/broken config). Evaluated before
+# CODEX_DISABLED (per-worker availability) / cooldown.
 WORKER_ROLES_FILE="${WORKER_ROLES_FILE:-$CONTROL_PLANE_DIR/config/worker_roles.json}"
-if [ -n "${WORKER_ROLE:-}" ]; then
-  ROLE_WORKER="$(node -e '
+if [ "${RUN_WORKER_DISPATCH:-}" != "1" ] && [ -n "${WORKER_ROLE:-}" ]; then
+  ROLE_CHAIN="$(node -e '
     const fs = require("fs");
     const [file, role] = process.argv.slice(1);
     const ROLES = ["task-check", "decomposition", "implementation", "verification", "acceptance", "github", "linear-report"];
@@ -117,12 +93,12 @@ if [ -n "${WORKER_ROLE:-}" ]; then
     if (!ROLES.includes(role)) { process.stdout.write(""); process.exit(0); }
     try {
       const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
-      const w = cfg[role];
-      process.stdout.write(WORKERS.includes(w) ? String(w) : "");
+      const raw = Array.isArray(cfg[role]) ? cfg[role] : [cfg[role]];
+      process.stdout.write(raw.filter(w => WORKERS.includes(w)).join(" "));
     } catch (e) { process.stdout.write(""); }
   ' "$WORKER_ROLES_FILE" "$WORKER_ROLE" 2>/dev/null || echo '')"
-  if [ -n "$ROLE_WORKER" ] && [ "$ROLE_WORKER" != "codex" ]; then
-    echo "WORKER_ROLE=$WORKER_ROLE assigned to '$ROLE_WORKER' (not codex) by config/worker_roles.json, delegating to Claude" >&2
+  if [ -n "$ROLE_CHAIN" ] && [[ " $ROLE_CHAIN " != *" codex "* ]]; then
+    echo "WORKER_ROLE=$WORKER_ROLE chain '[$ROLE_CHAIN]' does not include codex, delegating to Claude" >&2
     exit "$WORKER_NONRESPONSE_EXIT"
   fi
 fi
@@ -181,13 +157,70 @@ if [ -n "${TARGET_REPO:-}" ]; then
   cd "$TARGET_REPO"
 fi
 
-set +e
+# --- Handoff context (SOT-1459) ---
+# On a mid-processing handoff, the dispatcher (run_worker.sh) points WORKER_HANDOFF_REPORT at the
+# previous worker's partial report so Codex continues its work instead of restarting from scratch.
+PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
+if [ -n "${WORKER_HANDOFF_REPORT:-}" ] && [ -s "${WORKER_HANDOFF_REPORT:-/nonexistent}" ]; then
+  PROMPT_CONTENT="## Handoff from previous worker (${WORKER_HANDOFF_FROM:-unknown})
+
+The previous worker could not finish (non-response / usage limit). Continue its work — do NOT restart
+from scratch. Its partial report follows; pick up where it left off and produce the final report.
+
+<<<PREVIOUS_WORKER_REPORT
+$(cat "$WORKER_HANDOFF_REPORT")
+PREVIOUS_WORKER_REPORT
+
+---
+
+$PROMPT_CONTENT"
+fi
+
 # Capture stderr as well as stdout: Codex prints the usage-limit notice
 # ("You've hit your usage limit ... try again at <date>") to stderr, which the
 # usage-limit detection below needs to see.
-timeout "${WORKER_TIMEOUT}s" codex --sandbox danger-full-access exec "$(cat "$PROMPT_FILE")" 2>&1 | tee "$REPORT_FILE"
-EXIT_CODE="${PIPESTATUS[0]}"
+#
+# Same-AI session reuse (SOT-1459): if this run already created a Codex session, resume the most
+# recent one (`exec resume --last`) so consecutive Codex roles share a warm prompt cache. Disable with
+# WORKER_SESSION_REUSE=0. If resume fails to produce a valid report (and it is not a usage limit), fall
+# back once to a fresh session so a stale/broken session can never wedge the worker.
+run_codex_cli() {
+  if [ "$1" = "resume" ]; then
+    timeout "${WORKER_TIMEOUT}s" codex --sandbox danger-full-access exec resume --last "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
+  else
+    timeout "${WORKER_TIMEOUT}s" codex --sandbox danger-full-access exec "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
+  fi
+  return "${PIPESTATUS[0]}"
+}
+
+_REUSE_ENABLED=1
+case "$(printf '%s' "${WORKER_SESSION_REUSE:-1}" | tr '[:upper:]' '[:lower:]')" in
+  0|false|no|off) _REUSE_ENABLED=0 ;;
+esac
+
+set +e
+if [ "$_REUSE_ENABLED" -eq 1 ] && [ -f "$CODEX_SESSION_MARKER" ]; then
+  echo "CODEX_SESSION_REUSE: resuming most recent Codex session (warm cache)" >&2
+  run_codex_cli resume
+  EXIT_CODE=$?
+  if [ "$EXIT_CODE" -ne 0 ] \
+    && ! grep -q "## Next Action" "$REPORT_FILE" 2>/dev/null \
+    && ! grep -qi "usage limit" "$REPORT_FILE" 2>/dev/null; then
+    echo "CODEX_RESUME_FALLBACK: resume --last failed (exit $EXIT_CODE); retrying with a fresh session" >&2
+    run_codex_cli fresh
+    EXIT_CODE=$?
+  fi
+else
+  run_codex_cli fresh
+  EXIT_CODE=$?
+fi
 set -e
+
+# Record that this run now has a Codex session so the next same-run Codex call can resume it.
+if [ "$EXIT_CODE" -eq 0 ]; then
+  mkdir -p "$(dirname "$CODEX_SESSION_MARKER")" 2>/dev/null || true
+  : > "$CODEX_SESSION_MARKER" 2>/dev/null || true
+fi
 
 # --- Codex usage-limit detection (set cooldown, delegate to Claude) ---
 # Codex prints "You've hit your usage limit ... try again at <date>" and exits

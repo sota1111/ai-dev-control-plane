@@ -15,11 +15,14 @@ docs/ai/20_design.md
 docs/ai/30_tasks.md
 docs/ai/40_acceptance.md
 docs/ai/50_worker_antigravity_report.md
+docs/ai/55_worker_claude_report.md
 docs/ai/60_worker_codex_report.md
 docs/ai/70_final_report.md
 prompts/antigravity/implement.md
 prompts/codex/debug.md
+prompts/claude/worker.md
 docs/ai/linear/
+docs/ai/pipeline/
 
 # Local archive (not tracked)
 .local/

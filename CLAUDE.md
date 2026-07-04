@@ -58,55 +58,88 @@ Claude Code focuses on **judgment, delegation, and final approval** — not dire
 
 ---
 
-## When to Use Antigravity CLI
+## Worker Dispatch — always go through `scripts/ai/run_worker.sh` (SOT-1459)
 
-**MANDATORY**: Claude Code must ALWAYS invoke `scripts/ai/run_antigravity.sh` for ALL implementation work (within any feature Issue), without exception — except under the Worker Non-Response Fallback Policy below.
+**MANDATORY**: Claude Code must NEVER call `scripts/ai/run_codex.sh`, `scripts/ai/run_antigravity.sh`,
+or a nested `claude` directly for role work. **AI does not call AI** — every role's worker is selected
+by the dispatcher script `scripts/ai/run_worker.sh <role>`. This is the single entry point for all
+delegated work.
 
-Claude Code must NEVER write implementation code directly — except under the Worker Non-Response Fallback Policy below. All file creation, editing, and feature implementation must go through Antigravity CLI.
+How it works:
+1. Write the role's worker-agnostic instruction to `prompts/roles/<role>.md` (see `prompts/roles/TEMPLATE.md`).
+2. Run `scripts/ai/run_worker.sh <role>` (set `TARGET_REPO=…` first when working a target repo).
+3. The dispatcher reads the role's **ordered priority chain** from `config/worker_roles.json`, tries each
+   worker in order via its run script (`run_codex.sh` / `run_claude.sh` / `run_antigravity.sh`), and:
+   - copies your `prompts/roles/<role>.md` into whichever worker it picks;
+   - on **non-response / usage-limit** (exit `75`) **hands off** to the next worker in the chain, passing
+     the previous worker's partial report so work CONTINUES (no restart);
+   - on the first success (exit `0`) stops and prints `WORKER_DISPATCH_DONE role=<role> worker=<w> report=<path>` — read that report;
+   - if every worker is non-responsive prints `WORKER_DISPATCH_EXHAUSTED` and exits `75` → Claude Code takes over per the Worker Non-Response Fallback Policy.
+4. Consecutive invocations of the **same** worker reuse that CLI's session so the conversation/prompt
+   cache stays warm — claude via `--session-id`/`--resume`, codex via `exec resume --last`, antigravity
+   via `--continue` (disable with `WORKER_SESSION_REUSE=0`; per-run session state is reset by
+   `run_auto.sh`).
 
-Before running, write the full instruction into `prompts/antigravity/implement.md`.
+`prompts/antigravity/implement.md`, `prompts/codex/debug.md`, and `prompts/claude/worker.md` remain the
+per-worker prompt files the dispatcher writes into; the canonical, worker-agnostic role instruction lives
+in `prompts/roles/<role>.md`.
 
----
+### Script-driven role pipeline (案B / default; SOT-1459)
 
-## When to Use Codex CLI
+For a targeted issue (any autonomous run — `runner.ts` always injects `WEBHOOK_ISSUE_ID`), **`run_auto.sh`
+itself sequences the whole lifecycle as a script** — no single all-controlling Claude orchestrator. It runs,
+in order, `scripts/ai/run_worker.sh <role>` for: **task-check → decomposition → implementation →
+verification → acceptance → github → linear-report**, using the committed `prompts/roles/<role>.md` (which
+read `docs/ai/pipeline/context.md` for the issue id / target repo). After each role it reads the winning
+report's `## Next Action` and gates:
+- `task-check` not-actionable (`NEEDS_USER_INPUT`/`BLOCKED`) → stop as a successful no-op (exit 0);
+- `verification`/`acceptance` `NEEDS_DEBUG` → loop back to `implementation` (bounded by
+  `PIPELINE_MAX_DEBUG_CYCLES`, default 2);
+- any `BLOCKED`/`NEEDS_USER_INPUT`, or a dispatcher `WORKER_DISPATCH_EXHAUSTED` → stop (exit `70`,
+  needs human);
+- all roles `READY_FOR_REVIEW` → pipeline complete (exit 0).
 
-**MANDATORY**: Claude Code must ALWAYS invoke `scripts/ai/run_codex.sh` for ALL verification/debug work (within any feature Issue), without exception — except under the Worker Non-Response Fallback Policy below.
-
-Claude Code must NEVER run lint / typecheck / tests or apply fixes directly — except under the Worker Non-Response Fallback Policy below. All verification and debugging must go through Codex CLI.
-
-Before running, write the full instruction into `prompts/codex/debug.md`.
+This makes the工程順序 deterministic and script-owned; each role is a dispatched worker (Claude only
+participates as the worker its chain selects, not as an orchestrator). Escape hatch: `PIPELINE_MODE=0`
+(or a run with no issue id, e.g. a manual queue scan) falls back to the legacy single Claude-orchestrator
+launch, which routes each role through the dispatcher via its prompt instructions.
 
 ---
 
 ## Worker Non-Response Fallback Policy
 
 - **Definition of "non-response" (worker unavailable).** A worker run counts as non-responsive when ANY of these is true:
-  - the worker run script exits with the dedicated non-response code `75` (set by `scripts/ai/run_antigravity.sh` / `scripts/ai/run_codex.sh`), or
+  - the worker run script exits with the dedicated non-response code `75` (set by `scripts/ai/run_antigravity.sh` / `scripts/ai/run_codex.sh` / `scripts/ai/run_claude.sh`), or
   - the worker CLI exits non-zero (crash, auth failure, usage-limit, etc.), or
   - the worker invocation times out (exceeds the configured timeout), or
-  - the worker report file (`docs/ai/50_worker_antigravity_report.md` for Antigravity, `docs/ai/60_worker_codex_report.md` for Codex) is missing, empty, or lacks a `## Next Action` line after the run.
+  - the worker report file (`docs/ai/50_worker_antigravity_report.md` for Antigravity, `docs/ai/60_worker_codex_report.md` for Codex, `docs/ai/55_worker_claude_report.md` for a dispatched Claude worker) is missing, empty, or lacks a `## Next Action` line after the run.
+  - Within a role's priority chain the dispatcher `scripts/ai/run_worker.sh` treats each of these per worker and hands off to the next worker; only when the WHOLE chain is exhausted (`WORKER_DISPATCH_EXHAUSTED`, exit `75`) does Claude Code fall back and perform the role directly.
 - **Fallback rule.** Claude Code must FIRST attempt normal delegation. Only when a worker is non-responsive per the definition above, Claude Code MAY take over that worker's role and perform the implementation (Antigravity's role) or verification/fix (Codex's role) directly, so the Issue is not blocked. This is an explicit, narrowly-scoped EXCEPTION to the otherwise-mandatory delegation rules.
 - **Bounded retry.** Retry a non-responsive worker AT MOST once before falling back. Never loop on a hung or failing worker.
 - **Quality unchanged.** All Quality Gates (lint / typecheck / test / diff review / acceptance criteria) apply identically whether the work was done by the worker or by Claude Code fallback.
 - **Disclosure / audit.** When Claude Code falls back, it MUST record (a) which worker was non-responsive, (b) the detected failure mode, and (c) that Claude Code performed the work directly — in the relevant worker report file (the audit sink). Do NOT post this fallback disclosure as a Linear comment: Linear receives only the work result. The human needs the outcome of the delegation, not the fallback mechanics.
-- **All-Claude mode (`ALL_CLAUDE_MODE`).** Setting the env flag `ALL_CLAUDE_MODE` to a truthy value (`1|true|yes|on`, case-insensitive) makes BOTH `scripts/ai/run_antigravity.sh` and `scripts/ai/run_codex.sh` exit immediately with the non-response code `75`, so Claude Code intentionally performs ALL implementation and verification work directly under this policy. It is the superset of `ANTIGRAVITY_DISABLED` (which disables only Antigravity) and is evaluated before `ANTIGRAVITY_DISABLED` and the usage-limit cooldown checks. Default off = workers run as usual. Use this when running everything on Claude.
-- **Worker-mode selector (`WORKER_MODE`, SOT-1333).** A single config setting chooses which worker LLMs run; the disabled worker's CLI is never invoked at all (its run script exits `75` and Claude Code takes over via this policy). Values (case-insensitive; default/unset = `all`): `all` (both run), `claude-only` (disable both — equivalent to `ALL_CLAUDE_MODE`), `codex-only` (run Codex only; Antigravity disabled), `antigravity-only` (run Antigravity only; Codex disabled). Evaluated right after `ALL_CLAUDE_MODE`, before the individual disable flags and the cooldown checks. (`antigravity-only` replaced the former `gemini-only` mode once the Gemini→Antigravity CLI migration (SOT-1334) landed.)
-- **Codex disable flag (`CODEX_DISABLED`, SOT-1333).** Symmetric to `ANTIGRAVITY_DISABLED`: a truthy value (`1|true|yes|on`, case-insensitive) makes only `scripts/ai/run_codex.sh` exit with `75`, delegating verification to Claude Code while Codex CLI is unavailable. Default off.
-- **Per-role worker assignment (`config/worker_roles.json`, SOT-1459).** The env flags above switch a worker on/off *globally, for every role at once*. To assign a worker *per role*, edit the file `config/worker_roles.json` (an editable JSON, **not `.env`**). It maps each harness role — `task-check`, `decomposition`, `implementation`, `verification`, `acceptance`, `github`, `linear-report` — to the worker that handles it (`claude` | `codex` | `antigravity`); keys starting with `__` are documentation and ignored. When Claude Code invokes a run script for a role, it sets `WORKER_ROLE=<role>`; `scripts/ai/run_codex.sh` and `scripts/ai/run_antigravity.sh` read this file and, if the role is assigned to a *different* worker than the script's own (e.g. `verification` set to `claude`, or `implementation` set to `codex`), exit `75` so Claude Code takes over via this policy. This lets you, for example, keep implementation on Antigravity while routing verification to Claude. **Precedence:** the global switches `ALL_CLAUDE_MODE` and `WORKER_MODE` still win — the per-role check runs *after* them and *before* the individual `CODEX_DISABLED`/`ANTIGRAVITY_DISABLED` flags and the usage-limit cooldown. Fail-open: if `WORKER_ROLE` is unset, the role is unknown, or the file is missing/invalid, the script behaves as before. Loading/validation helper: `src/lib/workerRoles.ts` (`loadWorkerRolesConfig` / `resolveRoleWorker`). Decomposition, acceptance, `github`, and `linear-report` are Claude-owned roles by default; setting them to `codex`/`antigravity` routes that role's worker-script invocation accordingly, otherwise Claude Code performs them directly. `github` covers branch/PR/merge operations and `linear-report` covers Linear state sync and progress reporting (added per the SOT-1459 follow-up so those assignments are configurable too).
+- **Global kill-switches removed (`ALL_CLAUDE_MODE`, `WORKER_MODE`).** The former global env switches that overrode per-role assignment for every role at once have been removed. Worker selection is now governed solely by `config/worker_roles.json` (below). To run everything on Claude, set all roles to `claude` in that file; to run only one worker, assign roles accordingly. The run scripts no longer read `ALL_CLAUDE_MODE` or `WORKER_MODE`.
+- **Per-worker disable flags (`CODEX_DISABLED` / `ANTIGRAVITY_DISABLED` / `CLAUDE_DISABLED`).** A truthy value (`1|true|yes|on`, case-insensitive) makes that worker's run script exit `75`, so the dispatcher skips it and hands off to the next worker in the chain while that CLI is temporarily unavailable. These are per-worker *availability* escape hatches (worker down), NOT role-assignment overrides — each is evaluated *after* chain selection, inside the worker's own run script. Default off.
+- **Per-role priority chains (`config/worker_roles.json`, SOT-1459) — the top-level worker selector.** This file is the single source of truth for which worker handles each role. Each harness role — `task-check`, `decomposition`, `implementation`, `verification`, `acceptance`, `github`, `linear-report` — maps to an **ordered priority chain** of workers (`claude` | `codex` | `antigravity`), e.g. `"task-check": ["codex","claude","antigravity"]`: index 0 is the primary (tried first), the rest are the fallback order. A bare string is accepted as a single-element chain. Keys starting with `__` are documentation and ignored. The dispatcher `scripts/ai/run_worker.sh <role>` reads the chain, sets `RUN_WORKER_DISPATCH=1`, and tries each worker's run script in order — on non-response (`75`) or usage-limit it hands off to the next worker, passing the partial report so work continues; the first success wins. **Precedence:** this per-role config is the top-level worker selector (the former global switches `ALL_CLAUDE_MODE` / `WORKER_MODE` were removed) — evaluated *before* the per-worker availability flags (`CODEX_DISABLED` / `ANTIGRAVITY_DISABLED` / `CLAUDE_DISABLED`) and the usage-limit cooldown, which apply per worker. To run everything on Claude, set every role to `["claude"]`. Fail-open: a missing/invalid config or unknown role makes the dispatcher exit `75` (Claude Code fallback). Loading/validation helper: `src/lib/workerRoles.ts` (`loadWorkerRolesConfig` / `resolveRoleChain` / `resolveRoleWorker`). `github` (branch/PR/merge) and `linear-report` (Linear state sync + progress reporting) are Claude-primary by default; putting `codex`/`antigravity` first reroutes that role's primary accordingly.
 
 ### Roles the orchestrator maps to workers (SOT-1459)
 
-When acting on a feature Issue, Claude Code assigns each role to the worker configured in `config/worker_roles.json` and, when delegating to a run script, passes `WORKER_ROLE=<role>`:
+When acting on a feature Issue, Claude Code writes the role instruction to `prompts/roles/<role>.md` and
+runs the dispatcher `scripts/ai/run_worker.sh <role>` (which sets `WORKER_ROLE=<role>` and selects the
+worker from the role's priority chain). The default chains below are the committed values in
+`config/worker_roles.json` (primary first, then fallback order). Every role — including the
+Claude-primary ones — goes through the dispatcher; if a role's chain is `["claude"]` (or Claude wins the
+chain), `run_claude.sh` runs a dispatched Claude worker rather than the orchestrator acting inline.
 
-| Role (config key) | 役割 | Default worker | Run script |
-| --- | --- | --- | --- |
-| `task-check` | タスク確認 | `codex` | `run_codex.sh` |
-| `decomposition` | タスク分割 | `claude` | (Claude Code直接) |
-| `implementation` | 実装 | `antigravity` | `run_antigravity.sh` |
-| `verification` | 検証 | `codex` | `run_codex.sh` |
-| `acceptance` | 受け入れ | `claude` | (Claude Code直接) |
-| `github` | GitHub連携 (branch/PR/merge) | `claude` | (Claude Code直接) |
-| `linear-report` | Linear報告 (状態同期・進捗報告) | `claude` | (Claude Code直接) |
+| Role (config key) | 役割 | Default priority chain |
+| --- | --- | --- |
+| `task-check` | タスク確認 | `["codex","claude","antigravity"]` |
+| `decomposition` | タスク分割 | `["claude","codex","antigravity"]` |
+| `implementation` | 実装 | `["antigravity","codex","claude"]` |
+| `verification` | 検証 | `["codex","claude","antigravity"]` |
+| `acceptance` | 受け入れ | `["claude","codex","antigravity"]` |
+| `github` | GitHub連携 (branch/PR/merge) | `["claude","codex","antigravity"]` |
+| `linear-report` | Linear報告 (状態同期・進捗報告) | `["claude","codex","antigravity"]` |
 
 ---
 
@@ -211,14 +244,24 @@ READY_FOR_REVIEW | NEEDS_DEBUG | NEEDS_USER_INPUT | BLOCKED
 
 ## Workflow
 
+Autonomous (targeted issue) — script-driven role pipeline (案B, default):
+
 ```
-Human request
-  └─► Claude Code (requirements, plan, design, task decomposition)
-        ├─► prompts/antigravity/implement.md ──► scripts/ai/run_antigravity.sh ──► Antigravity CLI
-        │       └─► docs/ai/50_worker_antigravity_report.md
-        ├─► prompts/codex/debug.md ──► scripts/ai/run_codex.sh ──► Codex CLI
-        │       └─► docs/ai/60_worker_codex_report.md
-        └─► Claude Code reviews all reports ──► docs/ai/70_final_report.md ──► Human reply
+Linear webhook / queue ─► runner.ts (injects WEBHOOK_ISSUE_ID) ─► run_auto.sh (pipeline)
+  └─ for each role in [task-check, decomposition, implementation, verification, acceptance, github, linear-report]:
+        scripts/ai/run_worker.sh <role>
+          ├─ reads config/worker_roles.json chain, copies prompts/roles/<role>.md into the picked worker
+          ├─ run_codex.sh / run_claude.sh / run_antigravity.sh  (chain order; hand off on exit 75)
+          │     └─ docs/ai/{60_codex,55_claude,50_antigravity}_worker_report.md
+          └─ WORKER_DISPATCH_DONE ─► run_auto.sh gates on ## Next Action (proceed / loop / stop)
+```
+
+Legacy fallback (`PIPELINE_MODE=0`, or a manual run with no issue id):
+
+```
+Human request / queue scan
+  └─► Claude Code orchestrator (requirements, plan, decomposition)
+        └─► routes each role through scripts/ai/run_worker.sh <role> (per its prompt instructions)
 ```
 
 ---

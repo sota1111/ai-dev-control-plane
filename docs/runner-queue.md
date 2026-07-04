@@ -190,35 +190,36 @@ JS のロックを長時間占有しないよう、起動直後にロックを�
 - 注意: 有効時は `long-run` の待機/長時間タスクも前景同期で走るため、SOT-925 の「wall-clock 膨張」トレード
   オフが復活する。安定性を優先して並列を一時停止する目的のフラグであり、恒常設定ではない。
 
-### 全Claude担当モード（ALL_CLAUDE_MODE / SOT-993）
+### ワーカーは優先度チェーンでディスパッチする（config/worker_roles.json / run_worker.sh, SOT-1459）
 
-環境変数 `ALL_CLAUDE_MODE` を真値（`1` / `true` / `yes` / `on`、大小無視）にすると、`scripts/ai/run_antigravity.sh`
-と `scripts/ai/run_codex.sh` の**両方**が CLI を起動せずワーカー非応答コード `75` で即終了する。これにより
-CLAUDE.md「Worker Non-Response Fallback Policy」が発動し、**実装も検証も Claude Code が直接担当する**。
+どのワーカーが各役割を担当するかは、**`config/worker_roles.json` が唯一の上位スイッチ**である。各役割は
+**順序付きの優先度チェーン**（例 `"task-check": ["codex","claude","antigravity"]`。先頭=第一候補、以降=
+フォールバック順）にワーカーを割り当てる。かつてのグローバル env kill-switch `ALL_CLAUDE_MODE` /
+`WORKER_MODE` は**廃止**済み。
 
-- `ANTIGRAVITY_DISABLED`（Antigravity のみ無効化）の上位版であり、Codex も含めて全ワーカー委譲を停止する単一マスター
-  スイッチ。Claude のプラン変更等で全作業を Claude に寄せたいときに env 1 つで切替えられる（可逆）。
-- 評価順は両スクリプトとも `WORKER_NONRESPONSE_EXIT=75` 定義直後、`ANTIGRAVITY_DISABLED` / cooldown pre-check の
-  **前**。最初の意図的短絡として効く。
-- **既定は無効 = 後方互換**。未設定時は両ワーカーが従来どおり起動する。`RUNNER_STABLE_MODE`（並列の停止）とは
-  直交する別軸のフラグ（こちらはワーカー委譲そのものの停止）。
-
-### ワーカーモード選択（WORKER_MODE / CODEX_DISABLED / SOT-1333）
-
-「Codexのみ / Claudeのみ / Antigravityのみ」モードを設定から一括で選べるようにする単一スイッチ
-`WORKER_MODE`。無効化されたワーカーは該当スクリプトが非応答コード `75` で即終了し、対象 CLI を**一切起動
-しない**（→ Claude フォールバックに委譲）。
-
-- 値（大小無視, 未設定/その他は `all` 扱い）:
-  - `all` — Antigravity・Codex 両方を起動（既定）。
-  - `claude-only` — 両ワーカーを起動しない（Claude が全担当, `ALL_CLAUDE_MODE` と等価）。
-  - `codex-only` — Codex のみ起動（Antigravity は呼び出さない）。
-  - `antigravity-only` — Antigravity のみ起動（Codex は呼び出さない）。
-- 評価順: `run_antigravity.sh` は `ALL_CLAUDE_MODE` → `WORKER_MODE` → `ANTIGRAVITY_DISABLED` → cooldown。
-  `run_codex.sh` は `ALL_CLAUDE_MODE` → `WORKER_MODE` → `CODEX_DISABLED` → cooldown。
-- `CODEX_DISABLED` は `ANTIGRAVITY_DISABLED` と対称な個別フラグ（真値 `1/true/yes/on`）。Codex CLI が使えない
-  期間に Codex のみを止める。
-- `antigravity-only` は旧 `gemini-only` を置き換えるモード。Gemini→Antigravity CLI 移行（SOT-1334）完了に伴い有効化済み。
+- **完全スクリプト駆動パイプライン（案B / 既定）**: 対象 issue が確定した autonomous run（runner.ts は常に
+  `WEBHOOK_ISSUE_ID` を注入）では、**`run_auto.sh` 自身**が task-check → decomposition → implementation →
+  verification → acceptance → github → linear-report を順に `run_worker.sh <role>` で実行する。単一の
+  Claude オーケストレータは起動せず、各ロールを委譲 worker として回す。各ロール後に勝者レポートの
+  `## Next Action` でゲート（task-check 非アクション→成功 no-op、verification/acceptance の NEEDS_DEBUG→
+  implementation へループ上限 `PIPELINE_MAX_DEBUG_CYCLES` 既定2、BLOCKED/exhausted→停止 exit70）。
+  `PIPELINE_MODE=0` または issue 未指定（手動キュー走査）は、レガシーの単一オーケストレータ起動へ退避する。
+- **ディスパッチャ `scripts/ai/run_worker.sh <role>`** が単一の入口。パイプライン（およびレガシー
+  オーケストレータ）は worker を直接呼ばず、必ずこのスクリプト経由で役割を実行する（**AI が AI を直接呼ばない**）。
+  役割の指示は committed な `prompts/roles/<role>.md`（`docs/ai/pipeline/context.md` で issue を参照）に置き、
+  ディスパッチャが選んだ worker のプロンプトファイルへ複写する。
+- ディスパッチャはチェーンを先頭から試す。各 worker の run スクリプト（`run_codex.sh` / `run_claude.sh` /
+  `run_antigravity.sh`）を `RUN_WORKER_DISPATCH=1` 付きで起動し、**非応答（exit 75）や usage-limit なら次候補へ
+  引き継ぐ**（直前の部分レポートを `WORKER_HANDOFF_REPORT` で渡し、継続させる）。最初に成功（exit 0）した worker で
+  停止し `WORKER_DISPATCH_DONE role=… worker=… report=…` を出力。チェーン全滅時は `WORKER_DISPATCH_EXHAUSTED`＋
+  exit 75 で Claude フォールバックへ。
+- **同一ワーカーが連続する場合は会話セッションを再利用**してプロンプトキャッシュを温存する（claude=
+  `--session-id`/`--resume`、codex=`exec resume --last`、antigravity=`--continue`。`WORKER_SESSION_REUSE=0`
+  で無効化）。セッションは 1 run 単位（`run_auto.sh` 開始時にマーカー/セッションIDをリセット）。
+- 全作業を Claude だけで回すには全役割を `["claude"]` に。単一ワーカーで回すには該当役割をそのワーカー 1 要素に。
+- 評価順（各 worker スクリプト内）: チェーン選択（`run_worker.sh`）→ `*_DISABLED`（`ANTIGRAVITY_DISABLED` /
+  `CODEX_DISABLED` / `CLAUDE_DISABLED`）→ cooldown。`*_DISABLED`（真値 `1/true/yes/on`）は「ワーカー一時停止
+  （worker is down）」用のエスケープハッチで、役割割当を上書きしない。
 
 ### 運用ルール: 待機 / 長時間タスクは `long-run` を付ける（SOT-925）
 
@@ -295,7 +296,8 @@ docs/ai/auto_logs/run_*.log       # 各 Claude 実行ログ（run_auto.sh が生
 
 - **誰が作業しているか**が行単位で分かる（orchestrator が "Codex is ..." と語っても `[opus]` タグが
   付くので発話者が Claude 本体だと判別できる）。
-- **Codex/Antigravity が実際には動いていない run**（`ALL_CLAUDE_MODE` / `WORKER_MODE=claude-only`
-  等で worker が終了コード75を返す場合）では、実体のある `[codex]` / `[agy]` の作業行が出ず、
+- **Codex/Antigravity が実際には動いていない run**（`config/worker_roles.json` で該当役割が `claude` に
+  割り当てられている、または `ANTIGRAVITY_DISABLED` / `CODEX_DISABLED` 等で worker が終了コード75を返す
+  場合）では、実体のある `[codex]` / `[agy]` の作業行が出ず、
   委譲バイパス（`delegating to Claude`）のバナー行だけが残るため、worker が非稼働であることが
   ログから判別できる。
