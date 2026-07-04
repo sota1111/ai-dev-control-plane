@@ -208,6 +208,11 @@ JS のロックを長時間占有しないよう、起動直後にロックを�
   オーケストレータ）は worker を直接呼ばず、必ずこのスクリプト経由で役割を実行する（**AI が AI を直接呼ばない**）。
   役割の指示は committed な `prompts/roles/<role>.md`（`docs/ai/pipeline/context.md` で issue を参照）に置き、
   ディスパッチャが選んだ worker のプロンプトファイルへ複写する。
+- **Linear からの per-issue worker 指定**: issue の説明文/コメントに `workers: role=worker[>fallback], ...`
+  の 1 行を書くと、その issue のパイプラインだけ担当 worker を上書きできる（最新の記述が優先）。パイプライン
+  開始時に `run_auto.sh` が `runner-cli resolve-worker-roles <issue>` で解決 → 既定 `config/worker_roles.json`
+  にマージした `docs/ai/pipeline/worker_roles.<issue>.json` を書き出し、`WORKER_ROLES_FILE` として全
+  `run_worker.sh` に適用する。ディレクティブ無し/取得失敗は fail-open で既定を使用。パーサ=`src/lib/workerRoleDirective.ts`。
 - ディスパッチャはチェーンを先頭から試す。各 worker の run スクリプト（`run_codex.sh` / `run_claude.sh` /
   `run_antigravity.sh`）を `RUN_WORKER_DISPATCH=1` 付きで起動し、**非応答（exit 75）や usage-limit なら次候補へ
   引き継ぐ**（直前の部分レポートを `WORKER_HANDOFF_REPORT` で渡し、継続させる）。最初に成功（exit 0）した worker で

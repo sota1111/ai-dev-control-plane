@@ -167,10 +167,31 @@ COMPLETION_UNVERIFIED=70
 # （キュー走査）や `PIPELINE_MODE=0` のときは、後方互換のためレガシーの単一オーケストレータ起動へ退避する。
 plog() { echo "[pipeline] $*" | tee -a "$LOG_FILE"; }
 
+# runner-cli helper (mirror run_codex.sh): prefer the local tsx binary, fall back to npx.
+_PIPE_TSX_BIN="node_modules/.bin/tsx"
+run_cli() {
+  if [ -x "$_PIPE_TSX_BIN" ]; then
+    "$_PIPE_TSX_BIN" src/runner-cli.ts "$@"
+  else
+    npx tsx src/runner-cli.ts "$@"
+  fi
+}
+
 run_role_pipeline() {
   local issue="$1"
   local target_repo="${WEBHOOK_TARGET_REPO:-${TARGET_REPO:-}}"
   [ -n "$target_repo" ] && export TARGET_REPO="$target_repo"
+
+  # Per-issue worker override (SOT-1459): a `workers: role=chain` directive in the Linear issue
+  # description/comments reroutes roles for THIS issue only. resolve-worker-roles writes a merged
+  # config and prints its path; point the whole pipeline's dispatcher at it via WORKER_ROLES_FILE.
+  # Fail-open: empty output / error → keep the default config/worker_roles.json.
+  local override_file
+  override_file="$(run_cli resolve-worker-roles "$issue" 2>>"$LOG_FILE" || true)"
+  if [ -n "$override_file" ] && [ -f "$override_file" ]; then
+    export WORKER_ROLES_FILE="$override_file"
+    plog "per-issue worker override active (WORKER_ROLES_FILE=$override_file)"
+  fi
 
   # 各ロールプロンプト（prompts/roles/<role>.md）が読む共有コンテキストを書き出す。
   mkdir -p docs/ai/pipeline
