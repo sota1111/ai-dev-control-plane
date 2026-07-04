@@ -12,6 +12,7 @@
 - [アーキテクチャ全体像](#アーキテクチャ全体像)
 - [役割分担](#役割分担)
 - [ワーカー制御フラグ](#ワーカー制御フラグ)
+- [本番障害の自動対応（インシデント・オートレスポンス）](#本番障害の自動対応インシデントオートレスポンス)
 - [クイックスタート（実行手順）](#クイックスタート実行手順)
 - [ドキュメント](#ドキュメント)
 
@@ -169,6 +170,51 @@
 
 ---
 
+## 本番障害の自動対応（インシデント・オートレスポンス）
+
+上記のワーカー非応答フォールバックが **「Issue を作っている最中（開発／CI）の失敗」** を自己修復するのに対し、本ハーネスは **すでにデプロイ済みのサービスの稼働時障害** に対する自動対応ループも備える（SOT-1520）。対象は監視される側のアプリ（例: toddler-private-rag）で、実体は本リポジトリ（ai-dev-control-plane）にある。
+
+### 自動対応ループ（検知→ポストモーテムまで）
+
+```
+① 障害検知        detect     — ヘルスエンドポイントを N 回プローブ → healthy / degraded / unhealthy 判定
+② 原因特定        identify   — 失敗プローブのステータス / レイテンシ / エラーを記録
+③ 処置            remediate  — 設定されたロールバック / 縮退コマンドを実行（下記の判定を通過した時のみ）
+④ 回復確認        verify     — 再プローブして healthy 復帰を確認
+⑤ ポストモーテム  postmortem — docs/ai/incidents/<target>-<ts>.md を自動生成
+```
+
+### 自動ロールバックは「更新起因のエラー」に限定
+
+障害を検知しても無条件でロールバックはしない。**ロールバックで直る＝更新（デプロイ）起因のエラーの時だけ** 発火する（`classifyFailure` / `decideRollback`。純粋関数・単体テスト済）。
+
+| エラー種別 | 分類 | ロールバック |
+| ---------- | ---- | ------------ |
+| 5xx | `server-error` | ✅ する（更新起因になり得る） |
+| 無応答（接続拒否 / タイムアウト） | `unreachable` | ✅ する（起動失敗＝壊れたデプロイ） |
+| 404 | `not-found` | ✅ する（ルート消失） |
+| 401 / 403 / 429 / 400 等の 4xx | `client-error` | ⛔ しない（認証・レート・不正リクエスト。前リビジョンに戻しても直らない） |
+| その他（想定外 2xx / 3xx） | `unknown` | ⛔ しない |
+
+任意で **デプロイ相関ゲート**（`deployCorrelationWindowMs`）を設定すると、現行リビジョンのデプロイ直後の窓内で起きた障害のみ「更新起因」とみなす（長時間 healthy に稼働後の障害は通知のみ）。判定不能時はフェイルセーフでロールバックしない。判定結果と理由はポストモーテムの「③ 処置」に `✅ rollback / ⛔ no rollback` として記録される。
+
+### サービス側（GCP-native）監視 — ローカルホスト不要
+
+ローカル cron 版（`incident_response.sh`）は常駐ホストが要るが、Cloud Run 向けには **Google のインフラにプローブさせる** 構成が堅牢。`incident_response_gcp_setup.sh` が Cloud Monitoring の **uptime チェック**（`/health` を数分ごとに Google のプローバから叩く。既定 dry-run、`--execute` で作成）を作成し、`gcp_rollback_cloudrun.sh` が現行の1つ前の READY リビジョンを解決して 100% トラフィックを戻す（Cloud Run に `PREVIOUS` キーワードは無いため実リビジョンを解決。既定 dry-run）。アラートポリシー → 通知チャネル → Cloud Function / Cloud Scheduler で完全サーバーレスの検知→ロールバックも構成できる。
+
+### 安全設計（既定 OFF・二段スイッチ）
+
+実監視・実ロールバックはデプロイ環境の認証情報と稼働 URL を要するため、`redeploy_after_merge.sh` と同じく **既定 OFF**。二段スイッチで段階的に有効化する。
+
+| 変数 | 効果 | 既定 |
+| ---- | ---- | ---- |
+| `INCIDENT_RESPONSE_ENABLED` | ループ全体を有効化（未設定なら丸ごとスキップ） | OFF |
+| `INCIDENT_AUTO_REMEDIATE` | 障害確定時にロールバックを **実行**（未設定時は `would run: …` の dry-run ログのみ） | OFF |
+
+監視の有効化だけでは本番トラフィックを触らない。設定・実行手順の詳細は [本番障害の自動対応](docs/incident-response.md) を参照。
+
+---
+
 ## クイックスタート（実行手順）
 
 ### 0. 前提
@@ -313,6 +359,7 @@ Claude Code 用の MCP サーバーは、リポジトリルートの `.mcp.json`
 - [スケジューラー](docs/scheduler.md) — ポーリング起動・動作モード・操作コマンド
 - [Webhook サーバー / Webhook モード](docs/webhook.md) — イベント駆動起動・bootstrap scan・疎通確認・常駐運用
 - [共通実行キューとログ](docs/runner-queue.md) — runner.queue.json・処理順序・ロック・retryAt・ログ
+- [本番障害の自動対応](docs/incident-response.md) — 稼働監視→エラー分類→ロールバック判定→回復確認→ポストモーテム自動生成
 - [usage-limit と Resume](docs/usage-limit-and-resume.md) — cooldown 検知・自動再実行・Resume / Session-Continue
 - [Discord Bot](docs/discord-bot.md) — セットアップ・コマンド一覧・ngrok URL 更新
 - [環境変数リファレンス](docs/environment-variables.md) — 環境変数・秘密情報の管理
