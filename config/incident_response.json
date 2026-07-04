@@ -7,13 +7,12 @@
     "rollbackCmd": "Shell command that rolls back / degrades the service (e.g. redeploy previous revision, shift traffic).",
     "localPath": "Directory to run rollbackCmd in (optional)."
   },
-  "__example__": {
-    "sota1111/toddler-private-rag": {
-      "healthUrl": "https://toddler-private-rag.example.run.app/healthz",
-      "expectStatus": 200,
-      "maxLatencyMs": 3000,
-      "rollbackCmd": "gcloud run services update-traffic toddler-private-rag --to-revisions=PREVIOUS=100 --region us-central1 --quiet",
-      "localPath": "/workspaces/toddler-private-rag"
-    }
+  "__note__": "toddler-private-rag entry below is wired to the real deployed Cloud Run backend (health endpoint verified 200). The loop is still OFF until INCIDENT_RESPONSE_ENABLED=1, and rollbackCmd is only executed when INCIDENT_AUTO_REMEDIATE=1. rollbackCmd calls scripts/ai/gcp_rollback_cloudrun.sh which resolves the real previous READY revision (Cloud Run has no 'PREVIOUS' traffic keyword) and shifts 100% traffic to it. For service-side (no-local-host) monitoring see scripts/ai/incident_response_gcp_setup.sh and docs/incident-response.md.",
+  "toddler-private-rag": {
+    "healthUrl": "https://toddler-private-rag-backend-iqrm6wvhfq-an.a.run.app/health",
+    "expectStatus": 200,
+    "maxLatencyMs": 5000,
+    "rollbackCmd": "bash scripts/ai/gcp_rollback_cloudrun.sh --service toddler-private-rag-backend --region asia-northeast1 --project gen-lang-client-0243034020 --execute",
+    "localPath": "/workspaces/ai-dev-control-plane"
   }
 }

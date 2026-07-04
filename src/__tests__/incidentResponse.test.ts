@@ -2,6 +2,7 @@ import {
   classifyProbe,
   shouldTriggerIncident,
   renderPostmortem,
+  resolvePreviousRevision,
   type IncidentRecord,
   type ProbeThresholds,
 } from '../lib/incidentResponse.js';
@@ -127,5 +128,42 @@ describe('renderPostmortem', () => {
     });
     expect(md).toContain('NOT recovered — escalate');
     expect(md).toContain('[ ] Restore service');
+  });
+});
+
+describe('resolvePreviousRevision', () => {
+  // gcloud run revisions list --sort-by=~creationTimestamp (newest-first)
+  const revs = [
+    'toddler-private-rag-backend-00294-sis',
+    'toddler-private-rag-backend-00291-yuc',
+    'toddler-private-rag-backend-00288-pud',
+  ];
+
+  test('current serving is newest → rolls back to the next revision', () => {
+    expect(resolvePreviousRevision(revs, 'toddler-private-rag-backend-00294-sis')).toBe(
+      'toddler-private-rag-backend-00291-yuc'
+    );
+  });
+
+  test('current serving is an older revision → newest that is not current', () => {
+    expect(resolvePreviousRevision(revs, 'toddler-private-rag-backend-00291-yuc')).toBe(
+      'toddler-private-rag-backend-00294-sis'
+    );
+  });
+
+  test('current unknown → assumes newest is serving, returns second newest', () => {
+    expect(resolvePreviousRevision(revs, null)).toBe('toddler-private-rag-backend-00291-yuc');
+  });
+
+  test('only one revision → no rollback target', () => {
+    expect(resolvePreviousRevision(['only-rev'], 'only-rev')).toBeNull();
+  });
+
+  test('empty list → null', () => {
+    expect(resolvePreviousRevision([], 'x')).toBeNull();
+  });
+
+  test('trims whitespace and ignores blank entries', () => {
+    expect(resolvePreviousRevision([' a ', '', '  b '], 'a')).toBe('b');
   });
 });

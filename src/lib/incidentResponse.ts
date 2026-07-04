@@ -83,6 +83,28 @@ export interface IncidentRecord {
   recovery?: RecoveryOutcome;
 }
 
+/**
+ * Resolve the Cloud Run rollback target: the newest READY revision that is NOT the one currently
+ * serving traffic. Cloud Run has no `PREVIOUS` traffic keyword — a real "roll back to the previous
+ * revision" must name an actual revision, so we pick it from `gcloud run revisions list` output
+ * (newest-first) minus the current serving revision.
+ *
+ * @param revisions  revision names, newest-first (as `gcloud run revisions list --sort-by=~creationTimestamp`).
+ * @param current    the revision currently serving 100% traffic (from the service's traffic split); may be null.
+ * @returns the rollback target revision name, or null if there is no distinct prior revision.
+ */
+export function resolvePreviousRevision(revisions: string[], current: string | null | undefined): string | null {
+  const list = (revisions || []).map((r) => (r || '').trim()).filter(Boolean);
+  if (list.length === 0) return null;
+  const cur = (current || '').trim();
+  if (!cur) {
+    // Current unknown: assume the newest is serving and roll back to the next one.
+    return list[1] ?? null;
+  }
+  const prior = list.find((r) => r !== cur);
+  return prior ?? null;
+}
+
 function stateEmoji(state: HealthState | null | undefined): string {
   switch (state) {
     case 'healthy':
