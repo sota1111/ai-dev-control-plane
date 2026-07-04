@@ -6,7 +6,8 @@ Linear is used as the external control panel for the AI development harness.
 
 The user can send instructions from outside the development environment by creating or commenting on Linear issues.
 
-Claude Code reads Linear issues, plans the work, optionally uses Gemini CLI and Codex CLI internally, and reports progress back to Linear.
+The harness reads Linear issues and runs each role through the dispatcher (`run_worker.sh`) to the
+worker configured for that role in `config/worker_roles.json`, then reports progress back to Linear.
 
 ## Basic Flow
 
@@ -15,15 +16,10 @@ User
   ↓
 Linear issue / comment
   ↓
-Claude Code
+runner → run_auto.sh (script-driven role pipeline)
   ↓
-Plan / Design / Task split
-  ↓
-Gemini CLI, if implementation is needed
-  ↓
-Codex CLI, if debugging or verification is needed
-  ↓
-Claude Code review
+for each role (task-check → decomposition → implementation → verification → acceptance → github → linear-report):
+    run_worker.sh <role> → worker per config/worker_roles.json chain (codex / claude / antigravity)
   ↓
 Linear progress / completion comment
 ```
@@ -32,7 +28,7 @@ Linear progress / completion comment
 
 The user only needs to write instructions in Linear.
 
-The user does not need to mention Gemini CLI or Codex CLI.
+The user does not need to mention any worker CLI (Codex / Claude / Antigravity).
 
 Examples:
 
@@ -93,17 +89,16 @@ Claude Code must:
 
 ## Worker Tool Policy
 
-Claude Code may internally use:
+Each role is dispatched to the worker configured in `config/worker_roles.json` (priority chain):
 
 ```text
-Gemini CLI:
-  Implementation worker
-
-Codex CLI:
-  Debugging and verification worker
+codex        : verification / task-check / debugging worker (default)
+antigravity  : implementation worker (default)
+claude       : decomposition / acceptance / github / linear-report worker (default)
 ```
 
-The user does not interact with these tools directly.
+Roles are assigned individually and can be rerouted per issue from Linear
+(`workers: role=worker`). The user does not interact with these tools directly.
 
 ## Progress Comment Template
 

@@ -2,9 +2,14 @@
 
 ## Overview
 
-Claude Code is the **sole interface between the human and all AI workers**.
-The human never speaks directly to Antigravity CLI or Codex CLI.
-From the human's perspective, Claude Code handles everything.
+There is **no single "sole orchestrator."** Each harness role is **configured individually** in
+`config/worker_roles.json` (a per-role priority chain of workers) and executed via the dispatcher
+`scripts/ai/run_worker.sh`; for a targeted issue `scripts/ai/run_auto.sh` sequences the roles as a
+script (see **Worker Dispatch** below). Claude, Codex, and Antigravity are peer workers — Claude runs
+a given role only when that role's chain selects it, not as an all-controlling orchestrator.
+
+The human steers the system through Linear/Discord and per-issue directives, and never instructs a
+worker CLI directly.
 
 ---
 
@@ -411,9 +416,10 @@ The human user communicates through either:
 1. Direct Claude Code chat
 2. Linear issue / Linear comment
 
-The human user must not be asked to directly instruct Antigravity CLI or Codex CLI.
+The human user must not be asked to directly instruct a worker CLI (Codex / Claude / Antigravity).
 
-Claude Code remains the only orchestrator.
+Role→worker assignment is configured individually in `config/worker_roles.json` and dispatched by
+`scripts/ai/run_worker.sh`; there is no single "sole orchestrator" (see **Worker Dispatch**).
 
 ### Claude Code Responsibilities With Linear
 

@@ -1,7 +1,7 @@
 # ai-dev-control-plane
 
 **AI 開発オーケストレーションの「管制塔（control plane）」**。
-人間は Linear / Discord から指示を出すだけで、Claude Code が要件整理・設計・タスク分解・実装委譲・検証・PR 作成・マージまでを自律的に回す。
+人間は Linear / Discord から指示を出すだけで、ハーネスが各ロール（タスク確認・分解・実装・検証・受け入れ・GitHub・Linear報告）を **個別に設定したワーカー**（Claude / Codex / Antigravity）へディスパッチし、実装・検証・PR 作成・マージまでを自律的に回す。単一の「唯一のオーケストレータ」は存在しない。
 
 ---
 
@@ -24,11 +24,11 @@
 
 設計の根幹にある原則:
 
-1. **単一の窓口（Single Interface）**
-   人間が会話する相手は常に **Claude Code** ただ一つ。Antigravity CLI / Codex CLI といったワーカーへ人間が直接話しかけることはない。人間から見れば「Claude Code がすべてをやってくれる」状態を保つ。
+1. **人間の窓口は Linear / Discord（Single Interface）**
+   人間が指示を出す先は **Linear / Discord** に一本化する。Claude / Codex / Antigravity といったワーカー CLI へ人間が直接話しかけることはない。どのワーカーが何を担当するかはハーネスが設定に従って自動で振り分ける。
 
-2. **オーケストレーターは実装しない（Separation of Concerns）**
-   Claude Code は **判断・委譲・最終承認** に専念する。多ファイル実装・lint/test の反復・長時間ログ解析などの重い作業は、それぞれ専用ワーカーへ渡す。Claude Code 自身は「何を・誰に・どうやらせるか」を決める。
+2. **役割ごとに担当ワーカーを個別設定（Per-Role Assignment）**
+   各ロール（task-check / decomposition / implementation / verification / acceptance / github / linear-report）は `config/worker_roles.json` の **優先度チェーン**で個別にワーカーへ割り当てる。ディスパッチャ `scripts/ai/run_worker.sh` が選択・フォールバックを担い、対象 issue では `run_auto.sh` が全工程をスクリプトとして順に駆動する。単一の「全体を統括するオーケストレータ」は置かない（Claude はチェーンが選んだロールのワーカーとして参加する）。
 
 3. **Linear を外部コマンド／状態インターフェースに（State as the Source of Truth）**
    進捗・指示・優先度変更・レビュー依頼はすべて **Linear の Issue / コメント** を通じて行う。開発マシンの前にいなくても、スマホから Linear を見れば進捗が分かり、コメントを書けば指示になる。
@@ -49,10 +49,12 @@
 人間（Linear / Discord から指示）
         │  「これ作って」「ここ直して」
         ▼
-   Claude Code（管制塔）── 要件整理・設計・タスク分解・最終承認
-        │
-        ├─ 実装は Antigravity CLI へ委譲
-        ├─ 検証は Codex CLI へ委譲
+   run_auto.sh（スクリプト駆動ロールパイプライン）
+        │  各ロールを run_worker.sh <role> にディスパッチ
+        │  （担当ワーカーは config/worker_roles.json の優先度チェーンで個別設定）
+        ├─ task-check / verification … 既定 Codex
+        ├─ implementation … 既定 Antigravity（非応答時はチェーンで次候補へ）
+        ├─ decomposition / acceptance / github / linear-report … 既定 Claude
         └─ GitHub で PR 作成・マージ、Linear へ状態を同期
         ▲
         │  進捗・完了は Linear / Discord に自動報告
