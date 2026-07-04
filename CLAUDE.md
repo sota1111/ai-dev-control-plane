@@ -119,6 +119,24 @@ workers: implementation=codex, verification=claude
   `antigravity` (alias `agy`).
 - A chain may list fallbacks with `>` (or `|` / `/`): `workers: implementation=codex>claude`.
 - `workers:` may appear in the description or any comment; the **newest occurrence wins** for a role.
+
+Sample Linear issue description (only the `workers:` line is interpreted; it may sit among other text):
+
+```text
+## 目的
+ログイン画面のバグを修正する
+
+workers: implementation=codex, verification=codex
+```
+
+Sample Linear comment to reroute a role later (newest wins, so a comment can override the description
+before the run starts):
+
+```text
+implementation が antigravity で詰まったので claude に切り替えます。
+workers: implementation=claude
+```
+
 - Mechanics: at pipeline start `run_auto.sh` calls `runner-cli resolve-worker-roles <issue>`, which reads
   the issue's description + comments, merges the overrides onto the base config, writes a per-issue
   `docs/ai/pipeline/worker_roles.<issue>.json`, and exports `WORKER_ROLES_FILE` so every `run_worker.sh`

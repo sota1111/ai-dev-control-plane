@@ -161,6 +161,34 @@ workers: implementation=codex, verification=claude
 - 説明文でもコメントでも可。同じロールは**最新の記述が優先**。パイプライン開始時に `run_auto.sh` が
   `runner-cli resolve-worker-roles` で解決し、`WORKER_ROLES_FILE` として全 `run_worker.sh` に適用する。
 
+**Linear 記述サンプル**
+
+issue 説明文に直接書く例（他の本文と混在してよい。`workers:` の行だけが解釈される）:
+
+```text
+## 目的
+ログイン画面のバグを修正する
+
+## 補足
+- 実装は Codex に任せ、検証も Codex で通したい
+workers: implementation=codex, verification=codex
+```
+
+後からコメントで担当を切り替える例（最新の記述が優先されるので、実行前ならコメント追記で上書き可）:
+
+```text
+implementation が antigravity で詰まったので claude に切り替えます。
+workers: implementation=claude
+```
+
+フォールバック付き（第一候補 codex、ダメなら claude）や複数ロール指定の例:
+
+```text
+workers: implementation=codex>claude, verification=codex, github=claude
+```
+
+> 書かなかったロールは `config/worker_roles.json` の既定チェーンのまま。`workers:` 行が無ければ完全に既定動作。
+
 詳細は [`CLAUDE.md`](./CLAUDE.md) の「Worker Dispatch」節、および [`docs/runner-queue.md`](./docs/runner-queue.md) を参照。
 
 ### ワーカー非応答時のフォールバック
