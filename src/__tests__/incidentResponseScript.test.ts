@@ -132,4 +132,64 @@ describe('incident_response.sh', () => {
     expect(r.stdout).toContain('recovery probe');
     expect(fs.existsSync(marker)).toBe(true);
   });
+
+  // SOT-1520 REOPEN#4 — limit rollback to update-related errors.
+  const CLIENT_ERROR_PROBE = 'echo "0 401 30 unexpected_status"'; // 4xx = not update-related
+
+  test('4xx client error + auto-remediate ON → rollback SKIPPED (not update-related)', () => {
+    const marker = path.join(tmpDir, 'ran.marker');
+    const r = run(['owner/repo'], {
+      INCIDENT_RESPONSE_ENABLED: '1',
+      INCIDENT_AUTO_REMEDIATE: '1',
+      INCIDENT_PROBE_CMD: CLIENT_ERROR_PROBE,
+      INCIDENT_ROLLBACK_CMD: `touch ${marker}`,
+      INCIDENT_FAILURE_THRESHOLD: '1',
+      INCIDENT_PROBE_ATTEMPTS: '1',
+      INCIDENT_DIR: tmpDir,
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('class=client-error');
+    expect(r.stdout).toContain('not rolling back');
+    expect(fs.existsSync(marker)).toBe(false); // rollback command must NOT have run
+    // postmortem still written and records the no-rollback decision
+    const files = fs.readdirSync(tmpDir);
+    expect(files.length).toBe(1);
+    const md = fs.readFileSync(path.join(tmpDir, files[0]), 'utf8');
+    expect(md).toContain('⛔ no rollback');
+  });
+
+  test('5xx server error + auto-remediate ON → rollback EXECUTED (update-related)', () => {
+    const marker = path.join(tmpDir, 'ran.marker');
+    const r = run(['owner/repo'], {
+      INCIDENT_RESPONSE_ENABLED: '1',
+      INCIDENT_AUTO_REMEDIATE: '1',
+      INCIDENT_PROBE_CMD: UNHEALTHY_PROBE, // 503
+      INCIDENT_ROLLBACK_CMD: `touch ${marker}`,
+      INCIDENT_FAILURE_THRESHOLD: '1',
+      INCIDENT_PROBE_ATTEMPTS: '1',
+      INCIDENT_DIR: tmpDir,
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('class=server-error');
+    expect(r.stdout).toContain('remediating');
+    expect(fs.existsSync(marker)).toBe(true);
+  });
+
+  test('correlation window: 5xx long after deploy → rollback SKIPPED (not update-related)', () => {
+    const marker = path.join(tmpDir, 'ran.marker');
+    const r = run(['owner/repo'], {
+      INCIDENT_RESPONSE_ENABLED: '1',
+      INCIDENT_AUTO_REMEDIATE: '1',
+      INCIDENT_PROBE_CMD: UNHEALTHY_PROBE, // 503 server-error (class-eligible)
+      INCIDENT_ROLLBACK_CMD: `touch ${marker}`,
+      INCIDENT_FAILURE_THRESHOLD: '1',
+      INCIDENT_PROBE_ATTEMPTS: '1',
+      INCIDENT_DEPLOY_CORRELATION_WINDOW_MS: '60000', // 1 min window
+      INCIDENT_CURRENT_REVISION_DEPLOYED_AT: '2000-01-01T00:00:00Z', // long ago
+      INCIDENT_DIR: tmpDir,
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('not rolling back');
+    expect(fs.existsSync(marker)).toBe(false);
+  });
 });

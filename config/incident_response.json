@@ -5,7 +5,10 @@
     "expectStatus": "Expected HTTP status for a healthy probe (default 200).",
     "maxLatencyMs": "Latency above which an otherwise-OK probe is 'degraded' (0 disables).",
     "rollbackCmd": "Shell command that rolls back / degrades the service (e.g. redeploy previous revision, shift traffic).",
-    "localPath": "Directory to run rollbackCmd in (optional)."
+    "localPath": "Directory to run rollbackCmd in (optional).",
+    "rollbackOn": "(SOT-1520 REOPEN#4) Array of failure classes eligible for rollback — rollback runs ONLY for update-related errors. Valid: server-error (5xx), unreachable (no response), not-found (404), client-error (4xx), unknown. Default (omit) = ['server-error','unreachable','not-found']. Excludes client-error so 4xx auth/rate/bad-request never triggers a rollback (reverting the deploy would not fix it).",
+    "deployCorrelationWindowMs": "(optional, default 0=off) Only failures within this many ms of currentRevisionDeployedAt count as update-related; a revision that served healthily far longer and only now fails is treated as NOT caused by the update (alert only).",
+    "currentRevisionDeployedAt": "(optional) ISO time the current revision was deployed, used with deployCorrelationWindowMs. Unknown ⇒ correlation gate skipped, error-class gate alone decides."
   },
   "__note__": "toddler-private-rag entry below is wired to the real deployed Cloud Run backend (health endpoint verified 200). The loop is still OFF until INCIDENT_RESPONSE_ENABLED=1, and rollbackCmd is only executed when INCIDENT_AUTO_REMEDIATE=1. rollbackCmd calls scripts/ai/gcp_rollback_cloudrun.sh which resolves the real previous READY revision (Cloud Run has no 'PREVIOUS' traffic keyword) and shifts 100% traffic to it. For service-side (no-local-host) monitoring see scripts/ai/incident_response_gcp_setup.sh and docs/incident-response.md.",
   "toddler-private-rag": {
@@ -13,6 +16,7 @@
     "expectStatus": 200,
     "maxLatencyMs": 5000,
     "rollbackCmd": "bash scripts/ai/gcp_rollback_cloudrun.sh --service toddler-private-rag-backend --region asia-northeast1 --project gen-lang-client-0243034020 --execute",
-    "localPath": "/workspaces/ai-dev-control-plane"
+    "localPath": "/workspaces/ai-dev-control-plane",
+    "rollbackOn": ["server-error", "unreachable", "not-found"]
   }
 }

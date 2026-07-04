@@ -35,6 +35,12 @@
 #   INCIDENT_PROBE_TIMEOUT     (default 10) curl --max-time seconds
 #   INCIDENT_DIR               (default docs/ai/incidents) where postmortems are written
 #   INCIDENT_PROBE_CMD         test/override hook: prints "<ok> <httpStatus> <latencyMs> [error]"
+# Update-related rollback gating (SOT-1520 REOPEN#4) — rollback only for errors a rollback can fix:
+#   INCIDENT_ROLLBACK_ON                     comma-separated failure classes eligible for rollback
+#                                            (default server-error,unreachable,not-found; excludes 4xx client-error)
+#   INCIDENT_DEPLOY_CORRELATION_WINDOW_MS    (default 0 = off) only failures within this many ms of the
+#                                            current revision's deploy count as update-related
+#   INCIDENT_CURRENT_REVISION_DEPLOYED_AT    ISO deploy time of the current revision (for the window; optional)
 set -uo pipefail
 
 CONTROL_PLANE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -70,6 +76,10 @@ EXPECT_STATUS="${INCIDENT_EXPECT_STATUS:-$(read_cfg expectStatus)}"; EXPECT_STAT
 MAX_LATENCY_MS="${INCIDENT_MAX_LATENCY_MS:-$(read_cfg maxLatencyMs)}"; MAX_LATENCY_MS="${MAX_LATENCY_MS:-0}"
 ROLLBACK_CMD="${INCIDENT_ROLLBACK_CMD:-$(read_cfg rollbackCmd)}"
 LOCAL_PATH="${LOCAL_PATH_ARG:-$(read_cfg localPath)}"
+# SOT-1520 REOPEN#4 — limit rollback to update-related errors.
+ROLLBACK_ON="${INCIDENT_ROLLBACK_ON:-$(read_cfg rollbackOn)}"
+CORRELATION_WINDOW_MS="${INCIDENT_DEPLOY_CORRELATION_WINDOW_MS:-$(read_cfg deployCorrelationWindowMs)}"; CORRELATION_WINDOW_MS="${CORRELATION_WINDOW_MS:-0}"
+DEPLOYED_AT="${INCIDENT_CURRENT_REVISION_DEPLOYED_AT:-$(read_cfg currentRevisionDeployedAt)}"
 THRESHOLD="${INCIDENT_FAILURE_THRESHOLD:-3}"
 ATTEMPTS="${INCIDENT_PROBE_ATTEMPTS:-$THRESHOLD}"
 INTERVAL="${INCIDENT_PROBE_INTERVAL:-0}"
@@ -133,9 +143,36 @@ fi
 echo "[INCIDENT] $TARGET INCIDENT confirmed: $unhealthy/$THRESHOLD probes unhealthy (last status=$last_status)"
 DETECTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+# ── ②b Cause classification: is this error update-related (rollback-eligible)? ─────────────────────
+# Limit rollback to errors that a rollback can plausibly fix (server-side / unreachable / route-gone),
+# and — when a deploy time is known — that correlate with the current deployment. Delegate the decision
+# to the same pure logic the unit tests cover (src/lib/incidentResponse.ts) via a tiny tsx CLI.
+DECISION_LINE=""
+run_decision() {
+  HTTP_STATUS="$last_status" EXPECT_STATUS="$EXPECT_STATUS" ROLLBACK_ON="$ROLLBACK_ON" \
+  CORRELATION_WINDOW_MS="$CORRELATION_WINDOW_MS" DEPLOYED_AT="$DEPLOYED_AT" DETECTED_AT="$DETECTED_AT" \
+  "$@" "$CONTROL_PLANE_DIR/src/incident-rollback-decision-cli.ts" 2>/dev/null
+}
+TSX_BIN="$CONTROL_PLANE_DIR/node_modules/.bin/tsx"
+if [ -x "$TSX_BIN" ]; then
+  DECISION_LINE="$(run_decision "$TSX_BIN")"
+else
+  DECISION_LINE="$(cd "$CONTROL_PLANE_DIR" && HTTP_STATUS="$last_status" EXPECT_STATUS="$EXPECT_STATUS" ROLLBACK_ON="$ROLLBACK_ON" CORRELATION_WINDOW_MS="$CORRELATION_WINDOW_MS" DEPLOYED_AT="$DEPLOYED_AT" DETECTED_AT="$DETECTED_AT" npx tsx src/incident-rollback-decision-cli.ts 2>/dev/null)"
+fi
+ROLLBACK_ALLOWED="$(printf '%s' "$DECISION_LINE" | sed -n 's/.*ROLLBACK=\([a-z]*\).*/\1/p')"
+UPDATE_RELATED="$(printf '%s' "$DECISION_LINE" | sed -n 's/.*UPDATE_RELATED=\([a-z]*\).*/\1/p')"
+FAILURE_CLASS="$(printf '%s' "$DECISION_LINE" | sed -n 's/.*CLASS=\([a-z-]*\).*/\1/p')"; FAILURE_CLASS="${FAILURE_CLASS:-unknown}"
+DECISION_REASON="$(printf '%s' "$DECISION_LINE" | sed -n 's/.*REASON=//p')"
+# Fail-safe: if the decision could not be computed (tsx missing/broke), do NOT roll back automatically.
+[ -z "$ROLLBACK_ALLOWED" ] && { ROLLBACK_ALLOWED="false"; UPDATE_RELATED="false"; DECISION_REASON="rollback decision unavailable (tsx failed) — not rolling back automatically"; }
+echo "[INCIDENT] cause: class=$FAILURE_CLASS update-related=$UPDATE_RELATED rollback=$ROLLBACK_ALLOWED — $DECISION_REASON"
+
 # ── ③ Remediation: rollback / degrade (dry-run unless INCIDENT_AUTO_REMEDIATE) ────────────────────
+# Rollback runs only when the error is update-related (ROLLBACK_ALLOWED=true).
 REMEDIATE_ATTEMPTED=false; REMEDIATE_ENABLED=false; REMEDIATE_EXIT=null
-if [ -n "$ROLLBACK_CMD" ]; then
+if [ "$ROLLBACK_ALLOWED" != "true" ]; then
+  echo "[INCIDENT] not rolling back $TARGET — error not update-related ($FAILURE_CLASS): $DECISION_REASON"
+elif [ -n "$ROLLBACK_CMD" ]; then
   if truthy "${INCIDENT_AUTO_REMEDIATE:-}"; then
     REMEDIATE_ENABLED=true; REMEDIATE_ATTEMPTED=true
     echo "[INCIDENT] remediating $TARGET: $ROLLBACK_CMD"
@@ -170,6 +207,7 @@ INCIDENT_JSON="$(
   T="$TARGET" DAT="$DETECTED_AT" LS="$last_status" LL="$last_latency" LE="$last_error" \
   ES="$EXPECT_STATUS" ML="$MAX_LATENCY_MS" UH="$unhealthy" \
   RA="$REMEDIATE_ATTEMPTED" RE="$REMEDIATE_ENABLED" RC="$ROLLBACK_CMD" RX="$REMEDIATE_EXIT" RS="$RECOVERY_STATE" \
+  DRB="$ROLLBACK_ALLOWED" DUR="$UPDATE_RELATED" DFC="$FAILURE_CLASS" DRE="$DECISION_REASON" \
   node -e '
     const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
     const rec = {
@@ -184,6 +222,12 @@ INCIDENT_JSON="$(
         enabled: process.env.RE === "true",
         command: process.env.RC ? process.env.RC : null,
         exitCode: process.env.RX === "null" ? null : num(process.env.RX),
+        decision: {
+          rollback: process.env.DRB === "true",
+          updateRelated: process.env.DUR === "true",
+          failureClass: process.env.DFC || "unknown",
+          reason: process.env.DRE || "",
+        },
       },
       recovery: {
         attempted: process.env.RA === "true",
