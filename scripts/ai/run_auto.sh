@@ -326,6 +326,11 @@ if [ "$PIPELINE_ENABLED" -eq 1 ] && [ -n "$TARGET_ISSUE" ]; then
   run_role_pipeline "$TARGET_ISSUE"
   EXIT_CODE=$?
   set -e
+  # Loop-breaker (SOT-1438): a finished run must not leave the issue Todo/In Progress, or the
+  # webhook-reaper re-enqueues it forever as a "stranded active issue" and the pipeline loops. If the
+  # pipeline did not advance it (e.g. PLAN / blocked / needs-human), move it to In Review. Idempotent
+  # / best-effort: no-op when already In Review/terminal; never changes the run's exit code.
+  run_cli ensure-issue-reviewed "$TARGET_ISSUE" >/dev/null 2>&1 || true
   echo ""
   echo "== Finished pipeline: $(date +"%Y%m%d_%H%M%S") (exit: ${EXIT_CODE}) =="
   exit "$EXIT_CODE"

@@ -127,6 +127,23 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'ensure-issue-reviewed': {
+      // Loop-breaker (SOT-1438): after a pipeline run finishes, an issue must not be left in an active
+      // (Todo / In Progress) state — otherwise the webhook-reaper keeps re-enqueuing it as a "stranded
+      // active issue" and the pipeline loops, re-posting the same comments. Move it to In Review if it
+      // is still active. Idempotent / fail-open (does nothing if already In Review / terminal / missing).
+      const issueId = args[0];
+      if (!issueId) {
+        process.stderr.write('Usage: runner-cli.js ensure-issue-reviewed <issueIdentifier>\n');
+        process.exit(1);
+      }
+      const comment = `## 自動処理が一巡しました\n\nこの Issue のパイプラインが一巡し、自動では完了状態に到達しなかったため **In Review** に移行しました（無限再処理の防止）。内容を確認し、続行が必要なら Todo/In Progress に戻してください。`;
+      const moved = await runner.setIssueInReview(issueId, comment).catch(() => false);
+      runner.log('WORKER_ROLES', `ensure-issue-reviewed ${issueId}: ${moved ? 'moved to In Review' : 'no change (already reviewed/terminal)'}`, { issue: issueId });
+      process.stdout.write(moved ? 'moved' : 'nochange');
+      process.exit(0);
+      break;
+    }
     case 'parse-usage-limit-epoch': {
       let input = '';
       process.stdin.setEncoding('utf8');

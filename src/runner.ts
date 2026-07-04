@@ -69,6 +69,7 @@ import {
   hasPendingIssues,
   fetchActiveIssues,
   setIssueInProgress,
+  setIssueInReview,
   finalizeParentIfChildrenComplete,
   getIssueExecutionEligibility,
 } from './lib/linearApi.js';
@@ -1375,6 +1376,7 @@ export {
   getCurrentIssue,
   clearCurrentIssue,
   setIssueInProgress,
+  setIssueInReview,
   finalizeParentIfChildrenComplete,
   getIssueExecutionEligibility,
   getIssueProjectName,

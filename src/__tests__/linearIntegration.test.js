@@ -273,4 +273,36 @@ describe('Linear Integration', () => {
       expect(sanitizeLabelIds(null)).toEqual([]);
     });
   });
+
+  describe('setIssueInReview (reaper loop-breaker, SOT-1438)', () => {
+    it('moves an active (In Progress) issue to In Review and posts the comment', async () => {
+      linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'In Progress', type: 'started' }, team: { id: 't1' } } } });
+      linearMock.enqueue({ data: { workflowStates: { nodes: [
+        { id: 'sp', name: 'In Progress', type: 'started' },
+        { id: 'sr', name: 'In Review', type: 'started' },
+      ] } } });
+      linearMock.enqueue({ data: { issueUpdate: { success: true } } });
+      linearMock.enqueue({ data: { commentCreate: { success: true } } });
+
+      const moved = await runner.setIssueInReview('SOT-1', 'ran a pass');
+      expect(moved).toBe(true);
+      const update = linearMock.calls.find((c) => c.query.includes('issueUpdate'));
+      expect(update.variables.stateId).toBe('sr');
+      expect(linearMock.calls.some((c) => c.query.includes('commentCreate'))).toBe(true);
+    });
+
+    it('is a no-op when the issue is already In Review (no mutation)', async () => {
+      linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'In Review', type: 'started' }, team: { id: 't1' } } } });
+      const moved = await runner.setIssueInReview('SOT-1');
+      expect(moved).toBe(false);
+      expect(linearMock.calls).toHaveLength(1); // only the state query, no workflowStates/issueUpdate
+    });
+
+    it('is a no-op for a terminal (Done) issue', async () => {
+      linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'Done', type: 'completed' }, team: { id: 't1' } } } });
+      const moved = await runner.setIssueInReview('SOT-1');
+      expect(moved).toBe(false);
+      expect(linearMock.calls).toHaveLength(1);
+    });
+  });
 });

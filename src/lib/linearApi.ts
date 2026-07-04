@@ -374,6 +374,57 @@ export async function setIssueInProgress(issueId: string): Promise<void> {
   }
 }
 
+/**
+ * Advance an issue to "In Review" IF it is still in an active (non-terminal, non-hold) state. A
+ * completed autonomous run must never leave an issue in Todo/In Progress — otherwise the webhook-reaper
+ * repeatedly re-enqueues it as a "stranded active issue" (false positive) and the pipeline loops,
+ * re-posting the same comments (SOT-1438 loop). Idempotent / fail-open: does nothing and never throws
+ * when the issue is missing, already terminal, or already In Review. Returns true only when it moved
+ * the issue. `commentBody`, when given, is posted after the transition.
+ */
+export async function setIssueInReview(issueId: string, commentBody?: string): Promise<boolean> {
+  const { log } = requireDeps();
+  try {
+    const data: any = await linearQuery(
+      'query($id: String!) { issue(id: $id) { id state { name type } team { id } } }',
+      { id: issueId }
+    );
+    const issue = data.issue;
+    if (!issue) return false;
+    if (isTerminalState(issue.state)) return false;
+    if ((issue.state?.name || '').toLowerCase() === 'in review') return false;
+
+    // In Progress と In Review はどちらも type "started" のため、name で In Review を解決する。
+    const statesData: any = await linearQuery(
+      'query($teamId: String!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
+      { teamId: issue.team.id }
+    );
+    const reviewState = (statesData.workflowStates?.nodes || []).find(
+      (s: any) => (s.name || '').toLowerCase() === 'in review'
+    );
+    if (!reviewState) {
+      log('WEBHOOK', `setIssueInReview: no In Review state for team ${issue.team.id}, skip`, { issue: issueId });
+      return false;
+    }
+
+    await linearQuery(
+      'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
+      { id: issue.id, stateId: reviewState.id }
+    );
+    if (commentBody) {
+      await linearQuery(
+        'mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }',
+        { issueId: issue.id, body: commentBody }
+      );
+    }
+    log('WEBHOOK', `setIssueInReview: ${issueId} -> In Review`, { issue: issueId });
+    return true;
+  } catch (err: any) {
+    log('ERROR', `setIssueInReview failed: ${err.message}`, { issue: issueId });
+    return false;
+  }
+}
+
 // When a CHILD issue reaches a terminal state, advance its parent to In Review if all
 // of the parent's children are now terminal. Child issues are processed in independent
 // Linear-webhook single-issue runs, so without this nobody returns to finalize the
