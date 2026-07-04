@@ -124,6 +124,25 @@ fi
 # On a mid-processing handoff, run_worker.sh points WORKER_HANDOFF_REPORT at the previous worker's
 # partial report so this worker continues the work instead of restarting from scratch.
 PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
+
+# Constrain the dispatched worker (SOT-1459). This Claude runs in the repo root and auto-loads
+# CLAUDE.md — the ORCHESTRATOR spec (select issues, decompose, run workers, drive the pipeline). A
+# dispatched worker must NOT act on those orchestrator instructions, or it would spawn concurrent work
+# and process other issues. Pin it to exactly one role for one issue and forbid launching runs.
+PROMPT_CONTENT="# YOU ARE A CONSTRAINED WORKER — NOT THE ORCHESTRATOR
+
+You were dispatched by scripts/ai/run_worker.sh to perform EXACTLY ONE role for the single target issue
+described below / in docs/ai/pipeline/context.md. CLAUDE.md in this repo describes the ORCHESTRATOR;
+IGNORE its instructions about selecting issues, decomposing, driving the pipeline, or processing any
+other issue. Hard rules:
+- Do ONLY the one role task in this prompt, for ONLY the one target issue. Then write your report and stop.
+- Do NOT run scripts/ai/run_auto.sh, scripts/ai/run_worker.sh, scripts/ai/scheduler.sh, the webhook
+  server, or the runner queue/drain. Do NOT spawn or trigger any other run. Do NOT process other issues.
+- Do NOT run anything in the background or start long-lived processes.
+
+---
+
+$PROMPT_CONTENT"
 if [ -n "${WORKER_HANDOFF_REPORT:-}" ] && [ -s "${WORKER_HANDOFF_REPORT:-/nonexistent}" ]; then
   PROMPT_CONTENT="## Handoff from previous worker (${WORKER_HANDOFF_FROM:-unknown})
 
