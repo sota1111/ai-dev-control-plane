@@ -104,6 +104,27 @@ participates as the worker its chain selects, not as an orchestrator). Escape ha
 (or a run with no issue id, e.g. a manual queue scan) falls back to the legacy single Claude-orchestrator
 launch, which routes each role through the dispatcher via its prompt instructions.
 
+### Per-issue worker override from Linear (SOT-1459)
+
+A human can steer which worker handles a role for **one issue** by writing a directive line in the Linear
+issue description or a comment:
+
+```
+workers: implementation=codex, verification=claude
+```
+
+- Each `role=chain` pair overrides that role's worker chain **for this issue's pipeline only**; roles not
+  mentioned keep the `config/worker_roles.json` default. Roles: `task-check`, `decomposition`,
+  `implementation`, `verification`, `acceptance`, `github`, `linear-report`. Workers: `claude`, `codex`,
+  `antigravity` (alias `agy`).
+- A chain may list fallbacks with `>` (or `|` / `/`): `workers: implementation=codex>claude`.
+- `workers:` may appear in the description or any comment; the **newest occurrence wins** for a role.
+- Mechanics: at pipeline start `run_auto.sh` calls `runner-cli resolve-worker-roles <issue>`, which reads
+  the issue's description + comments, merges the overrides onto the base config, writes a per-issue
+  `docs/ai/pipeline/worker_roles.<issue>.json`, and exports `WORKER_ROLES_FILE` so every `run_worker.sh`
+  in the run uses it. Fail-open: no directive / fetch error → the default config is used. Parser +
+  merge: `src/lib/workerRoleDirective.ts`.
+
 ---
 
 ## Worker Non-Response Fallback Policy

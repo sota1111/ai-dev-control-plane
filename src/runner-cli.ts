@@ -1,4 +1,5 @@
 'use strict';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
@@ -19,6 +20,8 @@ import { notifyWorkerReport } from './lib/workerReportNotifier.js';
 import { formatOutcomeSummary } from './lib/outcomeStats.js';
 import { classifyWorkerFailure, writeAuthUnhealthy, type WorkerName } from './lib/workerHealth.js';
 import { workerAuthUnhealthyTtlSeconds } from './config/env.js';
+import { loadWorkerRolesConfig, type WorkerRoleConfig } from './lib/workerRoles.js';
+import { parseWorkerRoleDirectives, mergeWorkerRoleOverrides } from './lib/workerRoleDirective.js';
 
 const [,, command, ...args] = process.argv;
 
@@ -62,6 +65,65 @@ async function main() {
 
       runner.log('CLASSIFY', `${issueId} → type=${result.type} worker=${result.worker}`, { issue: issueId, reason: result.reason });
       process.stdout.write(JSON.stringify(result) + '\n');
+      process.exit(0);
+      break;
+    }
+    case 'resolve-worker-roles': {
+      // Per-issue worker override (SOT-1459): read `workers: role=chain` directives from the issue
+      // description + comments, merge onto config/worker_roles.json, and (if any override) write a
+      // per-issue merged config, printing its path to stdout. Prints empty stdout when there is no
+      // override or on any failure (fail-open: the pipeline keeps the default config).
+      const issueId = args[0];
+      if (!issueId) {
+        process.stderr.write('Usage: runner-cli.js resolve-worker-roles <issueIdentifier> [baseConfigPath]\n');
+        process.exit(1);
+      }
+      const baseConfigPath = args[1] || path.join(__dirname, '..', 'config', 'worker_roles.json');
+
+      let text = '';
+      try {
+        const data: any = await runner.linearQuery(
+          'query($id: String!) { issue(id: $id) { description comments(first: 50) { nodes { body } } } }',
+          { id: issueId },
+        );
+        const description: string = typeof data?.issue?.description === 'string' ? data.issue.description : '';
+        const comments: string[] = (data?.issue?.comments?.nodes || []).map((n: any) => (typeof n?.body === 'string' ? n.body : ''));
+        // Description first, then comments oldest→newest so the newest directive wins.
+        text = [description, ...comments].join('\n');
+      } catch (err: any) {
+        process.stderr.write(`resolve-worker-roles: could not fetch issue ${issueId}: ${err?.message || err}\n`);
+        process.stdout.write('');
+        process.exit(0);
+      }
+
+      const { overrides, warnings } = parseWorkerRoleDirectives(text);
+      for (const w of warnings) process.stderr.write(`resolve-worker-roles: ${w}\n`);
+      const overriddenRoles = Object.keys(overrides);
+      if (overriddenRoles.length === 0) {
+        process.stdout.write('');
+        process.exit(0);
+      }
+
+      let base: WorkerRoleConfig;
+      try {
+        base = loadWorkerRolesConfig(baseConfigPath);
+      } catch (err: any) {
+        process.stderr.write(`resolve-worker-roles: base config invalid (${baseConfigPath}): ${err?.message || err}\n`);
+        process.stdout.write('');
+        process.exit(0);
+      }
+
+      const merged = mergeWorkerRoleOverrides(base, overrides);
+      const outDir = path.join(__dirname, '..', 'docs', 'ai', 'pipeline');
+      fs.mkdirSync(outDir, { recursive: true });
+      const safeIssue = String(issueId).replace(/[^a-zA-Z0-9_-]/g, '_');
+      const outPath = path.join(outDir, `worker_roles.${safeIssue}.json`);
+      fs.writeFileSync(outPath, JSON.stringify(merged, null, 2));
+
+      const summary = overriddenRoles.map((r) => `${r}=[${(overrides as any)[r].join('>')}]`).join(', ');
+      process.stderr.write(`resolve-worker-roles: ${issueId} overrides ${summary} → ${outPath}\n`);
+      runner.log('WORKER_ROLES', `${issueId} per-issue override: ${summary}`, { issue: issueId });
+      process.stdout.write(outPath);
       process.exit(0);
       break;
     }

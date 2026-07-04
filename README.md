@@ -149,6 +149,18 @@
   ループ（上限 `PIPELINE_MAX_DEBUG_CYCLES`、既定 2）/ `BLOCKED`・チェーン全滅→停止（exit 70、要人間）。
 - `PIPELINE_MODE=0` または issue 未指定（手動キュー走査）は、レガシーの単一 Claude オーケストレータ起動へ退避。
 
+**Linear からの per-issue worker 指定**: issue の説明文またはコメントに `workers: role=worker[, ...]` の
+1 行を書くと、その issue のパイプラインだけ担当 worker を上書きできる（書かないロールは既定チェーン）。
+
+```
+workers: implementation=codex, verification=claude
+```
+
+- ロール: task-check / decomposition / implementation / verification / acceptance / github / linear-report
+- worker: claude / codex / antigravity（別名 `agy`）。フォールバックは `>` 区切り（例 `implementation=codex>claude`）
+- 説明文でもコメントでも可。同じロールは**最新の記述が優先**。パイプライン開始時に `run_auto.sh` が
+  `runner-cli resolve-worker-roles` で解決し、`WORKER_ROLES_FILE` として全 `run_worker.sh` に適用する。
+
 詳細は [`CLAUDE.md`](./CLAUDE.md) の「Worker Dispatch」節、および [`docs/runner-queue.md`](./docs/runner-queue.md) を参照。
 
 ### ワーカー非応答時のフォールバック
