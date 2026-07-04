@@ -137,6 +137,12 @@ implementation が antigravity で詰まったので claude に切り替えま�
 workers: implementation=claude
 ```
 
+Sample specifying ALL seven roles at once in one line (pins every stage's worker for this issue):
+
+```text
+workers: task-check=codex, decomposition=claude, implementation=antigravity, verification=codex, acceptance=claude, github=claude, linear-report=claude
+```
+
 - Mechanics: at pipeline start `run_auto.sh` calls `runner-cli resolve-worker-roles <issue>`, which reads
   the issue's description + comments, merges the overrides onto the base config, writes a per-issue
   `docs/ai/pipeline/worker_roles.<issue>.json`, and exports `WORKER_ROLES_FILE` so every `run_worker.sh`

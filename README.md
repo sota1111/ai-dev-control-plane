@@ -187,6 +187,20 @@ workers: implementation=claude
 workers: implementation=codex>claude, verification=codex, github=claude
 ```
 
+7 ロール全てを 1 行でまとめて明示指定する例（この issue のパイプライン全工程の担当 worker を確定させる）:
+
+```text
+workers: task-check=codex, decomposition=claude, implementation=antigravity, verification=codex, acceptance=claude, github=claude, linear-report=claude
+```
+
+複数行に分けても同じ（各行の `workers:` が積算され、同じロールは最後の行が優先）:
+
+```text
+workers: task-check=codex, decomposition=claude, implementation=antigravity
+workers: verification=codex, acceptance=claude
+workers: github=claude, linear-report=claude
+```
+
 > 書かなかったロールは `config/worker_roles.json` の既定チェーンのまま。`workers:` 行が無ければ完全に既定動作。
 
 詳細は [`CLAUDE.md`](./CLAUDE.md) の「Worker Dispatch」節、および [`docs/runner-queue.md`](./docs/runner-queue.md) を参照。
