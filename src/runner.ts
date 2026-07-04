@@ -43,6 +43,7 @@ import {
   loadInflight,
   saveInflight,
   reapStaleInflight,
+  reapLeakedInflightAtStartup,
   reapDeadDetachedSentinels,
   reapCompletedDetachedRuns,
   addInflight,
@@ -553,6 +554,36 @@ function getCurrentIssue(): { issueId: string; issueIdentifier?: string; started
 
 function isQueuedOrRunning(issueId: string): boolean {
   return isQueued(issueId) || isInflight(issueId);
+}
+
+// Startup reconciliation (SOT-1438): a spawner (webhook-server / scheduler) that was hard-killed
+// (SIGKILL) leaves leaked state — inflight entries and a lock file held by a now-dead PID — which make
+// isQueuedOrRunning() skip that issue's webhooks and (until the multi-hour TTL) prevent new runs from
+// starting ("webhook received but nothing launches"). Call this ONCE at spawner startup, before draining:
+//   1. reap inflight not backed by a live detached run (foreground runs never survive a fresh start);
+//   2. clear a lock file whose holder PID is dead/stale (isLocked() is false in that case);
+//   3. drop a stale current-issue marker for an issue that is no longer inflight.
+// Genuinely-alive detached runs (live sentinel PID) are preserved. Best-effort; never throws.
+function reconcileStaleStateAtStartup(): void {
+  try { reapDeadDetachedSentinels(); } catch (err: any) { log('RUNNER', `startup reconcile (sentinels) ERROR: ${err.message}`); }
+  try { reapLeakedInflightAtStartup(); } catch (err: any) { log('RUNNER', `startup reconcile (inflight) ERROR: ${err.message}`); }
+  try {
+    if (fs.existsSync(LOCK_FILE) && !isLocked()) {
+      const was = forceReleaseLock();
+      if (was) log('RUNNER', `startup: cleared stale lock (holder dead/stale, was: ${was.trim()})`);
+    }
+  } catch (err: any) {
+    log('RUNNER', `startup reconcile (lock) ERROR: ${err.message}`);
+  }
+  try {
+    const cur = getCurrentIssue();
+    if (cur && !isInflight(cur.issueId)) {
+      clearCurrentIssue();
+      log('RUNNER', `startup: cleared stale current-issue marker ${cur.issueId}`);
+    }
+  } catch (err: any) {
+    log('RUNNER', `startup reconcile (current-issue) ERROR: ${err.message}`);
+  }
 }
 
 async function notifyUsageLimitToAllActiveIssues(epochSeconds: number): Promise<void> {
@@ -1360,8 +1391,10 @@ export {
   removeInflight,
   isInflight,
   reapStaleInflight,
+  reapLeakedInflightAtStartup,
   reapDeadDetachedSentinels,
   reapCompletedDetachedRuns,
+  reconcileStaleStateAtStartup,
   detachedSentinelFile,
   writeDetachedSentinel,
   clearDetachedSentinel,

@@ -1120,6 +1120,47 @@ describe('runner', () => {
 
       expect(runner.reapStaleInflight()).toEqual([]);
     });
+
+    it('reapLeakedInflightAtStartup reaps inflight NOT backed by a live sentinel (foreground leak)', () => {
+      const sentPath = runner.detachedSentinelFile('SOT-live');
+      fs.existsSync.mockImplementation((p: string) => p === runner.INFLIGHT_FILE || p === sentPath);
+      fs.readFileSync.mockImplementation((p: string) => {
+        if (p === runner.INFLIGHT_FILE) return JSON.stringify([
+          { issueId: 'SOT-leak', startedAt: new Date().toISOString() }, // no sentinel → leaked
+          { issueId: 'SOT-live', startedAt: new Date().toISOString() },  // live detached sentinel
+        ]);
+        if (p === sentPath) return JSON.stringify({ issueId: 'SOT-live', pid: 4242 });
+        return '';
+      });
+      jest.spyOn(process, 'kill').mockImplementation((pid: number) => {
+        if (pid === 4242) return true; // live
+        const e: any = new Error('no such process'); e.code = 'ESRCH'; throw e;
+      });
+
+      const reaped = runner.reapLeakedInflightAtStartup();
+      expect(reaped).toEqual(['SOT-leak']);
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.inflight.json.tmp'),
+        expect.stringContaining('SOT-live')
+      );
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('runner.inflight.json.tmp'),
+        expect.not.stringContaining('SOT-leak')
+      );
+    });
+
+    it('reapLeakedInflightAtStartup keeps inflight whose detached run is still alive', () => {
+      const sentPath = runner.detachedSentinelFile('SOT-live');
+      fs.existsSync.mockImplementation((p: string) => p === runner.INFLIGHT_FILE || p === sentPath);
+      fs.readFileSync.mockImplementation((p: string) => {
+        if (p === runner.INFLIGHT_FILE) return JSON.stringify([{ issueId: 'SOT-live', startedAt: new Date().toISOString() }]);
+        if (p === sentPath) return JSON.stringify({ issueId: 'SOT-live', pid: 4242 });
+        return '';
+      });
+      jest.spyOn(process, 'kill').mockImplementation(() => true); // all alive
+
+      expect(runner.reapLeakedInflightAtStartup()).toEqual([]);
+    });
   });
 
   describe('pruneExpiredQueueItems', () => {
