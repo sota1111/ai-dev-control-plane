@@ -222,10 +222,12 @@ run_role_pipeline() {
       return "$COMPLETION_UNVERIFIED"
     fi
 
-    # Run the dispatcher; stream to the log AND capture output to parse the winning report path.
+    # Run the dispatcher; show on the terminal, append to the log, AND capture output to parse the
+    # winning report path. (tee writes to stdout too, so the run is visible live — do NOT redirect to
+    # /dev/null, which previously hid all worker output from the terminal.)
     local cap; cap="$(mktemp)"
     set +e
-    bash scripts/ai/run_worker.sh "$role" 2>&1 | tee -a "$LOG_FILE" "$cap" >/dev/null
+    bash scripts/ai/run_worker.sh "$role" 2>&1 | tee -a "$LOG_FILE" "$cap"
     local rc=${PIPESTATUS[0]}
     set -e
 

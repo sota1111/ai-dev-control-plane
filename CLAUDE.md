@@ -100,7 +100,11 @@ report's `## Next Action` and gates:
 - all roles `READY_FOR_REVIEW` → pipeline complete (exit 0).
 
 This makes the工程順序 deterministic and script-owned; each role is a dispatched worker (Claude only
-participates as the worker its chain selects, not as an orchestrator). Escape hatch: `PIPELINE_MODE=0`
+participates as the worker its chain selects, not as an orchestrator). A dispatched Claude worker
+(`run_claude.sh`) is given a hard preamble constraining it to its single role for the single target
+issue and forbidding it from launching `run_auto.sh` / `run_worker.sh` / the scheduler or processing
+other issues — so a worker that reads this CLAUDE.md does NOT start orchestrating and spawn concurrent
+runs. Escape hatch: `PIPELINE_MODE=0`
 (or a run with no issue id, e.g. a manual queue scan) falls back to the legacy single Claude-orchestrator
 launch, which routes each role through the dispatcher via its prompt instructions.
 
