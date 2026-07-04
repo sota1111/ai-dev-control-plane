@@ -1,0 +1,19 @@
+{
+  "__doc__": "SOT-1520 production incident auto-response config for scripts/ai/incident_response.sh. Keys are a repo slug (owner/name) or a project name (from project_repos.json); the value configures how that deployed service is monitored and rolled back. EMPTY by default = nothing is monitored. The loop stays OFF unless INCIDENT_RESPONSE_ENABLED is truthy, and automatic rollback additionally requires INCIDENT_AUTO_REMEDIATE (otherwise the rollback command is dry-run logged only). Real monitoring/rollback need deploy-environment credentials that do NOT live in this repo — enable it there. Keys starting with __ are ignored.",
+  "__fields__": {
+    "healthUrl": "HTTP(S) health endpoint to probe (e.g. https://my-service/healthz).",
+    "expectStatus": "Expected HTTP status for a healthy probe (default 200).",
+    "maxLatencyMs": "Latency above which an otherwise-OK probe is 'degraded' (0 disables).",
+    "rollbackCmd": "Shell command that rolls back / degrades the service (e.g. redeploy previous revision, shift traffic).",
+    "localPath": "Directory to run rollbackCmd in (optional)."
+  },
+  "__example__": {
+    "sota1111/toddler-private-rag": {
+      "healthUrl": "https://toddler-private-rag.example.run.app/healthz",
+      "expectStatus": 200,
+      "maxLatencyMs": 3000,
+      "rollbackCmd": "gcloud run services update-traffic toddler-private-rag --to-revisions=PREVIOUS=100 --region us-central1 --quiet",
+      "localPath": "/workspaces/toddler-private-rag"
+    }
+  }
+}
