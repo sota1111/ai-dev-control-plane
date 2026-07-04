@@ -28,6 +28,20 @@ lane_path() {
   printf '%s/%s.%s.%s' "$dir" "$name" "$RUNNER_LANE" "$ext"
 }
 
+# SOT-1514 / P4: run runner-cli via the locally-installed tsx binary instead of `npx tsx`.
+# `npx` re-resolves the `tsx` package on every invocation (a few hundred ms each), and these
+# scripts spawn runner-cli several times per worker run. Resolving the binary once here and
+# calling it directly removes that per-call npx overhead. Falls back to `npx tsx` when the
+# local bin is missing (e.g. deps not installed), preserving the previous behavior.
+_TSX_BIN="$CONTROL_PLANE_DIR/node_modules/.bin/tsx"
+run_cli() {
+  if [ -x "$_TSX_BIN" ]; then
+    (cd "$CONTROL_PLANE_DIR" && "$_TSX_BIN" src/runner-cli.ts "$@")
+  else
+    (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts "$@")
+  fi
+}
+
 PROMPT_FILE="$(lane_path "$CONTROL_PLANE_DIR/prompts/codex/debug.md")"
 REPORT_FILE="$(lane_path "$CONTROL_PLANE_DIR/docs/ai/60_worker_codex_report.md")"
 # Cooldown is account-global (worker usage limit is shared across lanes): NOT lane-suffixed.
@@ -183,14 +197,14 @@ if [ -f "$REPORT_FILE" ] \
   && grep -qi "usage limit" "$REPORT_FILE" \
   && grep -qi "try again at" "$REPORT_FILE"; then
   mkdir -p "$(dirname "$CODEX_COOLDOWN_FILE")"
-  RESUME_EPOCH="$( (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts parse-usage-limit-epoch < "$REPORT_FILE") 2>/dev/null || true)"
+  RESUME_EPOCH="$( run_cli parse-usage-limit-epoch < "$REPORT_FILE" 2>/dev/null || true)"
   if [ -n "$RESUME_EPOCH" ]; then
     node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({resumeAtEpoch:Number(process.argv[2]),detectedAt:new Date().toISOString(),reason:'codex_usage_limit'},null,2));" "$CODEX_COOLDOWN_FILE" "$RESUME_EPOCH"
     echo "CODEX_USAGE_LIMIT: cooldown set until epoch $RESUME_EPOCH, delegating to Claude" >&2
-    (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-cooldown codex) >/dev/null 2>&1 || true
+    run_cli notify-cooldown codex >/dev/null 2>&1 || true
   else
     echo "CODEX_USAGE_LIMIT: detected but reset time unparseable, notifying Discord without cooldown" >&2
-    (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-usage-limit-unknown codex) >/dev/null 2>&1 || true
+    run_cli notify-usage-limit-unknown codex >/dev/null 2>&1 || true
   fi
   exit "$WORKER_NONRESPONSE_EXIT"
 fi
@@ -200,7 +214,7 @@ fi
 # failure marks Codex auth-unhealthy (short TTL) so subsequent runs skip fast, with a separated alert
 # (chronic vs transient). Best-effort; never blocks the fallback exit below.
 if [ "$EXIT_CODE" -ne 0 ] && [ -f "$REPORT_FILE" ]; then
-  (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts worker-health-record codex "$EXIT_CODE" < "$REPORT_FILE") >/dev/null 2>&1 || true
+  run_cli worker-health-record codex "$EXIT_CODE" < "$REPORT_FILE" >/dev/null 2>&1 || true
 fi
 
 # Validation logic
@@ -223,4 +237,4 @@ if [ -n "$REASON" ]; then
 fi
 
 # SOT-1349: post the worker report to Discord (best-effort; never affects worker success)
-(cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts notify-worker-report codex "$REPORT_FILE") >/dev/null 2>&1 || true
+run_cli notify-worker-report codex "$REPORT_FILE" >/dev/null 2>&1 || true
