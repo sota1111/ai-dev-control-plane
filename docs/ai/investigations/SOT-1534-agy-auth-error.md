@@ -95,3 +95,58 @@ Error: authentication timed out.
 - 本 leg はコードを変更しない（原因特定と是正案提示が成果物）。案1（再ログイン）と案2
   （`ANTIGRAVITY_DISABLED`）は人間の資格情報操作/運用判断が必要なので In Review で人間に委ねる。
 - Linear へは根本原因の要約＋是正案（案1/案2）を報告し、Issue は In Review で停止する。
+
+---
+
+## 6. REOPEN#1（2026-07-05 05:47 UTC）— 「コンソールでは応答が返る＝認証は通っている。状況をまとめて。」
+
+人間の反証コメント: 「コンソールで agy を叩くと応答が返ってくるので、認証は通っている」。
+これは**正しい観察**であり、初回結論と矛盾しない。両者は**別モードの話**である。
+
+### 6.1 一言でまとめると
+- **対話（interactive／TTY あり）で `agy` を叩く**＝人間が OAuth を完了できる／セッションが揃うため
+  **応答が返る＝認証は通る**。⇒ アカウント／資格情報そのものは壊れていない。
+- **ハーネス経路 `agy -p`（print／非対話）**＝有効な資格情報を非対話で取得できず、依然として
+  約40秒で `authentication failed or timed out`（exit 1）で落ちる。
+- つまり問題は「認証が壊れている」ではなく、**非対話（`-p`）で使える資格情報が用意できない**こと。
+  ハーネスは `scripts/ai/run_antigravity.sh:180` で常に `-p` を付けて非対話起動するため、対話で
+  通ることは非対話の成否に効かない。
+
+### 6.2 REOPEN 時点の一次証拠（本 leg で再取得）
+- **非対話は今も失敗**（人間の対話ログイン後でも再現）:
+  ```
+  $ agy -p "Reply with exactly: OK" --dangerously-skip-permissions --print-timeout 50s
+  Error: authentication failed or timed out
+  ---- exit=1  elapsed=40s ----
+  ```
+- **ファイルトークンは依然プレースホルダ**: `~/.gemini/antigravity-cli/antigravity-oauth-token` は
+  ファイルサイズこそ 498B（mtime 05:25）だが、JSON 実体は `token`（**長さ 15**）＋
+  `auth_method=consumer` のまま＝print モードの `You are not logged into Antigravity.` は未解消。
+- **非対話環境は不変**: `DBUS_SESSION_BUS_ADDRESS` 未設定 / `xdg-open` 不在 / `secret-tool` 不在
+  → キーリング silent auth の5秒タイムアウトも OAuth 非完了も §1〜§3 のまま。
+- **auth-unhealthy マーカーは失効済み**（`expiresAtEpoch=1783225942` < now `1783230546`）。よって
+  ハーネスは次回 agy を再起動し、同じ約40秒 auth 失敗 → exit 75 → codex/claude フォールバックを繰り返す。
+
+### 6.3 なぜ「対話は通るのに非対話は落ちる」のか（差分の要点）
+| 項目 | 対話（人間のコンソール） | 非対話（ハーネス `agy -p`） |
+| --- | --- | --- |
+| OAuth 認可コード入力 | 人間が URL を開き貼れる → 完了 | 人間不在・`-p` で待てず 30s タイムアウト |
+| ブラウザ起動 | 人間側で開ける | `xdg-open` 不在 |
+| キーリング silent auth | セッション/D-Bus があれば取得可 | D-Bus 無し → 5s タイムアウト |
+| ファイルトークン | （対話成功時は更新され得る） | 15文字プレースホルダで無効のまま |
+| 結果 | 応答が返る（認証 OK） | 約40秒で auth 失敗（exit 1）→ exit 75 |
+
+### 6.4 是正（§4 と同じ・非対話に効くものだけ）
+非対話 `-p` を通すには、**print モードが読む file-based token store に有効トークンを書く**必要がある。
+- **本命**: コンテナ内で `agy` を対話起動して**最後までログインを完了**し、`antigravity-oauth-token`
+  が consumer/15文字ではない**有効トークン**に更新されることを確認する（現状 05:25 更新でも実体は
+  未更新なので、ログインが file store まで到達していない可能性が高い）。更新後に
+  `agy -p ...` が成功するかを本 leg と同じコマンドで検証する。
+- **暫定**: 復旧まで `ANTIGRAVITY_DISABLED=1` を設定 → 40秒/回の浪費を止め codex/claude へ即フォールバック。
+- 環境整備（D-Bus+gnome-keyring）や marker TTL 延長は補助（§4-3/§4-4）。
+
+### 6.5 結論
+人間の「認証は通っている」は**対話モードでは正しい**。一方でハーネスは常に**非対話 `-p`** で起動し、
+そこで使える有効トークンが無い（file token 無効＋keyring/OAuth 非完了）ため**引き続き失敗**する。
+コード欠陥ではなく、**非対話で使える資格情報が未整備**という一点に尽きる。ハーネス側の検知・
+フォールバックは正しく機能している。
