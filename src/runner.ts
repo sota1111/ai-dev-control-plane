@@ -98,6 +98,7 @@ const __dirname = dirname(__filename);
 
 interface RunResultType {
   TASK_COMPLETED: string;
+  COMPLETED_NO_PR: string;
   COMPLETION_UNVERIFIED: string;
   LOCK_CONFLICT: string;
   USAGE_LIMIT_RETRY: string;
@@ -111,6 +112,10 @@ const COMPLETION_UNVERIFIED = 70; // exit code when process 0 but task not finis
 
 const RUN_RESULT: RunResultType = {
   TASK_COMPLETED: 'TASK_COMPLETED',
+  // SOT-1550: a PLAN/REVIEW run that finished normally without producing a PR (reached In Review).
+  // A real terminal success — distinct from COMPLETION_UNVERIFIED so the reaper does NOT treat it as
+  // a stranded/human-wait run and re-enqueue it.
+  COMPLETED_NO_PR: 'COMPLETED_NO_PR',
   COMPLETION_UNVERIFIED: 'COMPLETION_UNVERIFIED',
   LOCK_CONFLICT: 'LOCK_CONFLICT',
   USAGE_LIMIT_RETRY: 'USAGE_LIMIT_RETRY',
@@ -122,6 +127,12 @@ const RUN_RESULT: RunResultType = {
 interface CompletionResult {
   completed: boolean;
   reason?: string;
+  /**
+   * SOT-1550: set when the run finished normally as a PLAN/REVIEW no-PR terminal (reached In Review
+   * without a PR). `completed` is still true; this flag lets classifyRunResult emit COMPLETED_NO_PR
+   * instead of TASK_COMPLETED so no-PR success is not lumped into COMPLETION_UNVERIFIED.
+   */
+  noPr?: boolean;
 }
 
 /**
@@ -133,6 +144,14 @@ async function verifyTaskCompletion(issueId: string, output: string): Promise<Co
     const reasonMatch = output.match(/COMPLETION_CONTRACT: INCOMPLETE reason=(.+)/);
     const reason = (reasonMatch ? reasonMatch[1] : 'run_auto marker: incomplete').trim();
     return { completed: false, reason };
+  }
+
+  // 1b. SOT-1550: PLAN/REVIEW no-PR normal completion. run_auto.sh emits this when the pipeline
+  // finished successfully as a no-PR terminal (task-check no-op, PLAN, or a full run that created no
+  // PR). It is a real terminal success — flag it so classifyRunResult can distinguish it from a Done
+  // completion and from a genuinely-unverified run.
+  if (output && output.includes('COMPLETION_CONTRACT: COMPLETED_NO_PR')) {
+    return { completed: true, noPr: true };
   }
 
   // 2. Query Linear for final state (Source of Truth)
@@ -903,6 +922,11 @@ interface ClassifyRunResult {
 function classifyRunResult({ code, output, completion }: ClassifyRunArgs): ClassifyRunResult {
   if (code === 0) {
     if (completion && completion.completed) {
+      // SOT-1550: a normal PLAN/REVIEW run that produced no PR (reached In Review) is a real terminal
+      // success, but a distinct kind so the reaper/gate never treats it as unverified/human-wait.
+      if (completion.noPr) {
+        return { kind: RUN_RESULT.COMPLETED_NO_PR, code, completion };
+      }
       return { kind: RUN_RESULT.TASK_COMPLETED, code, completion };
     }
     return { kind: RUN_RESULT.COMPLETION_UNVERIFIED, code, reason: completion ? completion.reason : undefined };
@@ -1016,6 +1040,17 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
       await removeUsageLimitLabel(issueId).catch(() => {});
       break;
 
+    case RUN_RESULT.COMPLETED_NO_PR:
+      // SOT-1550: PLAN/REVIEW finished normally without a PR (reached In Review). Terminal success —
+      // handled exactly like TASK_COMPLETED (clear cooldown + human-wait suppression) so the reaper
+      // does NOT re-enqueue it. Distinct log/outcome kind keeps it out of the COMPLETION_UNVERIFIED
+      // bucket that was the re-injection 温床 (SOT-1537 P3-1).
+      log('RUN', 'completed successfully (no PR — PLAN/REVIEW terminal)', { trigger: item.trigger || 'queue', issue: issueId });
+      clearUsageLimitCooldown();
+      clearHumanWaitSuppression(issueId);
+      await removeUsageLimitLabel(issueId).catch(() => {});
+      break;
+
     case RUN_RESULT.COMPLETION_UNVERIFIED:
       if (result.code === 0) {
         log('RUNNER', `process exited 0 but task completion not verified: ${result.reason} — skipping success cleanup`, { issue: issueId });
@@ -1123,6 +1158,8 @@ function detachedOutcomeForKind(kind: string): DetachedOutcome {
   switch (kind) {
     case RUN_RESULT.TASK_COMPLETED:
       return 'success';
+    case RUN_RESULT.COMPLETED_NO_PR:
+      return 'success'; // SOT-1550: no-PR PLAN/REVIEW terminal is a success, not an unverified run.
     case RUN_RESULT.COMPLETION_UNVERIFIED:
       return 'unverified';
     case RUN_RESULT.USAGE_LIMIT_RETRY:

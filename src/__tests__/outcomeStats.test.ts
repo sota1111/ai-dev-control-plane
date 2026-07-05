@@ -37,6 +37,21 @@ describe('outcomeStats', () => {
     expect(summary.successRate).toBe(0.5);
   });
 
+  test('COMPLETED_NO_PR counts toward successRate, not the unverified bucket (SOT-1550)', () => {
+    const log = [
+      '[2026-07-01 00:00:00] [OUTCOME] issue=SOT-1 trigger=webhook outcome=TASK_COMPLETED code=0 run outcome TASK_COMPLETED',
+      '[2026-07-01 00:10:00] [OUTCOME] issue=SOT-2 trigger=webhook outcome=COMPLETED_NO_PR code=0 run outcome COMPLETED_NO_PR',
+      '[2026-07-01 00:20:00] [OUTCOME] issue=SOT-3 trigger=webhook outcome=COMPLETION_UNVERIFIED code=0 run outcome COMPLETION_UNVERIFIED',
+      '[2026-07-01 00:30:00] [OUTCOME] issue=SOT-4 trigger=webhook outcome=FAILED code=2 run outcome FAILED',
+    ].join('\n');
+    const summary = summarizeOutcomes(parseOutcomeLines(log));
+    expect(summary.total).toBe(4);
+    expect(summary.byOutcome).toEqual({ TASK_COMPLETED: 1, COMPLETED_NO_PR: 1, COMPLETION_UNVERIFIED: 1, FAILED: 1 });
+    // TASK_COMPLETED + COMPLETED_NO_PR = 2/4; UNVERIFIED is neither success nor failure.
+    expect(summary.successRate).toBe(0.5);
+    expect(summary.failureRate).toBe(0.25);
+  });
+
   test('empty input yields a zeroed summary and readable format', () => {
     const summary = summarizeOutcomes([]);
     expect(summary.total).toBe(0);
