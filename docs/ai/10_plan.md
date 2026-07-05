@@ -1,23 +1,23 @@
-# Plan — SOT-1534 Agy認証エラー (REOPEN#2)
+# Plan — SOT-1536 Antigravity CLI 認証永続化問題の調査報告
 
 ## 解釈（1–2行）
-`agy`(Antigravity CLI)の認証が「対話ログイン直後は非対話 `agy -p` で成功するのに、数分後に再実行すると
-再認証を要求され失敗する」原因を調査する DEBUG タスク。他CLI(Claude/codex/gemini)では起きず agy 固有＝
-**時間経過での資格情報失効／リフレッシュ結果の非対話経路への非永続化**が焦点（前回「-pは一度も通らない」
-という結論を人間の新観測が反証）。
+`agy`(Antigravity CLI)の慢性認証エラー（認証直後の1回のみ成功→次回また要求→約40秒で timed out）を、
+人間提供のweb証拠（headless Linux/Dev Container で Secret Service/DBus/keyring が無い・遅いため token を
+保存/読み戻せず「毎回ログイン」になる既存複数報告）を踏まえて根本原因を確定し、解決または恒久回避策を
+提示する DEBUG/INVESTIGATION タスク。web検索・AIがAIを呼ぶことを共に許可。
 
 ## タスク種別
-DEBUG（root-cause 調査）。コード変更なしの調査/レポート更新が既定成果物。本Issueは「AIがAIを呼ぶ」禁止を
-免除しているため、必要なら agy を実起動して対話認証→`agy -p` を時間差で連続実行し失効を再現してよい。
+DEBUG（root-cause 調査 + 対策試行）。web報告の対策（`dbus-x11`/`libsecret-1-0`/`gnome-keyring` 導入、
+Secret Service 起動、default keyring 作成）を本 Dev Container で実測し、Secret Service 応答遅延
+（>5s timeout で有効 file token を破棄する読取経路）が解決可能か upstream 欠陥かを判定する。
 
 ## 意図するスコープ / 判断
-- 再現: 対話ログイン直後の `agy -p` 成功を確認 → 数分後に再実行して失敗を再現し、失効までの時間・
-  観測点（access token expiry / keyring / file token）を接地する。
-- 特定: なぜ agy 固有か（トークン寿命・リフレッシュ機構・keyring 依存が他CLIと異なる点）と、
-  既特定の「`agy -p` silent-auth keyring プローブが 5s タイムアウトで有効 file token を破棄」
-  （SOT-1535, [[sot1535-agy-auth-keyring]]）との関係を明確化。
-- 根本原因を1点に絞る（短寿命 access token + リフレッシュ結果が非対話経路で永続化されず次回復元不能、等）。
-- 是正/回避: `ANTIGRAVITY_DISABLED=1` での即フォールバック（機能不変）／agy 真利用は対話セッション／
-  根本は upstream 対応、を提示。
-- 成果物は `docs/ai/investigations/SOT-1534-agy-auth-error.md` の更新。SOT-1534/1535 の既知見を再利用し
-  ゼロから再調査しない。
+- 既存調査 SOT-1535([[sot1535-agy-auth-keyring]]) / SOT-1534([[sot1534-agy-auth-error]]) の確定知見
+  （真因 = `agy -p` silent-auth の keyring probe が 5s timeout で有効 file token を破棄する upstream 読取欠陥）を
+  出発点にし、本 Issue が持ち込んだ web 証拠でこれを裏付け／反証する。
+- web報告の keyring 導入策を実試行し、効果の有無を実測ログで示す（secret-tool 導入済でも DBUS 未設定で
+  TO 不変、という既知見の再検証を含む）。
+- 解決に至れば手順を、至らなければ恒久回避（`ANTIGRAVITY_DISABLED=1` で codex/claude へ即フォールバック、
+  機能不変）と upstream 起因である旨を明示。
+- 成果物 = 調査報告（`docs/ai/investigations/` 配下、SOT-1534/1535 と同系）＋ Linear 報告。コード変更は
+  keyring 導入スクリプト等に限定される可能性があり doc/scaffold 中心。ゼロから再調査せず既知見を再利用する。
