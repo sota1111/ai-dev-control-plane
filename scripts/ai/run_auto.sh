@@ -170,8 +170,11 @@ fi
 COMPLETION_UNVERIFIED=70
 
 # ── 完全スクリプト駆動ロールパイプライン（案B / SOT-1459） ─────────────────────────
-# run_auto.sh 自身が task-check → decomposition → implementation → verification → acceptance →
+# run_auto.sh 自身が task-check → implementation → verification → acceptance →
 # github → linear-report を順に `scripts/ai/run_worker.sh <role>` で実行する。各ロールの worker 選択・
+# SOT-1553: task-check と decomposition の worker 切り分けを廃止し、確認＋分解判断＋子Issue登録を単一の
+# task-check ロール（同一 worker・1回のディスパッチ）で一度に行う。両者の間にスクリプト（別の
+# run_worker.sh 起動やゲート）を挟まない。
 # 優先度チェーン・フォールバック・usage-limit 引き継ぎ・同一AIキャッシュ再利用はディスパッチャが担う。
 # Claude を「全工程を統括する単一オーケストレータ」としては起動せず、各ロールを個別の委譲 worker として
 # 回す。これにより「AI が AI を呼ぶ」構造を排し、工程順序はスクリプトが確定的に駆動する。
@@ -244,9 +247,13 @@ run_role_pipeline() {
     echo "Process ONLY this issue. Do not select or process other Linear issues."
   } > docs/ai/pipeline/context.md
 
-  local roles=(task-check decomposition implementation verification acceptance github linear-report)
+  # SOT-1553: task-check now folds in the decomposition work (check + 分解判断 + child-issue registration)
+  # so it runs as a single worker dispatch — decomposition is no longer a separate step with a script in
+  # between. The `decomposition` role remains a valid role for manual/override dispatch, just not part of
+  # the default sequential pipeline.
+  local roles=(task-check implementation verification acceptance github linear-report)
   local n=${#roles[@]}
-  local impl_index=2 verify_index=3
+  local impl_index=1 verify_index=2
   local i=0 debug_cycles=0
   local MAX_DEBUG_CYCLES="${PIPELINE_MAX_DEBUG_CYCLES:-2}"
 
@@ -294,10 +301,12 @@ run_role_pipeline() {
     case "$role" in
       task-check)
         case "$na" in
-          *READY_FOR_REVIEW*) ;;  # actionable → proceed
-          # SOT-1550: not-actionable no-op (already terminal / In Review / needs-human) never produces
-          # a PR — mark it a no-PR terminal so it is classified COMPLETED_NO_PR, not UNVERIFIED.
-          *) plog "PIPELINE_DONE: task-check reports not-actionable ('$na') → success no-op"; PIPELINE_NO_PR=1; return 0 ;;
+          *READY_FOR_REVIEW*) ;;  # actionable, no decomposition → proceed to implementation
+          # SOT-1550/1553: task-check now also performs decomposition. A non-READY result means either
+          # not-actionable (already terminal / In Review / needs-human) OR the issue was decomposed into
+          # child issues (which run as their own pipelines). Both stop the parent pipeline WITHOUT a PR —
+          # a successful no-op, so mark it a no-PR terminal (classified COMPLETED_NO_PR, not UNVERIFIED).
+          *) plog "PIPELINE_DONE: task-check not-actionable or decomposed ('$na') → success no-op"; PIPELINE_NO_PR=1; return 0 ;;
         esac
         ;;
       verification|acceptance)

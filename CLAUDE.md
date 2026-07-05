@@ -57,10 +57,15 @@ per-worker files (`prompts/antigravity/implement.md`, `prompts/codex/debug.md`, 
 
 For any targeted issue (`runner.ts` always injects `WEBHOOK_ISSUE_ID`), **`run_auto.sh` sequences the
 whole lifecycle** by running `run_worker.sh <role>` in order:
-**task-check → decomposition → implementation → verification → acceptance → github → linear-report**.
-The roles read `docs/ai/pipeline/context.md` for the issue id / target repo. After each role, `run_auto.sh`
-reads the winning report's `## Next Action` and gates:
-- `task-check` not-actionable (`NEEDS_USER_INPUT`/`BLOCKED`) → stop as a successful no-op (exit 0);
+**task-check → implementation → verification → acceptance → github → linear-report**.
+**SOT-1553:** `task-check` and `decomposition` are no longer split across separate worker dispatches —
+the single `task-check` role performs the actionability check AND the decomposition judgment (incl.
+child-issue registration, inheriting the parent's Project/Priority) in one worker run, with no script in
+between. The `decomposition` role stays valid for manual/override dispatch but is not a separate step in
+the default pipeline. The roles read `docs/ai/pipeline/context.md` for the issue id / target repo. After
+each role, `run_auto.sh` reads the winning report's `## Next Action` and gates:
+- `task-check` not-actionable OR decomposed-into-children (`NEEDS_USER_INPUT`/`BLOCKED`) → stop as a
+  successful no-op (exit 0);
 - `verification`/`acceptance` `NEEDS_DEBUG` → loop back to `implementation` (bounded by
   `PIPELINE_MAX_DEBUG_CYCLES`, default 2);
 - any `BLOCKED`/`NEEDS_USER_INPUT` or `WORKER_DISPATCH_EXHAUSTED` → stop (exit `70`, needs human);
@@ -201,7 +206,7 @@ Autonomous (targeted issue), default:
 
 ```
 Linear webhook / queue ─► runner.ts (injects WEBHOOK_ISSUE_ID) ─► run_auto.sh
-  └─ for each role [task-check, decomposition, implementation, verification, acceptance, github, linear-report]:
+  └─ for each role [task-check (incl. decomposition), implementation, verification, acceptance, github, linear-report]:
         run_worker.sh <role>  ─►  run_codex/claude/antigravity.sh (chain order; hand off on exit 75)
         ─► worker report ─► run_auto.sh gates on ## Next Action (proceed / loop / stop)
 ```
