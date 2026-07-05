@@ -552,6 +552,28 @@ function getCurrentIssue(): { issueId: string; issueIdentifier?: string; started
   }
 }
 
+// Authoritative set of issues currently running (SOT-1532). The single current-issue marker only
+// reflects the most-recent foreground pick and is cleared in the drain `finally` even for detached
+// long-runs, so `/queue` must not rely on it alone to decide "something is running". The inflight
+// records are the durable source of truth: a detached run keeps its inflight entry until the reaper
+// clears it. Enrich each running issue with its identifier from the current-issue marker when it
+// matches, so callers can render a human-readable id/title.
+function getRunningIssues(): Array<{ issueId: string; issueIdentifier?: string | null; startedAt: string | null }> {
+  const records = loadInflightRecords();
+  const cur = getCurrentIssue();
+  const running = records.map(r => ({
+    issueId: r.issueId,
+    issueIdentifier: cur && cur.issueId === r.issueId ? cur.issueIdentifier ?? null : null,
+    startedAt: r.startedAt,
+  }));
+  // Safety net: if the current marker points at an issue not present in inflight (e.g. a legacy
+  // foreground run before addInflight landed), still surface it as running.
+  if (cur && !records.some(r => r.issueId === cur.issueId)) {
+    running.push({ issueId: cur.issueId, issueIdentifier: cur.issueIdentifier ?? null, startedAt: cur.startedAt ?? null });
+  }
+  return running;
+}
+
 function isQueuedOrRunning(issueId: string): boolean {
   return isQueued(issueId) || isInflight(issueId);
 }
@@ -1407,6 +1429,7 @@ export {
   processCompletedRun,
   isQueuedOrRunning,
   getCurrentIssue,
+  getRunningIssues,
   clearCurrentIssue,
   setIssueInProgress,
   setIssueInReview,

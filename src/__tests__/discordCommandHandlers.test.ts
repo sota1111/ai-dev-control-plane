@@ -3,6 +3,7 @@ import { jest } from '@jest/globals';
 const mockRunner = {
   isLocked: jest.fn().mockReturnValue(false),
   getCurrentIssue: jest.fn().mockReturnValue(null),
+  getRunningIssues: jest.fn().mockReturnValue([]),
   fetchActiveIssues: (jest.fn() as any).mockResolvedValue([]),
   loadQueue: jest.fn().mockReturnValue([]),
   getUsageLimitCooldownUntil: jest.fn().mockReturnValue(null),
@@ -195,14 +196,28 @@ describe('handleQueue', () => {
   });
 
   test('returns queue with current issue as item 0', async () => {
-    (runner.getCurrentIssue as any).mockReturnValueOnce({
+    (runner.getRunningIssues as any).mockReturnValueOnce([{
       issueId: 'uuid-777',
       issueIdentifier: 'SOT-777',
       startedAt: new Date().toISOString()
-    });
+    }]);
     (runner.loadQueue as any).mockReturnValueOnce([]);
     const result = await handlers.handleQueue();
     expect(result.content).toContain('0. ▶ 現在実行中: **SOT-777**');
+  });
+
+  // SOT-1532: a detached run keeps its inflight entry (surfaced via getRunningIssues) after the
+  // current-issue marker is cleared. /queue must still report it as running, not "キューは空です".
+  test('shows running detached issue even when queue is empty', async () => {
+    (runner.getRunningIssues as any).mockReturnValueOnce([{
+      issueId: 'uuid-888',
+      issueIdentifier: 'SOT-888',
+      startedAt: new Date().toISOString()
+    }]);
+    (runner.loadQueue as any).mockReturnValueOnce([]);
+    const result = await handlers.handleQueue();
+    expect(result.content).not.toContain('キューは空です');
+    expect(result.content).toContain('0. ▶ 現在実行中: **SOT-888**');
   });
 
   test('current issue line includes title and url from fetchActiveIssues', async () => {
@@ -213,11 +228,11 @@ describe('handleQueue', () => {
         url: 'https://linear.app/x/SOT-777'
       }
     ]);
-    (runner.getCurrentIssue as any).mockReturnValueOnce({
+    (runner.getRunningIssues as any).mockReturnValueOnce([{
       issueId: 'uuid-777',
       issueIdentifier: 'SOT-777',
       startedAt: new Date().toISOString()
-    });
+    }]);
     (runner.loadQueue as any).mockReturnValueOnce([]);
     const result = await handlers.handleQueue();
     expect(result.content).toContain('0. ▶ 現在実行中: **SOT-777** — 現在タスクのタイトル https://linear.app/x/SOT-777');

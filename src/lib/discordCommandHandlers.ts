@@ -63,14 +63,19 @@ function formatQueueItem(
   return `${indent}${index}. **${identifier}** ${priorityStr} (rank ${rank}) — ${item.trigger || 'unknown'} (${at})${retryStr}${groupStr}${titleUrl}`;
 }
 
-// Build the identifier -> {title,url} map from Linear active issues. Tolerates failure.
+// Build the {title,url} lookup map from Linear active issues. Tolerates failure.
+// Keyed by BOTH the human identifier (e.g. SOT-123, used by queue items) and the internal issue id
+// (UUID, used by running/inflight entries — see runner.getRunningIssues), so both /queue rows and the
+// "現在実行中" lines can resolve a title/url regardless of which key the caller holds.
 async function buildActiveMap(): Promise<Map<string, { title: string; url: string }>> {
   const activeMap = new Map<string, { title: string; url: string }>();
   try {
     const actives = await runner.fetchActiveIssues();
     for (const issue of (actives || [])) {
-      if (issue.identifier && issue.title && issue.url) {
-        activeMap.set(issue.identifier, { title: issue.title, url: issue.url });
+      if (issue.title && issue.url) {
+        const meta = { title: issue.title, url: issue.url };
+        if (issue.identifier) activeMap.set(issue.identifier, meta);
+        if (issue.id) activeMap.set(issue.id, meta);
       }
     }
   } catch (err: any) {
@@ -156,12 +161,15 @@ async function handleStatus(): Promise<CommandResult> {
 async function handleQueue(): Promise<CommandResult> {
   try {
     const rawQueue = runner.loadQueue();
-    const current = runner.getCurrentIssue();
+    // Running set comes from inflight state, not just the single current-issue marker: a detached
+    // long-run keeps running (inflight) after the marker is cleared, so relying on the marker alone
+    // made /queue report "キューは空です" while a task was still executing (SOT-1532).
+    const running = runner.getRunningIssues();
 
     // A1: Fetch active issues for titles/urls
     const activeMap = await buildActiveMap();
 
-    if (rawQueue.length === 0 && !current) {
+    if (rawQueue.length === 0 && running.length === 0) {
       return { content: '## 実行キュー\nキューは空です。' };
     }
 
@@ -169,11 +177,11 @@ async function handleQueue(): Promise<CommandResult> {
     const { ready, waiting } = queueOrdering.previewQueueOrder(rawQueue);
 
     const lines: string[] = [];
-    if (current) {
-      const currentId = current.issueIdentifier || current.issueId;
-      const currentMeta = activeMap.get(currentId);
-      const currentTitleUrl = currentMeta ? ` — ${currentMeta.title} ${currentMeta.url}` : '';
-      lines.push(`0. ▶ 現在実行中: **${currentId}**${currentTitleUrl}`);
+    for (const run of running) {
+      const runId = run.issueIdentifier || run.issueId;
+      const runMeta = activeMap.get(runId) || activeMap.get(run.issueId);
+      const runTitleUrl = runMeta ? ` — ${runMeta.title} ${runMeta.url}` : '';
+      lines.push(`0. ▶ 現在実行中: **${runId}**${runTitleUrl}`);
     }
 
     if (ready.length > 0) {
