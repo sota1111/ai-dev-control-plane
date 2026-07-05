@@ -1,7 +1,7 @@
 import https from 'node:https';
 import { getSecret } from '../config/secrets.js';
 import { getPriorityRank } from './queueOrdering.js';
-import { isTerminalState, isHoldState } from './issueState.js';
+import { isTerminalState, isHoldState, isChildComplete } from './issueState.js';
 import * as appEnv from '../config/env.js';
 import type { IssueQueueMetadata } from '../runner.js';
 
@@ -425,10 +425,11 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
   }
 }
 
-// When a CHILD issue reaches a terminal state, advance its parent to In Review if all
-// of the parent's children are now terminal. Child issues are processed in independent
-// Linear-webhook single-issue runs, so without this nobody returns to finalize the
-// parent and it stays stuck In Progress (see SOT-840 / SOT-829). Fail-open: never throws.
+// When a CHILD issue reaches a completed state (terminal Done/Canceled OR In Review),
+// advance its parent to In Review if all of the parent's children are now complete. Child
+// issues are processed in independent Linear-webhook single-issue runs, so without this
+// nobody returns to finalize the parent and it stays stuck in Todo/In Progress (see
+// SOT-840 / SOT-829 / SOT-1551). Fail-open: never throws.
 export async function finalizeParentIfChildrenComplete(childIdentifier: string, parentId: string | null): Promise<boolean> {
   const { log } = requireDeps();
   if (!parentId) return false;
@@ -466,9 +467,12 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
       return false;
     }
 
-    const pending = children.filter((c: any) => !isTerminalState(c.state));
+    // A child is "complete" for finalization when it is terminal (Done/Canceled) OR In Review
+    // (hold). Implementation children in this harness stop at In Review, not Done, so counting
+    // only terminal children would leave the parent stuck in Todo/In Progress (SOT-1551).
+    const pending = children.filter((c: any) => !isChildComplete(c.state));
     if (pending.length > 0) {
-      log('WEBHOOK', `finalizeParent: ${parent.identifier} has non-terminal children: ${pending.map((c: any) => c.identifier).join(',')}, skip`, { issue: parent.identifier });
+      log('WEBHOOK', `finalizeParent: ${parent.identifier} has incomplete children: ${pending.map((c: any) => c.identifier).join(',')}, skip`, { issue: parent.identifier });
       return false;
     }
 
@@ -516,7 +520,7 @@ ${childList}
       { issueId: parent.id, body }
     );
 
-    log('WEBHOOK', `finalizeParent: ${parent.identifier} -> In Review (all ${children.length} children terminal, trigger ${childIdentifier})`, { issue: parent.identifier });
+    log('WEBHOOK', `finalizeParent: ${parent.identifier} -> In Review (all ${children.length} children complete, trigger ${childIdentifier})`, { issue: parent.identifier });
     return true;
   } catch (err: any) {
     log('ERROR', `finalizeParentIfChildrenComplete failed: ${err.message}`, { issue: parentId || '' });

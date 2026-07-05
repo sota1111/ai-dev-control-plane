@@ -456,6 +456,32 @@ describe('webhook issue filtering', () => {
     expect(runner.runItem).not.toHaveBeenCalled();
   });
 
+  test('child moving to In Review is ignored as hold and finalizes the parent (SOT-1551)', async () => {
+    const runner: any = mockRunner;
+    runner.finalizeParentIfChildrenComplete.mockClear();
+    const payload = {
+      type: 'Issue',
+      action: 'update',
+      updatedFrom: { stateId: 'old-state' },
+      data: {
+        identifier: 'TEST-CHILD-REVIEW',
+        title: 'child done',
+        state: { name: 'In Review', type: 'started' },
+        parent: { identifier: 'TEST-PARENT' },
+        labels: []
+      }
+    };
+    const res = await request(app).post('/webhooks/linear').send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ignored');
+    expect(res.body.reason).toBe('hold state: In Review');
+    expect(runner.removeFromQueue).toHaveBeenCalledWith('TEST-CHILD-REVIEW');
+    expect(runner.runItem).not.toHaveBeenCalled();
+
+    await new Promise(resolve => originalSetTimeout(resolve, 20));
+    expect(runner.finalizeParentIfChildrenComplete).toHaveBeenCalledWith('TEST-CHILD-REVIEW', 'TEST-PARENT');
+  });
+
   test('active issue create is accepted', async () => {
     const runner: any = mockRunner;
     runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-CREATE', trigger: 'webhook', retryAt: null });

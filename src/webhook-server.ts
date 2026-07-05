@@ -417,6 +417,26 @@ app.post('/webhooks/linear', (req: any, res: any) => {
     return res.status(200).json({ status: "ignored", reason: `terminal state: ${stateName || stateType}` });
   }
 
+  if (isHoldState({ type: stateType, name: stateName })) {
+    // A child issue just moved to In Review (hold). Implementation children stop at In Review
+    // (not Done), so the terminal-state branch above never fires for them — finalize the parent
+    // here too so it advances to In Review once all children are complete (SOT-1551). In Review
+    // is itself a hold state, so this issue is not queued for a run. Fire-and-forget; never blocks.
+    runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=hold state (In Review)`, { issue: issueId });
+    runner.removeFromQueue(issueId);
+    const parentId = body.data?.parent?.identifier ?? body.data?.parent?.id ?? null;
+    if (parentId) {
+      setImmediate(async () => {
+        try {
+          await runner.finalizeParentIfChildrenComplete(issueId, parentId);
+        } catch (e: any) {
+          runner.log("WEBHOOK", `finalizeParent error: ${e.message}`, { issue: issueId });
+        }
+      });
+    }
+    return res.status(200).json({ status: "ignored", reason: `hold state: ${stateName || stateType}` });
+  }
+
   if (archivedAt) {
     runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=archived issue`, { issue: issueId });
     runner.removeFromQueue(issueId);
