@@ -15,11 +15,11 @@ bash scripts/ai/archive_linear_issues.sh --dry-run
 ### 実行（アーカイブ）
 
 ```bash
-bash scripts/ai/archive_linear_issues.sh --parent-target-count 150 --execute
+bash scripts/ai/archive_linear_issues.sh --parent-target-count 150 --child-target-count 50 --execute
 ```
 
-子 Issue を古い順にローカル保存してから Linear 側をアーカイブします。
-親 Issue が 150 件を超える場合のみ、親 Issue も整理対象になります。
+親 Issue・子 Issue をそれぞれ古い順にローカル保存してから Linear 側をアーカイブします。
+親 Issue が 150 件、子 Issue が 50 件を超える場合のみ、超過分が整理対象になります。
 
 ### 自動実行 (auto-trigger)
 
@@ -47,10 +47,17 @@ ISSUE_CAP_TRIGGER=240 ./scripts/ai/run_auto.sh
 
 ## 動作仕様
 
-- 子 Issue（parent が設定されている Issue）を古い順に退避対象とする
-- 親 Issue は 150 件以下の場合、整理対象にしない
+アーカイブは **親 Issue と子 Issue を独立した上限で** 判定する（総数一律ではない）。
+
+- **親 Issue は 150 件以内**、**子 Issue は 50 件以内** に収める（`--parent-target-count` /
+  `--child-target-count`、既定 150 / 50）。各カテゴリで上限を超えた **超過分のみ** を対象とする。
+- 各カテゴリで **古い順（createdAt 昇順）** に退避する。新しい Issue が古い Issue より先に
+  アーカイブされることはない。
+- **In Progress（作業中）の Issue は退避対象から除外** する。容量プリフライトが処理中の
+  子 Issue を巻き込む事故（SOT-1545 / SOT-1543）を防ぐため。
 - ローカル保存に成功した Issue のみ Linear 側をアーカイブ
 - 保存先: `.local/linear-issue-archive/<YYYY-MM-DD>/`
+- `--total-target-count` は非推奨（後方互換のため引数は残るが選定には使用しない）。
 
 ## 保存ファイル構成
 

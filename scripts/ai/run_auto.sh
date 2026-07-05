@@ -98,7 +98,7 @@ fi
 #     TTL 内かつ前回件数が trigger 未満なら Linear への全Issue件数スキャン（毎run のネットワーク
 #     往復）をスキップする。閾値近傍（>= trigger）や TTL 切れ時のみ再スキャンし、アーカイブ実行後は
 #     件数が変わるためキャッシュを破棄して次回再スキャンさせる。
-# アーカイブは親150/全200を維持する archive_linear_issues.sh に委譲する。
+# アーカイブは親150/子50を維持する archive_linear_issues.sh に委譲する（各カテゴリ古い順・作業中除外）。
 # 失敗（APIキー未設定・取得失敗・アーカイブ失敗）は警告のみで run は継続する。
 ISSUE_CAP_TRIGGER="${ISSUE_CAP_TRIGGER:-245}"
 ISSUE_CAP_PREFLIGHT_TTL="${ISSUE_CAP_PREFLIGHT_TTL:-3600}"
