@@ -103,8 +103,81 @@ worker_prompt() {
 # each worker falls back to its own existing prompt file (backward compatible).
 ROLE_PROMPT_SRC="${WORKER_PROMPT_FILE:-$(lane_path "$CONTROL_PLANE_DIR/prompts/roles/$ROLE.md")}"
 
+# ── SOT-1549: per-leg metrics auto-collection ────────────────────────────────────────────────────
+# The dispatcher (NOT an AI) records each leg's objective metrics as a side-effect and shapes them via
+# src/lib/legMetricsCli.ts into docs/ai/auto_logs/metrics/. This replaces the hand-written benchmark
+# JSON that run_benchmark.sh could not produce from inside a dispatched worker ("AI does not call AI").
+# Disable with LEG_METRICS=0. The M1 gate breakdown (lint/typecheck/test) is collected only when
+# LEG_METRICS_GATE is truthy (default off: the full suite is the verification role's job and running it
+# per leg is expensive); when off, m1GatePass keeps its structured shape with null sub-gates.
+LEG_METRICS="${LEG_METRICS:-1}"
+LEG_METRICS_DIR="${LEG_METRICS_DIR:-$CONTROL_PLANE_DIR/docs/ai/auto_logs/metrics}"
+# The repo whose diff/gate is measured: the target repo when set, else this control-plane repo.
+METRICS_REPO="${TARGET_REPO:-$CONTROL_PLANE_DIR}"
+# Issue id for the metrics filename: prefer the injected env, else parse the pipeline context.
+LEG_ISSUE="${WEBHOOK_ISSUE_ID:-}"
+if [ -z "$LEG_ISSUE" ] && [ -f "$CONTROL_PLANE_DIR/docs/ai/pipeline/context.md" ]; then
+  LEG_ISSUE="$(sed -n 's/^- Target Linear issue:[[:space:]]*//p' "$CONTROL_PLANE_DIR/docs/ai/pipeline/context.md" | head -1)"
+fi
+
+_LEG_TSX_BIN="$CONTROL_PLANE_DIR/node_modules/.bin/tsx"
+truthy() { case "${1:-}" in 1|true|yes|on|TRUE|YES|ON) return 0 ;; *) return 1 ;; esac; }
+
+# Run the quality gate in the metrics repo, echoing "<lint> <typecheck> <test>" exit codes (empty when
+# a script is absent). Best-effort; never aborts the caller.
+collect_gate() {
+  local repo="$1" lint="" tc="" test=""
+  if [ -f "$repo/package.json" ]; then
+    if node -e 'process.exit(require(process.argv[1]).scripts?.lint?0:1)' "$repo/package.json" 2>/dev/null; then
+      (cd "$repo" && npm run lint >/dev/null 2>&1); lint=$?
+    fi
+    if node -e 'process.exit(require(process.argv[1]).scripts?.typecheck?0:1)' "$repo/package.json" 2>/dev/null; then
+      (cd "$repo" && npm run typecheck >/dev/null 2>&1); tc=$?
+    fi
+    if node -e 'process.exit(require(process.argv[1]).scripts?.test?0:1)' "$repo/package.json" 2>/dev/null; then
+      (cd "$repo" && npm test >/dev/null 2>&1); test=$?
+    fi
+  fi
+  printf '%s %s %s' "$lint" "$tc" "$test"
+}
+
+# Emit one leg's metrics JSON. Args: worker seq exit start_ms end_ms handoff_from report base_sha
+emit_leg_metrics() {
+  truthy "$LEG_METRICS" || return 0
+  local worker="$1" seq="$2" rc="$3" start_ms="$4" end_ms="$5" handoff="$6" report="$7" base="$8"
+  [ -x "$_LEG_TSX_BIN" ] || return 0
+
+  local numstat_file gate_lint="" gate_tc="" gate_test=""
+  numstat_file="$(mktemp)"
+  if [ -n "$base" ]; then
+    git -C "$METRICS_REPO" diff --numstat "$base" >"$numstat_file" 2>/dev/null || : >"$numstat_file"
+  fi
+  if truthy "${LEG_METRICS_GATE:-}"; then
+    read -r gate_lint gate_tc gate_test <<<"$(collect_gate "$METRICS_REPO")"
+  fi
+
+  local gate_args=()
+  [ -n "$gate_lint" ] && gate_args+=(--lint-exit "$gate_lint")
+  [ -n "$gate_tc" ] && gate_args+=(--typecheck-exit "$gate_tc")
+  [ -n "$gate_test" ] && gate_args+=(--test-exit "$gate_test")
+  local handoff_args=()
+  [ -n "$handoff" ] && handoff_args+=(--handoff-from "$handoff")
+
+  local written
+  written="$("$_LEG_TSX_BIN" "$CONTROL_PLANE_DIR/src/lib/legMetricsCli.ts" \
+    --issue "${LEG_ISSUE:-}" --role "$ROLE" --worker "$worker" --sequence "$seq" \
+    --exit "$rc" --start-ms "$start_ms" --end-ms "$end_ms" \
+    --numstat-file "$numstat_file" "${gate_args[@]}" "${handoff_args[@]}" \
+    --report "$report" --repo "$METRICS_REPO" --out-dir "$LEG_METRICS_DIR" 2>/dev/null || true)"
+  rm -f "$numstat_file"
+  [ -n "$written" ] && echo "LEG_METRICS_EMITTED role=$ROLE worker=$worker seq=$seq file=$written"
+  return 0
+}
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+
 PREV_WORKER=""
 PREV_REPORT=""
+LEG_SEQ=0
 
 for WORKER in $CHAIN; do
   SCRIPT="$(worker_script "$WORKER")"
@@ -134,11 +207,24 @@ for WORKER in $CHAIN; do
     HANDOFF_ENV=(WORKER_HANDOFF_FROM="$PREV_WORKER" WORKER_HANDOFF_REPORT="$PREV_REPORT")
   fi
 
+  # SOT-1549: snapshot the metrics-repo baseline + start time so this leg's M4/M6 are measured.
+  LEG_BASE_SHA=""
+  if truthy "$LEG_METRICS"; then
+    LEG_BASE_SHA="$(git -C "$METRICS_REPO" rev-parse HEAD 2>/dev/null || echo '')"
+  fi
+  LEG_START_MS="$(date +%s%3N)"
+
   set +e
   env RUN_WORKER_DISPATCH=1 WORKER_ROLE="$ROLE" WORKER_SELECTED="$WORKER" "${HANDOFF_ENV[@]}" \
     bash "$SCRIPT"
   RC=$?
   set -e
+
+  LEG_END_MS="$(date +%s%3N)"
+  # Emit this leg's metrics (M1 gate breakdown / M4 duration / M5 handoffs-so-far / M6 diff).
+  emit_leg_metrics "$WORKER" "$LEG_SEQ" "$RC" "$LEG_START_MS" "$LEG_END_MS" \
+    "$PREV_WORKER" "$REPORT" "$LEG_BASE_SHA" || true
+  LEG_SEQ=$((LEG_SEQ + 1))
 
   if [ "$RC" -eq 0 ]; then
     echo "WORKER_DISPATCH_DONE role=$ROLE worker=$WORKER report=$REPORT"
