@@ -16,9 +16,9 @@ _spec.loader.exec_module(archive)
 select = archive.select_archive_candidates
 
 
-def issue(identifier, created, is_child=False, state_type="completed"):
+def issue(identifier, created, is_child=False, state_type="completed", uuid=None):
     return {
-        "id": identifier,
+        "id": uuid if uuid is not None else identifier,
         "identifier": identifier,
         "createdAt": created,
         "state": {"type": state_type, "name": state_type},
@@ -90,6 +90,65 @@ class SelectArchiveCandidatesTest(unittest.TestCase):
         archive_parents, archive_children = select(parents + children, parent_target_count=150, child_target_count=50)
         self.assertEqual(len(archive_parents), 2)   # 152 - 150
         self.assertEqual(len(archive_children), 1)  # 51 - 50
+
+    # ── run-ownership exclusion (SOT-1546) ────────────────────────────────────
+    def test_excluded_target_protected_even_when_todo(self):
+        # Oldest child is the active run's target, still Todo (unstarted) so the
+        # state-guard does NOT protect it. It must be excluded by run-ownership id;
+        # the next oldest eligible child is archived instead.
+        children = [
+            issue("TARGET", "2026-01-01T00:00:00Z", is_child=True, state_type="unstarted"),
+            issue("OLD2", "2026-01-02T00:00:00Z", is_child=True),
+        ] + [
+            issue(f"K{i}", f"2026-03-{i:02d}T00:00:00Z", is_child=True) for i in range(1, 50)
+        ]
+        # 51 children, cap 50 -> 1 to archive; TARGET protected -> OLD2 archived.
+        _, archive_children = select(children, child_target_count=50, exclude_ids={"TARGET"})
+        self.assertEqual(ids(archive_children), ["OLD2"])
+
+    def test_excluded_target_matched_by_uuid(self):
+        # WEBHOOK_ISSUE_ID is a UUID; exclusion must match issue["id"] as well as
+        # the human identifier.
+        uuid = "d39d021d-b7f9-4c84-8d8b-a0aaad9e6f94"
+        children = [
+            issue("SOT-1543", "2026-01-01T00:00:00Z", is_child=True, state_type="unstarted", uuid=uuid),
+            issue("OLD2", "2026-01-02T00:00:00Z", is_child=True),
+        ] + [
+            issue(f"K{i}", f"2026-03-{i:02d}T00:00:00Z", is_child=True) for i in range(1, 50)
+        ]
+        _, archive_children = select(children, child_target_count=50, exclude_ids={uuid})
+        self.assertEqual(ids(archive_children), ["OLD2"])
+
+    def test_exclude_id_case_insensitive_for_identifier(self):
+        children = [
+            issue("SOT-1543", "2026-01-01T00:00:00Z", is_child=True, state_type="unstarted"),
+            issue("OLD2", "2026-01-02T00:00:00Z", is_child=True),
+        ] + [
+            issue(f"K{i}", f"2026-03-{i:02d}T00:00:00Z", is_child=True) for i in range(1, 50)
+        ]
+        _, archive_children = select(children, child_target_count=50, exclude_ids={"sot-1543"})
+        self.assertEqual(ids(archive_children), ["OLD2"])
+
+    def test_empty_or_none_exclude_ids_no_regression(self):
+        # No exclude set -> behaves exactly like the pre-SOT-1546 selection.
+        children = [
+            issue(f"C{i:02d}", f"2026-01-{i:02d}T00:00:00Z", is_child=True)
+            for i in range(1, 54)
+        ]
+        _, a_none = select(children, child_target_count=50, exclude_ids=None)
+        _, a_empty = select(children, child_target_count=50, exclude_ids=set())
+        self.assertEqual(ids(a_none), ["C01", "C02", "C03"])
+        self.assertEqual(ids(a_empty), ["C01", "C02", "C03"])
+
+    def test_blank_exclude_id_does_not_protect_everything(self):
+        # An empty-string exclude id (e.g. unset WEBHOOK_ISSUE_ID) must be ignored,
+        # not silently match Issues with a falsy/blank id.
+        children = [
+            issue(f"C{i:02d}", f"2026-01-{i:02d}T00:00:00Z", is_child=True)
+            for i in range(1, 54)
+        ]
+        _, archive_children = select(children, child_target_count=50, exclude_ids={"", "  "})
+        self.assertEqual(ids(archive_children), ["C01", "C02", "C03"])
 
 
 if __name__ == "__main__":

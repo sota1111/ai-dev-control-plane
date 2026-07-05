@@ -109,11 +109,36 @@ def _state_type(issue):
     return (issue.get("state") or {}).get("type")
 
 
+def _normalize_exclude_ids(exclude_ids):
+    """Normalise an exclude-id set for tolerant matching.
+
+    Accepts UUIDs (e.g. ``WEBHOOK_ISSUE_ID``) and human identifiers (e.g.
+    ``SOT-1543``). Identifiers are matched case-insensitively (upper-cased);
+    UUIDs upper-case harmlessly and still compare equal to their own
+    upper-cased form. Returns a set of upper-cased tokens.
+    """
+    if not exclude_ids:
+        return frozenset()
+    return frozenset(str(x).strip().upper() for x in exclude_ids if str(x).strip())
+
+
+def _is_excluded(issue, norm_exclude_ids):
+    """True when the Issue's id OR identifier is in the (normalised) exclude set."""
+    if not norm_exclude_ids:
+        return False
+    candidates = (issue.get("id"), issue.get("identifier"))
+    return any(
+        c is not None and str(c).strip().upper() in norm_exclude_ids
+        for c in candidates
+    )
+
+
 def select_archive_candidates(
     issues,
     parent_target_count=150,
     child_target_count=50,
     protected_state_types=PROTECTED_STATE_TYPES,
+    exclude_ids=None,
 ):
     """Choose which Issues to archive, honouring the SOT-1545 priority spec.
 
@@ -125,14 +150,26 @@ def select_archive_candidates(
       archived first; newer Issues are never archived before older ones.
     - Issues whose state type is in ``protected_state_types`` (In Progress by
       default) are excluded from candidacy so active work is never swept.
+    - Issues whose id OR identifier is in ``exclude_ids`` (run-ownership: the
+      target Issue an active run is holding) are excluded from candidacy
+      REGARDLESS of state — this protects a run's own target even while it is
+      still ``Todo`` (SOT-1546), which the state-based guard above cannot do
+      because the state-transition to In Progress may not have happened yet.
 
     Returns ``(archive_parents, archive_children)`` — lists ordered oldest-first.
     """
+    norm_exclude_ids = _normalize_exclude_ids(exclude_ids)
+
     parents = [i for i in issues if not _is_child(i)]
     children = [i for i in issues if _is_child(i)]
 
     def eligible(pool):
-        elig = [i for i in pool if _state_type(i) not in protected_state_types]
+        elig = [
+            i
+            for i in pool
+            if _state_type(i) not in protected_state_types
+            and not _is_excluded(i, norm_exclude_ids)
+        ]
         elig.sort(key=lambda x: x["createdAt"])
         return elig
 
@@ -157,8 +194,26 @@ def main():
     parser.add_argument("--total-target-count", type=int, default=200, help="Deprecated/unused: selection is now per-type (parent/child). Kept for backward compatibility.")
     parser.add_argument("--execute", action="store_true", help="Actually perform the archive operation")
     parser.add_argument("--print-total", action="store_true", help="Print only the current total Issue count to stdout and exit (no archiving)")
+    parser.add_argument(
+        "--exclude-id",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="Issue id (UUID) or identifier (e.g. SOT-1543) to protect from archiving "
+             "regardless of state (run-ownership: the active run's target). Repeatable; "
+             "also accepts a comma-separated list. (SOT-1546)",
+    )
 
     args = parser.parse_args()
+
+    # Build the run-ownership exclude set: split any comma-separated values and
+    # drop blanks so an unset WEBHOOK_ISSUE_ID (empty string) never protects "".
+    exclude_ids = {
+        tok.strip()
+        for raw in args.exclude_id
+        for tok in str(raw).split(",")
+        if tok.strip()
+    }
 
     # Count-only mode: print just the integer total to stdout and exit.
     # Progress output is routed to stderr so callers can capture the number cleanly.
@@ -184,6 +239,22 @@ def main():
         issues,
         parent_target_count=parent_target_count,
         child_target_count=child_target_count,
+        exclude_ids=exclude_ids,
+    )
+
+    # Observability (SOT-1546): always emit a single line naming the run-ownership
+    # Issues that were protected from archiving (which of the excluded ids actually
+    # matched a live Issue), so the self-archive race is auditable from the log.
+    norm_exclude = _normalize_exclude_ids(exclude_ids)
+    protected_matches = [
+        f"{i.get('identifier')}({i.get('id')})"
+        for i in issues
+        if _is_excluded(i, norm_exclude)
+    ]
+    print(
+        "[ARCHIVE] run-ownership excluded targets: "
+        f"count={len(protected_matches)} "
+        f"[{', '.join(protected_matches) if protected_matches else 'none'}]"
     )
 
     total_candidates = len(archive_candidates_children) + len(archive_candidates_parents)

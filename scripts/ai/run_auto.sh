@@ -135,8 +135,22 @@ else
       node -e "require('fs').writeFileSync(process.argv[1], JSON.stringify({total:Number(process.argv[2]),ts:Number(process.argv[3])}));" "$ISSUE_CAP_CACHE_FILE" "$ISSUE_TOTAL" "$NOW_EPOCH" 2>/dev/null || true
       if [ "$ISSUE_TOTAL" -ge "$ISSUE_CAP_TRIGGER" ]; then
         echo "[CAPACITY] Linear issues=${ISSUE_TOTAL} >= trigger=${ISSUE_CAP_TRIGGER}; running archive to free space"
+        # Run-ownership guard (SOT-1546): protect the Issue this run is holding from
+        # being swept by the capacity archive, even while it is still Todo (the
+        # In Progress state-guard cannot help before the transition). Pass the run's
+        # target id plus any in-flight run's current-issue marker as --exclude-id.
+        ARCHIVE_EXCLUDE_ARGS=()
+        if [ -n "${WEBHOOK_ISSUE_ID:-}" ]; then
+          ARCHIVE_EXCLUDE_ARGS+=(--exclude-id "${WEBHOOK_ISSUE_ID}")
+        fi
+        if [ -f "${LOG_DIR}/current-issue.json" ]; then
+          CUR_ISSUE_ID="$(node -e "try{const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(String(d.issueId||''));}catch(e){process.stdout.write('');}" "${LOG_DIR}/current-issue.json" 2>/dev/null || echo '')"
+          if [ -n "$CUR_ISSUE_ID" ] && [ "$CUR_ISSUE_ID" != "${WEBHOOK_ISSUE_ID:-}" ]; then
+            ARCHIVE_EXCLUDE_ARGS+=(--exclude-id "$CUR_ISSUE_ID")
+          fi
+        fi
         set +e
-        bash scripts/ai/archive_linear_issues.sh --execute
+        bash scripts/ai/archive_linear_issues.sh --execute "${ARCHIVE_EXCLUDE_ARGS[@]}"
         ARCHIVE_RC=$?
         set -e
         if [ "$ARCHIVE_RC" -ne 0 ]; then
