@@ -8,6 +8,7 @@ import {
   readAuthUnhealthy,
   writeAuthUnhealthy,
   clearAuthUnhealthy,
+  shouldSkipForAuthUnhealthy,
 } from '../lib/workerHealth.js';
 
 // SOT-1441 / P1 — worker availability classification + auth-unhealthy marker.
@@ -71,6 +72,44 @@ describe('workerHealth', () => {
       clearAuthUnhealthy('antigravity', dir);
       expect(fs.existsSync(authUnhealthyFile('antigravity', dir))).toBe(false);
       expect(readAuthUnhealthy('antigravity', dir, now).active).toBe(false);
+    });
+  });
+
+  // SOT-1548 — the pre-run gate decision used by run_antigravity.sh. Reader and writer must agree so a
+  // fresh marker can never slip through and pay the ~40s agy auth probe (the SOT-1533 hole).
+  describe('shouldSkipForAuthUnhealthy (pre-run gate)', () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wh-gate-'));
+    });
+    afterEach(() => {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    });
+
+    test('marker written by writeAuthUnhealthy reads as fresh → skip (round-trip, no drift)', () => {
+      const now = 1_000_000_000_000;
+      writeAuthUnhealthy('antigravity', dir, 900, now);
+      expect(shouldSkipForAuthUnhealthy('antigravity', dir, now + 60_000)).toBe(true);
+    });
+
+    test('marker expired → do NOT skip (retry agy as before)', () => {
+      const now = 1_000_000_000_000;
+      writeAuthUnhealthy('antigravity', dir, 10, now);
+      expect(shouldSkipForAuthUnhealthy('antigravity', dir, now + 11_000)).toBe(false);
+    });
+
+    test('missing marker → do NOT skip', () => {
+      expect(shouldSkipForAuthUnhealthy('antigravity', dir)).toBe(false);
+    });
+
+    test('malformed marker JSON → do NOT skip (fail-open to launching)', () => {
+      fs.writeFileSync(authUnhealthyFile('antigravity', dir), '{ not valid json');
+      expect(shouldSkipForAuthUnhealthy('antigravity', dir)).toBe(false);
+    });
+
+    test('marker without expiresAtEpoch → do NOT skip', () => {
+      fs.writeFileSync(authUnhealthyFile('antigravity', dir), JSON.stringify({ detectedAt: 'x' }));
+      expect(shouldSkipForAuthUnhealthy('antigravity', dir)).toBe(false);
     });
   });
 });
