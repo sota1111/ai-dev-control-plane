@@ -78,6 +78,28 @@ export function reaperStrandedMaxIntervalMs(env: Env = process.env): number {
   return intEnv(env, 'REAPER_STRANDED_MAX_INTERVAL_MS', 300000);
 }
 
+/**
+ * REAPER_HUMANWAIT_BACKOFF_BASE_MS — SOT-1547. Backoff window after the 1st code=70 (human-wait)
+ * termination before the reaper may re-enqueue the issue again (default 1_800_000ms = 30 min).
+ */
+export function reaperHumanWaitBackoffBaseMs(env: Env = process.env): number {
+  return intEnv(env, 'REAPER_HUMANWAIT_BACKOFF_BASE_MS', 30 * 60 * 1000);
+}
+
+/** REAPER_HUMANWAIT_BACKOFF_MAX_MS — SOT-1547. Cap on a single human-wait backoff window (default 6h). */
+export function reaperHumanWaitBackoffMaxMs(env: Env = process.env): number {
+  return intEnv(env, 'REAPER_HUMANWAIT_BACKOFF_MAX_MS', 6 * 60 * 60 * 1000);
+}
+
+/**
+ * REAPER_HUMANWAIT_MAX_RETRIES — SOT-1547. After this many backed-off reaper retries of a code=70
+ * (human-wait) run, suppress re-enqueue entirely until a human webhook (comment / state change) arrives
+ * (default 3). 0 = suppress immediately after the first code=70.
+ */
+export function reaperHumanWaitMaxRetries(env: Env = process.env): number {
+  return intEnv(env, 'REAPER_HUMANWAIT_MAX_RETRIES', 3);
+}
+
 /** PORT — webhook server listen port (default 3000). Returns string|number, matching the historical `env.PORT || 3000`. */
 export function port(env: Env = process.env): string | number {
   return env.PORT || 3000;
