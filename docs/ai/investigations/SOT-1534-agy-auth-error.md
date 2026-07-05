@@ -150,3 +150,101 @@ Error: authentication timed out.
 そこで使える有効トークンが無い（file token 無効＋keyring/OAuth 非完了）ため**引き続き失敗**する。
 コード欠陥ではなく、**非対話で使える資格情報が未整備**という一点に尽きる。ハーネス側の検知・
 フォールバックは正しく機能している。
+
+---
+
+## 7. REOPEN#2（2026-07-05 06:33 UTC）— 「対話ログイン後は `-p` で成功→数分後の再実行で再認証を要求され失敗。他CLIでは起きない。agy の認証に原因がある」
+
+人間の新観測（05:59 コメント）:
+> OAuth 認可コードは対話型で完了し、その後、非対話（ハーネス `-p`）で**成功している**。しかし、
+> 数分後に再実行すると再度認証が必要になり、失敗する。これは他の Claude, codex, gemini cli では
+> 発生していない。agy の認証に原因がある。
+
+この観測は §1/§6 の「file token は 15 文字プレースホルダで無効」という前提を**部分的に反証する**。
+本 leg で実測したところ、状況は前回から**2点**変わっていた。
+
+### 7.1 変化点①: file token は今や「有効」になっている
+`~/.gemini/antigravity-cli/antigravity-oauth-token`（mtime 06:25）は、もはやプレースホルダではなく
+**本物の有効トークン**を保持している:
+```
+token.access_token : ya29.a0AT3oNZ8-Rq2c... <len≈210>   (本物のアクセストークン)
+token.refresh_token: 1//0e1_8kQlWLR6g...    (本物のリフレッシュトークン)
+token.expiry       : 2026-07-05T07:25:40Z    (取得時 06:33 の約52分後＝未失効)
+auth_method        : consumer
+```
+→ 人間の対話ログインは **file-based token store に有効トークンを書けている**（§6.4「本命」は達成済み）。
+「書き戻し失敗（refresh後に file に保存できない）」という当初の作業仮説は**この点では誤り**。
+
+### 7.2 変化点②: keyring ツール群が導入されたが 5s タイムアウトは不変
+前回 §6.2 で「不在」とした `secret-tool` / `gnome-keyring-daemon` / `dbus-launch` は**今回インストール
+済み**。にもかかわらず `DBUS_SESSION_BUS_ADDRESS` は未設定のままで、silent-auth の keyring プローブは
+**依然 5 秒でタイムアウト**する（=keyring バイナリの導入だけでは解決しない。SOT-1535 の結論と一致）。
+
+### 7.3 決定的証拠 — 有効トークンがあっても `-p` は落ちる
+`agy -p` の実行ログ `cli-20260705_063135.log`（06:31、本調査の約5分前、**上記の有効トークンが存在する
+状態**）:
+```
+printmode.go:223] Print mode: not authenticated, trying silent auth
+keyring.go:59]    keyringAuth: loaded token, expiry=2026-07-05 07:25:40 expired=false   ← 有効トークンを読めている
+keyring.go:95]    keyringAuth: timed out after 5s, skipping keyring auth                 ← だが5sでTOしトークンを破棄
+printmode.go:229] Print mode: silent auth failed, triggering OAuth
+auth_manager.go:107] Starting OAuth authentication flow
+Waiting for authentication (timeout 30s)...
+printmode.go:277] Print mode: auth timed out
+Error: authentication timed out.   (exit 1, elapsed ≈40s)
+```
+直前の 06:06 の `-p` ログも同型（そのときの token expiry は 06:56:59 で、これも未失効）。つまり
+**複数回の対話ログインで file token は毎回リフレッシュされ有効**なのに、**非対話 `-p` は毎回同じ
+keyring 5s タイムアウトで有効トークンを捨てて失敗**する。file token の鮮度は結果に影響しない（不変の
+ブロッカーは keyring プローブのタイムアウト）。
+
+### 7.4 根本原因（1点に特定）— print モードの silent-auth が「読み取り側」で有効トークンを破棄する
+- agy の **print モード（`-p`）は、file-based token store の有効トークンを直接使わない**。起動時は常に
+  `Print mode: not authenticated` となり、資格情報を **keyring 経由の silent auth** から取り直そうとする。
+- その keyring プローブ（`keyringAuth`）は、機能する Secret Service（session D-Bus）が無いコンテナでは
+  **5 秒でハングしてタイムアウト**し、**その時点で読み込み済みの有効トークンごと破棄**して（`skipping
+  keyring auth`）対話 OAuth にフォールバックする。
+- `-p` 非対話では OAuth を完了できない（`xdg-open` 不在・人間不在）ため 30 秒でタイムアウト → exit 1。
+
+つまり原因は **①短寿命 access token の失効でも、②refresh 結果の書き戻し失敗でもない**。
+**print モードの silent-auth が keyring 経由に固定されており、そのプローブが 5s でタイムアウトした際に
+有効な file token へフォールバックせず破棄する**という、**読み取り経路の設計上の欠陥（agy/upstream 側）**
+である。SOT-1535 の根本原因（`keyring.go:95` の 5s タイムアウトが有効 file token を破棄）と完全一致。
+
+### 7.5 なぜ agy 固有で、他 CLI（Claude / codex / gemini）では起きないのか
+| | 非対話での資格情報取得 | keyring / Secret Service 依存 | 有効 file token 時の挙動 |
+| --- | --- | --- | --- |
+| Claude / codex / gemini CLI | file の refresh_token を読み HTTPS で直接リフレッシュ | 依存しない | そのまま使える |
+| **agy（print モード）** | **keyring 経由の silent auth に固定** | **依存する（5s TO でハング）** | **TO 時に破棄して OAuth に落ちる** |
+
+他 CLI は非対話パスで keyring を経由せず file の refresh token を直接使うため、同じコンテナでも成功する。
+agy だけが print モードで keyring を必須経路にしているため、Secret Service 不在の環境で恒常的に落ちる。
+
+### 7.6 「数分後に失敗」の説明
+人間が対話ログイン直後に見た「`-p` 成功」がどの経路だったかは本 leg のログ上では確認できなかったが
+（本環境の `-p` はすべて上記で失敗）、少なくとも観測される事実は一貫している: **file token の有効/無効・
+鮮度に関係なく、新しいプロセスの `agy -p` は毎回 keyring 5s タイムアウトで落ちる**。したがって「数分後に
+失敗する」のは access token の失効が原因ではなく、**プロセスが cold start するたびに必ず keyring プローブを
+やり直して 5s タイムアウトする**ためである（＝失敗は時間経過ではなく毎回の非対話起動そのものに起因）。
+
+### 7.7 是正（更新）
+- **恒久解決は upstream（agy 側）マター**: print モードの silent-auth が keyring タイムアウト時に
+  file-based token store の有効トークンへフォールバックする必要がある。現状のバイナリでは回避不能。
+- **本環境での実効的対処**（コード変更不要・機能不変）:
+  1. **`ANTIGRAVITY_DISABLED=1`** を設定 → run_antigravity.sh が即 exit 75 で codex/claude にフォールバック
+     し、毎回の約40秒 keyring/OAuth 待ちを止める（**推奨**）。
+  2. agy を実利用したい場合は **対話セッションを維持**して使う（print モード `-p` では現環境では通らない）。
+  3. （補助・不確実）機能する session D-Bus + gnome-keyring を常駐させれば keyring プローブが 5s で
+     ハングせず有効トークンを取得できる可能性はあるが、`secret-tool` 等の導入だけでは §7.2 のとおり
+     不十分で、コンテナに session bus を用意する運用コストが高い。
+- ハーネス側の検知・フォールバック（auth_failure 分類 → exit 75 → codex/claude）は**正しく機能**しており、
+  変更不要。
+
+### 7.8 結論
+REOPEN#2 の観測を受けて実測した結果、**file token は有効化されている（対話ログインは file store に有効
+トークンを書けている）にもかかわらず、`agy -p` は毎回 keyring silent-auth の 5s タイムアウトで有効トークンを
+破棄して失敗する**ことを確認した。根本原因は「トークンの書き戻し失敗」でも「失効」でもなく、**print モードの
+silent-auth が keyring 経由に固定されタイムアウト時に有効 file token へフォールバックしない、agy/upstream 側の
+読み取り経路の設計欠陥**である。他 CLI が非対話で keyring を経由せず file の refresh token を直接使うため
+影響を受けないのと対照的で、人間の「agy の認証に原因がある」という判断は正しい。本環境での実効策は
+`ANTIGRAVITY_DISABLED=1`（機能不変で即フォールバック）または agy の対話利用。
