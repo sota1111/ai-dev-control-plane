@@ -94,11 +94,67 @@ def archive_issue_mutation(issue_id):
         return True
     return False
 
+# State types that must never be auto-archived: an Issue actively being worked
+# (In Progress = Linear state type "started") must not be swept by the capacity
+# preflight, otherwise a run's own in-flight child Issue gets archived out from
+# under it (SOT-1545 / SOT-1543 incident).
+PROTECTED_STATE_TYPES = ("started",)
+
+
+def _is_child(issue):
+    return bool(issue.get("parent"))
+
+
+def _state_type(issue):
+    return (issue.get("state") or {}).get("type")
+
+
+def select_archive_candidates(
+    issues,
+    parent_target_count=150,
+    child_target_count=50,
+    protected_state_types=PROTECTED_STATE_TYPES,
+):
+    """Choose which Issues to archive, honouring the SOT-1545 priority spec.
+
+    Rules:
+    - Parent Issues are kept within ``parent_target_count`` (default 150);
+      child Issues within ``child_target_count`` (default 50). Each category is
+      capped independently — there is no single flat total cap.
+    - Within each category, the OLDEST (createdAt ascending) excess Issues are
+      archived first; newer Issues are never archived before older ones.
+    - Issues whose state type is in ``protected_state_types`` (In Progress by
+      default) are excluded from candidacy so active work is never swept.
+
+    Returns ``(archive_parents, archive_children)`` — lists ordered oldest-first.
+    """
+    parents = [i for i in issues if not _is_child(i)]
+    children = [i for i in issues if _is_child(i)]
+
+    def eligible(pool):
+        elig = [i for i in pool if _state_type(i) not in protected_state_types]
+        elig.sort(key=lambda x: x["createdAt"])
+        return elig
+
+    elig_parents = eligible(parents)
+    elig_children = eligible(children)
+
+    # Excess is measured against the FULL category count (protected Issues still
+    # occupy a slot), but only ELIGIBLE Issues can actually be archived.
+    num_parents_excess = max(0, len(parents) - parent_target_count)
+    num_children_excess = max(0, len(children) - child_target_count)
+
+    archive_parents = elig_parents[:num_parents_excess]
+    archive_children = elig_children[:num_children_excess]
+    return archive_parents, archive_children
+
+
 def main():
     parser = argparse.ArgumentParser(description="Linear Issue Archive Script")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be archived without making changes")
-    parser.add_argument("--parent-target-count", type=int, default=150, help="Max number of parent Issues to keep on Linear")
-    parser.add_argument("--total-target-count", type=int, default=200, help="Max total number of Issues to keep on Linear")
+    parser.add_argument("--parent-target-count", type=int, default=150, help="Max number of parent Issues to keep on Linear (older excess archived first)")
+    parser.add_argument("--child-target-count", type=int, default=50, help="Max number of child Issues to keep on Linear (older excess archived first)")
+    parser.add_argument("--total-target-count", type=int, default=200, help="Deprecated/unused: selection is now per-type (parent/child). Kept for backward compatibility.")
     parser.add_argument("--execute", action="store_true", help="Actually perform the archive operation")
     parser.add_argument("--print-total", action="store_true", help="Print only the current total Issue count to stdout and exit (no archiving)")
 
@@ -114,37 +170,22 @@ def main():
     # If neither --dry-run nor --execute is provided, default to dry-run
     is_dry_run = args.dry_run or not args.execute
     parent_target_count = args.parent_target_count
-    total_target_count = args.total_target_count
-    
+    child_target_count = args.child_target_count
+
     issues = fetch_all_issues()
-    
-    parents = []
-    children = []
-    
-    for issue in issues:
-        if issue.get("parent"):
-            children.append(issue)
-        else:
-            parents.append(issue)
-            
-    # Sort by createdAt ascending (oldest first)
-    children.sort(key=lambda x: x["createdAt"])
-    parents.sort(key=lambda x: x["createdAt"])
-    
-    # Calculate how many issues need to be archived to reach total_target_count.
-    num_to_archive_total = max(0, len(issues) - total_target_count)
 
-    # Archive oldest children first.
-    num_children_to_archive = min(len(children), num_to_archive_total)
-    archive_candidates_children = children[:num_children_to_archive]
+    parents = [i for i in issues if not i.get("parent")]
+    children = [i for i in issues if i.get("parent")]
 
-    # If still excess after archiving children, archive oldest excess parents.
-    remaining_after_children = num_to_archive_total - num_children_to_archive
-    archive_candidates_parents = []
-    
-    if remaining_after_children > 0:
-        archive_candidates_parents = parents[:remaining_after_children]
-        
+    # Per-type selection: parents kept <= parent_target_count, children kept <=
+    # child_target_count, oldest excess archived first, In Progress Issues never
+    # swept. See select_archive_candidates() for the full spec (SOT-1545).
+    archive_candidates_parents, archive_candidates_children = select_archive_candidates(
+        issues,
+        parent_target_count=parent_target_count,
+        child_target_count=child_target_count,
+    )
+
     total_candidates = len(archive_candidates_children) + len(archive_candidates_parents)
     
     if total_candidates == 0:
@@ -161,8 +202,9 @@ def main():
         print(f"現在の親 Issue 数: {len(parents)}")
         print(f"現在の子 Issue 数: {len(children)}")
         print(f"親 Issue 上限: {parent_target_count}")
-        print(f"総 Issue 上限: {total_target_count}")
-        
+        print(f"子 Issue 上限: {child_target_count}")
+        print(f"（In Progress の Issue は退避対象から除外。各カテゴリ古い順に超過分のみ退避。）")
+
         print(f"\n退避対象の子 Issue 一覧 ({len(archive_candidates_children)} 件):")
         for c in archive_candidates_children:
             print(f"  - {c['identifier']}: {c['title']}  →  .local/linear-issue-archive/{today}/children/{c['identifier']}.json")
