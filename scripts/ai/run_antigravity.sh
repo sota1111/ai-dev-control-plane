@@ -140,12 +140,16 @@ fi
 # re-hit the same auth error) and delegate to Claude. Once the TTL expires we clear it and retry.
 ANTIGRAVITY_AUTH_UNHEALTHY_FILE="$CONTROL_PLANE_DIR/docs/ai/auto_logs/antigravity.auth_unhealthy.json"
 if [ -f "$ANTIGRAVITY_AUTH_UNHEALTHY_FILE" ]; then
-  NOW_EPOCH="$(date +%s)"
-  EXPIRES_AT="$(node -e "try{const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(String(Number(d.expiresAtEpoch)||0));}catch(e){process.stdout.write('0');}" "$ANTIGRAVITY_AUTH_UNHEALTHY_FILE" 2>/dev/null || echo 0)"
-  if [ "$EXPIRES_AT" -gt 0 ] && [ "$NOW_EPOCH" -lt "$EXPIRES_AT" ]; then
-    echo "ANTIGRAVITY_AUTH_UNHEALTHY: chronic auth failure marker active until epoch $EXPIRES_AT (now $NOW_EPOCH), delegating to Claude" >&2
+  # SOT-1548: decide via the tested readAuthUnhealthy() pure logic (the same module that writes the
+  # marker) instead of re-parsing it here with an inline `node -e`. This closes the path/parsing/expiry
+  # drift between reader and writer that let a fresh marker slip through and pay the ~40s auth probe
+  # (SOT-1533). `auth-unhealthy-status` exits 0 when the marker is FRESH (short-circuit) / 3 otherwise.
+  # Fail-open: a runner-cli error (non-0/3) is treated as "not fresh" so we never wedge on a broken CLI.
+  if AUTH_STATUS="$(run_cli auth-unhealthy-status antigravity 2>/dev/null)"; then
+    echo "ANTIGRAVITY_AUTH_UNHEALTHY: chronic auth failure marker fresh ($AUTH_STATUS), skipping agy launch and delegating to Claude" >&2
     exit "$WORKER_NONRESPONSE_EXIT"
   fi
+  # Not fresh (expired / missing / malformed): clear the stale marker and retry agy as before.
   rm -f "$ANTIGRAVITY_AUTH_UNHEALTHY_FILE"
 fi
 

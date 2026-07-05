@@ -18,7 +18,7 @@ import { initSecrets } from './config/secrets.js';
 import { notifyCooldown, notifyUsageLimitUnknownReset } from './lib/cooldownNotifier.js';
 import { notifyWorkerReport } from './lib/workerReportNotifier.js';
 import { formatOutcomeSummary } from './lib/outcomeStats.js';
-import { classifyWorkerFailure, writeAuthUnhealthy, type WorkerName } from './lib/workerHealth.js';
+import { classifyWorkerFailure, writeAuthUnhealthy, readAuthUnhealthy, shouldSkipForAuthUnhealthy, type WorkerName } from './lib/workerHealth.js';
 import { workerAuthUnhealthyTtlSeconds } from './config/env.js';
 import { loadWorkerRolesConfig, type WorkerRoleConfig } from './lib/workerRoles.js';
 import { parseWorkerRoleDirectives, mergeWorkerRoleOverrides } from './lib/workerRoleDirective.js';
@@ -290,8 +290,29 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'auth-unhealthy-status': {
+      // SOT-1548: single source of truth for run_antigravity.sh's pre-run gate. Reads the worker's
+      // auth-unhealthy marker via the tested shouldSkipForAuthUnhealthy() pure logic (same module that
+      // writes it) so the reader/writer can never drift on path/parsing/expiry — the ~40s-probe hole
+      // seen in SOT-1533. Usage: runner-cli.js auth-unhealthy-status <antigravity|codex>
+      //   exit 0 → marker FRESH   → caller should short-circuit (skip launching, hand off)
+      //   exit 3 → marker not fresh (expired/missing/malformed) → caller launches as usual
+      const worker = args[0] as WorkerName;
+      if (!['antigravity', 'codex'].includes(worker)) {
+        process.stderr.write('Usage: runner-cli.js auth-unhealthy-status <antigravity|codex>\n');
+        process.exit(2);
+      }
+      if (shouldSkipForAuthUnhealthy(worker, runner.LOG_DIR)) {
+        const status = readAuthUnhealthy(worker, runner.LOG_DIR);
+        process.stdout.write(`active remaining=${status.remainingSeconds ?? 0}s expiresAtEpoch=${status.expiresAtEpoch ?? 0}\n`);
+        process.exit(0);
+      }
+      process.stdout.write('inactive\n');
+      process.exit(3);
+      break;
+    }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report, aggregate-outcomes, worker-health-record\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report, aggregate-outcomes, worker-health-record, auth-unhealthy-status\n`);
       process.exit(1);
     }
   }

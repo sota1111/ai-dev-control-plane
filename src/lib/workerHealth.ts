@@ -76,6 +76,21 @@ export function readAuthUnhealthy(worker: WorkerName, dir: string, nowMs: number
   }
 }
 
+/**
+ * SOT-1548 — the single decision behind run_antigravity.sh's pre-run gate: should we SKIP launching the
+ * worker CLI (and hand off immediately) because the auth-unhealthy marker is still fresh? True iff the
+ * marker is active. Exposed as a named function — instead of the shell re-parsing the marker with its
+ * own inline `node -e` one-liner — so the pre-run gate and the marker writer (writeAuthUnhealthy) share
+ * one source of truth and cannot drift on path/parsing/expiry (the ~40s-probe hole seen in SOT-1533).
+ */
+export function shouldSkipForAuthUnhealthy(
+  worker: WorkerName,
+  dir: string,
+  nowMs: number = Date.now()
+): boolean {
+  return readAuthUnhealthy(worker, dir, nowMs).active;
+}
+
 /** Write/refresh the auth-unhealthy marker with a TTL. Returns the expiry epoch (seconds). Never throws. */
 export function writeAuthUnhealthy(
   worker: WorkerName,
