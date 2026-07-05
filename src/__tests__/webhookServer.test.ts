@@ -28,6 +28,9 @@ const mockRunner = {
   removeFromQueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
   isQueuedOrRunning: jest.fn().mockReturnValue(false),
+  isReaperEnqueueSuppressed: jest.fn().mockReturnValue(false),
+  humanWaitSuppressionInfo: jest.fn().mockReturnValue({ count: 0, nextAt: null }),
+  clearHumanWaitSuppression: jest.fn().mockReturnValue(false),
   reapStaleInflight: jest.fn().mockReturnValue([]),
   reapCompletedDetachedRuns: (jest.fn() as any).mockResolvedValue([]),
   syncQueueWithLinear: (jest.fn() as any).mockResolvedValue(undefined),
@@ -820,6 +823,34 @@ describe('reaper (runReaperTick)', () => {
 
     expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50, { excludeHold: true });
     expect(runner.enqueue).toHaveBeenCalledWith('SOT-200', 'webhook-reaper', null, expect.objectContaining({ priority: 2 }));
+    expect(runner.drainQueue).toHaveBeenCalled();
+  });
+
+  it('should NOT re-enqueue a code=70 human-wait issue while suppressed (SOT-1547)', async () => {
+    runner.fetchActiveIssues.mockResolvedValue([
+      { identifier: 'SOT-1531', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+    ]);
+    runner.isQueued.mockReturnValue(false);
+    runner.isReaperEnqueueSuppressed.mockImplementation((id: string) => id === 'SOT-1531');
+    runner.humanWaitSuppressionInfo.mockReturnValue({ count: 4, nextAt: 'human-input' });
+
+    await runReaperTick();
+
+    expect(runner.isReaperEnqueueSuppressed).toHaveBeenCalledWith('SOT-1531');
+    expect(runner.enqueue).not.toHaveBeenCalled();
+    expect(runner.drainQueue).not.toHaveBeenCalled();
+  });
+
+  it('should re-enqueue a previously code=70 issue once suppression is cleared (SOT-1547)', async () => {
+    runner.fetchActiveIssues.mockResolvedValue([
+      { identifier: 'SOT-1531', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+    ]);
+    runner.isQueued.mockReturnValue(false);
+    runner.isReaperEnqueueSuppressed.mockReturnValue(false); // human input cleared it
+
+    await runReaperTick();
+
+    expect(runner.enqueue).toHaveBeenCalledWith('SOT-1531', 'webhook-reaper', null, expect.objectContaining({ priority: 2 }));
     expect(runner.drainQueue).toHaveBeenCalled();
   });
 

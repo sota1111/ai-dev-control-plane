@@ -91,6 +91,7 @@ import {
 } from './lib/queueStore.js';
 import { parseOutcomeLines, summarizeOutcomes, type OutcomeSummary } from './lib/outcomeStats.js';
 import { levelForTag, shouldLog, rotateIfNeeded, listLogFilesNewestFirst } from './lib/logRotation.js';
+import * as reaperSuppression from './lib/reaperSuppression.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -337,6 +338,8 @@ const LINEAR_API_URL = 'https://api.linear.app/graphql';
 const QUEUE_ITEM_TTL_DAYS = appEnv.queueItemTtlDays();
 const INFLIGHT_FILE = path.join(LOG_DIR, 'runner.inflight.json');
 const CURRENT_ISSUE_FILE = path.join(LOG_DIR, 'current-issue.json');
+// SOT-1547: durable record of runs that ended code=70 (human-wait); gates reaper re-enqueue.
+const HUMANWAIT_SUPPRESS_FILE = path.join(LOG_DIR, 'runner.humanwait-suppress.json');
 // Leaked inflight entries (process crashed without cleanup) older than this are reaped.
 const INFLIGHT_TTL_MS = appEnv.inflightTtlMs(); // 2 hours
 // long-run detached execution (SOT-914 / SOT-911 案②): issues carrying this Linear label are
@@ -576,6 +579,40 @@ function getRunningIssues(): Array<{ issueId: string; issueIdentifier?: string |
 
 function isQueuedOrRunning(issueId: string): boolean {
   return isQueued(issueId) || isInflight(issueId);
+}
+
+// SOT-1547: reaper re-enqueue gating for code=70 (human-wait) runs. Bound to HUMANWAIT_SUPPRESS_FILE
+// and the env-tuned backoff policy; the pure logic lives in ./lib/reaperSuppression.ts.
+function reaperSuppressionPolicy(): reaperSuppression.SuppressionPolicy {
+  return {
+    baseMs: appEnv.reaperHumanWaitBackoffBaseMs(),
+    maxMs: appEnv.reaperHumanWaitBackoffMaxMs(),
+    maxRetries: appEnv.reaperHumanWaitMaxRetries(),
+  };
+}
+
+// Record a code=70 (human-wait) termination so the reaper backs off / stops re-enqueuing this issue.
+function recordHumanWaitTermination(issueId: string): void {
+  const entry = reaperSuppression.recordHumanWait(HUMANWAIT_SUPPRESS_FILE, issueId);
+  log('RUNNER', `code=70 human-wait recorded (count=${entry.count}); reaper will back off until human input`, { issue: issueId });
+}
+
+// Clear an issue's human-wait suppression (a human webhook arrived, or the issue completed).
+function clearHumanWaitSuppression(issueId: string): boolean {
+  return reaperSuppression.clearHumanWait(HUMANWAIT_SUPPRESS_FILE, issueId);
+}
+
+// Should the reaper / bootstrap scan SKIP re-enqueuing this issue right now (human-wait backoff)?
+function isReaperEnqueueSuppressed(issueId: string, now: number = Date.now()): boolean {
+  const entry = reaperSuppression.getEntry(HUMANWAIT_SUPPRESS_FILE, issueId);
+  return reaperSuppression.shouldSuppressReaperEnqueue(entry, now, reaperSuppressionPolicy());
+}
+
+// Human-readable suppression state for observability logs ({count, nextAt}).
+function humanWaitSuppressionInfo(issueId: string): { count: number; nextAt: string | null } {
+  const entry = reaperSuppression.getEntry(HUMANWAIT_SUPPRESS_FILE, issueId);
+  if (!entry) return { count: 0, nextAt: null };
+  return { count: entry.count, nextAt: reaperSuppression.nextEligibleAt(entry, reaperSuppressionPolicy()) };
 }
 
 // Startup reconciliation (SOT-1438): a spawner (webhook-server / scheduler) that was hard-killed
@@ -974,6 +1011,8 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
     case RUN_RESULT.TASK_COMPLETED:
       log('RUN', 'completed successfully', { trigger: item.trigger || 'queue', issue: issueId });
       clearUsageLimitCooldown();
+      // SOT-1547: a real completion clears any prior human-wait suppression for this issue.
+      clearHumanWaitSuppression(issueId);
       await removeUsageLimitLabel(issueId).catch(() => {});
       break;
 
@@ -982,6 +1021,9 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
         log('RUNNER', `process exited 0 but task completion not verified: ${result.reason} — skipping success cleanup`, { issue: issueId });
       } else {
         log('RUNNER', `process exited ${COMPLETION_UNVERIFIED} (COMPLETION_UNVERIFIED) — skipping success cleanup`, { issue: issueId });
+        // SOT-1547: code=70 = human-wait (BLOCKED / NEEDS_USER_INPUT). Record it so the reaper backs
+        // off / stops re-enqueuing this issue until a human webhook (comment / state change) arrives.
+        recordHumanWaitTermination(issueId);
       }
       break;
 
@@ -1428,6 +1470,9 @@ export {
   clearDetachedLog,
   processCompletedRun,
   isQueuedOrRunning,
+  isReaperEnqueueSuppressed,
+  clearHumanWaitSuppression,
+  humanWaitSuppressionInfo,
   getCurrentIssue,
   getRunningIssues,
   clearCurrentIssue,

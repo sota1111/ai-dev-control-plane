@@ -140,6 +140,17 @@ async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
       continue;
     }
 
+    // SOT-1547: a run that ended code=70 (human-wait: BLOCKED / NEEDS_USER_INPUT) leaves its issue in
+    // Todo/In Progress. Without gating, this reaper/bootstrap rescan re-enqueues it every ~5 min and
+    // burns the account-global usage limit with no progress. Skip while inside the human-wait backoff
+    // (or past the retry cap); a human webhook (comment / state change) clears the suppression and the
+    // issue becomes eligible again. Fail-open: on any store error isReaperEnqueueSuppressed()=false.
+    if (runner.isReaperEnqueueSuppressed(identifier)) {
+      const info = runner.humanWaitSuppressionInfo(identifier);
+      runner.log('SCAN', `${trigger}: skip ${identifier} (code=70 human-wait suppressed count=${info.count} nextAt=${info.nextAt})`);
+      continue;
+    }
+
     const retryAt = cooldownRetryAt || null;
     runner.enqueue(identifier, trigger, retryAt, {
       priority,
@@ -353,6 +364,20 @@ app.post('/webhooks/linear', (req: any, res: any) => {
   }
   markDedupeEvent(eventKey);
 
+  // SOT-1547: a new human comment is a genuine "resume" signal. Comment events are otherwise dropped
+  // by the Issue-only gate below, so clear the code=70 human-wait suppression here — the next reaper
+  // tick then re-enqueues the issue (its existing resume path). No direct enqueue: comments never
+  // enqueued directly, and the reaper cadence is the historical comment-driven resume mechanism.
+  if (body.type === "Comment") {
+    const commentIssueId = body.data?.issue?.identifier || body.data?.issue?.id;
+    if (commentIssueId && ["create", "update"].includes(body.action || "")) {
+      if (runner.clearHumanWaitSuppression(commentIssueId)) {
+        runner.log('WEBHOOK', `code=70 human-wait suppression cleared by new comment; eligible for reaper resume`, { issue: commentIssueId });
+      }
+    }
+    return res.status(200).json({ status: "ignored", reason: "comment event" });
+  }
+
   if (body.type !== "Issue") {
     return res.status(200).json({ status: "ignored", reason: "not an issue event" });
   }
@@ -472,6 +497,12 @@ function scheduleIssueEvent(issueId: string, meta: IssueEventMeta): void {
 // setImmediate / debounce タイマーの双方から同一経路で呼ばれる（挙動は従来と同一）。
 async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise<void> {
   try {
+    // SOT-1547: a genuine issue webhook (state change / meaningful update) is new human input — clear
+    // any code=70 human-wait suppression so this event resumes the issue as before.
+    if (runner.clearHumanWaitSuppression(issueId)) {
+      runner.log('WEBHOOK', `code=70 human-wait suppression cleared by issue webhook`, { issue: issueId });
+    }
+
     const { priority: issuePriority, priorityLabel: issuePriorityLabel, parentIssueId, parentIssueIdentifier } = meta;
     const isUrgent = issuePriority === 1;
 
