@@ -744,6 +744,7 @@ describe('runner', () => {
 
     const startedState = { name: 'In Progress', type: 'started' };
     const doneState = { name: 'Done', type: 'completed' };
+    const reviewState = { name: 'In Review', type: 'started' };
 
     it('returns false immediately when parentId is null (no Linear calls)', async () => {
       const result = await runner.finalizeParentIfChildrenComplete('SOT-831', null);
@@ -774,6 +775,69 @@ describe('runner', () => {
       const written = writeSpy.mock.calls.map((c: any) => c[0]);
       expect(written.some((b: any) => b.includes('issueUpdate') && b.includes('state-review'))).toBe(true);
       expect(written.some((b: any) => b.includes('commentCreate') && b.includes('auto-parent-finalized'))).toBe(true);
+    });
+
+    it('moves parent to In Review when all children are In Review (hold, not terminal) (SOT-1551)', async () => {
+      setupLinearMocks([
+        { issue: { id: 'parent-uuid', identifier: 'SOT-829', state: startedState, team: { id: 'team-1' },
+          children: { nodes: [
+            { identifier: 'SOT-831', state: reviewState },
+            { identifier: 'SOT-832', state: reviewState }
+          ] } } },
+        { issue: { comments: { nodes: [] } } },
+        { workflowStates: { nodes: [
+          { id: 'state-progress', name: 'In Progress', type: 'started' },
+          { id: 'state-review', name: 'In Review', type: 'started' }
+        ] } },
+        { issueUpdate: { success: true } },
+        { commentCreate: { success: true } }
+      ]);
+
+      const result = await runner.finalizeParentIfChildrenComplete('SOT-832', 'SOT-829');
+
+      expect(result).toBe(true);
+      expect(https.request).toHaveBeenCalledTimes(5);
+      const written = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(written.some((b: any) => b.includes('issueUpdate') && b.includes('state-review'))).toBe(true);
+      expect(written.some((b: any) => b.includes('commentCreate') && b.includes('auto-parent-finalized'))).toBe(true);
+    });
+
+    it('moves parent to In Review when children are a mix of Done and In Review (SOT-1551)', async () => {
+      setupLinearMocks([
+        { issue: { id: 'parent-uuid', identifier: 'SOT-829', state: startedState, team: { id: 'team-1' },
+          children: { nodes: [
+            { identifier: 'SOT-831', state: doneState },
+            { identifier: 'SOT-832', state: reviewState }
+          ] } } },
+        { issue: { comments: { nodes: [] } } },
+        { workflowStates: { nodes: [
+          { id: 'state-progress', name: 'In Progress', type: 'started' },
+          { id: 'state-review', name: 'In Review', type: 'started' }
+        ] } },
+        { issueUpdate: { success: true } },
+        { commentCreate: { success: true } }
+      ]);
+
+      const result = await runner.finalizeParentIfChildrenComplete('SOT-832', 'SOT-829');
+
+      expect(result).toBe(true);
+    });
+
+    it('does nothing when a child is still active (Todo/In Progress) even if others are In Review (SOT-1551)', async () => {
+      setupLinearMocks([
+        { issue: { id: 'parent-uuid', identifier: 'SOT-829', state: startedState, team: { id: 'team-1' },
+          children: { nodes: [
+            { identifier: 'SOT-831', state: reviewState },
+            { identifier: 'SOT-832', state: startedState }
+          ] } } }
+      ]);
+
+      const result = await runner.finalizeParentIfChildrenComplete('SOT-831', 'SOT-829');
+
+      expect(result).toBe(false);
+      expect(https.request).toHaveBeenCalledTimes(1); // only the parent query
+      const written = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(written.some((b: any) => b.includes('issueUpdate'))).toBe(false);
     });
 
     it('does nothing when a child is still non-terminal', async () => {

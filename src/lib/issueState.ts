@@ -23,3 +23,15 @@ export function isTerminalState(state: State | null | undefined): boolean {
 export function isHoldState(state: State | null | undefined): boolean {
   return (state?.name || '').toLowerCase() === 'in review';
 }
+
+/**
+ * 子Issueが「作業として完了」しているかを判定する（親Issueのファイナライズ用）。
+ *
+ * このハーネスでは実装系の子Issueは PR マージ後も自動 Done にはせず「In Review」(hold 状態) で
+ * 止める運用のため、terminal（Done/Canceled/Duplicate）だけを完了とみなすと、全子Issueが In Review
+ * に到達しても親Issueが Todo/In Progress のまま残ってしまう（SOT-1551）。よって完了判定は
+ * terminal に加えて In Review（hold）も完了として扱う。
+ */
+export function isChildComplete(state: State | null | undefined): boolean {
+  return isTerminalState(state) || isHoldState(state);
+}
