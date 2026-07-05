@@ -250,6 +250,13 @@ run_role_pipeline() {
   local i=0 debug_cycles=0
   local MAX_DEBUG_CYCLES="${PIPELINE_MAX_DEBUG_CYCLES:-2}"
 
+  # SOT-1550: track whether this pipeline finished as a PLAN/REVIEW no-PR terminal so the caller can
+  # emit COMPLETION_CONTRACT: COMPLETED_NO_PR (a real terminal success, distinct from UNVERIFIED).
+  # Global (no `local`) so it is visible to the caller after run_role_pipeline returns. Default 0 =
+  # unknown/PR-producing → caller emits plain COMPLETED (unchanged behavior).
+  PIPELINE_NO_PR=0
+  GITHUB_REPORT=""
+
   while [ "$i" -lt "$n" ]; do
     local role="${roles[$i]}"
     plog "── role[$i]: $role (issue $issue) ──"
@@ -280,11 +287,17 @@ run_role_pipeline() {
     local na; na="$(grep -A1 '## Next Action' "$report" 2>/dev/null | tail -n1 | tr -d ' \r\t' || true)"
     plog "role=$role next_action='${na:-<none>}' report=$report"
 
+    # SOT-1550: remember the github role's report so we can tell (after all roles complete) whether a
+    # PR was actually created — PLAN/REVIEW tasks skip the PR and terminate at In Review (no-PR).
+    [ "$role" = "github" ] && GITHUB_REPORT="$report"
+
     case "$role" in
       task-check)
         case "$na" in
           *READY_FOR_REVIEW*) ;;  # actionable → proceed
-          *) plog "PIPELINE_DONE: task-check reports not-actionable ('$na') → success no-op"; return 0 ;;
+          # SOT-1550: not-actionable no-op (already terminal / In Review / needs-human) never produces
+          # a PR — mark it a no-PR terminal so it is classified COMPLETED_NO_PR, not UNVERIFIED.
+          *) plog "PIPELINE_DONE: task-check reports not-actionable ('$na') → success no-op"; PIPELINE_NO_PR=1; return 0 ;;
         esac
         ;;
       verification|acceptance)
@@ -321,7 +334,19 @@ run_role_pipeline() {
     i=$((i + 1))
   done
 
-  plog "PIPELINE_DONE: all roles completed for $issue"
+  # SOT-1550: the full pipeline ran. Decide whether it produced a PR. The github role records the PR
+  # number/URL in its report (e.g. "PR: **#182**" / ".../pull/182"); PLAN/REVIEW tasks skip PR
+  # creation, so a github report with no PR reference means this was a no-PR terminal (→ In Review).
+  # Fail-safe: if we can't read the github report, leave PIPELINE_NO_PR=0 (emit plain COMPLETED).
+  if [ -n "$GITHUB_REPORT" ] && [ -f "$GITHUB_REPORT" ]; then
+    if grep -qiE 'pull/[0-9]+|PR[ :*]*#[0-9]+' "$GITHUB_REPORT" 2>/dev/null; then
+      PIPELINE_NO_PR=0  # a PR was created/merged
+    else
+      PIPELINE_NO_PR=1  # no PR reference → PLAN/REVIEW no-PR terminal
+    fi
+  fi
+
+  plog "PIPELINE_DONE: all roles completed for $issue (no_pr=$PIPELINE_NO_PR)"
   return 0
 }
 
@@ -340,6 +365,17 @@ if [ "$PIPELINE_ENABLED" -eq 1 ] && [ -n "$TARGET_ISSUE" ]; then
   run_role_pipeline "$TARGET_ISSUE"
   EXIT_CODE=$?
   set -e
+  # SOT-1550: emit a machine-parseable completion contract for the pipeline path (the legacy path
+  # already does this). A successful no-PR PLAN/REVIEW terminal → COMPLETED_NO_PR so the runner
+  # classifies it as a terminal success (COMPLETED_NO_PR) instead of COMPLETION_UNVERIFIED, keeping it
+  # out of the reaper re-injection bucket. Any other clean exit stays plain COMPLETED (unchanged).
+  if [ "$EXIT_CODE" -eq 0 ]; then
+    if [ "${PIPELINE_NO_PR:-0}" -eq 1 ]; then
+      echo "COMPLETION_CONTRACT: COMPLETED_NO_PR"
+    else
+      echo "COMPLETION_CONTRACT: COMPLETED"
+    fi
+  fi
   # Loop-breaker (SOT-1438): a finished run must not leave the issue Todo/In Progress, or the
   # webhook-reaper re-enqueues it forever as a "stranded active issue" and the pipeline loops. If the
   # pipeline did not advance it (e.g. PLAN / blocked / needs-human), move it to In Review. Idempotent

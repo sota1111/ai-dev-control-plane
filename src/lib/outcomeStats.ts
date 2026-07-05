@@ -26,7 +26,7 @@ export interface OutcomeRecord {
 export interface OutcomeSummary {
   total: number;
   byOutcome: Record<string, number>;
-  /** TASK_COMPLETED / total (0 when total is 0). */
+  /** (TASK_COMPLETED + COMPLETED_NO_PR) / total (0 when total is 0). */
   successRate: number;
   /** USAGE_LIMIT_RETRY + NON_RETRYABLE_LIMIT / total. */
   usageLimitRate: number;
@@ -95,7 +95,9 @@ export function summarizeOutcomes(
   return {
     total,
     byOutcome,
-    successRate: rate(get('TASK_COMPLETED')),
+    // SOT-1550: COMPLETED_NO_PR (PLAN/REVIEW no-PR normal completion) is a terminal success, so it
+    // counts toward the success rate alongside TASK_COMPLETED (and out of the "unverified" bucket).
+    successRate: rate(get('TASK_COMPLETED') + get('COMPLETED_NO_PR')),
     usageLimitRate: rate(get('USAGE_LIMIT_RETRY') + get('NON_RETRYABLE_LIMIT')),
     failureRate: rate(get('FAILED')),
   };

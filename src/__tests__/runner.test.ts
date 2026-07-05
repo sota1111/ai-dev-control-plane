@@ -1364,6 +1364,29 @@ describe('runner', () => {
       expect(logs.some(l => l.includes('process exited 70 (COMPLETION_UNVERIFIED)'))).toBe(true);
     });
 
+    it('exits 0 with COMPLETION_CONTRACT: COMPLETED_NO_PR: terminal success, not re-injected (SOT-1550)', async () => {
+      const item: any = queueItem('SOT-101', 1);
+      // No-PR PLAN/REVIEW terminal: run_auto.sh emits the marker; verifyTaskCompletion short-circuits
+      // on it (no Linear state query), so only eligibility + triggerRun project fetch hit Linear.
+      mockRunAutoExit(0, '... COMPLETION_CONTRACT: COMPLETED_NO_PR ...');
+      setupLinearMocks([
+        { issue: { id: 'SOT-101', state: { type: 'started', name: 'In Progress' } } }, // eligibility
+        { issue: { project: { name: 'ai-dev-control-plane' } } }                        // triggerRun project->repo fetch
+      ]);
+
+      const logSpy = jest.spyOn(fs, 'appendFileSync');
+
+      await runner.runItem(item);
+
+      const logs = logSpy.mock.calls.map(c => c[1] as string);
+      // Classified as a terminal success (COMPLETED_NO_PR), NOT COMPLETION_UNVERIFIED.
+      expect(logs.some(l => l.includes('completed successfully (no PR'))).toBe(true);
+      expect(logs.some(l => l.includes('outcome=COMPLETED_NO_PR'))).toBe(true);
+      expect(logs.some(l => l.includes('task completion not verified'))).toBe(false);
+      // Being a success, it never records a code=70 human-wait termination → reaper won't re-enqueue it.
+      expect(logs.some(l => l.includes('human-wait recorded'))).toBe(false);
+    });
+
     it('Linear query fails during verification: fail-closed, skips success cleanup', async () => {
       const item: any = queueItem('SOT-101', 1);
       mockRunAutoExit(0, 'some output');
@@ -1921,6 +1944,31 @@ describe('runner', () => {
         code: 0,
         completion: { completed: true }
       });
+    });
+
+    it('returns COMPLETED_NO_PR when code is 0 and completion is a no-PR terminal (SOT-1550)', () => {
+      const result = classifyRunResult({
+        code: 0,
+        output: 'COMPLETION_CONTRACT: COMPLETED_NO_PR',
+        completion: { completed: true, noPr: true }
+      });
+      expect(result).toEqual({
+        kind: RUN_RESULT.COMPLETED_NO_PR,
+        code: 0,
+        completion: { completed: true, noPr: true }
+      });
+      // Explicitly distinct from both TASK_COMPLETED and COMPLETION_UNVERIFIED.
+      expect(result.kind).not.toBe(RUN_RESULT.TASK_COMPLETED);
+      expect(result.kind).not.toBe(RUN_RESULT.COMPLETION_UNVERIFIED);
+    });
+
+    it('returns TASK_COMPLETED (not COMPLETED_NO_PR) when completed without the noPr flag', () => {
+      const result = classifyRunResult({
+        code: 0,
+        output: 'done',
+        completion: { completed: true, noPr: false }
+      });
+      expect(result.kind).toBe(RUN_RESULT.TASK_COMPLETED);
     });
 
     it('returns COMPLETION_UNVERIFIED when code is 0 but task is NOT completed', () => {
