@@ -1,0 +1,14 @@
+{
+  "__doc__": "SOT-1560 circuit-breaker / stop conditions for the role-driven pipeline (scripts/ai/run_auto.sh), loop-engineering lever 2. Prevents an unattended loop from running away (token/cost) by stopping a single issue pipeline when a stop condition is exceeded. Same style as incident_response.json: every knob ships DISABLED (0) so current behavior is a strict no-op — enable each one deliberately for staged rollout. When any enabled condition trips, run_auto.sh stops the pipeline safely, notifies Linear, and moves the issue to On Hold (so recover/reaper stop re-running it). The pure decision logic lives in src/lib/circuitBreaker.ts (unit-tested); the shell calls it via the thin CLI src/circuit-breaker-cli.ts. This is role-separated from usage-limit resume/cooldown (docs/usage-limit-and-resume.md): resume/cooldown pause+resume the SAME work when a worker hits an account limit; the breaker STOPS runaway work. Keys starting with __ are ignored.",
+  "__fields__": {
+    "max_runtime_min": "Wall-clock cap (minutes) for one issue pipeline. Exceeding it → safe stop + Linear notify + On Hold. 0 = disabled. Recommended once enabled: 90.",
+    "max_consecutive_failures": "Max consecutive same-role failures (NEEDS_DEBUG / non-zero exit) before stopping. Generalizes the old PIPELINE_MAX_DEBUG_CYCLES into one breaker. 0 = disabled. Recommended once enabled: 3.",
+    "issue_token_budget": "Approximate token/cost budget for one issue. Exceeding it → stop + notify. 0 = disabled (no token accounting).",
+    "no_progress": "Stop when the last N cycles produced no diff/commit and no worker-report change. 0 = disabled. Recommended once enabled: 2.",
+    "__failsafe__": "If a condition is enabled (threshold > 0) but its measurement is indeterminate, the breaker trips (fail-safe stop) rather than continuing an unmeasurable loop."
+  },
+  "max_runtime_min": 0,
+  "max_consecutive_failures": 0,
+  "issue_token_budget": 0,
+  "no_progress": 0
+}

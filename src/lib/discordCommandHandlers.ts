@@ -549,12 +549,69 @@ async function handleRetry(interaction: DiscordInteraction): Promise<CommandResu
 // force: 上記に加えて runner.lock を無条件解放し inflight / current-issue を強制クリアする。
 //   ロック保持者が「生存しているが固まっている」ケース向け（dead/stale は acquireLock が自動回収する）。
 //   run_auto.sh の OS flock が実際の二重起動を防ぐため、JSロックの強制解放は比較的安全。
+/**
+ * SOT-1560 — recover ONE circuit-breaker-halted issue from Discord. The breaker parks a runaway issue
+ * in On Hold; recovering it means a human deliberately un-parks it: move it back to In Progress (so the
+ * reaper/queue treats it as actionable again) and enqueue just that issue, then drain. Never throws.
+ */
+async function handleRecoverIssue(issueIdRaw: string): Promise<CommandResult> {
+  const validation = validateIssueId(issueIdRaw);
+  if (!validation.valid) {
+    return { content: `❌ ${validation.error}` };
+  }
+  const issueId = validation.id!;
+
+  try {
+    // Move it off On Hold back into the active flow. Fail-open: enqueue regardless so a Linear hiccup
+    // does not block manual recovery.
+    let moved = false;
+    try {
+      await runner.setIssueInProgress(issueId);
+      moved = true;
+    } catch (err: any) {
+      runner.log('DISCORD', `handleRecoverIssue setIssueInProgress failed for ${issueId}: ${err.message}`);
+    }
+
+    runner.enqueue(issueId, 'discord-recover-issue', null, { reason: 'circuit_breaker' });
+    runner.log('DISCORD', `${issueId} recovered from circuit-breaker halt via Discord /recover issue (moved=${moved})`);
+
+    setImmediate(() => {
+      runner.drainQueue().catch((err: any) => {
+        runner.log('DISCORD', `drainQueue error after /recover issue: ${err.message}`);
+      });
+    });
+
+    const stateLine = moved
+      ? '- 🔓 On Hold → In Progress に戻しました'
+      : '- ⚠ Linear 状態の更新に失敗（キュー投入は継続）';
+    return {
+      content: [
+        `## 🚑 ブレーカー復旧: ${issueId}`,
+        stateLine,
+        `- 📥 実行キューへ再投入しました — ドレインを開始しました。`,
+      ].join('\n'),
+    };
+  } catch (err: any) {
+    runner.log('DISCORD', `handleRecoverIssue error: ${err.message}`);
+    return { content: `❌ ${issueId} の復旧中にエラーが発生しました: ${err.message}` };
+  }
+}
+
 async function handleRecover(interaction?: DiscordInteraction): Promise<CommandResult> {
   const actions: string[] = [];
   try {
     const opts = (interaction && interaction.data && interaction.data.options) || [];
     const forceOpt = opts.find(o => o.name === 'force');
     const force = forceOpt ? forceOpt.value === true : false;
+
+    // SOT-1560: `/recover issue:<id>` — explicitly recover a SPECIFIC circuit-breaker-halted issue.
+    // The breaker moves a runaway issue to On Hold; the bulk re-scan below deliberately skips On Hold
+    // (isHoldState) so it never re-runs a halted issue automatically. A human recovers it on purpose
+    // here: move it back to In Progress and enqueue exactly that one issue (no bulk re-scan).
+    const issueOpt = opts.find(o => o.name === 'issue');
+    if (issueOpt && issueOpt.value) {
+      return await handleRecoverIssue(issueOpt.value);
+    }
 
     // 1. usage-limit cooldown のクリア
     const cd = runner.getUsageLimitCooldownUntil();

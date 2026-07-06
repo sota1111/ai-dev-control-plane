@@ -144,6 +144,24 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'move-on-hold': {
+      // SOT-1560: circuit-breaker halt — move a runaway issue to On Hold so the reaper / recover
+      // re-scan stops re-running it (isHoldState treats On Hold as a hold state). Idempotent /
+      // fail-open (does nothing if already On Hold / terminal / missing). An optional reason arg is
+      // included in the posted comment.
+      const issueId = args[0];
+      if (!issueId) {
+        process.stderr.write('Usage: runner-cli.js move-on-hold <issueIdentifier> [reason]\n');
+        process.exit(1);
+      }
+      const reason = args.slice(1).join(' ').trim();
+      const comment = `## 🛑 サーキットブレーカー発火\n\nこの Issue のパイプラインが停止条件を超過したため、無人ループの暴走を防ぐために自動停止し **On Hold** に移行しました。${reason ? `\n\n**理由:** ${reason}` : ''}\n\n再開するには Discord の \`/recover issue:${issueId}\` を実行してください（内容を確認のうえ復旧）。`;
+      const moved = await runner.setIssueOnHold(issueId, comment).catch(() => false);
+      runner.log('WORKER_ROLES', `move-on-hold ${issueId}: ${moved ? 'moved to On Hold' : 'no change (already on hold/terminal/missing)'}`, { issue: issueId });
+      process.stdout.write(moved ? 'moved' : 'nochange');
+      process.exit(0);
+      break;
+    }
     case 'parse-usage-limit-epoch': {
       let input = '';
       process.stdin.setEncoding('utf8');

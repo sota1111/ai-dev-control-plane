@@ -19,9 +19,14 @@ export function isTerminalState(state: State | null | undefined): boolean {
  * 人手で保留にしたケース）、type は In Progress と同じ "started" になる。そのため type だけでは
  * 区別できず、reaper や bootstrap scan が actionable とみなして繰り返し再実行してしまう。
  * 名前で In Review を保留状態として明示的に除外する。
+ *
+ * SOT-1560: サーキットブレーカー発火で停止した Issue は「On Hold」へ遷移させる。On Hold も
+ * 自動実行の対象外（hold）として扱い、reaper / recover の再スキャンが同一 Issue を再実行しない
+ * ようにする（再実行ループの停止）。
  */
 export function isHoldState(state: State | null | undefined): boolean {
-  return (state?.name || '').toLowerCase() === 'in review';
+  const name = (state?.name || '').toLowerCase();
+  return name === 'in review' || name === 'on hold';
 }
 
 /**
