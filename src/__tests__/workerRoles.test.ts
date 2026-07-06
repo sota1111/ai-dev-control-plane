@@ -185,16 +185,18 @@ describe('reorderChainForPin (SOT-1555 implementation-not-required pin)', () => 
     expect(reorderChainForPin(['codex', 'claude'], 'antigravity')).toEqual(['codex', 'claude']);
   });
 
-  test.each([['', 'empty'], [null, 'null'], [undefined, 'undefined'], ['bogus', 'invalid worker']])(
-    'returns the chain unchanged for a %s pin (%s)',
-    (pin) => {
-      expect(reorderChainForPin(['codex', 'claude', 'antigravity'], pin as string | null | undefined)).toEqual([
-        'codex',
-        'claude',
-        'antigravity',
-      ]);
-    },
-  );
+  test.each([
+    ['', 'empty'],
+    [null, 'null'],
+    [undefined, 'undefined'],
+    ['bogus', 'invalid worker'],
+  ])('returns the chain unchanged for a %s pin (%s)', (pin: string | null | undefined, _label: string) => {
+    expect(reorderChainForPin(['codex', 'claude', 'antigravity'], pin)).toEqual([
+      'codex',
+      'claude',
+      'antigravity',
+    ]);
+  });
 
   test('does not mutate the input chain', () => {
     const chain: ('codex' | 'claude' | 'antigravity')[] = ['codex', 'claude', 'antigravity'];
