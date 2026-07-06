@@ -1,19 +1,22 @@
-# 受け入れ条件 — SOT-1559
+# Acceptance Criteria — SOT-1558
 
-git worktree による並列隔離でロック粒度を repo → worktree(branch) に下げる（loop engineering レバー3）。
-親: SOT-1556 ループエンジニアリングの性能向上。実装順序: 親指示により **2 番目**（1 → 3 → 2、レバー1=SOT-1558 の後）。
+acceptance を別コンテキスト完了判定 ＋ 機械可読 PASS/FAIL ＋ 実動作検証に強化する
+（loop engineering 提案レバー1、親 SOT-1556）
 
-## 受け入れ条件（親Issue由来）
+## 受け入れ条件
 
-- [ ] lane/issue が専用 git worktree で実行され、完了/失敗時にクリーンアップされる
-      （`git worktree add ../wt/<issue-id> <branch>` → 完了・失敗時 `git worktree remove`、変更なしなら自動削除）
-- [ ] ロックが repo 全体でなく worktree(branch) 単位になり、異 branch は並列できる
-      （`runnerLock.ts` のロックキーを repo → worktree パスに拡張）
-- [ ] 同一 branch は従来通り直列（衝突しない）
-- [ ] CLAUDE.md の並列方針（「same repo/branch は serial」）が branch 単位に更新される
+- [ ] IMPLEMENT/FIX/DEBUG では acceptance が実装ワーカーと別コンテキスト（別ワーカー／別セッション）で走る。
+- [ ] SOT-1555 の NOT_REQUIRED ピン留めは非コード生成タスク（DOC/REVIEW/PLAN/QUESTION/SECURITY-scan/純調査）
+      限定にし、IMPLEMENT/FIX/DEBUG では acceptance を別コンテキストに保つ。
+- [ ] acceptance レポートが機械可読の `## Acceptance: PASS|FAIL`（criteria 単位の [x]/[ ]）を必須出力し、
+      `run_auto.sh` のゲートが自然文でなくこの行を機械的に読む。
+- [ ] UI を持つ target repo では実ユーザー動作検証（after スクリーンショット ＋ 主要導線 E2E/Playwright）が
+      acceptance の標準ステップになる。バックエンド/ライブラリ（`docs/screenshots/` 無し等 repo 種別）は E2E 不要。
+- [ ] 既定挙動の非回帰：非 UI repo は E2E 不要、既存パイプラインの成功/停止判定が壊れない。
 
-## 検証内容
+## 検証
 
-- `runnerLock.ts` の worktree 単位ロックキー単体テスト（異 branch 並列可 / 同 branch 直列）
-- worktree add/remove ライフサイクル（変更なし自動削除）のテスト
-- lint / typecheck / test green
+- `src/lib/workerRoles.ts` の doer/checker 分離ロジックの単体テスト（acceptance が直前実装ワーカーと別に選ばれる）。
+- ピン留め条件（NOT_REQUIRED 限定＝非コード生成タスクのみピン、IMPLEMENT/FIX/DEBUG はピンしない）のテスト。
+- 機械可読 `## Acceptance: PASS|FAIL` ゲート読取の検証。
+- lint / typecheck / test green。

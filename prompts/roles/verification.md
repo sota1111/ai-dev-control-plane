@@ -15,6 +15,15 @@ Verify the implementation in the target repository:
 3. If failures require real implementation changes beyond minimal fixes, stop and report `NEEDS_DEBUG`
    (the pipeline will loop back to the implementation role).
 
+## Real-action verification (SOT-1558) — standard step for UI repos
+If the target repo has a user-facing UI (an e2e/Playwright harness and/or a `docs/screenshots/`
+directory, or the change touches a visible screen), the primary-flow E2E through the project's existing
+mock harness is a REQUIRED part of the quality gate here — run it (e.g. `npm run e2e` with
+`installApiMocks` / `login`) and record the result. The acceptance role then captures the after
+screenshot as receipt-of-work evidence. Backend / library / doc-only repos (no e2e harness, no
+`docs/screenshots/`) skip E2E — note "N/A (non-UI repo)".
+
 ## Output
-Record each command run and its result. End with a `## Next Action` line:
+Record each command run and its result (include the E2E result or "N/A (non-UI repo)"). End with a
+`## Next Action` line:
 READY_FOR_REVIEW (all checks pass) | NEEDS_DEBUG (needs implementation changes) | BLOCKED

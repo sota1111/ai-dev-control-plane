@@ -1,32 +1,35 @@
-# Plan — SOT-1559（git worktree 並列隔離でロック粒度を repo → branch に下げる）
+# Plan — SOT-1558
 
-## 要件の解釈
-親 SOT-1556（ループエンジニアリング性能向上）レバー3 の実装子 Issue。グローバルロックが全実行を直列化
-する既知問題に対し、git worktree ベースの作業ディレクトリ隔離を導入してロック粒度を repo 全体 →
-worktree(=branch) 単位へ下げ、multi-repo/多 issue の並列を衝突なく解く。
+## 要件解釈（1–2行）
+acceptance（完了判定）を「別コンテキスト・別モデル」の doer/checker 分離で行い、受け入れ判定を機械可読
+`## Acceptance: PASS|FAIL` にゲート化し、UI を持つ target repo では snapshot/E2E の実動作検証を受け入れ証跡に
+標準ステップとして組み込む。（loop engineering レバー1、親 SOT-1556）
 
-3 段の変更:
-1. **git worktree 隔離**: 各 lane/issue に `git worktree add ../wt/<issue-id> <branch>` で専用作業ツリーを
-   与え、同一 repo でも別ディレクトリで並列作業させファイル/インデックス競合を構造的に排除。完了/失敗時に
-   `git worktree remove`（変更なしは自動削除）。
-2. **ロック粒度低下**: `runnerLock.ts` のロックキーを repo → worktree パスに拡張。異 issue/branch は並列可、
-   同一 branch は従来通り直列。
-3. **段階導入 + ドキュメント**: read-only 調査 lane を先に worktree 化（低リスク）→ 単一 repo 内複数 issue の
-   実装 lane へ拡大。CLAUDE.md 並列方針節の「same repo/branch は serial」を branch 単位に緩和。
+## タスク種別
+IMPLEMENT（config/worker_roles.json ＋ src/lib/workerRoles.ts ＋ scripts/ai/run_auto.sh ＋ prompts/roles/*.md ＋
+docs 様式の密結合な複数ファイル変更 + test）。Implementation REQUIRED。
 
-- タスク種別: **IMPLEMENT**（複数ファイル・ロジック変更・単体テストを伴うコード実装）。
-- 対象リポジトリ: `/workspaces/ai-dev-control-plane`（ハーネス自身）。
-- ブランチ: 親の feat/sot-1556-loop-engineering-improvements（子は同一 feature ブランチ）。
+## スコープ
+- doer/checker 分離: acceptance ロールを直前実装ワーカーとは別ワーカー／別セッションで走らせるのを既定化
+  （`src/lib/workerRoles.ts` の選択ロジック、`config/worker_roles.json` の acceptance チェーンを実装チェーンと
+  意図的に食い違わせる）。SOT-1555 の NOT_REQUIRED ピン留めを非コード生成タスク限定に制限し、IMPLEMENT/FIX/DEBUG
+  では acceptance を別コンテキストに保つ（`scripts/ai/run_auto.sh`）。
+- 機械可読化: acceptance レポートに `## Acceptance: PASS|FAIL`（criteria 単位の [x]/[ ]）を必須化し、
+  `run_auto.sh` のゲートが自然文でなくこの行を直接読む。曖昧な自然文完了宣言を排除。
+- 実動作検証: snapshot ラベル導線 ＋ e2e/Playwright モックハーネスを acceptance の標準ステップに組み込み、
+  after スクリーンショット ＋ 主要導線 E2E を受け入れ証跡として要求（repo 種別・`docs/screenshots/` 有無で判定）。
+  バックエンド/ライブラリは E2E 不要。
+- prompts: `prompts/roles/acceptance.md` / `prompts/roles/verification.md` に実動作検証（snapshot/E2E）を標準ステップ化、
+  `docs/ai/70_acceptance_check.md` 様式を規定。
 
-## 分解判断: 不要
-既に親 SOT-1556 から分解された子 Issue。単一 feature（worktree 隔離＋ロック粒度低下）で対象ファイル群が
-密結合（laneNotifier.ts / runnerLock.ts / run_codex・antigravity lane_path / CLAUDE.md）、impl+tests+docs が
-1 PR にまとまる単位。3 段は段階導入ステップであって独立 rollback/PR 単位ではない。さらなる分割は overhead > value。
+## 実装順序（親 SOT-1556 指示）
+1（doer/checker 分離＋ピン留め限定）→ 3（実動作検証標準ステップ化）→ 2（機械可読 PASS/FAIL ゲート）。
 
-## 対象ファイル（親Issueの変更範囲より）
-- `src/lib/runnerLock.ts` — ロックキーを repo → worktree パスに拡張（＋単体テスト）
-- `src/lib/laneNotifier.ts` — detach 実行 / lane_path を worktree ベースに
-- `scripts/ai/run_codex.sh`, `scripts/ai/run_antigravity.sh` — lane_path（worktree add/remove ライフサイクル）
-- `CLAUDE.md` — 並列方針節（「same repo/branch は serial」→ branch 単位）
+## 想定 commit
+- `feat(SOT-1558): make acceptance a separate-context checker with machine-readable PASS/FAIL`
+- `feat(SOT-1558): integrate snapshot/e2e real-action verification into acceptance`
+
+## 分解判断
+不要（30_tasks.md 参照）。単一 feature（acceptance 強化）で対象ファイル群が密結合、1 PR にまとまる。
 
 ## Next Action: READY_FOR_REVIEW（実装ロールへ）

@@ -25,8 +25,11 @@ const runner: any = await import('../runner.js');
 
 describe('runner', () => {
   const mockLockFile = runner.LOCK_FILE;
+  let prevRunnerStableMode: string | undefined;
 
   beforeEach(() => {
+    prevRunnerStableMode = process.env.RUNNER_STABLE_MODE;
+    delete process.env.RUNNER_STABLE_MODE;
     jest.clearAllMocks();
     jest.spyOn(process, 'kill').mockImplementation(() => true);
     // Default mock for existsSync
@@ -35,6 +38,8 @@ describe('runner', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+    if (prevRunnerStableMode === undefined) delete process.env.RUNNER_STABLE_MODE;
+    else process.env.RUNNER_STABLE_MODE = prevRunnerStableMode;
   });
 
   describe('lane resolution (SOT-913)', () => {
