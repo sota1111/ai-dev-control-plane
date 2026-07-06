@@ -356,7 +356,7 @@ export async function setIssueInProgress(issueId: string): Promise<void> {
     }
     const { id: uuid, team } = issueData.issue;
     const statesData: any = await linearQuery(
-      'query($teamId: String!) { workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "started" } }, first: 1) { nodes { id name } } }',
+      'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "started" } }, first: 1) { nodes { id name } } }',
       { teamId: team.id }
     );
     const stateId = statesData.workflowStates?.nodes[0]?.id;
@@ -399,7 +399,7 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
 
     // In Progress と In Review はどちらも type "started" のため、name で In Review を解決する。
     const statesData: any = await linearQuery(
-      'query($teamId: String!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
+      'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
       { teamId: issue.team.id }
     );
     const reviewState = (statesData.workflowStates?.nodes || []).find(
@@ -449,7 +449,7 @@ export async function setIssueOnHold(issueId: string, commentBody?: string): Pro
     if ((issue.state?.name || '').toLowerCase() === 'on hold') return false;
 
     const statesData: any = await linearQuery(
-      'query($teamId: String!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
+      'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
       { teamId: issue.team.id }
     );
     const holdState = (statesData.workflowStates?.nodes || []).find(
@@ -543,7 +543,7 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
     // Resolve the team's "In Review" workflow state by name (both In Progress and In
     // Review are type "started", so we must match on name, not type).
     const statesData: any = await linearQuery(
-      'query($teamId: String!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
+      'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
       { teamId: parent.team.id }
     );
     const stateNodes = statesData.workflowStates?.nodes || [];
