@@ -22,6 +22,7 @@ const mockRunner = {
   loadInflight: jest.fn().mockReturnValue([]),
   saveInflight: jest.fn(),
   clearCurrentIssue: jest.fn(),
+  setIssueInProgress: (jest.fn() as any).mockResolvedValue(undefined),
   syncQueueWithLinear: (jest.fn() as any).mockResolvedValue(undefined),
   getPriorityRank: jest.fn((p) => {
     if (p === 1) return 1;
@@ -478,5 +479,41 @@ describe('handleRecover', () => {
     expect(runner.clearUsageLimitCooldown).toHaveBeenCalled();
     expect(runner.drainQueue).toHaveBeenCalled(); // still drains existing queue
     expect(result.content).toContain('再スキャンに失敗');
+  });
+
+  // SOT-1560: `/recover issue:<id>` recovers ONE circuit-breaker-halted (On Hold) issue on purpose —
+  // move it off On Hold back to In Progress and enqueue just that issue (no bulk re-scan).
+  test('issue-specific recovery moves the issue to In Progress and enqueues only it', async () => {
+    const result = await handlers.handleRecover({
+      data: { options: [{ name: 'issue', type: 3, value: 'SOT-1560' }] },
+    });
+    await new Promise((r) => setImmediate(r)); // flush the deferred drainQueue
+
+    expect(runner.setIssueInProgress).toHaveBeenCalledWith('SOT-1560');
+    expect(runner.enqueue).toHaveBeenCalledWith('SOT-1560', 'discord-recover-issue', null, { reason: 'circuit_breaker' });
+    expect(runner.enqueue).toHaveBeenCalledTimes(1); // only the named issue, no bulk re-scan
+    expect(runner.fetchActiveIssues).not.toHaveBeenCalled(); // targeted path skips the re-scan
+    expect(runner.drainQueue).toHaveBeenCalled();
+    expect(result.content).toContain('ブレーカー復旧: SOT-1560');
+  });
+
+  test('issue-specific recovery still enqueues when the Linear transition fails (fail-open)', async () => {
+    (runner.setIssueInProgress as any).mockRejectedValueOnce(new Error('Linear down'));
+
+    const result = await handlers.handleRecover({
+      data: { options: [{ name: 'issue', type: 3, value: 'SOT-1560' }] },
+    });
+    await new Promise((r) => setImmediate(r));
+
+    expect(runner.enqueue).toHaveBeenCalledWith('SOT-1560', 'discord-recover-issue', null, { reason: 'circuit_breaker' });
+    expect(result.content).toContain('状態の更新に失敗');
+  });
+
+  test('issue-specific recovery rejects a malformed issue id', async () => {
+    const result = await handlers.handleRecover({
+      data: { options: [{ name: 'issue', type: 3, value: 'not-an-id' }] },
+    });
+    expect(runner.enqueue).not.toHaveBeenCalled();
+    expect(result.content).toContain('SOT-xxx');
   });
 });

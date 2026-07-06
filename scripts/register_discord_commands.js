@@ -112,6 +112,12 @@ const commands = [
     description: '停止した自動実行を強制復帰します（cooldown解除/pause解除/inflight回収/再スキャン/ドレイン）',
     options: [
       {
+        name: 'issue',
+        description: 'サーキットブレーカーで停止(On Hold)した特定Issueを復旧して再投入（例: SOT-123）',
+        type: 3, // STRING
+        required: false,
+      },
+      {
         name: 'force',
         description: 'runner.lockを強制解放しinflight/current-issueも強制クリア（生存だが固まったロック向け）',
         type: 5, // BOOLEAN
