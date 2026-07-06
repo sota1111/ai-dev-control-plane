@@ -318,6 +318,51 @@ function resolveLane(laneOrEnv?: string | NodeJS.ProcessEnv): string {
   return DEFAULT_LANE;
 }
 
+/**
+ * Worktree-isolation opt-in (SOT-1559 reopen). INDEPENDENT of `RUNNER_SERIALIZE_SCOPE`: when
+ * `RUNNER_WORKTREE_ISOLATION` is truthy, a run that would otherwise use the DEFAULT (repo) lane — i.e.
+ * `RUNNER_SERIALIZE_SCOPE` is not `branch` — is still given a dedicated git worktree keyed on its issue
+ * id. Its uncommitted work is therefore isolated in its own working tree and, on interruption, kept
+ * (dirty=preserve) so recovery is faster — WITHOUT changing the serialization/lock granularity (同一
+ * repo stays serial via the shared lock). Default false ⇒ the default lane keeps running in-place
+ * (backward compatible; this is why worktree is NOT used when scope≠branch and this flag is off).
+ * Accepts `1|true|yes|on` (trim, case-insensitive).
+ */
+function resolveWorktreeIsolation(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = (env.RUNNER_WORKTREE_ISOLATION || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+/**
+ * Resolve the lane used ONLY for git-worktree provisioning/cleanup (SOT-1559), decoupled from the
+ * serialization lane. Given the already-resolved base serialization lane:
+ *   1. base lane is non-default (branch scope) → use it as-is (existing SOT-932 behavior, unchanged).
+ *   2. else, worktree isolation opted-in and an issue id is known → a per-issue isolation lane
+ *      `iso-<issue-id>` so the default (repo) lane still runs in a dedicated worktree.
+ *   3. else → DEFAULT_LANE (no worktree; in-place run, backward compatible).
+ * Pure/deterministic in (baseLane, issueId, env) so provisioning and cleanup agree on the worktree path.
+ */
+function worktreeLaneFor(
+  baseLane: string,
+  issueId?: string | null,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  if (baseLane && baseLane !== DEFAULT_LANE) return baseLane;
+  if (resolveWorktreeIsolation(env)) {
+    const id = sanitizeLaneToken(issueId);
+    if (id) return `iso-${id}`;
+  }
+  return DEFAULT_LANE;
+}
+
+/**
+ * Convenience wrapper: resolve the worktree lane for a run env + issue id, deriving the base
+ * serialization lane from the env first. Used at provisioning time (buildRunEnv).
+ */
+function resolveWorktreeLane(env: NodeJS.ProcessEnv = process.env, issueId?: string | null): string {
+  return worktreeLaneFor(resolveLane(env), issueId, env);
+}
+
 /** Lock file path for a given lane (default lane → historical `runner.lock`). */
 function laneLockFile(lane?: string): string {
   const l = resolveLane(lane);
@@ -773,12 +818,14 @@ async function buildRunEnv(
     log('RUNNER', `project->repo resolution error (fail-open): ${err.message}`, { issue: issueId });
   }
 
-  // Lane worktree 供給 (SOT-932, 案A): RUNNER_SERIALIZE_SCOPE=branch などで非 default lane が
-  // 導出される場合、同一 repo・別 branch の作業ツリー競合を避けるため、解決済み TARGET_REPO を
-  // lane 専用の git worktree に差し替える。default lane（既定 repo スコープ）は repoRoot のまま
-  // 不変（後方互換）。fail-open: worktree 供給に失敗しても元の localPath を維持し run を止めない。
+  // Lane worktree 供給 (SOT-932, 案A / SOT-1559): RUNNER_SERIALIZE_SCOPE=branch などで非 default lane
+  // が導出される場合に加え、RUNNER_WORKTREE_ISOLATION が有効なら既定 repo スコープでも issue 単位の
+  // 隔離 lane (iso-<issue-id>) を与え、解決済み TARGET_REPO を lane 専用の git worktree に差し替える。
+  // これにより中断時に未コミット変更が専用ツリーに保持され復旧が速くなる（直列粒度は不変＝同一 repo は
+  // 共有ロックで直列のまま）。フラグ無効の default lane は repoRoot のまま不変（後方互換）。
+  // fail-open: worktree 供給に失敗しても元の localPath を維持し run を止めない。
   if (env.WEBHOOK_TARGET_REPO) {
-    const lane = resolveLane(env);
+    const lane = resolveWorktreeLane(env, issueId);
     if (lane !== DEFAULT_LANE) {
       try {
         const workingDir = resolveLaneWorkingDir({ repoRoot: env.WEBHOOK_TARGET_REPO, lane }, env);
@@ -1254,7 +1301,7 @@ async function runLanePool<T extends { lane: string }>(
 // lanes drain concurrently while same-lane work stays serial. Completion is handled exactly as in the
 // serial path (runItem → processCompletedRun / detached reaper); only dispatch is parallelized.
 async function drainQueuePooled(maxParallel: number): Promise<void> {
-  const batch: { item: QueueItem; lane: string; repoRoot: string | null }[] = [];
+  const batch: { item: QueueItem; lane: string; wtLane: string; repoRoot: string | null }[] = [];
   let item: QueueItem | null;
   while (batch.length < MAX_DRAIN_ITEMS && (item = dequeue(null)) !== null) {
     // Future retryAt: put it back and stop pulling (ordering preserved; it runs in a later pass).
@@ -1279,9 +1326,12 @@ async function drainQueuePooled(maxParallel: number): Promise<void> {
     }
     const lane = await resolveConcurrencyLane(item);
     // Resolve the repo root now (while we have the item) so the lane worktree can be cleaned up after
-    // the run. Only needed for non-default lanes (default lane never gets a worktree).
-    const repoRoot = lane === DEFAULT_LANE ? null : await resolveLaneRepoRoot(item);
-    batch.push({ item, lane, repoRoot });
+    // the run. The worktree lane (SOT-1559) may differ from the serialization lane: under repo scope
+    // with RUNNER_WORKTREE_ISOLATION it is the per-issue iso lane while the serialization lane stays
+    // default. Only resolve/clean up when a worktree lane actually exists.
+    const wtLane = worktreeLaneFor(lane, item.issueId);
+    const repoRoot = wtLane === DEFAULT_LANE ? null : await resolveLaneRepoRoot(item);
+    batch.push({ item, lane, wtLane, repoRoot });
   }
 
   if (batch.length === 0) {
@@ -1290,7 +1340,7 @@ async function drainQueuePooled(maxParallel: number): Promise<void> {
   }
   log('QUEUE', `drain(pool): dispatching ${batch.length} item(s) across up to ${maxParallel} slots`);
 
-  await runLanePool(batch, maxParallel, async ({ item, lane, repoRoot }) => {
+  await runLanePool(batch, maxParallel, async ({ item, lane, wtLane, repoRoot }) => {
     // Distinct lanes get distinct locks (cross-process safety); same lane shares one lock (serial).
     const locked = acquireLaneLock(lane, { trigger: 'drain', issue: item.issueId });
     if (!locked) {
@@ -1319,17 +1369,19 @@ async function drainQueuePooled(maxParallel: number): Promise<void> {
       // Detached long-runs keep their inflight entry (reaper owns cleanup); always release the lane lock.
       if (!outcome.detached) removeInflight(item.issueId);
       releaseLaneLock(lane);
-      // SOT-1559: tear down this lane's dedicated worktree once a synchronous run finishes. Skip
-      // detached runs (still executing in that worktree) and the default lane (no worktree).
-      // cleanupLaneWorktree removes only a CLEAN worktree — a dirty one is kept so in-progress work is
-      // never discarded (「変更なしなら自動削除」). Best-effort: never throws into the drain path.
-      if (!outcome.detached && lane !== DEFAULT_LANE && repoRoot) {
+      // SOT-1559: tear down this run's dedicated worktree once a synchronous run finishes. Skip
+      // detached runs (still executing in that worktree) and the default lane (no worktree). The
+      // worktree lane (wtLane) is the branch-scope lane OR the per-issue iso lane under
+      // RUNNER_WORKTREE_ISOLATION. cleanupLaneWorktree removes only a CLEAN worktree — a dirty one is
+      // kept so in-progress work is never discarded (「変更なしなら自動削除」) and can speed recovery.
+      // Best-effort: never throws into the drain path.
+      if (!outcome.detached && wtLane !== DEFAULT_LANE && repoRoot) {
         try {
-          const c = cleanupLaneWorktree({ repoRoot, lane });
+          const c = cleanupLaneWorktree({ repoRoot, lane: wtLane });
           if (c.removed) {
-            log('QUEUE', `lane worktree cleaned up: lane=${lane}`, { issue: item.issueId });
+            log('QUEUE', `lane worktree cleaned up: lane=${wtLane}`, { issue: item.issueId });
           } else if (c.reason === 'dirty') {
-            log('QUEUE', `lane worktree kept (uncommitted changes): lane=${lane}`, { issue: item.issueId });
+            log('QUEUE', `lane worktree kept (uncommitted changes): lane=${wtLane}`, { issue: item.issueId });
           }
         } catch (err: any) {
           log('QUEUE', `lane worktree cleanup error (non-fatal): ${err.message}`, { issue: item.issueId });
@@ -1434,6 +1486,28 @@ async function drainQueue(): Promise<void> {
       // (and its sentinel) so the reaper, not this finally, owns cleanup. Always release the lock.
       if (!outcome.detached) removeInflight(item.issueId);
       releaseLock();
+      // SOT-1559: the serial drain uses the global lock (no per-lane worktree), but under
+      // RUNNER_WORKTREE_ISOLATION buildRunEnv still ran this issue in a dedicated per-issue worktree.
+      // Tear it down here (clean=remove / dirty=keep so interrupted work is preserved for recovery).
+      // Skip detached runs (still using the worktree). Best-effort: never throws into the drain path.
+      if (!outcome.detached) {
+        const wtLane = resolveWorktreeLane(process.env, item.issueId);
+        if (wtLane !== DEFAULT_LANE) {
+          try {
+            const repoRoot = await resolveLaneRepoRoot(item);
+            if (repoRoot) {
+              const c = cleanupLaneWorktree({ repoRoot, lane: wtLane });
+              if (c.removed) {
+                log('QUEUE', `lane worktree cleaned up: lane=${wtLane}`, { issue: item.issueId });
+              } else if (c.reason === 'dirty') {
+                log('QUEUE', `lane worktree kept (uncommitted changes): lane=${wtLane}`, { issue: item.issueId });
+              }
+            }
+          } catch (err: any) {
+            log('QUEUE', `lane worktree cleanup error (non-fatal): ${err.message}`, { issue: item.issueId });
+          }
+        }
+      }
     }
 
     // A global run_auto.sh flock is held by another active run — no queued item can
@@ -1465,6 +1539,9 @@ export {
   resolveConcurrencyLane,
   runLanePool,
   resolveLane,
+  resolveWorktreeIsolation,
+  worktreeLaneFor,
+  resolveWorktreeLane,
   laneLockFile,
   laneQueueFile,
   LOCK_FILE,
