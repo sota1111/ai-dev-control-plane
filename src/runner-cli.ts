@@ -17,6 +17,7 @@ import { getWorkerCooldownStatus } from './lib/workerCooldown.js';
 import { initSecrets } from './config/secrets.js';
 import { notifyCooldown, notifyUsageLimitUnknownReset } from './lib/cooldownNotifier.js';
 import { notifyWorkerReport } from './lib/workerReportNotifier.js';
+import { notifyProgress } from './lib/progressNotifier.js';
 import { formatOutcomeSummary } from './lib/outcomeStats.js';
 import { classifyWorkerFailure, writeAuthUnhealthy, readAuthUnhealthy, shouldSkipForAuthUnhealthy, type WorkerName } from './lib/workerHealth.js';
 import { workerAuthUnhealthyTtlSeconds } from './config/env.js';
@@ -263,6 +264,28 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'notify-discord': {
+      // SOT-1577: generic best-effort progress post used by dispatched `-p` workers (via
+      // scripts/ai/notify_discord.sh) to send short updates to Discord DURING their work.
+      await initSecrets(['DISCORD_WEBHOOK_URL']);
+      let message = args.join(' ').trim();
+      if (!message && !process.stdin.isTTY) {
+        message = fs.readFileSync(0, 'utf8').trim();
+      }
+      if (!message) {
+        process.stderr.write('Usage: runner-cli.js notify-discord <message>   (or pipe the message on stdin)\n');
+        process.exit(1);
+      }
+      const ok = await notifyProgress({
+        message,
+        issueId: process.env.WEBHOOK_ISSUE_ID || null,
+        role: process.env.WORKER_ROLE || null,
+        worker: process.env.WORKER_SELECTED || null,
+      });
+      process.stdout.write(`Notification ${ok ? 'sent' : 'skipped/failed'}\n`);
+      process.exit(0);
+      break;
+    }
     case 'aggregate-outcomes': {
       // SOT-1439 / P5: parse the runner log's structured [OUTCOME] lines and print aggregate stats.
       // Usage: runner-cli.js aggregate-outcomes [windowHours] [--json]
@@ -330,7 +353,7 @@ async function main() {
       break;
     }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report, aggregate-outcomes, worker-health-record, auth-unhealthy-status\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report, notify-discord, aggregate-outcomes, worker-health-record, auth-unhealthy-status\n`);
       process.exit(1);
     }
   }

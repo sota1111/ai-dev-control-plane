@@ -212,6 +212,25 @@ for WORKER in $CHAIN; do
     PROMPT_DEST="$(worker_prompt "$WORKER")"
     mkdir -p "$(dirname "$PROMPT_DEST")"
     cp "$ROLE_PROMPT_SRC" "$PROMPT_DEST"
+    # SOT-1577: every dispatched worker posts short progress updates to Discord DIRECTLY while it works
+    # (the end-of-run report is still sent automatically). Appended after cp so it applies to every role
+    # and every worker in one place. Best-effort — notify_discord.sh always exits 0.
+    cat >> "$PROMPT_DEST" <<'PROGRESS_NOTIFY'
+
+---
+
+## Progress notifications to Discord (during your work — DO THIS)
+While you work, post short progress updates to Discord DIRECTLY by running, from the control-plane repo
+root (`/workspaces/ai-dev-control-plane`):
+
+    bash scripts/ai/notify_discord.sh "<one-line progress update>"
+
+- Post at minimum: (1) when you START this role, and (2) at each meaningful milestone (e.g. plan fixed,
+  backend done, tests passing, blocked-on-X). Keep each message to 1–3 lines.
+- The issue id / role / worker prefix is added automatically — pass only the human-readable message.
+- This is best-effort and never blocks your task; the full end-of-run report is still sent
+  automatically, so do NOT paste the whole report here — just short live updates.
+PROGRESS_NOTIFY
   fi
 
   # Hand off the previous worker's partial report (usage-limit / non-response continuity).
