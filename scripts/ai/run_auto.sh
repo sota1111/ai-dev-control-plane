@@ -217,6 +217,24 @@ run_cli() {
   fi
 }
 
+# SOT-1560: circuit breaker CLI (pure stop-condition decision; single source of truth = circuitBreaker.ts).
+# Prints `TRIPPED=… BREAKER=… REASON=…` and exits 10 when tripped, 0 otherwise.
+run_breaker_cli() {
+  if [ -x "$_PIPE_TSX_BIN" ]; then
+    "$_PIPE_TSX_BIN" src/circuit-breaker-cli.ts "$@"
+  else
+    npx tsx src/circuit-breaker-cli.ts "$@"
+  fi
+}
+
+# SOT-1560: fingerprint the working repo's git state (HEAD commit + dirty tree) so the no-progress
+# breaker can tell whether a cycle actually produced a diff/commit. Empty on any error (fail-open).
+_cb_fingerprint() {
+  local repo="${1:-.}"
+  { git -C "$repo" rev-parse HEAD 2>/dev/null; git -C "$repo" status --porcelain 2>/dev/null; } \
+    | sha1sum 2>/dev/null | awk '{print $1}'
+}
+
 run_role_pipeline() {
   local issue="$1"
   local target_repo="${WEBHOOK_TARGET_REPO:-${TARGET_REPO:-}}"
@@ -257,6 +275,13 @@ run_role_pipeline() {
   local i=0 debug_cycles=0
   local MAX_DEBUG_CYCLES="${PIPELINE_MAX_DEBUG_CYCLES:-2}"
 
+  # SOT-1560: circuit-breaker baseline. `debug_cycles` doubles as the consecutive-failure counter (the
+  # breaker generalizes PIPELINE_MAX_DEBUG_CYCLES). no-progress is measured across implementation cycles
+  # via the working-repo git fingerprint. All knobs ship DISABLED (config/circuit_breaker.json all-zero)
+  # → strict no-op, so this guard changes nothing until a knob is enabled deliberately.
+  local pipeline_start_ms; pipeline_start_ms="$(date +%s%3N 2>/dev/null || echo '')"
+  local cb_no_progress=0 cb_last_fp=""
+
   # SOT-1550: track whether this pipeline finished as a PLAN/REVIEW no-PR terminal so the caller can
   # emit COMPLETION_CONTRACT: COMPLETED_NO_PR (a real terminal success, distinct from UNVERIFIED).
   # Global (no `local`) so it is visible to the caller after run_role_pipeline returns. Default 0 =
@@ -278,6 +303,31 @@ run_role_pipeline() {
 
     if [ ! -s "prompts/roles/$role.md" ]; then
       plog "PIPELINE_STOP: missing canonical prompt prompts/roles/$role.md"
+      return "$COMPLETION_UNVERIFIED"
+    fi
+
+    # SOT-1560: circuit-breaker guard — consult the stop-condition breaker BEFORE spending another role,
+    # so a runaway loop is caught before it burns more tokens. Track no-progress across implementation
+    # cycles (git diff/commit fingerprint at each implementation entry). On trip: stop safely, notify
+    # Linear, and park the issue in On Hold so recover/reaper stop re-running it (kill the re-run loop).
+    if [ "$role" = "implementation" ]; then
+      local cb_fp; cb_fp="$(_cb_fingerprint "${target_repo:-.}")"
+      if [ -n "$cb_last_fp" ]; then
+        if [ "$cb_fp" = "$cb_last_fp" ]; then cb_no_progress=$((cb_no_progress + 1)); else cb_no_progress=0; fi
+      fi
+      cb_last_fp="$cb_fp"
+    fi
+    local cb_out cb_rc
+    set +e
+    cb_out="$(CB_STARTED_AT_MS="$pipeline_start_ms" \
+              CB_CONSECUTIVE_FAILURES="$debug_cycles" \
+              CB_NO_PROGRESS_CYCLES="$cb_no_progress" \
+              run_breaker_cli 2>>"$LOG_FILE")"
+    cb_rc=$?
+    set -e
+    if [ "$cb_rc" -eq 10 ]; then
+      plog "PIPELINE_HALT: circuit breaker tripped at role=$role → $cb_out"
+      run_cli move-on-hold "$issue" "$cb_out" >/dev/null 2>&1 || true
       return "$COMPLETION_UNVERIFIED"
     fi
 

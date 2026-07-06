@@ -106,3 +106,46 @@ webhook 経由で起動した Claude Code が usage limit に達した場合、u
 
 5. 再実行時に同じ issueId が処理されることを確認する
    - ログに `[WEBHOOK] Retry starting for issueId=TEST-001` が表示される
+
+---
+
+## サーキットブレーカー（停止条件）と usage-limit resume/cooldown の役割分離（SOT-1560）
+
+**役割は明確に分離されている。混同しないこと。**
+
+| 観点 | usage-limit resume / cooldown | サーキットブレーカー（circuit breaker） |
+| --- | --- | --- |
+| 目的 | アカウント制限に当たった **同じ作業を一時停止して後で再開**する | 明示的な停止条件のない **暴走ループを止める**（トークン/コスト浪費の防止） |
+| 契機 | worker が usage-limit / 429 / weekly-limit 等に到達 | 実時間超過・連続失敗・token 予算超過・no-progress |
+| 挙動 | cooldown 永続化 → `retryAt` でキュー再投入 → resume モードで**再実行** | パイプラインを**安全停止** → Linear 通知 → 該当 Issue を **On Hold** へ遷移（再実行しない） |
+| 復旧 | cooldown 解除時刻に**自動**で再開 | 人間が Discord `/recover issue:<id>` で**明示的に**復旧 |
+| 実装 | `runner.cooldown.json` / `resumeMetadata.ts` / `sessionContinue.ts` | `config/circuit_breaker.json` / `src/lib/circuitBreaker.ts` / `src/circuit-breaker-cli.ts` |
+
+要点: resume/cooldown は「一時停止して**続ける**」ための仕組み、ブレーカーは「暴走を**止める**」ための仕組み。
+usage-limit は待てば直る（自動再開）が、ブレーカー発火は「このまま回し続けると危険」という判断なので
+On Hold に落として自動再実行を止め、人間の確認を挟む。
+
+### 停止条件ノブ（`config/circuit_breaker.json`）
+
+すべて既定 `0`（無効）＝現行挙動は完全な no-op。段階導入のため各ノブを個別に有効化する。
+
+- `max_runtime_min` — issue パイプライン1本の実時間上限（分）。超過で安全停止＋On Hold。推奨値 例 `90`。
+- `max_consecutive_failures` — 同一ロールの連続失敗（NEEDS_DEBUG / exit≠0）上限。従来の
+  `PIPELINE_MAX_DEBUG_CYCLES` をブレーカー群の1つに一般化したもの。推奨値 `3`。
+- `issue_token_budget` — issue 単位の概算トークン/コスト上限。`0`＝トークン計測なし（無効）。
+- `no_progress` — 直近 N サイクルで diff/commit（作業リポの git 状態）に変化が無ければ停止。推奨値 `2`。
+- フェイルセーフ: あるノブが有効（>0）なのに計測不能な場合は、暴走を疑い**停止側**に倒す。
+
+判定ロジックは純粋関数 `src/lib/circuitBreaker.ts`（単体テスト済）に集約し、shell（`run_auto.sh`）は
+薄い CLI `src/circuit-breaker-cli.ts` 経由で単一の source of truth を参照する。ブレーカー発火時は
+`run_auto.sh` が `runner-cli move-on-hold <issue>` を呼び、`setIssueOnHold`（`linearApi.ts`）で該当 Issue を
+On Hold に遷移させる。On Hold は `isHoldState` が hold として扱うため、reaper / `/recover` の再スキャンは
+その Issue を再投入せず、**再実行ループが止まる**。
+
+### ブレーカー停止からの復旧（Discord）
+
+- `/recover issue:<SOT-xxx>` — ブレーカーで On Hold になった特定 Issue を明示的に復旧する。On Hold →
+  In Progress に戻し、その Issue だけをキューに再投入して drain する（一括再スキャンは行わない）。
+- `/recover`（issue 指定なし） — 従来どおり cooldown/pause/inflight を回収し actionable Issue を再スキャン
+  するが、On Hold の Issue は `isHoldState` により**スキップ**する（ブレーカー停止中の Issue を勝手に
+  再実行しない）。
