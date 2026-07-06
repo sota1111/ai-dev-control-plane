@@ -51,8 +51,13 @@ lane_path() {
 }
 
 # Resolve the ordered worker chain for this role from config/worker_roles.json (fail-open to "").
+# SOT-1555: when PIPELINE_PINNED_WORKER is set (task-check flagged the issue implementation-not-required),
+# the pinned worker is moved to the FRONT of the chain so the whole lifecycle stays on one AI with no
+# cross-worker handoff. This is a reorder, not a replacement — the rest of the chain remains as fallback,
+# so a non-responsive pinned worker still hands off (fail-open). Mirrors reorderChainForPin() in
+# src/lib/workerRoles.ts (the unit-tested reference spec).
 WORKER_ROLES_FILE="${WORKER_ROLES_FILE:-$CONTROL_PLANE_DIR/config/worker_roles.json}"
-CHAIN="$(node -e '
+CHAIN="$(PIPELINE_PINNED_WORKER="${PIPELINE_PINNED_WORKER:-}" node -e '
   const fs = require("fs");
   const [file, role] = process.argv.slice(1);
   const ROLES = ["task-check","decomposition","implementation","verification","acceptance","github","linear-report"];
@@ -61,8 +66,10 @@ CHAIN="$(node -e '
   try {
     const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
     const raw = Array.isArray(cfg[role]) ? cfg[role] : [cfg[role]];
-    const seen = new Set(); const out = [];
+    const seen = new Set(); let out = [];
     for (const w of raw) { if (WORKERS.includes(w) && !seen.has(w)) { seen.add(w); out.push(w); } }
+    const pin = process.env.PIPELINE_PINNED_WORKER || "";
+    if (WORKERS.includes(pin) && out.includes(pin)) { out = [pin, ...out.filter((w) => w !== pin)]; }
     process.stdout.write(out.join(" "));
   } catch (e) { process.stdout.write(""); }
 ' "$WORKER_ROLES_FILE" "$ROLE" 2>/dev/null || echo '')"
@@ -72,7 +79,11 @@ if [ -z "$CHAIN" ]; then
   exit "$WORKER_NONRESPONSE_EXIT"
 fi
 
-echo "== Worker dispatch: role=$ROLE chain=[$CHAIN] =="
+if [ -n "${PIPELINE_PINNED_WORKER:-}" ]; then
+  echo "== Worker dispatch: role=$ROLE chain=[$CHAIN] (pinned worker=$PIPELINE_PINNED_WORKER) =="
+else
+  echo "== Worker dispatch: role=$ROLE chain=[$CHAIN] =="
+fi
 
 # Map a worker to its run script and report file (lane-aware).
 worker_script() {

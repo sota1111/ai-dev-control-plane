@@ -5,6 +5,7 @@ import {
   WORKER_ROLES,
   WORKERS,
   loadWorkerRolesConfig,
+  reorderChainForPin,
   resolveRoleChain,
   resolveRoleChainCli,
   resolveRoleWorker,
@@ -164,5 +165,43 @@ describe('CLI helpers', () => {
     expect(resolveRoleWorkerCli(p, 'task-check')).toBe('codex');
     expect(resolveRoleWorkerCli(p, 'unknown-role')).toBe('');
     expect(resolveRoleWorkerCli('/no/such/file.json', 'task-check')).toBe('');
+  });
+});
+
+describe('reorderChainForPin (SOT-1555 implementation-not-required pin)', () => {
+  test('moves the pinned worker to the front, preserving the rest as fallback', () => {
+    expect(reorderChainForPin(['codex', 'claude', 'antigravity'], 'claude')).toEqual([
+      'claude',
+      'codex',
+      'antigravity',
+    ]);
+  });
+
+  test('is a no-op when the pinned worker is already primary', () => {
+    expect(reorderChainForPin(['codex', 'claude'], 'codex')).toEqual(['codex', 'claude']);
+  });
+
+  test('returns the chain unchanged when the pin is not in the chain', () => {
+    expect(reorderChainForPin(['codex', 'claude'], 'antigravity')).toEqual(['codex', 'claude']);
+  });
+
+  test.each([
+    ['', 'empty'],
+    [null, 'null'],
+    [undefined, 'undefined'],
+    ['bogus', 'invalid worker'],
+  ])('returns the chain unchanged for a %s pin (%s)', (pin: string | null | undefined, _label: string) => {
+    expect(reorderChainForPin(['codex', 'claude', 'antigravity'], pin)).toEqual([
+      'codex',
+      'claude',
+      'antigravity',
+    ]);
+  });
+
+  test('does not mutate the input chain', () => {
+    const chain: ('codex' | 'claude' | 'antigravity')[] = ['codex', 'claude', 'antigravity'];
+    const out = reorderChainForPin(chain, 'antigravity');
+    expect(chain).toEqual(['codex', 'claude', 'antigravity']);
+    expect(out).toEqual(['antigravity', 'codex', 'claude']);
   });
 });
