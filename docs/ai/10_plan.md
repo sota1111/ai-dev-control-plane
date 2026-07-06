@@ -1,23 +1,32 @@
-# Plan — SOT-1536 Antigravity CLI 認証永続化問題の調査報告
+# Plan — SOT-1559（git worktree 並列隔離でロック粒度を repo → branch に下げる）
 
-## 解釈（1–2行）
-`agy`(Antigravity CLI)の慢性認証エラー（認証直後の1回のみ成功→次回また要求→約40秒で timed out）を、
-人間提供のweb証拠（headless Linux/Dev Container で Secret Service/DBus/keyring が無い・遅いため token を
-保存/読み戻せず「毎回ログイン」になる既存複数報告）を踏まえて根本原因を確定し、解決または恒久回避策を
-提示する DEBUG/INVESTIGATION タスク。web検索・AIがAIを呼ぶことを共に許可。
+## 要件の解釈
+親 SOT-1556（ループエンジニアリング性能向上）レバー3 の実装子 Issue。グローバルロックが全実行を直列化
+する既知問題に対し、git worktree ベースの作業ディレクトリ隔離を導入してロック粒度を repo 全体 →
+worktree(=branch) 単位へ下げ、multi-repo/多 issue の並列を衝突なく解く。
 
-## タスク種別
-DEBUG（root-cause 調査 + 対策試行）。web報告の対策（`dbus-x11`/`libsecret-1-0`/`gnome-keyring` 導入、
-Secret Service 起動、default keyring 作成）を本 Dev Container で実測し、Secret Service 応答遅延
-（>5s timeout で有効 file token を破棄する読取経路）が解決可能か upstream 欠陥かを判定する。
+3 段の変更:
+1. **git worktree 隔離**: 各 lane/issue に `git worktree add ../wt/<issue-id> <branch>` で専用作業ツリーを
+   与え、同一 repo でも別ディレクトリで並列作業させファイル/インデックス競合を構造的に排除。完了/失敗時に
+   `git worktree remove`（変更なしは自動削除）。
+2. **ロック粒度低下**: `runnerLock.ts` のロックキーを repo → worktree パスに拡張。異 issue/branch は並列可、
+   同一 branch は従来通り直列。
+3. **段階導入 + ドキュメント**: read-only 調査 lane を先に worktree 化（低リスク）→ 単一 repo 内複数 issue の
+   実装 lane へ拡大。CLAUDE.md 並列方針節の「same repo/branch は serial」を branch 単位に緩和。
 
-## 意図するスコープ / 判断
-- 既存調査 SOT-1535([[sot1535-agy-auth-keyring]]) / SOT-1534([[sot1534-agy-auth-error]]) の確定知見
-  （真因 = `agy -p` silent-auth の keyring probe が 5s timeout で有効 file token を破棄する upstream 読取欠陥）を
-  出発点にし、本 Issue が持ち込んだ web 証拠でこれを裏付け／反証する。
-- web報告の keyring 導入策を実試行し、効果の有無を実測ログで示す（secret-tool 導入済でも DBUS 未設定で
-  TO 不変、という既知見の再検証を含む）。
-- 解決に至れば手順を、至らなければ恒久回避（`ANTIGRAVITY_DISABLED=1` で codex/claude へ即フォールバック、
-  機能不変）と upstream 起因である旨を明示。
-- 成果物 = 調査報告（`docs/ai/investigations/` 配下、SOT-1534/1535 と同系）＋ Linear 報告。コード変更は
-  keyring 導入スクリプト等に限定される可能性があり doc/scaffold 中心。ゼロから再調査せず既知見を再利用する。
+- タスク種別: **IMPLEMENT**（複数ファイル・ロジック変更・単体テストを伴うコード実装）。
+- 対象リポジトリ: `/workspaces/ai-dev-control-plane`（ハーネス自身）。
+- ブランチ: 親の feat/sot-1556-loop-engineering-improvements（子は同一 feature ブランチ）。
+
+## 分解判断: 不要
+既に親 SOT-1556 から分解された子 Issue。単一 feature（worktree 隔離＋ロック粒度低下）で対象ファイル群が
+密結合（laneNotifier.ts / runnerLock.ts / run_codex・antigravity lane_path / CLAUDE.md）、impl+tests+docs が
+1 PR にまとまる単位。3 段は段階導入ステップであって独立 rollback/PR 単位ではない。さらなる分割は overhead > value。
+
+## 対象ファイル（親Issueの変更範囲より）
+- `src/lib/runnerLock.ts` — ロックキーを repo → worktree パスに拡張（＋単体テスト）
+- `src/lib/laneNotifier.ts` — detach 実行 / lane_path を worktree ベースに
+- `scripts/ai/run_codex.sh`, `scripts/ai/run_antigravity.sh` — lane_path（worktree add/remove ライフサイクル）
+- `CLAUDE.md` — 並列方針節（「same repo/branch は serial」→ branch 単位）
+
+## Next Action: READY_FOR_REVIEW（実装ロールへ）

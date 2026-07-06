@@ -198,5 +198,43 @@ describe('worktree lane provisioning (SOT-932)', () => {
       expect(res.worktree).toBe(false);
       expect(res.path).toBe(repoRoot);
     });
+
+    describe('cleanupLaneWorktree lifecycle (SOT-1559)「変更なしなら自動削除」', () => {
+      it('auto-removes a CLEAN worktree after a run', () => {
+        const baseDir = path.join(tmp, 'wt');
+        const lane = 'repo--clean';
+        const wt = worktree.provisionLaneWorktree({ repoRoot, lane, baseDir }, {});
+        expect(fs.existsSync(wt.path)).toBe(true);
+
+        const res = worktree.cleanupLaneWorktree({ repoRoot, lane, baseDir }, {});
+        expect(res).toEqual({ removed: true, reason: 'clean' });
+        expect(fs.existsSync(wt.path)).toBe(false);
+        // The lane branch is preserved even after the worktree is removed.
+        expect(git(repoRoot, 'branch --list runner/lane/repo--clean')).toContain('runner/lane/repo--clean');
+      });
+
+      it('KEEPS a dirty worktree so in-progress work is not discarded', () => {
+        const baseDir = path.join(tmp, 'wt');
+        const lane = 'repo--dirty';
+        const wt = worktree.provisionLaneWorktree({ repoRoot, lane, baseDir }, {});
+        fs.writeFileSync(path.join(wt.path, 'wip.txt'), 'uncommitted\n');
+
+        const res = worktree.cleanupLaneWorktree({ repoRoot, lane, baseDir }, {});
+        expect(res).toEqual({ removed: false, reason: 'dirty' });
+        expect(fs.existsSync(wt.path)).toBe(true);
+      });
+
+      it('is a safe no-op for the default lane and for an absent worktree', () => {
+        const baseDir = path.join(tmp, 'wt');
+        expect(worktree.cleanupLaneWorktree({ repoRoot, lane: 'default', baseDir }, {})).toEqual({
+          removed: false,
+          reason: 'default-lane',
+        });
+        expect(worktree.cleanupLaneWorktree({ repoRoot, lane: 'repo--never', baseDir }, {})).toEqual({
+          removed: false,
+          reason: 'absent',
+        });
+      });
+    });
   });
 });

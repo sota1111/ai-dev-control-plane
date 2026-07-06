@@ -11,7 +11,7 @@ import { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } fro
 import * as queueOrdering from './lib/queueOrdering.js';
 import { resolveRepoForProject } from './lib/projectRepo.js';
 import { notifyDetachedLaunched, DetachedOutcome } from './lib/laneNotifier.js';
-import { resolveLaneWorkingDir } from './lib/worktree.js';
+import { resolveLaneWorkingDir, cleanupLaneWorktree } from './lib/worktree.js';
 import {
   isNewProject,
   deriveNewRepoName,
@@ -1190,6 +1190,19 @@ async function resolveConcurrencyLane(item: QueueItem, env: NodeJS.ProcessEnv = 
   }
 }
 
+// Resolve the repo root (local checkout path) a queue item's lane worktree lives under, so the lane
+// worktree can be torn down after the run (SOT-1559). Mirrors resolveConcurrencyLane's repo
+// resolution; returns null on unknown repo / any error (→ nothing to clean up). Never throws.
+async function resolveLaneRepoRoot(item: QueueItem): Promise<string | null> {
+  try {
+    const projectName = await getIssueProjectName(item.issueId);
+    const resolved = projectName ? resolveRepoForProject(projectName) : null;
+    return resolved ? resolved.localPath : null;
+  } catch {
+    return null;
+  }
+}
+
 // Generic N-slot, lane-serial pool scheduler (SOT-933). Dispatches `items` via `runOne`, running at
 // most `maxParallel` at once and NEVER two items of the same lane concurrently (same lane waits for
 // its predecessor — the 同一 branch 直列 safety valve). Pure orchestration: all side effects live in
@@ -1240,7 +1253,7 @@ async function runLanePool<T extends { lane: string }>(
 // lanes drain concurrently while same-lane work stays serial. Completion is handled exactly as in the
 // serial path (runItem → processCompletedRun / detached reaper); only dispatch is parallelized.
 async function drainQueuePooled(maxParallel: number): Promise<void> {
-  const batch: { item: QueueItem; lane: string }[] = [];
+  const batch: { item: QueueItem; lane: string; repoRoot: string | null }[] = [];
   let item: QueueItem | null;
   while (batch.length < MAX_DRAIN_ITEMS && (item = dequeue(null)) !== null) {
     // Future retryAt: put it back and stop pulling (ordering preserved; it runs in a later pass).
@@ -1264,7 +1277,10 @@ async function drainQueuePooled(maxParallel: number): Promise<void> {
       continue;
     }
     const lane = await resolveConcurrencyLane(item);
-    batch.push({ item, lane });
+    // Resolve the repo root now (while we have the item) so the lane worktree can be cleaned up after
+    // the run. Only needed for non-default lanes (default lane never gets a worktree).
+    const repoRoot = lane === DEFAULT_LANE ? null : await resolveLaneRepoRoot(item);
+    batch.push({ item, lane, repoRoot });
   }
 
   if (batch.length === 0) {
@@ -1273,7 +1289,7 @@ async function drainQueuePooled(maxParallel: number): Promise<void> {
   }
   log('QUEUE', `drain(pool): dispatching ${batch.length} item(s) across up to ${maxParallel} slots`);
 
-  await runLanePool(batch, maxParallel, async ({ item, lane }) => {
+  await runLanePool(batch, maxParallel, async ({ item, lane, repoRoot }) => {
     // Distinct lanes get distinct locks (cross-process safety); same lane shares one lock (serial).
     const locked = acquireLaneLock(lane, { trigger: 'drain', issue: item.issueId });
     if (!locked) {
@@ -1302,6 +1318,22 @@ async function drainQueuePooled(maxParallel: number): Promise<void> {
       // Detached long-runs keep their inflight entry (reaper owns cleanup); always release the lane lock.
       if (!outcome.detached) removeInflight(item.issueId);
       releaseLaneLock(lane);
+      // SOT-1559: tear down this lane's dedicated worktree once a synchronous run finishes. Skip
+      // detached runs (still executing in that worktree) and the default lane (no worktree).
+      // cleanupLaneWorktree removes only a CLEAN worktree — a dirty one is kept so in-progress work is
+      // never discarded (「変更なしなら自動削除」). Best-effort: never throws into the drain path.
+      if (!outcome.detached && lane !== DEFAULT_LANE && repoRoot) {
+        try {
+          const c = cleanupLaneWorktree({ repoRoot, lane });
+          if (c.removed) {
+            log('QUEUE', `lane worktree cleaned up: lane=${lane}`, { issue: item.issueId });
+          } else if (c.reason === 'dirty') {
+            log('QUEUE', `lane worktree kept (uncommitted changes): lane=${lane}`, { issue: item.issueId });
+          }
+        } catch (err: any) {
+          log('QUEUE', `lane worktree cleanup error (non-fatal): ${err.message}`, { issue: item.issueId });
+        }
+      }
     }
   });
 
