@@ -264,6 +264,10 @@ run_role_pipeline() {
   PIPELINE_NO_PR=0
   GITHUB_REPORT=""
 
+  # SOT-1555: clear any pin from a previous run so it never leaks. task-check may set
+  # PIPELINE_PINNED_WORKER (implementation-not-required → keep the whole lifecycle on one AI).
+  unset PIPELINE_PINNED_WORKER
+
   while [ "$i" -lt "$n" ]; do
     local role="${roles[$i]}"
     plog "── role[$i]: $role (issue $issue) ──"
@@ -283,7 +287,9 @@ run_role_pipeline() {
     local rc=${PIPESTATUS[0]}
     set -e
 
-    local report; report="$(grep -oE 'WORKER_DISPATCH_DONE role=[^ ]+ worker=[^ ]+ report=[^ ]+' "$cap" 2>/dev/null | sed 's/.*report=//' | tail -1 || true)"
+    local dispatch_done; dispatch_done="$(grep -oE 'WORKER_DISPATCH_DONE role=[^ ]+ worker=[^ ]+ report=[^ ]+' "$cap" 2>/dev/null | tail -1 || true)"
+    local report; report="$(printf '%s' "$dispatch_done" | sed 's/.*report=//' || true)"
+    local winner; winner="$(printf '%s' "$dispatch_done" | sed -E 's/.*worker=([^ ]+).*/\1/' || true)"
     rm -f "$cap"
 
     if [ "$rc" -ne 0 ] || [ -z "$report" ] || [ ! -f "$report" ]; then
@@ -301,7 +307,21 @@ run_role_pipeline() {
     case "$role" in
       task-check)
         case "$na" in
-          *READY_FOR_REVIEW*) ;;  # actionable, no decomposition → proceed to implementation
+          *READY_FOR_REVIEW*)
+            # SOT-1555: if task-check flagged the issue implementation-not-required (DOC / REVIEW /
+            # QUESTION / SECURITY-scan / trivial), pin every subsequent role to the worker that just
+            # handled task-check, so the whole lifecycle is completed by ONE AI with no cross-worker
+            # handoff. run_worker.sh moves this worker to the front of each role's chain (rest kept as
+            # fallback → fail-open). Absent flag → REQUIRED → no pin → unchanged multi-worker behavior.
+            if grep -qiE '^##[[:space:]]*Implementation:[[:space:]]*NOT_REQUIRED' "$report" 2>/dev/null; then
+              if [ -n "$winner" ]; then
+                export PIPELINE_PINNED_WORKER="$winner"
+                plog "PIPELINE_PIN: task-check flagged implementation-not-required → pin all remaining roles to worker=$winner (no handoff)"
+              else
+                plog "PIPELINE_PIN: implementation-not-required flagged but winning worker unknown → not pinning"
+              fi
+            fi
+            ;;  # actionable, no decomposition → proceed to implementation
           # SOT-1550/1553: task-check now also performs decomposition. A non-READY result means either
           # not-actionable (already terminal / In Review / needs-human) OR the issue was decomposed into
           # child issues (which run as their own pipelines). Both stop the parent pipeline WITHOUT a PR —

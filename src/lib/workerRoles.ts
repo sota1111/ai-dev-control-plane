@@ -148,6 +148,28 @@ export function resolveRoleWorker(
 }
 
 /**
+ * SOT-1555: reorder a resolved worker chain so a PINNED worker is tried FIRST.
+ *
+ * When task-check classifies an issue as implementation-not-required (DOC / REVIEW / QUESTION /
+ * SECURITY-scan / trivial), the pipeline pins every subsequent role to the SAME worker that handled
+ * task-check, so the whole lifecycle is completed by one AI with no cross-worker handoff (the human
+ * requirement in SOT-1555). This is a REORDER, not a replacement: the pinned worker is moved to the
+ * front and the remaining chain is preserved as fallback, so if the pinned worker becomes
+ * non-responsive the dispatcher still hands off to the others (fail-open — never a deadlock).
+ *
+ * Rules:
+ * - `pinned` empty / not a valid worker / not present in `chain` → return `chain` unchanged.
+ * - otherwise move `pinned` to index 0, keeping the relative order of the rest (de-duplicated).
+ *
+ * NOTE: `scripts/ai/run_worker.sh` applies the identical rule inline (it reads the pin from
+ * `PIPELINE_PINNED_WORKER`); this function is the reference spec covered by unit tests.
+ */
+export function reorderChainForPin(chain: Worker[], pinned: string | null | undefined): Worker[] {
+  if (!pinned || !isWorker(pinned) || !chain.includes(pinned)) return [...chain];
+  return [pinned, ...chain.filter((w) => w !== pinned)];
+}
+
+/**
  * CLI entry used by the dispatcher: prints the ordered worker chain for a role, space-separated
  * (empty string when there is no override). `node -e "..." <configPath> <role>`.
  */

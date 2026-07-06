@@ -46,7 +46,21 @@ Continue in the SAME run — do NOT stop and wait for another worker/script:
   separately).
 - Not actionable / blocked → `## Next Action: NEEDS_USER_INPUT` or `BLOCKED`.
 
+## Implementation-required signal (SOT-1555) — emit this line in your report
+When the task is actionable (READY_FOR_REVIEW), also emit ONE machine-readable line so the pipeline can
+keep implementation-not-required work on a single AI (no cross-worker handoff):
+
+- `## Implementation: NOT_REQUIRED` — the task needs no separate implementation role: it is a
+  non-code-building type (DOC / REVIEW / QUESTION / SECURITY-scan / a pure investigation or answer) OR a
+  trivial 1–2 line wording fix. The pipeline then pins every remaining role (implementation /
+  verification / acceptance / github / linear-report) to the SAME worker that ran task-check.
+- `## Implementation: REQUIRED` — the task needs real implementation (IMPLEMENT / FIX / DEBUG, multi-file
+  or code changes). Default when the line is absent, so REQUIRED keeps the normal multi-worker chains.
+
+Emit this line only on READY_FOR_REVIEW (not on decomposition / not-actionable).
+
 ## Output
 Report (a) status/labels/latest comments, (b) acceptance criteria, (c) actionable?, (d) task type + scope,
 (e) decomposition judgment (必要/不要 + reason; child issue IDs + their inherited project if any).
+Include the `## Implementation: REQUIRED|NOT_REQUIRED` line (see above) when READY_FOR_REVIEW.
 End with a `## Next Action` line: READY_FOR_REVIEW | NEEDS_USER_INPUT | BLOCKED
