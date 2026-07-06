@@ -270,11 +270,16 @@ describe('reorderChainForCheckerSeparation (SOT-1558 doer/checker separation)', 
   });
 });
 
-describe('committed config divergence (SOT-1558 doer/checker separation)', () => {
-  test("acceptance & verification primaries differ from implementation's primary", () => {
+describe('committed config default (SOT-1569 unified claude-primary policy)', () => {
+  // SOT-1569: the human directive set every role's static primary to claude (secondary codex,
+  // tertiary antigravity). The SOT-1558 static doer/checker divergence was removed in favor of the
+  // DYNAMIC acceptance separation (reorderChainForCheckerSeparation, tested above), so the static
+  // acceptance/verification primaries now MATCH implementation's primary.
+  test('every role chain is claude primary, codex secondary, antigravity tertiary', () => {
     const repoConfig = path.join(process.cwd(), 'config', 'worker_roles.json');
     const cfg = loadWorkerRolesConfig(repoConfig);
-    expect(cfg.acceptance[0]).not.toBe(cfg.implementation[0]);
-    expect(cfg.verification[0]).not.toBe(cfg.implementation[0]);
+    for (const role of WORKER_ROLES) {
+      expect(cfg[role]).toEqual(['claude', 'codex', 'antigravity']);
+    }
   });
 });

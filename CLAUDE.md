@@ -125,14 +125,15 @@ The single source of truth for which worker handles each role. Each role maps to
 cooldown. Fail-open: missing/invalid config or unknown role → dispatcher exits `75` (Claude fallback).
 Helper: `src/lib/workerRoles.ts`. To run everything on Claude, set every role to `["claude"]`.
 
-Default chains:
+Default chains (SOT-1569): every role's chain is primary `claude`, secondary `codex`, tertiary
+`antigravity`.
 
 | Role | Default chain |
 | --- | --- |
-| `task-check` | `["codex","claude","antigravity"]` |
+| `task-check` | `["claude","codex","antigravity"]` |
 | `decomposition` | `["claude","codex","antigravity"]` |
-| `implementation` | `["antigravity","codex","claude"]` |
-| `verification` | `["codex","claude","antigravity"]` |
+| `implementation` | `["claude","codex","antigravity"]` |
+| `verification` | `["claude","codex","antigravity"]` |
 | `acceptance` | `["claude","codex","antigravity"]` |
 | `github` (branch/PR/merge) | `["claude","codex","antigravity"]` |
 | `linear-report` (state sync/progress) | `["claude","codex","antigravity"]` |

@@ -52,9 +52,9 @@
    run_auto.sh（スクリプト駆動ロールパイプライン）
         │  各ロールを run_worker.sh <role> にディスパッチ
         │  （担当ワーカーは config/worker_roles.json の優先度チェーンで個別設定）
-        ├─ task-check / verification … 既定 Codex
-        ├─ implementation … 既定 Antigravity（非応答時はチェーンで次候補へ）
-        ├─ decomposition / acceptance / github / linear-report … 既定 Claude
+        ├─ 全ロール共通の既定 … 一次 Claude / 二次 Codex / 三次 Antigravity
+        │   （task-check / decomposition / implementation / verification / acceptance / github / linear-report）
+        │   非応答（exit 75）/ usage-limit 時はチェーンで次候補へ自動フォールバック
         └─ GitHub で PR 作成・マージ、Linear へ状態を同期
         ▲
         │  進捗・完了は Linear / Discord に自動報告
@@ -228,8 +228,8 @@ workers: github=claude, linear-report=claude
 ## ワーカー制御フラグ
 
 どのワーカーが各役割を担当するかは、**`config/worker_roles.json` が唯一の上位スイッチ**である。各役割は
-**順序付きの優先度チェーン**（例: `"task-check": ["codex","claude","antigravity"]`。先頭=第一候補、以降=
-フォールバック順）にワーカーを割り当てる。ディスパッチャ `scripts/ai/run_worker.sh <role>` がこのチェーンを
+**順序付きの優先度チェーン**（既定は全ロール共通で `["claude","codex","antigravity"]`＝一次 Claude / 二次
+Codex / 三次 Antigravity。先頭=第一候補、以降=フォールバック順）にワーカーを割り当てる。ディスパッチャ `scripts/ai/run_worker.sh <role>` がこのチェーンを
 読み、先頭から順にワーカーの run スクリプト（`run_codex.sh` / `run_claude.sh` / `run_antigravity.sh`）を起動し、
 **非応答（exit 75）や usage-limit なら次の候補へ引き継ぐ**（部分レポートを渡して継続）。**AI が AI を直接呼ばず、
 必ずこのスクリプトを噛ませる**のが原則。同一ワーカーが連続する場合はその CLI の会話セッションを再利用して
