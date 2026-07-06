@@ -1,43 +1,44 @@
-# Worker Report — task-check (SOT-1536)
+# Task-Check Report — SOT-1559（git worktree 並列隔離 / loop engineering レバー3）
 
 ## Summary
-SOT-1536「Antigravity CLIの認証永続化問題に関する調査報告」の実行可否を確認。**Actionable**。
-新規 Issue（Todo / No priority / ラベル無 / project=ai-dev-control-plane / コメント無）。SOT-1534 /
-SOT-1535 の系譜で、`agy` 慢性認証エラーを試行錯誤で解決に至らせる DEBUG/INVESTIGATION タスク。
-本 Issue の新規性 = 人間が **web検索を全面許可** し、**headless Linux/Dev Container で Secret Service /
-DBus / keyring が無い・遅いため token を保存/読み戻せず「毎回ログイン要求」になる既存複数報告（Google
-AI Forum / GitHub Issue #18 / Zenn / HN）** を証拠として添付。公式 README では認証は system keyring 経由・
-有効セッションが無ければ Google Sign-In にフォールバック、Secret Service 応答が1秒超で未ログイン扱いに
-なる、という設計説明も引用。**AIがAIを呼ぶことも許可**。`docs/ai/10_plan.md` / `docs/ai/40_acceptance.md`
-を本 Issue 向けに更新済み。
+task-check（確認 ＋ 分解判断）を SOT-1559 に実施。本 Issue は親 SOT-1556 から分解済みの実装子 Issue
+（レバー3）。グローバルロックの全直列化問題に対し、git worktree ベースの作業ディレクトリ隔離を導入して
+ロック粒度を repo 全体 → worktree(=branch) 単位へ下げる。IMPLEMENT で actionable、これ以上の分解は不要。
+親指示の実装順序は 1 → 3 → 2 で本 Issue は **2 番目**（レバー1=SOT-1558 の後）。
 
-## (a) 状態・ラベル・最新コメント
-- Status: **Todo**（type=unstarted）。履歴: 一度 Canceled → 2026-07-05T06:38 に Todo へ復帰。
-- ラベル: なし（Bug/snapshot 無 → GitHub Issue/スクショ不要）。Priority: No priority。
-- Project: ai-dev-control-plane。Team: Sota。Assignee: sota morohashi。添付/コメント: なし。
-- 本文: 近い既存報告表 + 公式/準公式情報 + GitHub Issue #18 + Forum 追加情報（1秒超で未ログイン扱い）+
-  Zenn 検証（v1.0.1 で保存方式変更の可能性、手順を信用しすぎない注記）+ 追加検索語。
-  結論仮説 = 「固有の環境破損ではなく、Antigravity CLI + headless Linux 系の既知の認証永続化問題」。
+## (a) 状態 / ラベル / 最新コメント
+- Status: Todo → **In Progress**（本 task-check で遷移）
+- Labels: なし（Bug/snapshot ラベル無し）
+- Project: ai-dev-control-plane / Priority: No priority / 親: SOT-1556
+- 既存コメント: なし（本 task-check で分類 ＋ 分解判断 ＋ 作業開始を投稿）
 
-## (b) 受け入れ条件（`docs/ai/40_acceptance.md` に記載）
-- [ ] 認証失敗（認証直後1回成功→次回また要求→約40秒 timed out）の根本原因を実測で確定（web報告との一致検証）。
-- [ ] web提示の対策（`dbus-x11`/`libsecret-1-0`/`gnome-keyring` 導入・Secret Service 起動・default keyring
-      作成・1秒超で未ログイン扱い挙動）を本 Dev Container で試行し効果を実測。
-- [ ] Secret Service 応答遅延（>5s timeout で有効 file token を破棄する読取経路）が解決可能か upstream 欠陥かを判定。
-- [ ] 解決手順 or 恒久回避（`ANTIGRAVITY_DISABLED=1` 即フォールバック、機能不変）+ upstream 起因の明示。
-- [ ] 調査報告を Linear へ。
+## (b) 受け入れ条件（`docs/ai/40_acceptance.md` 参照）
+- lane/issue が専用 git worktree で実行され、完了/失敗時にクリーンアップされる（変更なし自動削除）
+- ロックが repo 全体でなく worktree(branch) 単位になり、異 branch は並列できる
+- 同一 branch は従来通り直列（衝突しない）
+- CLAUDE.md の並列方針（「same repo/branch は serial」）が branch 単位に更新される
 
 ## (c) Actionable?
-**Yes（READY_FOR_REVIEW）**。Todo・明確な actionable スコープ（原因特定＋対策試行＋解決/恒久回避提示）。
-web検索・AIがAIを呼ぶ両方を明示許可。先行 SOT-1534/SOT-1535 の確定知見（真因 = `agy -p` silent-auth の
-keyring probe が 5s timeout で有効 file token を破棄する upstream 読取欠陥）を土台に、本 Issue の web 証拠で
-裏付け／keyring 導入策を実測できる。人間入力待ち・terminal 状態ではない。
+Yes。Todo・オープン・要件明確。対象ファイル（`src/lib/runnerLock.ts`, `src/lib/laneNotifier.ts`,
+`scripts/ai/run_codex.sh`/`run_antigravity.sh`, `CLAUDE.md`）はリポジトリに実在を確認済み。
 
-## (d) タスク種別・スコープ
-- 種別: **DEBUG / INVESTIGATION**（対策試行を含む。keyring 導入 script/env 変更まで踏み込みうる）。
-- スコープ: 対象 repo = /workspaces/ai-dev-control-plane（agy を実行するハーネス側）。既知の keyring 5s
-  timeout 読取経路を軸に、web報告の keyring 導入策を本 Dev Container で実測 → 解決可否を判定 → 手順 or
-  恒久回避を提示。Antigravity CLI upstream 本体修正・OAuth プロバイダ変更はスコープ外。
-  SOT-1534/1535 の既知見を再利用しゼロから再調査しない。
+## (d) Task type + Scope
+- Type: **IMPLEMENT**（複数ファイル・ロジック変更・単体テストを伴うコード実装）。
+- Scope: git worktree による lane 隔離、runnerLock のロックキーを repo → worktree パスに拡張、
+  CLAUDE.md 並列方針の branch 単位緩和、及び対応する単体テスト。対象 repo はハーネス自身
+  `/workspaces/ai-dev-control-plane`。ブランチは親と同一 feat/sot-1556-loop-engineering-improvements。
+
+## (e) 分解判断: 不要
+理由: 既に親 SOT-1556 から分解された子 Issue。単一 feature（worktree 隔離＋ロック粒度低下）で対象
+ファイル群が密結合し、実装＋テスト＋ドキュメントが 1 PR にまとまる単位。3 段の「段階導入」は独立
+rollback/PR 単位ではなく実装ステップ。さらなる分割は overhead > value。子 Issue は作成しない。
+
+## 成果物
+- `docs/ai/10_plan.md` — 実装計画（実装ロール向け）
+- `docs/ai/30_tasks.md` — 具体タスクリスト（3 段）
+- `docs/ai/40_acceptance.md` — 受け入れ条件
+- Linear: 分類 ＋ 分解判断（不要）コメント、作業開始 Progress コメント、Todo → In Progress
+
+## Implementation: REQUIRED
 
 ## Next Action: READY_FOR_REVIEW

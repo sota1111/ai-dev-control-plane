@@ -1,36 +1,19 @@
-# Acceptance Criteria — SOT-1536: Antigravity CLI 認証永続化問題の調査報告
+# 受け入れ条件 — SOT-1559
 
-Issue type: **DEBUG / INVESTIGATION**（web検索許可、AIがAIを呼ぶことを許可）
-Target repo: /workspaces/ai-dev-control-plane
-Status: Todo（actionable）
+git worktree による並列隔離でロック粒度を repo → worktree(branch) に下げる（loop engineering レバー3）。
+親: SOT-1556 ループエンジニアリングの性能向上。実装順序: 親指示により **2 番目**（1 → 3 → 2、レバー1=SOT-1558 の後）。
 
-## 要件解釈
-`agy`（Antigravity CLI）の慢性認証エラーに対し、試行錯誤して問題を解決に至らせる。
-人間が提供したweb検索結果（WSL2/headless Linux/Dev Container で Secret Service / DBus /
-keyring が無い・遅い・別セッションを見るため token を保存/読み戻しできず「毎回ログイン要求」に
-なる、という既存複数報告）を踏まえ、根本原因を確定し、実効的な解決または恒久回避策を提示する。
+## 受け入れ条件（親Issue由来）
 
-## 受け入れ条件
-- [ ] `agy` の認証失敗（認証直後の1回のみ成功→次回また要求→約40秒で timed out）の根本原因を
-      実測で確定する（web報告と自環境の一致/不一致を検証）。
-- [ ] web検索で示された対策（`dbus-x11` / `libsecret-1-0` / `gnome-keyring` 導入、Secret Service
-      起動、default keyring 作成、Secret Service 応答1秒超で未ログイン扱いになる挙動）を
-      本 Dev Container で試行し、効果の有無を実測で示す。
-- [ ] Secret Service の応答遅延（>5s timeout で有効な file token を破棄する読取経路）が
-      解決可能か、あるいは upstream 欠陥として回避不能かを判定する。
-- [ ] 解決に至った場合はその手順を、至らない場合は恒久回避策
-      （例: `ANTIGRAVITY_DISABLED=1` で codex/claude へ即フォールバック、機能不変）と
-      upstream 起因である旨を明示する。
-- [ ] 調査結果・根拠・再現ログ・結論を調査報告としてまとめる（Linear へ報告）。
+- [ ] lane/issue が専用 git worktree で実行され、完了/失敗時にクリーンアップされる
+      （`git worktree add ../wt/<issue-id> <branch>` → 完了・失敗時 `git worktree remove`、変更なしなら自動削除）
+- [ ] ロックが repo 全体でなく worktree(branch) 単位になり、異 branch は並列できる
+      （`runnerLock.ts` のロックキーを repo → worktree パスに拡張）
+- [ ] 同一 branch は従来通り直列（衝突しない）
+- [ ] CLAUDE.md の並列方針（「same repo/branch は serial」）が branch 単位に更新される
 
-## スコープ外
-- Antigravity CLI 本体（upstream）のソース修正。
-- 認証プロバイダ（Google OAuth）側の変更。
+## 検証内容
 
-## 参考（既存調査・lineage）
-- SOT-1535: `agy -p` 非対話 silent-auth の keyring probe が 5s timeout（keyring.go:95）し
-  有効 file token を破棄 → 真因は読取経路 upstream 欠陥。
-- SOT-1534: 対話ログイン直後は `-p` 成功→数分後失敗は失効でなく cold-start 毎の keyring 5s TO。
-  secret-tool 導入済でも DBUS 未設定で TO 不変。
-- これらは本 Issue（SOT-1536）が web証拠で裏付ける「headless Linux + system keyring 不安定」
-  仮説と一致する。
+- `runnerLock.ts` の worktree 単位ロックキー単体テスト（異 branch 並列可 / 同 branch 直列）
+- worktree add/remove ライフサイクル（変更なし自動削除）のテスト
+- lint / typecheck / test green

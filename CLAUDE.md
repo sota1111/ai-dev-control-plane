@@ -343,8 +343,13 @@ Claude's compute.
    acceptance checks, multi-repo live verification — fan out read-only sub-agents (`Agent` tool, e.g.
    `Explore` / `acceptance-checker` / `repo-scanner`) within one run. Sub-agents must do **no writes**
    (no implementation/git/PR); only conclusions return to the parent.
-2. **Writes (implementation, git, PR) are single-lane.** Serial. Lane-parallelism is allowed only across
-   **different repos**; the same repo/branch is always serial (avoid conflicts/corruption).
+2. **Writes (implementation, git, PR) serialize per branch, not per repo (SOT-1559).** The serialization
+   lane is keyed by **worktree(=branch)**, so different branches — even in the **same repo** — run in
+   parallel, each in its own dedicated `git worktree` (opt-in via `RUNNER_SERIALIZE_SCOPE=branch`; the
+   default `repo` scope keeps the whole repo serial for backward compatibility). The **same branch is
+   always serial** (same lane = same worktree = same lock), which prevents index/file corruption. Each
+   lane's worktree is torn down when its run finishes — automatically removed if the working tree is
+   clean, kept if it has uncommitted changes so in-progress work is never discarded.
 3. **Generation-heavy work (Claude-compute-bound)** stays single-lane — parallelizing only hits the
    global limit faster.
 

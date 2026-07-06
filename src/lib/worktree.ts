@@ -144,6 +144,52 @@ export function removeLaneWorktree(opts: ProvisionOpts, env: NodeJS.ProcessEnv =
   }
 }
 
+export type CleanupReason = 'default-lane' | 'absent' | 'clean' | 'dirty' | 'error';
+
+export interface CleanupResult {
+  /** Whether the worktree was removed on this call. */
+  removed: boolean;
+  /** Why the worktree was (not) removed. */
+  reason: CleanupReason;
+}
+
+/**
+ * Tear down a lane's worktree after its run completes/fails, honoring 「変更なしなら自動削除」
+ * (SOT-1559): remove the worktree ONLY when it has no uncommitted changes. A dirty worktree
+ * (modified/untracked files) is kept so in-progress work is never silently discarded — this is the
+ * key difference from removeLaneWorktree(), which force-removes unconditionally (explicit teardown).
+ *
+ * - default lane → no-op (never has a worktree).
+ * - missing worktree dir → no-op (`absent`).
+ * - clean worktree → `git worktree remove <path>` (no --force needed) → `removed:true` (`clean`).
+ *   The lane branch (`runner/lane/<lane>`) is left intact; only the working tree is removed, so any
+ *   committed work is preserved on the branch.
+ * - dirty worktree → kept (`dirty`).
+ *
+ * Fail-open / idempotent: any git error returns `removed:false` and never throws into the runner path.
+ */
+export function cleanupLaneWorktree(opts: ProvisionOpts, env: NodeJS.ProcessEnv = process.env): CleanupResult {
+  const { repoRoot, lane } = opts;
+  if (isDefaultLane(lane)) {
+    return { removed: false, reason: 'default-lane' };
+  }
+  const exec = opts.exec || defaultExec;
+  const wtPath = laneWorktreePath({ repoRoot, lane, baseDir: opts.baseDir }, env);
+  if (!fs.existsSync(wtPath)) {
+    return { removed: false, reason: 'absent' };
+  }
+  try {
+    const status = exec(`git -C ${JSON.stringify(wtPath)} status --porcelain`).trim();
+    if (status !== '') {
+      return { removed: false, reason: 'dirty' };
+    }
+    exec(`git -C ${JSON.stringify(repoRoot)} worktree remove ${JSON.stringify(wtPath)}`);
+    return { removed: true, reason: 'clean' };
+  } catch {
+    return { removed: false, reason: 'error' };
+  }
+}
+
 /**
  * Convenience: resolve the working directory to use for a lane WITHOUT mutating git state when the
  * lane is default. Non-default lanes are provisioned (created if needed). Fail-open: on any error
