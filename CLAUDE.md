@@ -351,6 +351,12 @@ Claude's compute.
    always serial** (same lane = same worktree = same lock), which prevents index/file corruption. Each
    lane's worktree is torn down when its run finishes — automatically removed if the working tree is
    clean, kept if it has uncommitted changes so in-progress work is never discarded.
+   **Worktree isolation is also available independently of branch-scope parallelism (SOT-1559):** set
+   `RUNNER_WORKTREE_ISOLATION=1` and even a default (repo-scope) run executes in a dedicated per-issue
+   `git worktree` (`iso-<issue-id>`) WITHOUT changing the lock granularity (同一 repo stays serial). Its
+   purpose is faster recovery — if an Urgent run is interrupted, its uncommitted work is preserved in its
+   own worktree (dirty=kept) rather than mixed into the main working tree. Default off ⇒ the repo-scope
+   run stays in-place (so worktree is NOT used when `RUNNER_SERIALIZE_SCOPE`≠`branch` and this flag is off).
 3. **Generation-heavy work (Claude-compute-bound)** stays single-lane — parallelizing only hits the
    global limit faster.
 

@@ -152,6 +152,63 @@ describe('runner', () => {
     });
   });
 
+  describe('worktree isolation opt-in (SOT-1559 reopen)', () => {
+    it('resolveWorktreeIsolation is off by default and parses truthy values', () => {
+      expect(runner.resolveWorktreeIsolation({})).toBe(false);
+      expect(runner.resolveWorktreeIsolation({ RUNNER_WORKTREE_ISOLATION: '' })).toBe(false);
+      expect(runner.resolveWorktreeIsolation({ RUNNER_WORKTREE_ISOLATION: '0' })).toBe(false);
+      for (const v of ['1', 'true', 'yes', 'on', ' TRUE ', 'On']) {
+        expect(runner.resolveWorktreeIsolation({ RUNNER_WORKTREE_ISOLATION: v })).toBe(true);
+      }
+    });
+
+    it('repo scope + isolation ON: default-lane run gets a per-issue iso worktree lane', () => {
+      const lane = runner.resolveWorktreeLane(
+        { RUNNER_WORKTREE_ISOLATION: '1' },
+        'SOT-1559'
+      );
+      expect(lane).toBe('iso-SOT-1559');
+      // the serialization lane itself stays DEFAULT (locks/queue unchanged → 同一 repo 直列)
+      expect(runner.resolveLane({ RUNNER_WORKTREE_ISOLATION: '1' })).toBe(runner.DEFAULT_LANE);
+    });
+
+    it('repo scope + isolation OFF: no worktree (backward compatible; scope≠branch → not used)', () => {
+      expect(runner.resolveWorktreeLane({}, 'SOT-1559')).toBe(runner.DEFAULT_LANE);
+      // even with RUNNER_REPO/BRANCH set under repo scope, no worktree without the flag
+      expect(
+        runner.resolveWorktreeLane(
+          { RUNNER_REPO: 'ai-dev-control-plane', RUNNER_BRANCH: 'feat/x' },
+          'SOT-1559'
+        )
+      ).toBe(runner.DEFAULT_LANE);
+    });
+
+    it('isolation ON but no issue id → no iso lane (nothing to key on)', () => {
+      expect(runner.resolveWorktreeLane({ RUNNER_WORKTREE_ISOLATION: '1' }, '')).toBe(runner.DEFAULT_LANE);
+      expect(runner.resolveWorktreeLane({ RUNNER_WORKTREE_ISOLATION: '1' }, null)).toBe(runner.DEFAULT_LANE);
+    });
+
+    it('branch scope is unchanged: non-default serialization lane wins over iso (no regression)', () => {
+      const env = {
+        RUNNER_SERIALIZE_SCOPE: 'branch',
+        RUNNER_REPO: 'booking-monitor',
+        RUNNER_BRANCH: 'feat/a',
+        RUNNER_WORKTREE_ISOLATION: '1'
+      };
+      // base serialization lane is non-default → worktree lane == serialization lane (SOT-932 behavior)
+      expect(runner.resolveWorktreeLane(env, 'SOT-1559')).toBe('booking-monitor--feata');
+      // worktreeLaneFor honors an explicit non-default base lane and ignores the iso fallback
+      expect(runner.worktreeLaneFor('booking-monitor--feata', 'SOT-1559', env)).toBe('booking-monitor--feata');
+    });
+
+    it('iso worktree lane stays lane-safe (cannot escape the worktree base dir)', () => {
+      const lane = runner.resolveWorktreeLane({ RUNNER_WORKTREE_ISOLATION: '1' }, '../../evil/../id');
+      expect(lane.includes('/')).toBe(false);
+      expect(lane.includes('..')).toBe(false);
+      expect(lane.startsWith('iso-')).toBe(true);
+    });
+  });
+
   describe('acquireLock', () => {
     it('returns true when lock file does not exist', () => {
       fs.existsSync.mockImplementation((path: string) => path === runner.LOG_DIR); // log dir exists, lock file doesn't
