@@ -347,7 +347,13 @@ run_role_pipeline() {
       return "$COMPLETION_UNVERIFIED"
     fi
 
-    local na; na="$(grep -A1 '## Next Action' "$report" 2>/dev/null | tail -n1 | tr -d ' \r\t' || true)"
+    # Parse the role's verdict token from the report. Workers emit it either INLINE
+    # (`## Next Action: READY_FOR_REVIEW`) OR on the line AFTER the header. The old parser only read the
+    # line after the header, so an inline token parsed as <none> and wrongly stopped the pipeline (which,
+    # combined with the errexit leak below, stranded the issue In Progress). Read from the LAST
+    # `## Next Action` header to EOF (awk resets the buffer at each header) and pull the first known
+    # verdict token, case-insensitively, normalized to upper case.
+    local na; na="$(awk '/[Nn]ext[[:space:]]*[Aa]ction/{cap=1; buf=""} cap{buf=buf"\n"$0} END{print buf}' "$report" 2>/dev/null | grep -oiE 'READY_FOR_REVIEW|NEEDS_DEBUG|NEEDS_USER_INPUT|BLOCKED' | head -n1 | tr '[:lower:]' '[:upper:]' || true)"
     plog "role=$role next_action='${na:-<none>}' report=$report"
 
     # SOT-1550: remember the github role's report so we can tell (after all roles complete) whether a
@@ -483,9 +489,15 @@ if [ "$PIPELINE_ENABLED" -eq 1 ] && [ -n "$TARGET_ISSUE" ]; then
   echo "Start: ${TIMESTAMP}"
   echo "Log: ${LOG_FILE}"
   echo ""
+  # NOTE (SOT loop-breaker fix): run_role_pipeline toggles `set -e` per role internally, and shell
+  # options are global (not function-scoped), so errexit is re-enabled by the time the function returns.
+  # A bare `run_role_pipeline "$TARGET_ISSUE"` would therefore abort the whole script the instant the
+  # function returns a non-zero COMPLETION_UNVERIFIED (the common "needs human" stop), skipping the
+  # ensure-issue-reviewed loop-breaker below and leaving the issue stranded In Progress. Capturing the
+  # status via `||` makes this a tested command, so errexit never fires here regardless of option state.
   set +e
-  run_role_pipeline "$TARGET_ISSUE"
-  EXIT_CODE=$?
+  EXIT_CODE=0
+  run_role_pipeline "$TARGET_ISSUE" || EXIT_CODE=$?
   set -e
   # SOT-1550: emit a machine-parseable completion contract for the pipeline path (the legacy path
   # already does this). A successful no-PR PLAN/REVIEW terminal → COMPLETED_NO_PR so the runner
