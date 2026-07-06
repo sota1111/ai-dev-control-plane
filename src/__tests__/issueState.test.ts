@@ -51,6 +51,12 @@ describe('isHoldState', () => {
     expect(isHoldState({ name: 'IN REVIEW' })).toBe(true);
   });
 
+  test('SOT-1560: returns true for On Hold (circuit-breaker halt), case-insensitive', () => {
+    expect(isHoldState({ type: 'started', name: 'On Hold' })).toBe(true);
+    expect(isHoldState({ name: 'on hold' })).toBe(true);
+    expect(isHoldState({ name: 'ON HOLD' })).toBe(true);
+  });
+
   test('returns false for actionable and terminal states', () => {
     expect(isHoldState({ type: 'started', name: 'In Progress' })).toBe(false);
     expect(isHoldState({ type: 'unstarted', name: 'Todo' })).toBe(false);

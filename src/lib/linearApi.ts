@@ -392,7 +392,10 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
     const issue = data.issue;
     if (!issue) return false;
     if (isTerminalState(issue.state)) return false;
-    if ((issue.state?.name || '').toLowerCase() === 'in review') return false;
+    // SOT-1560: skip any hold state (In Review OR On Hold). A circuit-breaker-halted issue is parked in
+    // On Hold; the post-run ensure-issue-reviewed step must NOT drag it back to In Review, or the halt
+    // would be undone and the re-run loop would resume.
+    if (isHoldState(issue.state)) return false;
 
     // In Progress と In Review はどちらも type "started" のため、name で In Review を解決する。
     const statesData: any = await linearQuery(
@@ -421,6 +424,56 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
     return true;
   } catch (err: any) {
     log('ERROR', `setIssueInReview failed: ${err.message}`, { issue: issueId });
+    return false;
+  }
+}
+
+/**
+ * SOT-1560 — move an issue to **On Hold** (circuit-breaker halt). Unlike In Review (human review), On
+ * Hold marks a pipeline stopped by a safety stop-condition; every scanner (`fetchActiveIssues`
+ * excludeHold / reaper / `/recover` re-scan) treats On Hold as a hold state (see `isHoldState`) and
+ * therefore stops re-running the halted issue — which is the whole point of the breaker (kill the
+ * runaway re-run loop). `commentBody`, when given, is posted after the transition. Fail-open: returns
+ * false (never throws) when there is no On Hold state / already terminal / issue missing.
+ */
+export async function setIssueOnHold(issueId: string, commentBody?: string): Promise<boolean> {
+  const { log } = requireDeps();
+  try {
+    const data: any = await linearQuery(
+      'query($id: String!) { issue(id: $id) { id state { name type } team { id } } }',
+      { id: issueId }
+    );
+    const issue = data.issue;
+    if (!issue) return false;
+    if (isTerminalState(issue.state)) return false;
+    if ((issue.state?.name || '').toLowerCase() === 'on hold') return false;
+
+    const statesData: any = await linearQuery(
+      'query($teamId: String!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
+      { teamId: issue.team.id }
+    );
+    const holdState = (statesData.workflowStates?.nodes || []).find(
+      (s: any) => (s.name || '').toLowerCase() === 'on hold'
+    );
+    if (!holdState) {
+      log('WEBHOOK', `setIssueOnHold: no On Hold state for team ${issue.team.id}, skip`, { issue: issueId });
+      return false;
+    }
+
+    await linearQuery(
+      'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
+      { id: issue.id, stateId: holdState.id }
+    );
+    if (commentBody) {
+      await linearQuery(
+        'mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }',
+        { issueId: issue.id, body: commentBody }
+      );
+    }
+    log('WEBHOOK', `setIssueOnHold: ${issueId} -> On Hold`, { issue: issueId });
+    return true;
+  } catch (err: any) {
+    log('ERROR', `setIssueOnHold failed: ${err.message}`, { issue: issueId });
     return false;
   }
 }
