@@ -1,36 +1,34 @@
-# Acceptance Check — TEMPLATE (SOT-1558 様式)
+# Acceptance Check — SOT-1558（acceptance separate-context checker）
 
-This is the canonical format the **acceptance** role fills in each run (it overwrites this file with the
-target issue's actual check). It pairs the human-readable evidence with the machine-readable
-`## Acceptance: PASS|FAIL` line that `run_auto.sh` reads directly. Keep the section headings.
-
----
-
-# Acceptance Check — <ISSUE-ID>（<short title>）
-
-対象: `<target repo path>`, branch `<feat/...>`
-コミット: `<sha> <commit subject>`
-
-## Acceptance: PASS | FAIL
-<!-- REQUIRED machine-readable verdict. run_auto.sh reads this line, not the prose below.
-     PASS only when every criterion is [x] AND (UI repo) real-action verification passed. -->
+対象: `/workspaces/ai-dev-control-plane`, branch `feat/sot-1558-acceptance-separate-context`
+コミット: `64abf52 feat(SOT-1558): make acceptance a separate-context checker with machine-readable PASS/FAIL`
 
 ## 受け入れ条件の判定
-<!-- one row per acceptance criterion from docs/ai/40_acceptance.md -->
-- [x] **<criterion 1>** — evidence: `<file:line>` / test `<name>` / observed behavior. **pass**
-- [ ] **<criterion 2>** — not met: <why>. → loops back to implementation.
+
+- [x] **IMPLEMENT/FIX/DEBUG では acceptance が実装ワーカーと別コンテキスト（別ワーカー／別セッション）で走る。** — `config/worker_roles.json:5-7` sets implementation primary to `claude` and acceptance primary to `codex`; `scripts/ai/run_auto.sh:311-318` records the actual implementation winner in `PIPELINE_IMPL_WORKER`; `scripts/ai/run_worker.sh:59-64` and `scripts/ai/run_worker.sh:81-85` move that worker to the back of the acceptance chain. Unit coverage: `src/__tests__/workerRoles.test.ts:210-279`.
+- [x] **SOT-1555 の NOT_REQUIRED ピン留めは非コード生成タスク限定にし、IMPLEMENT/FIX/DEBUG では acceptance を別コンテキストに保つ。** — `scripts/ai/run_auto.sh:323-336` only sets `PIPELINE_PINNED_WORKER` when task-check emits `## Implementation: NOT_REQUIRED`; otherwise code-building tasks proceed without pinning and use `PIPELINE_IMPL_WORKER` separation. `scripts/ai/run_worker.sh:77-85` gives the pin precedence over checker separation, making pin and separation mutually exclusive. Unit coverage includes pin/separation inverse behavior at `src/__tests__/workerRoles.test.ts:262-270`.
+- [x] **acceptance レポートが機械可読の `## Acceptance: PASS|FAIL` を必須出力し、`run_auto.sh` のゲートがこの行を機械的に読む。** — `prompts/roles/acceptance.md:35-58` requires the machine-readable verdict; `docs/ai/70_acceptance_check.md` now uses this concrete report format; `scripts/ai/run_auto.sh:360-390` parses `^## Acceptance: PASS|FAIL` and loops on `FAIL` before falling back to `Next Action`.
+- [x] **UI を持つ target repo では実ユーザー動作検証が acceptance の標準ステップになる。非 UI repo は E2E 不要。** — `prompts/roles/acceptance.md:21-33` requires E2E/screenshot evidence for UI repos and N/A for backend/library/doc-only repos; `prompts/roles/verification.md` also requires the same E2E decision in verification. This target repo has no `e2e` script, no Playwright/e2e harness, and no `docs/screenshots/`; therefore E2E is N/A for this run.
+- [x] **既定挙動の非回帰：非 UI repo は E2E 不要、既存パイプラインの成功/停止判定が壊れない。** — `npm run lint`, `npm run typecheck`, `npm test`, and `bash -n scripts/ai/run_auto.sh scripts/ai/run_worker.sh` all pass. The acceptance gate remains backward-compatible when the `## Acceptance:` line is absent via the fallback at `scripts/ai/run_auto.sh:384-390`.
+
+## Acceptance: PASS
 
 ## 実ユーザー動作検証（SOT-1558）
-<!-- UI repo (has e2e harness and/or docs/screenshots/, or change touches a visible screen): REQUIRED.
-     Backend/library/doc-only repo: write "N/A（非 UI repo: e2e ハーネス無し / docs/screenshots 無し）". -->
-- E2E（主要導線）: `<npm run e2e / project equivalent>` → <pass/fail per flow>.
-- After スクリーンショット: `<docs/screenshots/<file> @ <sha>>` or "該当画面なし".
+
+- E2E（主要導線）: N/A（非 UI repo: `package.json` has no `e2e` script; `find` found no Playwright/e2e harness and no `docs/screenshots/`）.
+- After スクリーンショット: N/A（非 UI repo / visible screen changeなし）.
 
 ## 意図せぬ / スコープ外変更のチェック
-- <confirm the diff is limited to the planned scope; list anything outside it and justify or reject.>
 
-## 検証サマリ（60_worker_codex_report.md より）
-- `npm run lint` exit <n> / `npm run typecheck` exit <n> / `npm test` <pass/fail counts>.
-- e2e: <result or "N/A（非 UI repo）">。
+- `git diff main...HEAD` is limited to worker role config, SOT-1558 pipeline shell logic, role prompts, acceptance template, SOT-1558 tests, and issue planning docs.
+- Local uncommitted verification artifacts also exist (`docs/ai/60_worker_codex_report.md`, `src/__tests__/runner.test.ts`, `.claude/settings.local.json`, and experiment/benchmark files), but they are outside `main...HEAD` feature diff. The verification-time `runner.test.ts` change was a minimal env-isolation fix for this worker environment.
 
-## Next Action: READY_FOR_REVIEW | NEEDS_DEBUG | NEEDS_USER_INPUT | BLOCKED
+## 検証サマリ
+
+- `npm run lint` → pass.
+- `npm run typecheck` → pass.
+- `npm test` → pass: 43 suites, 666 tests.
+- `bash -n scripts/ai/run_auto.sh scripts/ai/run_worker.sh` → pass.
+- e2e: N/A（非 UI repo）.
+
+## Next Action: READY_FOR_REVIEW
