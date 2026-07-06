@@ -5,7 +5,6 @@ import {
   WORKER_ROLES,
   WORKERS,
   loadWorkerRolesConfig,
-  reorderChainForCheckerSeparation,
   reorderChainForPin,
   resolveRoleChain,
   resolveRoleChainCli,
@@ -207,74 +206,11 @@ describe('reorderChainForPin (SOT-1555 implementation-not-required pin)', () => 
   });
 });
 
-describe('reorderChainForCheckerSeparation (SOT-1558 doer/checker separation)', () => {
-  test('moves the doer (implementation worker) to the BACK so a different worker checks first', () => {
-    expect(reorderChainForCheckerSeparation(['claude', 'codex', 'antigravity'], 'claude')).toEqual([
-      'codex',
-      'antigravity',
-      'claude',
-    ]);
-  });
-
-  test('is a no-op when the doer is already last', () => {
-    expect(reorderChainForCheckerSeparation(['codex', 'claude'], 'claude')).toEqual(['codex', 'claude']);
-  });
-
-  test('preserves the relative order of the non-doer workers', () => {
-    expect(reorderChainForCheckerSeparation(['codex', 'claude', 'antigravity'], 'codex')).toEqual([
-      'claude',
-      'antigravity',
-      'codex',
-    ]);
-  });
-
-  test('returns the chain unchanged when the doer is not in the chain', () => {
-    expect(reorderChainForCheckerSeparation(['codex', 'claude'], 'antigravity')).toEqual([
-      'codex',
-      'claude',
-    ]);
-  });
-
-  test('fail-open: a single-worker chain is left unchanged (cannot separate → no deadlock)', () => {
-    expect(reorderChainForCheckerSeparation(['claude'], 'claude')).toEqual(['claude']);
-  });
-
-  test.each([
-    ['', 'empty'],
-    [null, 'null'],
-    [undefined, 'undefined'],
-    ['bogus', 'invalid worker'],
-  ])('returns the chain unchanged for a %s doer (%s)', (doer: string | null | undefined, _label: string) => {
-    expect(reorderChainForCheckerSeparation(['codex', 'claude', 'antigravity'], doer)).toEqual([
-      'codex',
-      'claude',
-      'antigravity',
-    ]);
-  });
-
-  test('does not mutate the input chain', () => {
-    const chain: ('codex' | 'claude' | 'antigravity')[] = ['claude', 'codex', 'antigravity'];
-    const out = reorderChainForCheckerSeparation(chain, 'claude');
-    expect(chain).toEqual(['claude', 'codex', 'antigravity']);
-    expect(out).toEqual(['codex', 'antigravity', 'claude']);
-  });
-
-  test('pin and separation are inverse operations on the same chain', () => {
-    const chain: ('codex' | 'claude' | 'antigravity')[] = ['claude', 'codex', 'antigravity'];
-    expect(reorderChainForPin(chain, 'antigravity')).toEqual(['antigravity', 'claude', 'codex']);
-    expect(reorderChainForCheckerSeparation(chain, 'claude')).toEqual([
-      'codex',
-      'antigravity',
-      'claude',
-    ]);
-  });
-});
-
 describe('committed config default (SOT-1569 unified claude-primary policy)', () => {
   // SOT-1569: the human directive set every role's static primary to claude (secondary codex,
-  // tertiary antigravity). The SOT-1558 static doer/checker divergence was removed in favor of the
-  // DYNAMIC acceptance separation (reorderChainForCheckerSeparation, tested above), so the static
-  // acceptance/verification primaries now MATCH implementation's primary.
+  // tertiary antigravity). The SOT-1558 dynamic doer/checker separation was later removed entirely
+  // (per the human directive: "受け入れチェーンの最後尾に回す動的な分離は不要"), so every role —
+  // including acceptance/verification — now resolves to the same static chain with no reordering.
   test('every role chain is claude primary, codex secondary, antigravity tertiary', () => {
     const repoConfig = path.join(process.cwd(), 'config', 'worker_roles.json');
     const cfg = loadWorkerRolesConfig(repoConfig);

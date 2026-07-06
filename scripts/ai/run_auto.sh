@@ -292,10 +292,6 @@ run_role_pipeline() {
   # SOT-1555: clear any pin from a previous run so it never leaks. task-check may set
   # PIPELINE_PINNED_WORKER (implementation-not-required → keep the whole lifecycle on one AI).
   unset PIPELINE_PINNED_WORKER
-  # SOT-1558: clear the doer/checker separation marker too. When the implementation role wins we set
-  # PIPELINE_IMPL_WORKER to the winning worker so the acceptance role runs in a SEPARATE context
-  # (different worker) — the checker must not be the same AI/context that produced the work.
-  unset PIPELINE_IMPL_WORKER
 
   while [ "$i" -lt "$n" ]; do
     local role="${roles[$i]}"
@@ -357,15 +353,6 @@ run_role_pipeline() {
     # SOT-1550: remember the github role's report so we can tell (after all roles complete) whether a
     # PR was actually created — PLAN/REVIEW tasks skip the PR and terminate at In Review (no-PR).
     [ "$role" = "github" ] && GITHUB_REPORT="$report"
-
-    # SOT-1558: remember which worker did the implementation so the acceptance role is dispatched in a
-    # SEPARATE context (run_worker.sh moves this worker to the back of the acceptance chain). Only for
-    # code-building tasks: when task-check pinned the run (implementation-not-required), PIPELINE_PINNED_WORKER
-    # is set and takes precedence, so the pin — not separation — governs the chain order (mutually exclusive).
-    if [ "$role" = "implementation" ] && [ -n "$winner" ]; then
-      export PIPELINE_IMPL_WORKER="$winner"
-      plog "PIPELINE_CHECKER_SEP: implementation done by worker=$winner → acceptance will run in a separate context"
-    fi
 
     case "$role" in
       task-check)

@@ -56,14 +56,8 @@ lane_path() {
 # cross-worker handoff. This is a reorder, not a replacement — the rest of the chain remains as fallback,
 # so a non-responsive pinned worker still hands off (fail-open). Mirrors reorderChainForPin() in
 # src/lib/workerRoles.ts (the unit-tested reference spec).
-# SOT-1558: doer/checker separation. When NOT pinned and PIPELINE_IMPL_WORKER is set (the worker that
-# just did implementation), the checking role(s) in PIPELINE_CHECKER_ROLES (default "acceptance") move
-# that doer to the BACK of the chain so a DIFFERENT worker checks the work in a separate context. The
-# doer stays as final fallback (fail-open). Pin and separation are mutually exclusive: NOT_REQUIRED
-# non-code tasks are pinned to one AI; code-building tasks (IMPLEMENT/FIX/DEBUG) get a separate checker.
-# Mirrors reorderChainForCheckerSeparation() in src/lib/workerRoles.ts (the unit-tested reference spec).
 WORKER_ROLES_FILE="${WORKER_ROLES_FILE:-$CONTROL_PLANE_DIR/config/worker_roles.json}"
-CHAIN="$(PIPELINE_PINNED_WORKER="${PIPELINE_PINNED_WORKER:-}" PIPELINE_IMPL_WORKER="${PIPELINE_IMPL_WORKER:-}" PIPELINE_CHECKER_ROLES="${PIPELINE_CHECKER_ROLES:-acceptance}" node -e '
+CHAIN="$(PIPELINE_PINNED_WORKER="${PIPELINE_PINNED_WORKER:-}" node -e '
   const fs = require("fs");
   const [file, role] = process.argv.slice(1);
   const ROLES = ["task-check","decomposition","implementation","verification","acceptance","github","linear-report"];
@@ -77,12 +71,6 @@ CHAIN="$(PIPELINE_PINNED_WORKER="${PIPELINE_PINNED_WORKER:-}" PIPELINE_IMPL_WORK
     const pin = process.env.PIPELINE_PINNED_WORKER || "";
     if (WORKERS.includes(pin) && out.includes(pin)) {
       out = [pin, ...out.filter((w) => w !== pin)];
-    } else {
-      const doer = process.env.PIPELINE_IMPL_WORKER || "";
-      const checkerRoles = (process.env.PIPELINE_CHECKER_ROLES || "acceptance").split(/[\s,]+/).filter(Boolean);
-      if (checkerRoles.includes(role) && WORKERS.includes(doer) && out.includes(doer) && out.length > 1) {
-        out = [...out.filter((w) => w !== doer), doer];
-      }
     }
     process.stdout.write(out.join(" "));
   } catch (e) { process.stdout.write(""); }
@@ -93,11 +81,8 @@ if [ -z "$CHAIN" ]; then
   exit "$WORKER_NONRESPONSE_EXIT"
 fi
 
-_SEP_ROLES="${PIPELINE_CHECKER_ROLES:-acceptance}"
 if [ -n "${PIPELINE_PINNED_WORKER:-}" ]; then
   echo "== Worker dispatch: role=$ROLE chain=[$CHAIN] (pinned worker=$PIPELINE_PINNED_WORKER) =="
-elif [ -n "${PIPELINE_IMPL_WORKER:-}" ] && [[ " $_SEP_ROLES " == *" $ROLE "* ]]; then
-  echo "== Worker dispatch: role=$ROLE chain=[$CHAIN] (doer/checker separation: impl worker=$PIPELINE_IMPL_WORKER moved to fallback) =="
 else
   echo "== Worker dispatch: role=$ROLE chain=[$CHAIN] =="
 fi
