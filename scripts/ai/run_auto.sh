@@ -267,6 +267,10 @@ run_role_pipeline() {
   # SOT-1555: clear any pin from a previous run so it never leaks. task-check may set
   # PIPELINE_PINNED_WORKER (implementation-not-required → keep the whole lifecycle on one AI).
   unset PIPELINE_PINNED_WORKER
+  # SOT-1558: clear the doer/checker separation marker too. When the implementation role wins we set
+  # PIPELINE_IMPL_WORKER to the winning worker so the acceptance role runs in a SEPARATE context
+  # (different worker) — the checker must not be the same AI/context that produced the work.
+  unset PIPELINE_IMPL_WORKER
 
   while [ "$i" -lt "$n" ]; do
     local role="${roles[$i]}"
@@ -304,6 +308,15 @@ run_role_pipeline() {
     # PR was actually created — PLAN/REVIEW tasks skip the PR and terminate at In Review (no-PR).
     [ "$role" = "github" ] && GITHUB_REPORT="$report"
 
+    # SOT-1558: remember which worker did the implementation so the acceptance role is dispatched in a
+    # SEPARATE context (run_worker.sh moves this worker to the back of the acceptance chain). Only for
+    # code-building tasks: when task-check pinned the run (implementation-not-required), PIPELINE_PINNED_WORKER
+    # is set and takes precedence, so the pin — not separation — governs the chain order (mutually exclusive).
+    if [ "$role" = "implementation" ] && [ -n "$winner" ]; then
+      export PIPELINE_IMPL_WORKER="$winner"
+      plog "PIPELINE_CHECKER_SEP: implementation done by worker=$winner → acceptance will run in a separate context"
+    fi
+
     case "$role" in
       task-check)
         case "$na" in
@@ -329,7 +342,7 @@ run_role_pipeline() {
           *) plog "PIPELINE_DONE: task-check not-actionable or decomposed ('$na') → success no-op"; PIPELINE_NO_PR=1; return 0 ;;
         esac
         ;;
-      verification|acceptance)
+      verification)
         case "$na" in
           *READY_FOR_REVIEW*) ;;  # passed → proceed
           *NEEDS_DEBUG*)
@@ -343,6 +356,49 @@ run_role_pipeline() {
             ;;
           *) plog "PIPELINE_STOP: $role '$na' → stop (needs human)"; return "$COMPLETION_UNVERIFIED" ;;
         esac
+        ;;
+      acceptance)
+        # SOT-1558: the acceptance verdict is decided by a MACHINE-READABLE line — `## Acceptance: PASS`
+        # or `## Acceptance: FAIL` (criterion-level [x]/[ ] above it). run_auto.sh reads that line
+        # directly instead of trusting an ambiguous natural-language completion claim. Precedence:
+        #   FAIL      → loop back to implementation (bounded), regardless of Next Action.
+        #   PASS      → proceed (Next Action must also not be a stop/blocker).
+        #   (absent)  → fall back to the Next Action verdict (backward compatible; logged as a warning).
+        local acc_verdict; acc_verdict="$(grep -ioE '^##[[:space:]]*Acceptance:[[:space:]]*(PASS|FAIL)' "$report" 2>/dev/null | grep -ioE '(PASS|FAIL)' | tail -1 | tr '[:lower:]' '[:upper:]' || true)"
+        plog "role=acceptance machine_verdict='${acc_verdict:-<none>}' next_action='${na:-<none>}'"
+        if [ "$acc_verdict" = "FAIL" ]; then
+          if [ "$debug_cycles" -lt "$MAX_DEBUG_CYCLES" ]; then
+            debug_cycles=$((debug_cycles + 1))
+            plog "PIPELINE_LOOP: acceptance ## Acceptance: FAIL → re-run implementation (cycle $debug_cycles/$MAX_DEBUG_CYCLES)"
+            i="$impl_index"; continue
+          fi
+          plog "PIPELINE_STOP: acceptance ## Acceptance: FAIL after $MAX_DEBUG_CYCLES cycles → needs attention"
+          return "$COMPLETION_UNVERIFIED"
+        fi
+        if [ "$acc_verdict" = "PASS" ]; then
+          case "$na" in
+            *NEEDS_USER_INPUT*|*BLOCKED*)
+              plog "PIPELINE_STOP: acceptance PASS but '$na' → stop (needs human)"; return "$COMPLETION_UNVERIFIED" ;;
+            *) ;;  # PASS and not a human-stop → proceed
+          esac
+        else
+          # No machine-readable verdict — fall back to Next Action (backward compatible), but warn: the
+          # acceptance role is expected to emit `## Acceptance: PASS|FAIL` (prompts/roles/acceptance.md).
+          plog "PIPELINE_WARN: acceptance report has no '## Acceptance: PASS|FAIL' line → falling back to Next Action"
+          case "$na" in
+            *READY_FOR_REVIEW*) ;;  # passed → proceed
+            *NEEDS_DEBUG*)
+              if [ "$debug_cycles" -lt "$MAX_DEBUG_CYCLES" ]; then
+                debug_cycles=$((debug_cycles + 1))
+                plog "PIPELINE_LOOP: acceptance NEEDS_DEBUG → re-run implementation (cycle $debug_cycles/$MAX_DEBUG_CYCLES)"
+                i="$impl_index"; continue
+              fi
+              plog "PIPELINE_STOP: acceptance still NEEDS_DEBUG after $MAX_DEBUG_CYCLES cycles → needs attention"
+              return "$COMPLETION_UNVERIFIED"
+              ;;
+            *) plog "PIPELINE_STOP: acceptance '$na' → stop (needs human)"; return "$COMPLETION_UNVERIFIED" ;;
+          esac
+        fi
         ;;
       *)
         case "$na" in
