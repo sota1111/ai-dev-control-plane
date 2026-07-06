@@ -2,10 +2,9 @@
 
 You are a dispatched worker in a script-driven pipeline. Do ONLY this role, then write a report.
 
-**Doer/checker separation (SOT-1558):** you are dispatched as a SEPARATE context from the worker that
-implemented the change. Do NOT assume the implementation is correct — independently verify each
-criterion against the actual diff and real behavior. A completion judgment made by the same context
-that produced the work is unreliable; that is why acceptance runs on a different worker/session.
+**Independent verification:** even if the same worker implemented the change, do NOT assume the
+implementation is correct — independently verify each criterion against the actual diff and real
+behavior. Treat this as a fresh review, not a rubber stamp of your own prior work.
 
 ## Context
 - Read `docs/ai/pipeline/context.md` for the target issue id and **target repository**.

@@ -170,34 +170,6 @@ export function reorderChainForPin(chain: Worker[], pinned: string | null | unde
 }
 
 /**
- * SOT-1558: reorder a resolved worker chain so the DOER (the worker that just did implementation) is
- * tried LAST — enforcing doer/checker separation for the checking roles (acceptance). A completion
- * judgment carried out by the same context/model that produced the work is unreliable (the doer is
- * biased toward "done"); acceptance must run in a SEPARATE context. This reorder moves the
- * implementation worker to the back so a DIFFERENT worker checks the work first, while keeping the
- * doer as the final fallback so a chain is never emptied (fail-open — never a deadlock).
- *
- * Rules:
- * - `doer` empty / not a valid worker / not present in `chain` → return `chain` unchanged.
- * - `chain` has a single worker → return unchanged (cannot separate; fail-open to that one worker).
- * - otherwise move `doer` to the END, preserving the relative order of the rest.
- *
- * This is the inverse of {@link reorderChainForPin} (which pins a worker to the FRONT). Pin and
- * separation are mutually exclusive: the NOT_REQUIRED pin (SOT-1555) keeps a non-code task on ONE
- * AI, whereas separation applies to code-building tasks (IMPLEMENT/FIX/DEBUG) where the checker must
- * differ from the doer. `scripts/ai/run_worker.sh` applies the identical rule inline (it reads the
- * doer from `PIPELINE_IMPL_WORKER`); this function is the reference spec covered by unit tests.
- */
-export function reorderChainForCheckerSeparation(
-  chain: Worker[],
-  doer: string | null | undefined,
-): Worker[] {
-  if (!doer || !isWorker(doer) || !chain.includes(doer)) return [...chain];
-  if (chain.length <= 1) return [...chain];
-  return [...chain.filter((w) => w !== doer), doer];
-}
-
-/**
  * CLI entry used by the dispatcher: prints the ordered worker chain for a role, space-separated
  * (empty string when there is no override). `node -e "..." <configPath> <role>`.
  */
