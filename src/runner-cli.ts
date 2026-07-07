@@ -18,7 +18,7 @@ import { initSecrets } from './config/secrets.js';
 import { notifyCooldown, notifyUsageLimitUnknownReset } from './lib/cooldownNotifier.js';
 import { notifyWorkerReport } from './lib/workerReportNotifier.js';
 import { notifyProgress } from './lib/progressNotifier.js';
-import { formatOutcomeSummary } from './lib/outcomeStats.js';
+import { formatOutcomeSummary, promotionCandidates } from './lib/outcomeStats.js';
 import { classifyWorkerFailure, writeAuthUnhealthy, readAuthUnhealthy, shouldSkipForAuthUnhealthy, type WorkerName } from './lib/workerHealth.js';
 import { workerAuthUnhealthyTtlSeconds } from './config/env.js';
 import { loadWorkerRolesConfig, type WorkerRoleConfig } from './lib/workerRoles.js';
@@ -298,17 +298,38 @@ async function main() {
     }
     case 'aggregate-outcomes': {
       // SOT-1439 / P5: parse the runner log's structured [OUTCOME] lines and print aggregate stats.
-      // Usage: runner-cli.js aggregate-outcomes [windowHours] [--json]
+      // SOT-1575: with --promote, also list recurring failure kinds (>= threshold) as promotion
+      // candidates for docs/ai/failure-log.md (半自動: 集計 → 候補提示 → 人/Claude が恒久化を判断).
+      // Usage: runner-cli.js aggregate-outcomes [windowHours] [--json] [--promote] [--threshold N]
       //   windowHours: only count outcomes from the last N hours (default: all). `0`/omit = all.
       const windowHours = args[0] && /^\d+(\.\d+)?$/.test(args[0]) ? parseFloat(args[0]) : 0;
       const asJson = args.includes('--json');
+      const showPromote = args.includes('--promote');
+      const thIdx = args.indexOf('--threshold');
+      const threshold = thIdx >= 0 && /^\d+$/.test(args[thIdx + 1] ?? '') ? parseInt(args[thIdx + 1], 10) : 3;
       const windowMs = windowHours > 0 ? windowHours * 60 * 60 * 1000 : undefined;
       const summary = runner.getRecentOutcomeSummary(windowMs);
+      const candidates = showPromote
+        ? promotionCandidates(runner.getRecentOutcomeRecords(windowMs), { threshold })
+        : [];
       if (asJson) {
-        process.stdout.write(JSON.stringify({ windowHours: windowHours || null, ...summary }, null, 2) + '\n');
+        const payload: Record<string, unknown> = { windowHours: windowHours || null, ...summary };
+        if (showPromote) payload.promotionCandidates = { threshold, candidates };
+        process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
       } else {
         const scope = windowHours > 0 ? `last ${windowHours}h` : 'all-time';
         process.stdout.write(`[OUTCOMES ${scope}] ${formatOutcomeSummary(summary)}\n`);
+        if (showPromote) {
+          if (candidates.length === 0) {
+            process.stdout.write(`[PROMOTE ${scope}] 昇格候補なし（同種 failure が ${threshold} 回未満）\n`);
+          } else {
+            process.stdout.write(`[PROMOTE ${scope}] 昇格候補（同種 failure ≥ ${threshold} 回）— docs/ai/failure-log.md に記録し恒久化を判断:\n`);
+            for (const c of candidates) {
+              const issues = c.issues.length > 0 ? ` issues=${c.issues.join(',')}` : '';
+              process.stdout.write(`  - kind(code)=${c.kind} count=${c.count}${issues}\n`);
+            }
+          }
+        }
       }
       process.exit(0);
       break;

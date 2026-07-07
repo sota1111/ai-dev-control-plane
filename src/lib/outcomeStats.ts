@@ -103,6 +103,56 @@ export function summarizeOutcomes(
   };
 }
 
+/**
+ * SOT-1575 — failure-pattern promotion.
+ *
+ * A "promotion candidate" is a recurring failure kind that has happened at least `threshold` times in
+ * the aggregated window. Surfacing it lets a human/Claude decide whether to promote the pattern to a
+ * permanent rule (a memory lesson, a CLAUDE.md rule, or a harness-lint check) and record it in
+ * `docs/ai/failure-log.md`. This is the "半自動" step: aggregate → propose → human decides.
+ */
+export interface PromotionCandidate {
+  /** The failure "kind" key the records were grouped by (the run exit `code`, or `unknown`). */
+  kind: string;
+  /** How many failing records share this kind. */
+  count: number;
+  /** Distinct issue ids seen for this kind (deduped, first-seen order) — helps locate the pattern. */
+  issues: string[];
+}
+
+/**
+ * Group failing outcome records by their "kind" (the run exit `code`) and return the kinds that recur
+ * at least `threshold` times, most frequent first. Pure (no I/O) so the N-threshold logic is trivially
+ * testable and reused by the CLI. By default only `outcome=FAILED` records count as failures; pass
+ * `failureOutcomes` to widen the set (e.g. include `NON_RETRYABLE_LIMIT`).
+ */
+export function promotionCandidates(
+  records: OutcomeRecord[],
+  opts: { threshold?: number; failureOutcomes?: string[] } = {}
+): PromotionCandidate[] {
+  const threshold = opts.threshold ?? 3;
+  const failureSet = new Set(opts.failureOutcomes ?? ['FAILED']);
+
+  const groups = new Map<string, { count: number; issues: string[] }>();
+  for (const r of records) {
+    if (!failureSet.has(r.outcome)) continue;
+    const kind = r.code !== null ? String(r.code) : 'unknown';
+    let g = groups.get(kind);
+    if (!g) {
+      g = { count: 0, issues: [] };
+      groups.set(kind, g);
+    }
+    g.count += 1;
+    if (r.issue && !g.issues.includes(r.issue)) g.issues.push(r.issue);
+  }
+
+  return [...groups.entries()]
+    .filter(([, g]) => g.count >= threshold)
+    .map(([kind, g]) => ({ kind, count: g.count, issues: g.issues }))
+    // Most frequent first; stable tie-break by kind so output is deterministic.
+    .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind));
+}
+
 /** Format a summary as a compact one-line human string (used by Discord /status and the CLI). */
 export function formatOutcomeSummary(summary: OutcomeSummary): string {
   if (summary.total === 0) return 'なし（記録なし）';

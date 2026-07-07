@@ -90,7 +90,7 @@ import {
   removeFromQueue,
   isQueued,
 } from './lib/queueStore.js';
-import { parseOutcomeLines, summarizeOutcomes, type OutcomeSummary } from './lib/outcomeStats.js';
+import { parseOutcomeLines, summarizeOutcomes, type OutcomeSummary, type OutcomeRecord } from './lib/outcomeStats.js';
 import { levelForTag, shouldLog, rotateIfNeeded, listLogFilesNewestFirst } from './lib/logRotation.js';
 import * as reaperSuppression from './lib/reaperSuppression.js';
 
@@ -453,6 +453,23 @@ function getRecentOutcomeSummary(windowMs?: number): OutcomeSummary {
     return summarizeOutcomes(records, { sinceMs });
   } catch {
     return summarizeOutcomes([]);
+  }
+}
+
+// SOT-1575: raw outcome records over the same window, so callers (e.g. the aggregate-outcomes CLI's
+// promotion-candidate output) can group failures without re-reading the log.
+function getRecentOutcomeRecords(windowMs?: number): OutcomeRecord[] {
+  try {
+    const files = listLogFilesNewestFirst(LOG_FILE, appEnv.logMaxFiles());
+    if (files.length === 0) return [];
+    const text = files.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
+    const records = parseOutcomeLines(text);
+    const sinceMs = windowMs && windowMs > 0 ? Date.now() - windowMs : undefined;
+    return sinceMs !== undefined
+      ? records.filter((r) => r.epochMs === null || r.epochMs >= sinceMs)
+      : records;
+  } catch {
+    return [];
   }
 }
 
@@ -1552,6 +1569,7 @@ export {
   USAGE_LIMIT_FILE,
   LOG_FILE,
   getRecentOutcomeSummary,
+  getRecentOutcomeRecords,
   STALE_LOCK_MS,
   LINEAR_API_URL,
   USAGE_LIMIT_RETRY_BUFFER_SECONDS,
