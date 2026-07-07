@@ -101,6 +101,7 @@ interface RunResultType {
   TASK_COMPLETED: string;
   COMPLETED_NO_PR: string;
   COMPLETION_UNVERIFIED: string;
+  WORKER_UNAVAILABLE_RETRY: string;
   LOCK_CONFLICT: string;
   USAGE_LIMIT_RETRY: string;
   NON_RETRYABLE_LIMIT: string;
@@ -110,6 +111,11 @@ interface RunResultType {
 
 const SKIPPED_LOCKED = 75;  // exit code when lock is not available
 const COMPLETION_UNVERIFIED = 70; // exit code when process 0 but task not finished
+// SOT-1584: run_auto.sh exits 71 when the pipeline stopped because the WHOLE worker chain was
+// TRANSIENTLY non-responsive (dispatcher WORKER_DISPATCH_EXHAUSTED: usage cooldown / auth crash /
+// disabled). Distinct from COMPLETION_UNVERIFIED (70, a genuine needs-human stop): this is retryable,
+// so it is re-enqueued with backoff (like a lock conflict) and NOT recorded as a human-wait termination.
+const WORKER_UNAVAILABLE = 71;
 
 const RUN_RESULT: RunResultType = {
   TASK_COMPLETED: 'TASK_COMPLETED',
@@ -118,6 +124,9 @@ const RUN_RESULT: RunResultType = {
   // a stranded/human-wait run and re-enqueue it.
   COMPLETED_NO_PR: 'COMPLETED_NO_PR',
   COMPLETION_UNVERIFIED: 'COMPLETION_UNVERIFIED',
+  // SOT-1584: transient worker-chain exhaustion (dispatcher exit 75 surfaced as run_auto.sh exit 71).
+  // Retryable: re-enqueue with backoff, do not move to In Review, do not record human-wait.
+  WORKER_UNAVAILABLE_RETRY: 'WORKER_UNAVAILABLE_RETRY',
   LOCK_CONFLICT: 'LOCK_CONFLICT',
   USAGE_LIMIT_RETRY: 'USAGE_LIMIT_RETRY',
   NON_RETRYABLE_LIMIT: 'NON_RETRYABLE_LIMIT',
@@ -1002,6 +1011,10 @@ function classifyRunResult({ code, output, completion }: ClassifyRunArgs): Class
   if (code === SKIPPED_LOCKED) {
     return { kind: RUN_RESULT.LOCK_CONFLICT, code };
   }
+  // SOT-1584: transient worker-chain exhaustion → retryable, distinct from a genuine unverified stop.
+  if (code === WORKER_UNAVAILABLE) {
+    return { kind: RUN_RESULT.WORKER_UNAVAILABLE_RETRY, code };
+  }
   const classification = classifyUsageLimit(output);
   if (classification.retryable && classification.retryAt) {
     return { kind: RUN_RESULT.USAGE_LIMIT_RETRY, code, classification };
@@ -1126,6 +1139,27 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
         recordHumanWaitTermination(issueId);
       }
       break;
+
+    case RUN_RESULT.WORKER_UNAVAILABLE_RETRY: {
+      // SOT-1584: the pipeline aborted because EVERY worker in the chain was transiently non-responsive
+      // (usage cooldown / auth crash / disabled). This is NOT a human-wait stop: do NOT record a
+      // human-wait termination and do NOT let the loop-breaker move the issue to In Review (run_auto.sh
+      // already skipped ensure-issue-reviewed for exit 71). Re-enqueue with a backoff so it retries when
+      // a worker recovers, and stop this drain pass (the whole chain is down → other items likely too).
+      const backoffRetryAt = new Date(Date.now() + LOCK_CONFLICT_BACKOFF_MS).toISOString();
+      log('RUNNER', `WORKER_UNAVAILABLE (exit 71): all workers transiently non-responsive — re-enqueuing with backoff retryAt=${backoffRetryAt}`, { issue: issueId });
+      enqueue(issueId, item.trigger || 'queue', backoffRetryAt, {
+        issueIdentifier: item.issueIdentifier || null,
+        reason: 'worker_unavailable',
+        priority: item.priority ?? null,
+        priorityLabel: item.priorityLabel ?? null,
+        parentIssueId: item.parentIssueId ?? null,
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null,
+        queueGroup: item.queueGroup ?? null,
+        queueGroupOrder: item.queueGroupOrder ?? null
+      });
+      return { lockConflict: true, resultKind: result.kind }; // signal drainQueue to stop this pass
+    }
 
     case RUN_RESULT.LOCK_CONFLICT: {
       // Another run_auto.sh holds the global OS flock. Re-enqueue with a short
