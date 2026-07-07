@@ -293,6 +293,25 @@ run_role_pipeline() {
   # PIPELINE_PINNED_WORKER (implementation-not-required → keep the whole lifecycle on one AI).
   unset PIPELINE_PINNED_WORKER
 
+  # SOT-1574: delegation / cost preflight — before spending any role, emit ONE human-readable block
+  # showing which worker handles each role (summarizing WORKER_ROLES_FILE / per-issue override) plus a
+  # QUALITATIVE usage estimate (cooldown/auth state, Claude-primary role count, PIPELINE_MAX_DEBUG_CYCLES
+  # loop bound). No dollar figures (real spend is not obtainable). Best-effort / fail-open — never blocks
+  # the role loop. Disable with DELEGATION_PREFLIGHT=0/false/no/off.
+  local _delegation_preflight_enabled=1
+  case "$(printf '%s' "${DELEGATION_PREFLIGHT:-1}" | tr '[:upper:]' '[:lower:]')" in
+    0|false|no|off) _delegation_preflight_enabled=0 ;;
+  esac
+  if [ "$_delegation_preflight_enabled" -eq 0 ]; then
+    plog "delegation preflight disabled by DELEGATION_PREFLIGHT; skipping"
+  else
+    set +e
+    run_cli delegation-preflight "$issue" 2>>"$LOG_FILE" | while IFS= read -r _pf_line; do
+      plog "$_pf_line"
+    done
+    set -e
+  fi
+
   while [ "$i" -lt "$n" ]; do
     local role="${roles[$i]}"
     plog "── role[$i]: $role (issue $issue) ──"
