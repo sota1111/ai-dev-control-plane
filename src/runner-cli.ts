@@ -139,6 +139,22 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'set-issue-in-progress': {
+      // SOT-1590: move an issue to In Progress at the very START of processing (run_auto.sh calls this
+      // before dispatching task-check) so a picked-up issue leaves Todo immediately instead of only
+      // after task-check finishes its check + 分解判断. Reuses the idempotent/fail-open helper
+      // (skips terminal / already-started; never throws). Best-effort — always exits 0.
+      const issueId = args[0];
+      if (!issueId) {
+        process.stderr.write('Usage: runner-cli.js set-issue-in-progress <issueIdentifier>\n');
+        process.exit(1);
+      }
+      await runner.setIssueInProgress(issueId).catch(() => {});
+      runner.log('WORKER_ROLES', `set-issue-in-progress ${issueId}: requested (idempotent/fail-open)`, { issue: issueId });
+      process.stdout.write('ok');
+      process.exit(0);
+      break;
+    }
     case 'ensure-issue-reviewed': {
       // Loop-breaker (SOT-1438): after a pipeline run finishes, an issue must not be left in an active
       // (Todo / In Progress) state — otherwise the webhook-reaper keeps re-enqueuing it as a "stranded
@@ -441,7 +457,7 @@ async function main() {
       break;
     }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report, notify-discord, aggregate-outcomes, worker-health-record, auth-unhealthy-status, delegation-preflight\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report, notify-discord, aggregate-outcomes, worker-health-record, auth-unhealthy-status, delegation-preflight\n`);
       process.exit(1);
     }
   }

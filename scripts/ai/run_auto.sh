@@ -271,6 +271,13 @@ run_role_pipeline() {
     echo "Process ONLY this issue. Do not select or process other Linear issues."
   } > docs/ai/pipeline/context.md
 
+  # SOT-1590: move the issue to In Progress the moment work starts — BEFORE dispatching task-check —
+  # so a picked-up issue leaves Todo immediately instead of only after task-check finishes its
+  # actionability check + 分解判断. Best-effort / fail-open (the helper skips terminal/already-started
+  # and never throws); a Linear hiccup here must never block the role loop.
+  run_cli set-issue-in-progress "$issue" >/dev/null 2>>"$LOG_FILE" || true
+  plog "issue $issue → In Progress (pipeline start)"
+
   # SOT-1553: task-check now folds in the decomposition work (check + 分解判断 + child-issue registration)
   # so it runs as a single worker dispatch — decomposition is no longer a separate step with a script in
   # between. The `decomposition` role remains a valid role for manual/override dispatch, just not part of

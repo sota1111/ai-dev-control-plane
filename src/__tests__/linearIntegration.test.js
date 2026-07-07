@@ -305,4 +305,36 @@ describe('Linear Integration', () => {
       expect(linearMock.calls).toHaveLength(1);
     });
   });
+
+  describe('setIssueInProgress (early pipeline-start transition, SOT-1590)', () => {
+    it('moves a Todo issue to In Progress via the started workflow state', async () => {
+      linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'Todo', type: 'unstarted' }, team: { id: 't1' } } } });
+      linearMock.enqueue({ data: { workflowStates: { nodes: [{ id: 'sp', name: 'In Progress' }] } } });
+      linearMock.enqueue({ data: { issueUpdate: { success: true } } });
+
+      await runner.setIssueInProgress('SOT-1');
+      const update = linearMock.calls.find((c) => c.query.includes('issueUpdate'));
+      expect(update).toBeTruthy();
+      expect(update.variables.stateId).toBe('sp');
+    });
+
+    it('is a no-op when the issue is already started (In Progress)', async () => {
+      linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'In Progress', type: 'started' }, team: { id: 't1' } } } });
+      await runner.setIssueInProgress('SOT-1');
+      expect(linearMock.calls).toHaveLength(1); // only the state query, no workflowStates/issueUpdate
+    });
+
+    it('is a no-op for a terminal (Done) issue — never reopens it', async () => {
+      linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'Done', type: 'completed' }, team: { id: 't1' } } } });
+      await runner.setIssueInProgress('SOT-1');
+      expect(linearMock.calls).toHaveLength(1);
+      expect(linearMock.calls.some((c) => c.query.includes('issueUpdate'))).toBe(false);
+    });
+
+    it('does nothing when the issue is missing', async () => {
+      linearMock.enqueue({ data: { issue: null } });
+      await runner.setIssueInProgress('SOT-1');
+      expect(linearMock.calls).toHaveLength(1);
+    });
+  });
 });
