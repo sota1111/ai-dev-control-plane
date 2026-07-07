@@ -118,6 +118,30 @@ interface UsageLimitResult {
   rawMessage: string;
 }
 
+// SOT-1587: attribute a usage-limit hit to the worker that caused it. The dispatcher run scripts print
+// an explicit marker at the point they detect a usage limit — CLAUDE_* from run_claude.sh, CODEX_* from
+// run_codex.sh, ANTIGRAVITY_* from run_antigravity.sh. These let us tell WHOSE limit is in the combined
+// run output (classifyUsageLimit alone cannot: it just pattern-matches the raw CLI error text, which for
+// a codex handoff is codex's "You've hit your usage limit … try again at …").
+const CLAUDE_LIMIT_MARKER = /CLAUDE_USAGE_LIMIT|CLAUDE_COOLDOWN_ACTIVE/i;
+const WORKER_LIMIT_MARKER = /CODEX_USAGE_LIMIT|CODEX_COOLDOWN_ACTIVE|ANTIGRAVITY_USAGE_LIMIT|ANTIGRAVITY_COOLDOWN_ACTIVE/i;
+
+/**
+ * SOT-1587: true when the ONLY worker that hit a usage limit in this run is a fallback worker
+ * (codex / antigravity), NOT Claude. Such a limit is already handled by that worker's own per-worker
+ * cooldown file + dispatcher handoff, so it must NOT drive the GLOBAL runner cooldown (which represents
+ * "Claude — the account-global primary — is unavailable" and gates the whole pipeline). Separating the
+ * two keeps a codex cooldown from wrongly halting Claude-primary work.
+ *
+ * Returns false when Claude also hit a limit (global cooldown applies) or when there is no worker
+ * marker at all (backward compatible: a bare usage-limit classification still gates globally).
+ */
+export function isWorkerOnlyUsageLimit(output: string): boolean {
+  if (!output) return false;
+  if (CLAUDE_LIMIT_MARKER.test(output)) return false; // Claude also limited → global cooldown is correct
+  return WORKER_LIMIT_MARKER.test(output);            // only codex/antigravity limited → per-worker only
+}
+
 // HTTP ステータスを示す文脈語。裸の数字一致による誤検知を抑えるため、
 // ステータスコード判定は「単語境界つきの数字」かつ「この文脈語のいずれかが本文に存在」
 // する場合のみ真とする。

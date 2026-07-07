@@ -2162,6 +2162,24 @@ describe('runner', () => {
       expect(result.classification.retryAt).toBeDefined();
     });
 
+    it('returns WORKER_UNAVAILABLE_RETRY (NOT global cooldown) when ONLY codex hit the usage limit (SOT-1587)', () => {
+      // codex hit its usage limit and handed off to Claude. This must NOT set the global (Claude-gating)
+      // cooldown — codex has its own per-worker cooldown. Separates codex/claude cooldowns.
+      const output = "ERROR: You've hit your usage limit. try again at Jul 8th, 2026 5:42 AM.\n"
+        + 'CODEX_USAGE_LIMIT: cooldown set until epoch 1783437029, delegating to Claude';
+      const result = classifyRunResult({ code: 1, output, completion: null });
+      expect(result.kind).toBe(RUN_RESULT.WORKER_UNAVAILABLE_RETRY);
+      expect(result.kind).not.toBe(RUN_RESULT.USAGE_LIMIT_RETRY);
+    });
+
+    it('returns USAGE_LIMIT_RETRY (global cooldown) when Claude also hit the usage limit (SOT-1587)', () => {
+      const output = "ERROR: You've hit your usage limit. try again at Jul 8th, 2026 5:42 AM.\n"
+        + 'CODEX_USAGE_LIMIT: cooldown set until epoch 1783437029, delegating to Claude\n'
+        + 'CLAUDE_USAGE_LIMIT: cooldown set until epoch 1783437033, delegating';
+      const result = classifyRunResult({ code: 1, output, completion: null });
+      expect(result.kind).toBe(RUN_RESULT.USAGE_LIMIT_RETRY);
+    });
+
     it('returns NON_RETRYABLE_LIMIT for non-retryable limit output', () => {
       const output = 'maximum context length reached';
       const result = classifyRunResult({
