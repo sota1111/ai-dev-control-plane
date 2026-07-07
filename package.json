@@ -6,6 +6,7 @@
   "scripts": {
     "lint": "node --check eslint.config.js && node --check src/scheduler.js && node --check src/lib/schedulerCore.js && node --check src/config/secrets.js && node --check scripts/register_discord_commands.js && node --check scripts/auth/firebase-user.js && node --check scripts/auth/cloudrun-sync.js && node --check scripts/auth/auth-setup.js",
     "lint:eslint": "eslint src scripts",
+    "lint:harness": "tsx scripts/ai/harness_lint.ts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
