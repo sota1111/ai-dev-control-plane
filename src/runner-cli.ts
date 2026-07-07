@@ -21,8 +21,9 @@ import { notifyProgress } from './lib/progressNotifier.js';
 import { formatOutcomeSummary, promotionCandidates } from './lib/outcomeStats.js';
 import { classifyWorkerFailure, writeAuthUnhealthy, readAuthUnhealthy, shouldSkipForAuthUnhealthy, type WorkerName } from './lib/workerHealth.js';
 import { workerAuthUnhealthyTtlSeconds } from './config/env.js';
-import { loadWorkerRolesConfig, type WorkerRoleConfig } from './lib/workerRoles.js';
+import { loadWorkerRolesConfig, type WorkerRoleConfig, type WorkerRole } from './lib/workerRoles.js';
 import { parseWorkerRoleDirectives, mergeWorkerRoleOverrides } from './lib/workerRoleDirective.js';
+import { buildDelegationPreflight } from './lib/delegationPreflight.js';
 
 const [,, command, ...args] = process.argv;
 
@@ -383,8 +384,64 @@ async function main() {
       process.exit(3);
       break;
     }
+    case 'delegation-preflight': {
+      // SOT-1574: print a ONE-block delegation/cost preflight before run_auto.sh's role loop — which
+      // worker handles each role (summarizing WORKER_ROLES_FILE / the per-issue override) plus a
+      // QUALITATIVE usage estimate (cooldown/auth state, Claude-primary role count, loop bound). No
+      // dollar figures (real spend is not obtainable). Fail-open: on any error print nothing, exit 0,
+      // so the pipeline is never blocked. Usage: runner-cli.js delegation-preflight [issueId]
+      const issueId = args[0] || undefined;
+      const defaultConfigPath = path.join(__dirname, '..', 'config', 'worker_roles.json');
+      // The pipeline's actual role sequence (task-check folds in decomposition; see run_auto.sh).
+      const pipelineRoles: WorkerRole[] = [
+        'task-check', 'implementation', 'verification', 'acceptance', 'github', 'linear-report',
+      ];
+      try {
+        // Resolved config = per-issue override file if pointed at, else the default config.
+        const overrideFile = process.env.WORKER_ROLES_FILE;
+        const resolvedPath = overrideFile && fs.existsSync(overrideFile) ? overrideFile : defaultConfigPath;
+        const config = loadWorkerRolesConfig(resolvedPath);
+        // Base config for override detection (best-effort — null if unreadable).
+        let baseConfig: WorkerRoleConfig | null = null;
+        try { baseConfig = loadWorkerRolesConfig(defaultConfigPath); } catch { baseConfig = null; }
+        // Per-role model pins live under the resolved file's `__models__` section (SOT-1583).
+        let models: Record<string, Record<string, string>> | null = null;
+        try {
+          const rawResolved = JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
+          if (rawResolved && typeof rawResolved.__models__ === 'object') models = rawResolved.__models__;
+        } catch { models = null; }
+
+        const cooldowns = getWorkerCooldownStatus().workers.map((w) => ({
+          worker: w.worker, active: w.active, remainingHuman: w.remainingHuman,
+        }));
+        const authUnhealthy = {
+          antigravity: readAuthUnhealthy('antigravity', runner.LOG_DIR),
+          codex: readAuthUnhealthy('codex', runner.LOG_DIR),
+        };
+        const maxDebugCyclesRaw = Number(process.env.PIPELINE_MAX_DEBUG_CYCLES);
+        const maxDebugCycles = Number.isFinite(maxDebugCyclesRaw) ? maxDebugCyclesRaw : 2;
+
+        const block = buildDelegationPreflight({
+          issue: issueId,
+          roles: pipelineRoles,
+          config,
+          baseConfig,
+          models: models as any,
+          cooldowns,
+          authUnhealthy,
+          maxDebugCycles,
+        });
+        process.stdout.write(block + '\n');
+        process.exit(0);
+      } catch (err: any) {
+        // Fail-open: never block the pipeline on a preflight-summary error.
+        process.stderr.write(`delegation-preflight: ${err?.message || err}\n`);
+        process.exit(0);
+      }
+      break;
+    }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report, notify-discord, aggregate-outcomes, worker-health-record, auth-unhealthy-status\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report, notify-discord, aggregate-outcomes, worker-health-record, auth-unhealthy-status, delegation-preflight\n`);
       process.exit(1);
     }
   }
