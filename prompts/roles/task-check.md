@@ -33,7 +33,10 @@ Continue in the SAME run — do NOT stop and wait for another worker/script:
 4. **If decomposition is NOT needed:** treat the parent issue as the single work unit and write the
    concrete task list to `docs/ai/30_tasks.md`.
 5. Ensure `docs/ai/10_plan.md` holds an implementable plan for the next role (implementation).
-6. Post a "作業開始" progress comment and set the issue to `In Progress` if it is `Todo`.
+6. Post a "作業開始" progress comment and set the issue to `In Progress` if it is `Todo`. (SOT-1590:
+   `run_auto.sh` already moves the issue to `In Progress` at pipeline start, so it is usually already
+   `In Progress` here — this step is an idempotent safety net; just post the comment and no-op the state
+   change if it is already `In Progress`.)
 
 ## Constraints
 - Do NOT implement anything or change code in this role.

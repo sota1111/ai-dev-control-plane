@@ -346,10 +346,17 @@ export async function setIssueInProgress(issueId: string): Promise<void> {
   const { log } = requireDeps();
   try {
     const issueData: any = await linearQuery(
-      'query($id: String!) { issue(id: $id) { id state { type } team { id } } }',
+      'query($id: String!) { issue(id: $id) { id state { name type } team { id } } }',
       { id: issueId }
     );
     if (!issueData.issue) return;
+    // SOT-1590: never drag a finished issue back to In Progress. The early pipeline-start transition
+    // may be handed a Done/Canceled/Duplicate issue (e.g. a stale queue entry); reopening it would be
+    // wrong. isTerminalState also guards the Discord `/recover` caller for free.
+    if (isTerminalState(issueData.issue.state)) {
+      log('WEBHOOK', `setIssueInProgress: ${issueId} is terminal (${issueData.issue.state?.name ?? issueData.issue.state?.type}), skip`);
+      return;
+    }
     if (issueData.issue.state?.type === 'started') {
       log('WEBHOOK', `setIssueInProgress: ${issueId} already started, skip`);
       return;
