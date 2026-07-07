@@ -622,3 +622,28 @@ Event: <PR Created / PR Merged / Branch Created>
 **On failure:** (1) identify the failed item, (2) reopen/create the child Issue, (3) Antigravity fixes →
 Codex re-verifies, (4) repeat until all pass, (5) after 3 consecutive failures set the parent `Blocked`
 and comment the cause.
+
+---
+
+## Failure Log & 昇格ワークフロー (SOT-1575)
+
+Failure information lives in **layered, non-duplicated** places — a single append-only operational log
+links the rest instead of copying it:
+
+- **`docs/ai/failure-log.md`** — the operational log (time-ordered). One entry per failure:
+  `日付 / issue / 症状 / 根本原因 / 恒久対策 / 昇格先(memory | CLAUDE.md | harness-lint ルール)`. It **links**
+  to `docs/ai/investigations/*.md` deep-dives; it does not copy them.
+- **`[OUTCOME]` 集計** (`scripts/ai/aggregate_outcomes.sh` → `runner-cli aggregate-outcomes`) — machine
+  aggregation of per-run success / usage-limit / failure rates, and the source of **promotion candidates**.
+- **memory** (`MEMORY.md` + memory files) — the *promoted* lessons (durable, cross-session rules).
+
+**Role split (no duplication):** failure-log = raw time-ordered operational log; memory = promoted
+lessons. A lesson lives in exactly one of these — the failure-log entry's `昇格先` field points at the
+promoted rule, it does not restate it.
+
+**Promotion workflow (半自動: 集計 → 候補提示 → 恒久化判断):**
+1. `bash scripts/ai/aggregate_outcomes.sh 0 --promote [--threshold N]` (default N=3) surfaces recurring
+   failure kinds (grouped by run exit `code`) that occurred ≥ N times as **promotion candidates**.
+2. Record each candidate as a `failure-log.md` entry (link the investigation if any).
+3. A human / Claude decides the permanent fix and promotes it to **memory**, a **CLAUDE.md rule**, or a
+   **harness-lint rule**, then fills the entry's `昇格先` field.
