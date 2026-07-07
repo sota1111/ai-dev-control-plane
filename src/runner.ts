@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { spawn, execSync } from 'node:child_process';
 import * as appEnv from './config/env.js';
-import { classifyUsageLimit } from './lib/usageLimitParser.js';
+import { classifyUsageLimit, isWorkerOnlyUsageLimit } from './lib/usageLimitParser.js';
 import { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } from './lib/resumeMetadata.js';
 import * as queueOrdering from './lib/queueOrdering.js';
 import { resolveRepoForProject } from './lib/projectRepo.js';
@@ -1017,6 +1017,14 @@ function classifyRunResult({ code, output, completion }: ClassifyRunArgs): Class
   }
   const classification = classifyUsageLimit(output);
   if (classification.retryable && classification.retryAt) {
+    // SOT-1587: separate codex/antigravity cooldown from Claude cooldown. A usage limit hit ONLY by a
+    // fallback worker (codex/antigravity) is already handled by its per-worker cooldown + dispatcher
+    // handoff, so it must NOT set the GLOBAL runner cooldown (which gates Claude-primary work and would
+    // wrongly halt Claude just because codex is limited). Treat it as transient worker unavailability
+    // (retry with backoff); the dispatcher skips the limited worker on retry and runs Claude instead.
+    if (isWorkerOnlyUsageLimit(output)) {
+      return { kind: RUN_RESULT.WORKER_UNAVAILABLE_RETRY, code };
+    }
     return { kind: RUN_RESULT.USAGE_LIMIT_RETRY, code, classification };
   }
   if (classification.type !== 'unknown') {

@@ -1,4 +1,36 @@
-import { classifyUsageLimit } from '../lib/usageLimitParser.js';
+import { classifyUsageLimit, isWorkerOnlyUsageLimit } from '../lib/usageLimitParser.js';
+
+describe('isWorkerOnlyUsageLimit (SOT-1587 codex/claude cooldown separation)', () => {
+  const CODEX_LIMIT = "ERROR: You've hit your usage limit. try again at Jul 8th, 2026 5:42 AM.\nCODEX_USAGE_LIMIT: cooldown set until epoch 1783437029, delegating to Claude";
+
+  it('true when only codex hit the limit (marker present, no Claude marker)', () => {
+    expect(isWorkerOnlyUsageLimit(CODEX_LIMIT)).toBe(true);
+  });
+
+  it('true for a codex cooldown-active handoff (CODEX_COOLDOWN_ACTIVE)', () => {
+    expect(isWorkerOnlyUsageLimit('CODEX_COOLDOWN_ACTIVE: codex usage limit until epoch 123, delegating to Claude')).toBe(true);
+  });
+
+  it('true when only antigravity hit the limit', () => {
+    expect(isWorkerOnlyUsageLimit('ANTIGRAVITY_USAGE_LIMIT: cooldown set until epoch 123, delegating to Claude')).toBe(true);
+  });
+
+  it('false when Claude also hit a usage limit (global cooldown must still apply)', () => {
+    expect(isWorkerOnlyUsageLimit(CODEX_LIMIT + '\nCLAUDE_USAGE_LIMIT: cooldown set until epoch 123, delegating')).toBe(false);
+  });
+
+  it('false when Claude is the one limited (CLAUDE_COOLDOWN_ACTIVE)', () => {
+    expect(isWorkerOnlyUsageLimit('CLAUDE_COOLDOWN_ACTIVE: claude usage limit until epoch 123, delegating')).toBe(false);
+  });
+
+  it('false when no worker marker is present (bare usage-limit text stays global — backward compatible)', () => {
+    expect(isWorkerOnlyUsageLimit("You've hit your usage limit. try again at Jul 8th, 2026 5:42 AM.")).toBe(false);
+  });
+
+  it('false for empty output', () => {
+    expect(isWorkerOnlyUsageLimit('')).toBe(false);
+  });
+});
 
 describe('classifyUsageLimit', () => {
   const NOW_MS = Date.UTC(2026, 5, 16, 12, 0, 0);
