@@ -29,8 +29,11 @@ docs/ai/pipeline/
 
 # Authentication credential directories (bind mount for Dev Container persistence)
 .claude/*
-# ...but track version-controlled skills (SOT-1576); credentials/local settings stay ignored
+# ...but track version-controlled skills (SOT-1576) and shared hooks + settings (SOT-1573);
+# credentials/local settings (settings.local.json) stay ignored
 !.claude/skills/
+!.claude/hooks/
+!.claude/settings.json
 .codex/
 .antigravity/
 .config/antigravity/

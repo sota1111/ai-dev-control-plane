@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/tsx\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/dangerous-command-guard.ts\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/tsx\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-tool-lint.ts\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/tsx\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/ask-question-gate.ts\""
+          }
+        ]
+      }
+    ]
+  }
+}
