@@ -318,6 +318,32 @@ describe('Linear Integration', () => {
       expect(update.variables.stateId).toBe('sp');
     });
 
+    it('selects In Progress by name even when In Review (also "started") is listed first (SOT-1591)', async () => {
+      // Both In Review and In Progress are type "started"; a first-of-type pick would wrongly return
+      // In Review. Resolving by name must land on the In Progress state id.
+      linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'Todo', type: 'unstarted' }, team: { id: 't1' } } } });
+      linearMock.enqueue({ data: { workflowStates: { nodes: [
+        { id: 'sr', name: 'In Review', type: 'started' },
+        { id: 'sp', name: 'In Progress', type: 'started' },
+      ] } } });
+      linearMock.enqueue({ data: { issueUpdate: { success: true } } });
+
+      await runner.setIssueInProgress('SOT-1');
+      const update = linearMock.calls.find((c) => c.query.includes('issueUpdate'));
+      expect(update).toBeTruthy();
+      expect(update.variables.stateId).toBe('sp');
+    });
+
+    it('is a no-op when the team has no In Progress state (SOT-1591)', async () => {
+      linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'Todo', type: 'unstarted' }, team: { id: 't1' } } } });
+      linearMock.enqueue({ data: { workflowStates: { nodes: [
+        { id: 'sr', name: 'In Review', type: 'started' },
+      ] } } });
+
+      await runner.setIssueInProgress('SOT-1');
+      expect(linearMock.calls.some((c) => c.query.includes('issueUpdate'))).toBe(false);
+    });
+
     it('is a no-op when the issue is already started (In Progress)', async () => {
       linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'In Progress', type: 'started' }, team: { id: 't1' } } } });
       await runner.setIssueInProgress('SOT-1');
