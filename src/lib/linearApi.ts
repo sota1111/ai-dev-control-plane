@@ -362,13 +362,20 @@ export async function setIssueInProgress(issueId: string): Promise<void> {
       return;
     }
     const { id: uuid, team } = issueData.issue;
+    // SOT-1591: resolve the target state by NAME ("In Progress"), symmetric to setIssueInReview.
+    // In Progress AND In Review are BOTH type "started", so grabbing the first `type:"started"` state
+    // (`first:1`) can return "In Review" instead — which mislabels every pipeline-started issue as
+    // In Review and breaks the SOT-1460 "usage-limit label only on In Progress" guard. Match by name.
     const statesData: any = await linearQuery(
-      'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "started" } }, first: 1) { nodes { id name } } }',
+      'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
       { teamId: team.id }
     );
-    const stateId = statesData.workflowStates?.nodes[0]?.id;
+    const progressState = (statesData.workflowStates?.nodes || []).find(
+      (s: any) => (s.name || '').toLowerCase() === 'in progress'
+    );
+    const stateId = progressState?.id;
     if (!stateId) {
-      log('WEBHOOK', `setIssueInProgress: no started state found for team ${team.id}`);
+      log('WEBHOOK', `setIssueInProgress: no In Progress state for team ${team.id}, skip`);
       return;
     }
     await linearQuery(
