@@ -184,11 +184,21 @@ fi
 # recent one (`exec resume --last`) so consecutive Codex roles share a warm prompt cache. Disable with
 # WORKER_SESSION_REUSE=0. If resume fails to produce a valid report (and it is not a usage limit), fall
 # back once to a fresh session so a stale/broken session can never wedge the worker.
+# SOT-1583: a per-issue directive `workers: <role>=codex:<model>` sets CODEX_MODEL (via run_worker.sh).
+# When set, pass it to a FRESH `codex exec` as `-m <model>` (Codex's `-p` is a profile, not the model).
+# A resumed session (`exec resume --last`) already inherits the model chosen when it was created, so the
+# flag is applied to fresh sessions only. Unset → no `-m` flag → Codex's default model (backward compat).
+CODEX_MODEL_ARGS=()
+if [ -n "${CODEX_MODEL:-}" ]; then
+  CODEX_MODEL_ARGS=(-m "$CODEX_MODEL")
+  echo "run_codex.sh: using model '$CODEX_MODEL' (codex exec -m)" >&2
+fi
+
 run_codex_cli() {
   if [ "$1" = "resume" ]; then
     timeout "${WORKER_TIMEOUT}s" codex --sandbox danger-full-access exec resume --last "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
   else
-    timeout "${WORKER_TIMEOUT}s" codex --sandbox danger-full-access exec "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
+    timeout "${WORKER_TIMEOUT}s" codex --sandbox danger-full-access exec "${CODEX_MODEL_ARGS[@]}" "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
   fi
   return "${PIPESTATUS[0]}"
 }

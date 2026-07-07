@@ -183,6 +183,13 @@ fi
 # Base agy args (shared by fresh + resume). --add-dir only when a target repo is set.
 AGY_ARGS=(-p "$PROMPT_CONTENT" --dangerously-skip-permissions --print-timeout "${WORKER_TIMEOUT}s")
 [ -n "${TARGET_REPO:-}" ] && AGY_ARGS+=(--add-dir "$TARGET_REPO")
+# SOT-1583: a per-issue directive `workers: <role>=agy:<model>` sets AGY_MODEL (via run_worker.sh); pass
+# it to agy as `--model "<model>"`. Model names may contain spaces/parens (e.g. "Gemini 3.5 Flash
+# (High)"), so keep it quoted. Unset → no --model flag → agy's default model (backward compatible).
+if [ -n "${AGY_MODEL:-}" ]; then
+  AGY_ARGS+=(--model "$AGY_MODEL")
+  echo "run_antigravity.sh: using model '$AGY_MODEL' (agy --model)" >&2
+fi
 
 # Same-AI session reuse (SOT-1459): if this run already created an Antigravity conversation, continue
 # the most recent one (`--continue`) so consecutive Antigravity roles share a warm cache. Disable with

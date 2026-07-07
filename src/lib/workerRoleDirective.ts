@@ -10,6 +10,18 @@
 //
 //   workers: implementation=codex>claude, github=antigravity
 //
+// SOT-1583: a worker token may also carry a MODEL, as `worker:model`, so the human can pin not just the
+// CLI but the specific model a role runs on. Each element of a fallback chain can carry its own model:
+//
+//   workers: implementation=codex:gpt-5.5, verification=claude:sonnet>codex:gpt-5.4-mini
+//
+// The model string is everything after the FIRST colon (so ids with dots/spaces/parens like
+// "Gemini 3.5 Flash (High)" or "claude-sonnet-5" pass through verbatim). A missing/empty model just
+// means "use the worker's default model" (fully backward compatible with the model-less syntax). The
+// parsed models are returned separately (role → worker → model) so callers can keep treating the worker
+// chain exactly as before; the dispatcher passes the resolved model to the selected worker's run script
+// via its model env var (CODEX_MODEL / AGY_MODEL / CLAUDE_MODEL).
+//
 // This module is pure (no I/O): it parses directive text and merges overrides onto a base config. The
 // runner-cli `resolve-worker-roles` subcommand fetches the issue text, calls these, and writes a
 // per-issue merged config that run_auto.sh points WORKER_ROLES_FILE at for the pipeline run.
@@ -29,9 +41,17 @@ const WORKER_ALIASES: Record<string, Worker> = {
   agy: 'antigravity',
 };
 
+/** SOT-1583: per-role model pins, keyed by the worker the model applies to. */
+export type RoleModelMap = Partial<Record<WorkerRole, Partial<Record<Worker, string>>>>;
+
 export interface DirectiveParseResult {
   /** Role → overridden worker chain. Later directives (e.g. a newer comment) win. */
   overrides: Partial<Record<WorkerRole, Worker[]>>;
+  /**
+   * SOT-1583: Role → (worker → model) parsed from `worker:model` tokens. Only workers that were given
+   * an explicit non-empty model appear here; a role/worker absent from this map uses its default model.
+   */
+  models: RoleModelMap;
   /** Human-readable notes about ignored/invalid tokens (never throws). */
   warnings: string[];
 }
@@ -47,8 +67,9 @@ function isWorkerRole(value: string): value is WorkerRole {
  */
 export function parseWorkerRoleDirectives(text: string | null | undefined): DirectiveParseResult {
   const overrides: Partial<Record<WorkerRole, Worker[]>> = {};
+  const models: RoleModelMap = {};
   const warnings: string[] = [];
-  if (!text) return { overrides, warnings };
+  if (!text) return { overrides, models, warnings };
 
   const lineRe = /^\s*workers?\s*:\s*(.+?)\s*$/i;
   for (const line of text.split(/\r?\n/)) {
@@ -69,24 +90,41 @@ export function parseWorkerRoleDirectives(text: string | null | undefined): Dire
         continue;
       }
       const chain: Worker[] = [];
+      const roleModels: Partial<Record<Worker, string>> = {};
       for (const tokenRaw of pair.slice(eq + 1).split(/[>|/]/)) {
-        const token = tokenRaw.trim().toLowerCase();
+        const token = tokenRaw.trim();
         if (!token) continue;
-        const worker = WORKER_ALIASES[token];
+        // Split `worker:model` on the FIRST colon so model ids containing dots/spaces/parens survive.
+        const colon = token.indexOf(':');
+        const workerToken = (colon < 0 ? token : token.slice(0, colon)).trim().toLowerCase();
+        const modelToken = colon < 0 ? '' : token.slice(colon + 1).trim();
+        const worker = WORKER_ALIASES[workerToken];
         if (!worker) {
-          warnings.push(`unknown worker "${token}" for role "${role}"`);
+          warnings.push(`unknown worker "${workerToken}" for role "${role}"`);
           continue;
         }
         if (!chain.includes(worker)) chain.push(worker); // de-dupe, preserve order
+        if (colon >= 0) {
+          if (modelToken) {
+            roleModels[worker] = modelToken; // later occurrence in the same line wins
+          } else {
+            warnings.push(`empty model for worker "${workerToken}" in role "${role}" (using default)`);
+          }
+        }
       }
       if (chain.length === 0) {
         warnings.push(`no valid worker specified for role "${role}"`);
         continue;
       }
       overrides[role] = chain; // later occurrence overrides earlier
+      if (Object.keys(roleModels).length > 0) {
+        models[role] = roleModels; // later directive replaces this role's model pins wholesale
+      } else {
+        delete models[role]; // a newer model-less directive for the role clears any earlier pins
+      }
     }
   }
-  return { overrides, warnings };
+  return { overrides, models, warnings };
 }
 
 /**
