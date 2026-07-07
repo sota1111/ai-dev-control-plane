@@ -15,5 +15,5 @@
     "ignoreDeprecations": "6.0",
     "types": ["jest", "node"]
   },
-  "include": ["src/**/*.js", "src/**/*.ts", "scripts/**/*.js"]
+  "include": ["src/**/*.js", "src/**/*.ts", "scripts/**/*.js", "scripts/**/*.ts"]
 }
