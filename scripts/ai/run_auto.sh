@@ -168,6 +168,12 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 
 COMPLETION_UNVERIFIED=70
+# SOT-1584: the pipeline stopped because the WHOLE worker chain was TRANSIENTLY non-responsive
+# (dispatcher exit 75 / WORKER_DISPATCH_EXHAUSTED: usage cooldown, auth crash, disabled) — NOT a genuine
+# "one full pass, still can't complete" stop. This is distinct from COMPLETION_UNVERIFIED (70) so the
+# top-level does NOT fire the ensure-issue-reviewed loop-breaker (which would falsely move the issue to
+# In Review and strand ready work) and the runner re-enqueues it with backoff to retry when a worker recovers.
+WORKER_UNAVAILABLE=71
 
 # ── 完全スクリプト駆動ロールパイプライン（案B / SOT-1459） ─────────────────────────
 # run_auto.sh 自身が task-check → implementation → verification → acceptance →
@@ -362,7 +368,15 @@ run_role_pipeline() {
     rm -f "$cap"
 
     if [ "$rc" -ne 0 ] || [ -z "$report" ] || [ ! -f "$report" ]; then
-      plog "PIPELINE_STOP: role=$role dispatcher rc=$rc (chain exhausted / no report) → needs attention"
+      # SOT-1584: dispatcher exit 75 = WORKER_DISPATCH_EXHAUSTED — every worker in the chain was
+      # TRANSIENTLY non-responsive (usage cooldown / auth crash / disabled). This is not a genuine
+      # completion failure: retry later when a worker recovers instead of moving the issue to In Review.
+      # Any OTHER non-zero rc or a missing report is treated as the usual needs-attention stop.
+      if [ "$rc" -eq 75 ]; then
+        plog "PIPELINE_RETRY: role=$role dispatcher rc=75 (all workers transiently non-responsive) → leave issue active, retry when a worker recovers"
+        return "$WORKER_UNAVAILABLE"
+      fi
+      plog "PIPELINE_STOP: role=$role dispatcher rc=$rc (no report) → needs attention"
       return "$COMPLETION_UNVERIFIED"
     fi
 
@@ -533,7 +547,15 @@ if [ "$PIPELINE_ENABLED" -eq 1 ] && [ -n "$TARGET_ISSUE" ]; then
   # webhook-reaper re-enqueues it forever as a "stranded active issue" and the pipeline loops. If the
   # pipeline did not advance it (e.g. PLAN / blocked / needs-human), move it to In Review. Idempotent
   # / best-effort: no-op when already In Review/terminal; never changes the run's exit code.
-  run_cli ensure-issue-reviewed "$TARGET_ISSUE" >/dev/null 2>&1 || true
+  # SOT-1584: EXCEPT when the run stopped because every worker was TRANSIENTLY non-responsive
+  # (EXIT_CODE=WORKER_UNAVAILABLE=71). The pipeline did NOT complete a full pass — it aborted on
+  # transient worker unavailability — so moving to In Review would be misleading and would strand
+  # ready work. Leave the issue active; the runner re-enqueues it with backoff to retry on recovery.
+  if [ "$EXIT_CODE" -eq "$WORKER_UNAVAILABLE" ]; then
+    echo "[pipeline] WORKER_UNAVAILABLE (71): all workers transiently non-responsive → skip ensure-issue-reviewed, leave issue active for retry"
+  else
+    run_cli ensure-issue-reviewed "$TARGET_ISSUE" >/dev/null 2>&1 || true
+  fi
   echo ""
   echo "== Finished pipeline: $(date +"%Y%m%d_%H%M%S") (exit: ${EXIT_CODE}) =="
   exit "$EXIT_CODE"

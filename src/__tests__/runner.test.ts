@@ -2134,6 +2134,20 @@ describe('runner', () => {
       });
     });
 
+    it('returns WORKER_UNAVAILABLE_RETRY when code is 71 (SOT-1584 transient worker-chain exhaustion)', () => {
+      const result = classifyRunResult({
+        code: 71,
+        output: 'WORKER_DISPATCH_EXHAUSTED role=verification',
+        completion: null
+      });
+      expect(result).toEqual({
+        kind: RUN_RESULT.WORKER_UNAVAILABLE_RETRY,
+        code: 71
+      });
+      // Distinct from the genuine needs-human stop so the reaper retries instead of moving to In Review.
+      expect(result.kind).not.toBe(RUN_RESULT.COMPLETION_UNVERIFIED);
+    });
+
     it('returns USAGE_LIMIT_RETRY for retryable limit output', () => {
       const output = 'Your limit will reset at 11:59pm (UTC)';
       const result = classifyRunResult({
