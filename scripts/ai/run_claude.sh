@@ -173,6 +173,8 @@ else
   SESSION_ARGS=(--session-id "$SID")
 fi
 
+# SOT-1583: a per-issue directive `workers: <role>=claude:<model>` sets CLAUDE_MODEL (via
+# run_worker.sh); it is consumed here as `--model`. Unset → default `opus` (backward compatible).
 CLAUDE_MODEL="${CLAUDE_MODEL:-opus}"
 export CLAUDE_MODEL
 

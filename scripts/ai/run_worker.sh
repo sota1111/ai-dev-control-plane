@@ -102,6 +102,23 @@ worker_report() {
     antigravity) lane_path "$CONTROL_PLANE_DIR/docs/ai/50_worker_antigravity_report.md" ;;
   esac
 }
+# SOT-1583: per-issue model selection. The Linear directive `workers: role=worker:model` records a
+# model for a (role, worker) pair in the `__models__` section of $WORKER_ROLES_FILE (written by
+# runner-cli resolve-worker-roles). Look up the model for the (role, worker) we are about to invoke and
+# pass it to that worker's run script via its model env var (CODEX_MODEL / AGY_MODEL / CLAUDE_MODEL). No
+# model recorded → print empty → the run script keeps its default model (fully backward compatible).
+worker_model() {
+  # args: role worker → prints the model string (empty when none)
+  node -e '
+    const fs = require("fs");
+    const [file, role, worker] = process.argv.slice(1);
+    try {
+      const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+      const m = cfg && cfg.__models__ && cfg.__models__[role] && cfg.__models__[role][worker];
+      process.stdout.write(typeof m === "string" ? m : "");
+    } catch (e) { process.stdout.write(""); }
+  ' "$WORKER_ROLES_FILE" "$1" "$2" 2>/dev/null || echo ''
+}
 # Each worker script reads a DIFFERENT prompt file. The orchestrator writes ONE canonical role prompt
 # and the dispatcher fans it out to whichever worker it picks (so the instruction is worker-agnostic).
 worker_prompt() {
@@ -239,6 +256,19 @@ PROGRESS_NOTIFY
     HANDOFF_ENV=(WORKER_HANDOFF_FROM="$PREV_WORKER" WORKER_HANDOFF_REPORT="$PREV_REPORT")
   fi
 
+  # SOT-1583: resolve the per-issue model pin for this (role, worker) and pass it to the run script via
+  # that worker's model env var. Absent → don't set it, so the run script keeps its default model.
+  MODEL_ENV=()
+  WORKER_MODEL="$(worker_model "$ROLE" "$WORKER")"
+  if [ -n "$WORKER_MODEL" ]; then
+    case "$WORKER" in
+      codex)       MODEL_ENV=(CODEX_MODEL="$WORKER_MODEL") ;;
+      antigravity) MODEL_ENV=(AGY_MODEL="$WORKER_MODEL") ;;
+      claude)      MODEL_ENV=(CLAUDE_MODEL="$WORKER_MODEL") ;;
+    esac
+    echo "-- model override: role '$ROLE' worker '$WORKER' → model '$WORKER_MODEL' --"
+  fi
+
   # SOT-1549: snapshot the metrics-repo baseline + start time so this leg's M4/M6 are measured.
   LEG_BASE_SHA=""
   if truthy "$LEG_METRICS"; then
@@ -247,7 +277,7 @@ PROGRESS_NOTIFY
   LEG_START_MS="$(date +%s%3N)"
 
   set +e
-  env RUN_WORKER_DISPATCH=1 WORKER_ROLE="$ROLE" WORKER_SELECTED="$WORKER" "${HANDOFF_ENV[@]}" \
+  env RUN_WORKER_DISPATCH=1 WORKER_ROLE="$ROLE" WORKER_SELECTED="$WORKER" "${HANDOFF_ENV[@]}" "${MODEL_ENV[@]}" \
     bash "$SCRIPT"
   RC=$?
   set -e

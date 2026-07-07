@@ -61,6 +61,58 @@ describe('parseWorkerRoleDirectives', () => {
     expect(parseWorkerRoleDirectives('').overrides).toEqual({});
     expect(parseWorkerRoleDirectives(null).overrides).toEqual({});
   });
+
+  // SOT-1583: `worker:model` model pins.
+  test('model-less syntax stays fully backward compatible (empty models map)', () => {
+    const { overrides, models, warnings } = parseWorkerRoleDirectives(
+      'workers: implementation=codex, verification=claude',
+    );
+    expect(overrides).toEqual({ implementation: ['codex'], verification: ['claude'] });
+    expect(models).toEqual({});
+    expect(warnings).toEqual([]);
+  });
+
+  test('parses worker:model tokens into overrides + models', () => {
+    const { overrides, models, warnings } = parseWorkerRoleDirectives(
+      'workers: implementation=codex:gpt-5.5, verification=claude:sonnet',
+    );
+    expect(overrides).toEqual({ implementation: ['codex'], verification: ['claude'] });
+    expect(models).toEqual({
+      implementation: { codex: 'gpt-5.5' },
+      verification: { claude: 'sonnet' },
+    });
+    expect(warnings).toEqual([]);
+  });
+
+  test('each element of a fallback chain can carry its own model', () => {
+    const { overrides, models } = parseWorkerRoleDirectives(
+      'workers: verification=claude:sonnet>codex:gpt-5.4-mini',
+    );
+    expect(overrides.verification).toEqual(['claude', 'codex']);
+    expect(models.verification).toEqual({ claude: 'sonnet', codex: 'gpt-5.4-mini' });
+  });
+
+  test('keeps model ids that contain spaces/parens/dots verbatim (first colon splits)', () => {
+    const { models } = parseWorkerRoleDirectives(
+      'workers: implementation=agy:Gemini 3.5 Flash (High), github=claude:claude-sonnet-5',
+    );
+    expect(models.implementation).toEqual({ antigravity: 'Gemini 3.5 Flash (High)' });
+    expect(models.github).toEqual({ claude: 'claude-sonnet-5' });
+  });
+
+  test('an empty model (worker:) warns and falls back to default (no pin)', () => {
+    const { overrides, models, warnings } = parseWorkerRoleDirectives('workers: implementation=codex:');
+    expect(overrides).toEqual({ implementation: ['codex'] });
+    expect(models).toEqual({});
+    expect(warnings.some((w) => w.includes('empty model for worker "codex"'))).toBe(true);
+  });
+
+  test('a newer model-less directive clears an earlier model pin for the same role', () => {
+    const text = ['workers: implementation=codex:gpt-5.5', 'workers: implementation=codex'].join('\n');
+    const { overrides, models } = parseWorkerRoleDirectives(text);
+    expect(overrides).toEqual({ implementation: ['codex'] });
+    expect(models).toEqual({});
+  });
 });
 
 describe('mergeWorkerRoleOverrides', () => {

@@ -89,11 +89,23 @@ workers: implementation=codex, verification=claude
   config default. Roles: `task-check`, `decomposition`, `implementation`, `verification`, `acceptance`,
   `github`, `linear-report`. Workers: `claude`, `codex`, `antigravity` (alias `agy`).
 - Fallbacks use `>` (or `|` / `/`): `implementation=codex>claude`.
+- **Model selection (SOT-1583):** a worker token may pin a **model** as `worker:model`, so you can steer
+  not just the CLI but the specific model a role runs on. Each element of a fallback chain can carry its
+  own model:
+  ```
+  workers: implementation=codex:gpt-5.5, verification=claude:sonnet>codex:gpt-5.4-mini
+  ```
+  The model is everything after the **first** colon (ids with dots/spaces/parens survive, e.g.
+  `agy:Gemini 3.5 Flash (High)`). A missing/empty model means "use the worker's default" (fully backward
+  compatible with the model-less syntax). The dispatcher passes the resolved model to the selected
+  worker's run script via its model env var — Codex `CODEX_MODEL` (→ `codex exec -m <model>`),
+  Antigravity `AGY_MODEL` (→ `agy --model "<model>"`), Claude `CLAUDE_MODEL` (→ `claude --model <model>`,
+  default `opus`). No model validation is done — an unknown model is passed through and the CLI errors.
 - The directive may appear in the description or any comment; the **newest occurrence wins** per role.
 - Mechanics: at pipeline start `run_auto.sh` calls `runner-cli resolve-worker-roles <issue>`, which
-  merges overrides onto the base config, writes `docs/ai/pipeline/worker_roles.<issue>.json`, and exports
-  `WORKER_ROLES_FILE`. Fail-open: no directive / fetch error → default config. Parser:
-  `src/lib/workerRoleDirective.ts`.
+  merges overrides onto the base config, writes `docs/ai/pipeline/worker_roles.<issue>.json` (with any
+  model pins under a `__models__` section), and exports `WORKER_ROLES_FILE`. Fail-open: no directive /
+  fetch error → default config. Parser: `src/lib/workerRoleDirective.ts`.
 
 ---
 
