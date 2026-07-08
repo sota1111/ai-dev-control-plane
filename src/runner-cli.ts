@@ -108,11 +108,12 @@ async function main() {
         process.exit(0);
       }
 
-      const { overrides, models, warnings } = parseWorkerRoleDirectives(text);
+      const { overrides, models, solo, warnings } = parseWorkerRoleDirectives(text);
       for (const w of warnings) process.stderr.write(`resolve-worker-roles: ${w}\n`);
       const overriddenRoles = Object.keys(overrides);
       const modelledRoles = Object.keys(models);
-      if (overriddenRoles.length === 0 && modelledRoles.length === 0) {
+      // SOT-1591: a solo directive alone (e.g. `workers: solo=off`) must also produce a per-issue file.
+      if (overriddenRoles.length === 0 && modelledRoles.length === 0 && !solo) {
         process.stdout.write('');
         process.exit(0);
       }
@@ -131,12 +132,29 @@ async function main() {
       // loader (loadWorkerRolesConfig) and the dispatcher's chain reader both ignore it; run_worker.sh
       // reads `__models__[role][worker]` to pass the model to the selected worker's run script.
       const output: Record<string, unknown> = { ...merged };
-      if (modelledRoles.length > 0) output.__models__ = models;
-      // SOT-1591: carry the base config's solo-mode selector into the per-issue merged file so solo mode
-      // is not lost for issues that also have a `workers:` directive (the merged file becomes the
-      // dispatcher's WORKER_ROLES_FILE). Directives only reroute per-role chains, never solo mode.
-      const soloWorker = loadSoloWorker(baseConfigPath);
-      if (soloWorker) output.__solo__ = soloWorker;
+      // SOT-1583 role model pins + SOT-1591 solo model pin share the `__models__` section (run_worker.sh
+      // reads `__models__[role][worker]`; the synthetic `solo` role is looked up the same way).
+      const modelsOut: Record<string, Record<string, string>> = {};
+      for (const [r, m] of Object.entries(models)) modelsOut[r] = { ...(m as Record<string, string>) };
+      // SOT-1591: resolve the effective solo selector for this issue.
+      // - `solo=<worker>` directive → force solo on that worker (+ optional model pin);
+      // - `solo=off` directive      → omit __solo__ so this issue runs the NORMAL per-role pipeline;
+      // - no solo directive         → inherit the base config's __solo__ (a bare `workers:` role
+      //   directive keeps solo mode; the merged file is the dispatcher's WORKER_ROLES_FILE).
+      let soloSummary = '';
+      if (solo) {
+        if (solo.disabled) {
+          soloSummary = 'solo=off';
+        } else {
+          output.__solo__ = solo.worker;
+          if (solo.model) modelsOut.solo = { ...(modelsOut.solo || {}), [solo.worker]: solo.model };
+          soloSummary = `solo=${solo.worker}${solo.model ? `:${solo.model}` : ''}`;
+        }
+      } else {
+        const soloWorker = loadSoloWorker(baseConfigPath);
+        if (soloWorker) output.__solo__ = soloWorker;
+      }
+      if (Object.keys(modelsOut).length > 0) output.__models__ = modelsOut;
       const outDir = path.join(__dirname, '..', 'docs', 'ai', 'pipeline');
       fs.mkdirSync(outDir, { recursive: true });
       const safeIssue = String(issueId).replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -147,7 +165,7 @@ async function main() {
       const modelSummary = modelledRoles
         .map((r) => `${r}{${Object.entries((models as any)[r]).map(([w, m]) => `${w}:${m}`).join(',')}}`)
         .join(', ');
-      const summary = [overrideSummary, modelSummary].filter(Boolean).join(' | ');
+      const summary = [overrideSummary, modelSummary, soloSummary].filter(Boolean).join(' | ');
       process.stderr.write(`resolve-worker-roles: ${issueId} overrides ${summary} → ${outPath}\n`);
       runner.log('WORKER_ROLES', `${issueId} per-issue override: ${summary}`, { issue: issueId });
       process.stdout.write(outPath);
