@@ -5,11 +5,14 @@ import {
   WORKER_ROLES,
   WORKERS,
   loadWorkerRolesConfig,
+  loadSoloWorker,
   reorderChainForPin,
   resolveRoleChain,
   resolveRoleChainCli,
   resolveRoleWorker,
   resolveRoleWorkerCli,
+  resolveSoloWorker,
+  resolveSoloWorkerCli,
 } from '../lib/workerRoles.js';
 
 function writeTmpConfig(content: string): string {
@@ -165,6 +168,42 @@ describe('CLI helpers', () => {
     expect(resolveRoleWorkerCli(p, 'task-check')).toBe('codex');
     expect(resolveRoleWorkerCli(p, 'unknown-role')).toBe('');
     expect(resolveRoleWorkerCli('/no/such/file.json', 'task-check')).toBe('');
+  });
+});
+
+describe('solo mode (SOT-1591 __solo__)', () => {
+  test('resolveSoloWorker returns the worker when __solo__ is a valid worker', () => {
+    expect(resolveSoloWorker({ __solo__: 'claude' })).toBe('claude');
+    expect(resolveSoloWorker({ __solo__: 'codex' })).toBe('codex');
+    expect(resolveSoloWorker({ __solo__: 'antigravity' })).toBe('antigravity');
+  });
+
+  test('resolveSoloWorker returns null when __solo__ is absent / null / empty / invalid', () => {
+    expect(resolveSoloWorker({})).toBeNull();
+    expect(resolveSoloWorker({ __solo__: null })).toBeNull();
+    expect(resolveSoloWorker({ __solo__: '' })).toBeNull();
+    expect(resolveSoloWorker({ __solo__: 'gpt5' })).toBeNull();
+    expect(resolveSoloWorker(null)).toBeNull();
+    expect(resolveSoloWorker([])).toBeNull();
+  });
+
+  test('loadSoloWorker reads the file, fail-open to null on missing/invalid', () => {
+    const on = writeTmpConfig(JSON.stringify({ __solo__: 'claude', ...JSON.parse(VALID) }));
+    expect(loadSoloWorker(on)).toBe('claude');
+    // A config without __solo__ (normal per-role mode) → null.
+    expect(loadSoloWorker(writeTmpConfig(VALID))).toBeNull();
+    expect(loadSoloWorker('/no/such/file.json')).toBeNull();
+  });
+
+  test('resolveSoloWorkerCli prints the worker or empty string', () => {
+    expect(resolveSoloWorkerCli(writeTmpConfig(JSON.stringify({ __solo__: 'claude', ...JSON.parse(VALID) })))).toBe('claude');
+    expect(resolveSoloWorkerCli(writeTmpConfig(VALID))).toBe('');
+  });
+
+  test('solo key does not break normal chain loading (it is a __ doc-style key)', () => {
+    const p = writeTmpConfig(JSON.stringify({ __solo__: 'claude', ...JSON.parse(VALID) }));
+    // loadWorkerRolesConfig ignores __-prefixed keys, so chains still load unchanged.
+    expect(loadWorkerRolesConfig(p)['task-check']).toEqual(['codex', 'claude', 'antigravity']);
   });
 });
 

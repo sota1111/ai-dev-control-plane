@@ -278,6 +278,53 @@ run_role_pipeline() {
   run_cli set-issue-in-progress "$issue" >/dev/null 2>>"$LOG_FILE" || true
   plog "issue $issue → In Progress (pipeline start)"
 
+  # SOT-1591 SOLO MODE: if the worker-roles config sets `__solo__`, ONE AI runs the entire lifecycle in a
+  # SINGLE dispatch — no per-role loop, no script handoff/gating in between. Query the resolved config
+  # (WORKER_ROLES_FILE carries the per-issue merge; solo mode is preserved through it). Fail-open: empty
+  # output → fall through to the normal per-role pipeline below.
+  local solo_worker
+  solo_worker="$(run_cli solo-worker 2>>"$LOG_FILE" || true)"
+  if [ -n "$solo_worker" ]; then
+    plog "SOLO MODE: worker=$solo_worker runs the whole lifecycle in one dispatch (no per-role handoff)"
+    PIPELINE_NO_PR=0
+    local scap; scap="$(mktemp)"
+    set +e
+    bash scripts/ai/run_worker.sh solo 2>&1 | python3 -u -c "$_PIPE_TAG_FILTER" | tee -a "$LOG_FILE" "$scap"
+    local src=${PIPESTATUS[0]}
+    set -e
+    local sdone sreport
+    sdone="$(grep -oE 'WORKER_DISPATCH_DONE role=[^ ]+ worker=[^ ]+ report=[^ ]+' "$scap" 2>/dev/null | tail -1 || true)"
+    sreport="$(printf '%s' "$sdone" | sed 's/.*report=//' || true)"
+    rm -f "$scap"
+    if [ "$src" -ne 0 ] || [ -z "$sreport" ] || [ ! -f "$sreport" ]; then
+      # rc=75 = solo worker transiently non-responsive (usage limit / crash): leave active, retry later
+      # (mirrors the per-role dispatcher-exhaustion handling). No fallback in solo mode by design.
+      if [ "$src" -eq 75 ]; then
+        plog "PIPELINE_RETRY: solo worker '$solo_worker' transiently non-responsive (rc=75) → leave active, retry when it recovers"
+        return "$WORKER_UNAVAILABLE"
+      fi
+      plog "PIPELINE_STOP: solo dispatch rc=$src (no report) → needs attention"
+      return "$COMPLETION_UNVERIFIED"
+    fi
+    # Solo verdict: acceptance FAIL or a human-stop Next Action → needs attention; else complete.
+    local sacc sna
+    sacc="$(grep -ioE '^##[[:space:]]*Acceptance:[[:space:]]*(PASS|FAIL)' "$sreport" 2>/dev/null | grep -ioE '(PASS|FAIL)' | tail -1 | tr '[:lower:]' '[:upper:]' || true)"
+    sna="$(awk '/[Nn]ext[[:space:]]*[Aa]ction/{cap=1; buf=""} cap{buf=buf"\n"$0} END{print buf}' "$sreport" 2>/dev/null | grep -oiE 'READY_FOR_REVIEW|NEEDS_DEBUG|NEEDS_USER_INPUT|BLOCKED' | head -n1 | tr '[:lower:]' '[:upper:]' || true)"
+    plog "SOLO result: acceptance='${sacc:-<none>}' next_action='${sna:-<none>}' report=$sreport"
+    if [ "$sacc" = "FAIL" ]; then
+      plog "PIPELINE_STOP: solo acceptance FAIL → needs attention"; return "$COMPLETION_UNVERIFIED"
+    fi
+    case "$sna" in
+      *READY_FOR_REVIEW*) ;;  # complete
+      *) plog "PIPELINE_STOP: solo '${sna:-<none>}' → stop (needs human)"; return "$COMPLETION_UNVERIFIED" ;;
+    esac
+    # PR detection (reuse the github-role heuristic): no PR reference in the solo report → no-PR terminal
+    # (PLAN/REVIEW/decomposition/no-op) → In Review; a PR reference → normal COMPLETED.
+    if grep -qiE 'pull/[0-9]+|PR[ :*]*#[0-9]+' "$sreport" 2>/dev/null; then PIPELINE_NO_PR=0; else PIPELINE_NO_PR=1; fi
+    plog "PIPELINE_DONE: solo lifecycle completed for $issue (no_pr=$PIPELINE_NO_PR)"
+    return 0
+  fi
+
   # SOT-1553: task-check now folds in the decomposition work (check + 分解判断 + child-issue registration)
   # so it runs as a single worker dispatch — decomposition is no longer a separate step with a script in
   # between. The `decomposition` role remains a valid role for manual/override dispatch, just not part of

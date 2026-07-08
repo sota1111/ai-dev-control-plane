@@ -170,6 +170,38 @@ export function reorderChainForPin(chain: Worker[], pinned: string | null | unde
 }
 
 /**
+ * SOT-1591 (solo mode): the optional top-level `__solo__` key selects a SINGLE worker that runs the
+ * ENTIRE issue lifecycle (task-check → implementation → verification → acceptance → github →
+ * linear-report) in ONE dispatch — no per-role script handoff in between. It is a global harness mode,
+ * opt-in: absent / null / "" (or an invalid worker) → normal per-role priority-chain dispatch. Because
+ * the key starts with `__`, loadWorkerRolesConfig already ignores it, so this is fully additive.
+ *
+ * `resolveSoloWorker` is the pure form (validates a parsed config object); `loadSoloWorker` reads the
+ * file. Both fail-open to null so a broken/absent config never forces solo mode.
+ */
+export function resolveSoloWorker(parsed: unknown): Worker | null {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const value = (parsed as Record<string, unknown>).__solo__;
+  return isWorker(value) ? value : null;
+}
+
+export function loadSoloWorker(configPath: string = DEFAULT_CONFIG_PATH): Worker | null {
+  try {
+    return resolveSoloWorker(JSON.parse(fs.readFileSync(configPath, 'utf8')));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * CLI entry used by the dispatcher/orchestrator: prints the solo worker (empty string when solo mode
+ * is off). `node -e "..." <configPath>`.
+ */
+export function resolveSoloWorkerCli(configPath: string = DEFAULT_CONFIG_PATH): string {
+  return loadSoloWorker(configPath) ?? '';
+}
+
+/**
  * CLI entry used by the dispatcher: prints the ordered worker chain for a role, space-separated
  * (empty string when there is no override). `node -e "..." <configPath> <role>`.
  */

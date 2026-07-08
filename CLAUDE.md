@@ -153,6 +153,21 @@ Default chains (SOT-1569): every role's chain is primary `claude`, secondary `co
 Every role — including Claude-primary ones — goes through the dispatcher; if Claude wins a chain,
 `run_claude.sh` runs a dispatched Claude worker rather than the orchestrator acting inline.
 
+### Solo mode — one AI runs the whole lifecycle in one dispatch (`__solo__`, SOT-1591)
+
+Set the top-level key `"__solo__": "<worker>"` in `config/worker_roles.json` (worker ∈ `claude` |
+`codex` | `antigravity`) to run in **solo mode**: `run_auto.sh` does a **single** `run_worker.sh solo`
+dispatch and that ONE AI performs the ENTIRE lifecycle for the target issue — task-check (incl.
+分解判断) → implementation → verification → acceptance → github (branch/PR/merge) → linear-report — in
+one CLI session, with **no per-role script handoff or gating in between**. The per-role priority chains
+are ignored while `__solo__` is active. It is strictly single-AI (no fallback, per「のみ」): a
+usage-limited solo worker cools down and retries later rather than handing off. In solo mode the "always
+delegate / do ONLY one role" rules are contextually replaced by an "all roles, one issue" preamble (the
+solo worker still must not launch runners or touch other issues). Remove / null `__solo__` to return to
+the normal per-role dispatch pipeline. Resolver: `resolveSoloWorker`/`loadSoloWorker`
+(`src/lib/workerRoles.ts`); the orchestrator queries `runner-cli solo-worker`. Prompt:
+`prompts/roles/solo.md`. **Current setting: `claude`.**
+
 ---
 
 ## Instruction Prompt Templates

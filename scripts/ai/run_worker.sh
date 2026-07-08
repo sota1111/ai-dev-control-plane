@@ -33,7 +33,9 @@ for arg in "$@"; do
   esac
 done
 
-VALID_ROLES="task-check decomposition implementation verification acceptance github linear-report"
+# SOT-1591: `solo` is a synthetic dispatch role — one worker runs the whole lifecycle in one session.
+# Its chain is the single `__solo__` worker from the config (no fallback); its prompt is prompts/roles/solo.md.
+VALID_ROLES="task-check decomposition implementation verification acceptance github linear-report solo"
 if [ -z "$ROLE" ] || [[ " $VALID_ROLES " != *" $ROLE "* ]]; then
   echo "run_worker.sh: role must be one of: $VALID_ROLES (got '${ROLE:-}')" >&2
   exit 2
@@ -60,12 +62,15 @@ WORKER_ROLES_FILE="${WORKER_ROLES_FILE:-$CONTROL_PLANE_DIR/config/worker_roles.j
 CHAIN="$(PIPELINE_PINNED_WORKER="${PIPELINE_PINNED_WORKER:-}" node -e '
   const fs = require("fs");
   const [file, role] = process.argv.slice(1);
-  const ROLES = ["task-check","decomposition","implementation","verification","acceptance","github","linear-report"];
+  const ROLES = ["task-check","decomposition","implementation","verification","acceptance","github","linear-report","solo"];
   const WORKERS = ["claude","codex","antigravity"];
   if (!ROLES.includes(role)) { process.stdout.write(""); process.exit(0); }
   try {
     const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
-    const raw = Array.isArray(cfg[role]) ? cfg[role] : [cfg[role]];
+    // SOT-1591 solo mode: the `solo` role resolves to the single `__solo__` worker (no fallback chain).
+    const raw = role === "solo"
+      ? [cfg.__solo__]
+      : (Array.isArray(cfg[role]) ? cfg[role] : [cfg[role]]);
     const seen = new Set(); let out = [];
     for (const w of raw) { if (WORKERS.includes(w) && !seen.has(w)) { seen.add(w); out.push(w); } }
     const pin = process.env.PIPELINE_PINNED_WORKER || "";
