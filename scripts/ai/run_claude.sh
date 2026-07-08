@@ -206,13 +206,31 @@ if [ -n "${TARGET_REPO:-}" ]; then
 fi
 
 set +e
-timeout "${WORKER_TIMEOUT}s" claude \
-  --model "$CLAUDE_MODEL" \
-  --dangerously-skip-permissions \
-  "${SESSION_ARGS[@]}" \
-  "${ADD_DIR_ARGS[@]}" \
-  -p "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
-EXIT_CODE="${PIPESTATUS[0]}"
+if [ "${WORKER_ROLE:-}" = "solo" ]; then
+  # SOT-1591 (solo live output): solo runs the WHOLE lifecycle in ONE `claude -p` session. Default
+  # (text) `-p` buffers all output until the end, so the run log/report stay empty for the whole run and
+  # a hang (e.g. a stuck test command) is invisible. Stream instead: `--output-format stream-json
+  # --verbose` emits events as they happen; solo_stream_format.py prints concise LIVE progress to stdout
+  # (→ run log/Discord) AND writes the final report text to REPORT_FILE (kept parseable for the
+  # `## Acceptance` / `## Next Action` gate). PIPESTATUS[0] stays claude's own exit code (timeout=124…).
+  timeout "${WORKER_TIMEOUT}s" claude \
+    --model "$CLAUDE_MODEL" \
+    --dangerously-skip-permissions \
+    "${SESSION_ARGS[@]}" \
+    "${ADD_DIR_ARGS[@]}" \
+    --output-format stream-json --verbose \
+    -p "$PROMPT_CONTENT" 2>&1 \
+    | python3 -u "$CONTROL_PLANE_DIR/scripts/ai/solo_stream_format.py" "$REPORT_FILE"
+  EXIT_CODE="${PIPESTATUS[0]}"
+else
+  timeout "${WORKER_TIMEOUT}s" claude \
+    --model "$CLAUDE_MODEL" \
+    --dangerously-skip-permissions \
+    "${SESSION_ARGS[@]}" \
+    "${ADD_DIR_ARGS[@]}" \
+    -p "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
+  EXIT_CODE="${PIPESTATUS[0]}"
+fi
 set -e
 
 # --- Claude usage-limit detection (set cooldown, delegate) ---
