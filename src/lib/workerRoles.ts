@@ -182,6 +182,8 @@ export function reorderChainForPin(chain: Worker[], pinned: string | null | unde
 export function resolveSoloWorker(parsed: unknown): Worker | null {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
   const value = (parsed as Record<string, unknown>).__solo__;
+  // Solo mode is ON only when __solo__ is a KNOWN worker (claude | codex | antigravity). An empty
+  // string "", null, a missing key, or any other value → null = solo OFF = NORMAL per-role pipeline.
   return isWorker(value) ? value : null;
 }
 
