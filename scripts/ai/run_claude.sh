@@ -129,7 +129,27 @@ PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
 # CLAUDE.md — the ORCHESTRATOR spec (select issues, decompose, run workers, drive the pipeline). A
 # dispatched worker must NOT act on those orchestrator instructions, or it would spawn concurrent work
 # and process other issues. Pin it to exactly one role for one issue and forbid launching runs.
-PROMPT_CONTENT="# YOU ARE A CONSTRAINED WORKER — NOT THE ORCHESTRATOR
+# SOT-1591 (solo mode): when dispatched as the synthetic `solo` role, this worker instead owns the
+# ENTIRE lifecycle for the single target issue in ONE session — so the "exactly one role" clause is
+# replaced by an "all roles, one issue" clause. The run-nothing / one-issue guards are kept either way.
+if [ "${WORKER_ROLE:-}" = "solo" ]; then
+  PROMPT_CONTENT="# YOU ARE THE SOLO WORKER — ONE AI, THE WHOLE LIFECYCLE FOR ONE ISSUE
+
+You were dispatched by scripts/ai/run_worker.sh in SOLO MODE to run the ENTIRE lifecycle for the single
+target issue in docs/ai/pipeline/context.md, yourself, in this one session — with NO per-role script
+handoff. Follow CLAUDE.md's role specs, quality gates, GitHub policy, and Linear policy, but you perform
+every step directly: task-check (incl. 分解判断) → implementation → verification → acceptance → github
+(branch/PR/merge) → linear-report. Hard rules:
+- Work on ONLY the one target issue. Do NOT select or process any other Linear issue.
+- Do NOT run scripts/ai/run_auto.sh, scripts/ai/run_worker.sh, scripts/ai/scheduler.sh, the webhook
+  server, or the runner queue/drain. Do NOT spawn or trigger any other run.
+- Do NOT run anything in the background or start long-lived processes.
+
+---
+
+$PROMPT_CONTENT"
+else
+  PROMPT_CONTENT="# YOU ARE A CONSTRAINED WORKER — NOT THE ORCHESTRATOR
 
 You were dispatched by scripts/ai/run_worker.sh to perform EXACTLY ONE role for the single target issue
 described below / in docs/ai/pipeline/context.md. CLAUDE.md in this repo describes the ORCHESTRATOR;
@@ -143,6 +163,7 @@ other issue. Hard rules:
 ---
 
 $PROMPT_CONTENT"
+fi
 if [ -n "${WORKER_HANDOFF_REPORT:-}" ] && [ -s "${WORKER_HANDOFF_REPORT:-/nonexistent}" ]; then
   PROMPT_CONTENT="## Handoff from previous worker (${WORKER_HANDOFF_FROM:-unknown})
 

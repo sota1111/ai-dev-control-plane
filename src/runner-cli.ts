@@ -21,7 +21,7 @@ import { notifyProgress } from './lib/progressNotifier.js';
 import { formatOutcomeSummary, promotionCandidates } from './lib/outcomeStats.js';
 import { classifyWorkerFailure, writeAuthUnhealthy, readAuthUnhealthy, shouldSkipForAuthUnhealthy, type WorkerName } from './lib/workerHealth.js';
 import { workerAuthUnhealthyTtlSeconds } from './config/env.js';
-import { loadWorkerRolesConfig, type WorkerRoleConfig, type WorkerRole } from './lib/workerRoles.js';
+import { loadWorkerRolesConfig, loadSoloWorker, type WorkerRoleConfig, type WorkerRole } from './lib/workerRoles.js';
 import { parseWorkerRoleDirectives, mergeWorkerRoleOverrides } from './lib/workerRoleDirective.js';
 import { buildDelegationPreflight } from './lib/delegationPreflight.js';
 
@@ -67,6 +67,16 @@ async function main() {
 
       runner.log('CLASSIFY', `${issueId} → type=${result.type} worker=${result.worker}`, { issue: issueId, reason: result.reason });
       process.stdout.write(JSON.stringify(result) + '\n');
+      process.exit(0);
+      break;
+    }
+    case 'solo-worker': {
+      // SOT-1591 (solo mode): print the single worker that runs the whole lifecycle when
+      // `__solo__` is set in the worker-roles config, else empty. run_auto.sh queries this to decide
+      // between one solo dispatch and the per-role pipeline. Reads WORKER_ROLES_FILE (per-issue merged
+      // config) when set, else the base config. Fail-open: any error → empty (normal pipeline).
+      const configPath = args[0] || process.env.WORKER_ROLES_FILE || path.join(__dirname, '..', 'config', 'worker_roles.json');
+      process.stdout.write(loadSoloWorker(configPath) ?? '');
       process.exit(0);
       break;
     }
@@ -122,6 +132,11 @@ async function main() {
       // reads `__models__[role][worker]` to pass the model to the selected worker's run script.
       const output: Record<string, unknown> = { ...merged };
       if (modelledRoles.length > 0) output.__models__ = models;
+      // SOT-1591: carry the base config's solo-mode selector into the per-issue merged file so solo mode
+      // is not lost for issues that also have a `workers:` directive (the merged file becomes the
+      // dispatcher's WORKER_ROLES_FILE). Directives only reroute per-role chains, never solo mode.
+      const soloWorker = loadSoloWorker(baseConfigPath);
+      if (soloWorker) output.__solo__ = soloWorker;
       const outDir = path.join(__dirname, '..', 'docs', 'ai', 'pipeline');
       fs.mkdirSync(outDir, { recursive: true });
       const safeIssue = String(issueId).replace(/[^a-zA-Z0-9_-]/g, '_');
