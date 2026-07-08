@@ -22,6 +22,17 @@
 // chain exactly as before; the dispatcher passes the resolved model to the selected worker's run script
 // via its model env var (CODEX_MODEL / AGY_MODEL / CLAUDE_MODEL).
 //
+// SOT-1591: the same directive line can also flip SOLO MODE for one issue (one AI runs the whole
+// lifecycle in a single dispatch). Use a `solo=` token:
+//
+//   workers: solo=codex           → this issue runs solo on codex (overrides the base __solo__)
+//   workers: solo=claude:sonnet   → solo on claude with a model pin
+//   workers: solo=off             → this issue runs the NORMAL per-role pipeline, even if base __solo__ is set
+//
+// `solo=off` (also none / false / 0) disables solo for the issue; `solo=<worker>[:model]` forces it.
+// When no solo token is present the base config's __solo__ is inherited. A solo token combines with role
+// overrides on the same line (e.g. `workers: solo=off, implementation=codex`).
+//
 // This module is pure (no I/O): it parses directive text and merges overrides onto a base config. The
 // runner-cli `resolve-worker-roles` subcommand fetches the issue text, calls these, and writes a
 // per-issue merged config that run_auto.sh points WORKER_ROLES_FILE at for the pipeline run.
@@ -44,6 +55,17 @@ const WORKER_ALIASES: Record<string, Worker> = {
 /** SOT-1583: per-role model pins, keyed by the worker the model applies to. */
 export type RoleModelMap = Partial<Record<WorkerRole, Partial<Record<Worker, string>>>>;
 
+/**
+ * SOT-1591: per-issue SOLO override parsed from a `solo=` directive token.
+ * - `{ disabled: true }`  ← `solo=off` (also `none` / `false` / `0`): force NORMAL per-role mode for
+ *   this issue, even when the base config sets `__solo__`.
+ * - `{ disabled: false, worker, model }` ← `solo=<worker>[:model]`: force SOLO mode with that worker
+ *   (and optional model) for this issue, overriding the base `__solo__`.
+ */
+export type SoloDirective =
+  | { disabled: true }
+  | { disabled: false; worker: Worker; model: string | null };
+
 export interface DirectiveParseResult {
   /** Role → overridden worker chain. Later directives (e.g. a newer comment) win. */
   overrides: Partial<Record<WorkerRole, Worker[]>>;
@@ -52,6 +74,8 @@ export interface DirectiveParseResult {
    * an explicit non-empty model appear here; a role/worker absent from this map uses its default model.
    */
   models: RoleModelMap;
+  /** SOT-1591: per-issue solo override from a `solo=` token (undefined when not specified). */
+  solo?: SoloDirective;
   /** Human-readable notes about ignored/invalid tokens (never throws). */
   warnings: string[];
 }
@@ -69,6 +93,7 @@ export function parseWorkerRoleDirectives(text: string | null | undefined): Dire
   const overrides: Partial<Record<WorkerRole, Worker[]>> = {};
   const models: RoleModelMap = {};
   const warnings: string[] = [];
+  let solo: SoloDirective | undefined;
   if (!text) return { overrides, models, warnings };
 
   const lineRe = /^\s*workers?\s*:\s*(.+?)\s*$/i;
@@ -85,6 +110,26 @@ export function parseWorkerRoleDirectives(text: string | null | undefined): Dire
         continue;
       }
       const role = pair.slice(0, eq).trim().toLowerCase();
+      // SOT-1591: `solo=<worker>[:model]` / `solo=off` is a special directive, not a role chain. It sets
+      // (or disables) solo mode for this issue. Handle it before the role check. Newest occurrence wins.
+      if (role === 'solo') {
+        const rhs = pair.slice(eq + 1).trim();
+        const rhsLower = rhs.toLowerCase();
+        if (rhsLower === 'off' || rhsLower === 'none' || rhsLower === 'false' || rhsLower === '0') {
+          solo = { disabled: true };
+        } else {
+          const colon = rhs.indexOf(':');
+          const workerToken = (colon < 0 ? rhs : rhs.slice(0, colon)).trim().toLowerCase();
+          const modelToken = colon < 0 ? '' : rhs.slice(colon + 1).trim();
+          const worker = WORKER_ALIASES[workerToken];
+          if (!worker) {
+            warnings.push(`unknown worker "${workerToken}" for solo (valid: claude, codex, antigravity/agy, or 'off')`);
+            continue;
+          }
+          solo = { disabled: false, worker, model: modelToken || null };
+        }
+        continue;
+      }
       if (!isWorkerRole(role)) {
         warnings.push(`unknown role "${role}" (valid: ${WORKER_ROLES.join(', ')})`);
         continue;
@@ -124,7 +169,7 @@ export function parseWorkerRoleDirectives(text: string | null | undefined): Dire
       }
     }
   }
-  return { overrides, models, warnings };
+  return { overrides, models, solo, warnings };
 }
 
 /**

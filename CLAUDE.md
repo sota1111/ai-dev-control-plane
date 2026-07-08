@@ -89,6 +89,12 @@ workers: implementation=codex, verification=claude
   config default. Roles: `task-check`, `decomposition`, `implementation`, `verification`, `acceptance`,
   `github`, `linear-report`. Workers: `claude`, `codex`, `antigravity` (alias `agy`).
 - Fallbacks use `>` (or `|` / `/`): `implementation=codex>claude`.
+- **Solo mode per issue (SOT-1591):** a special `solo=` token flips solo mode for THIS issue —
+  `solo=<worker>` (e.g. `workers: solo=codex`, or with a model `solo=claude:sonnet`) forces the one-AI
+  full-lifecycle dispatch on that worker, overriding the base `__solo__`; `solo=off` (also `none` /
+  `false` / `0`) forces the NORMAL per-role pipeline for this issue even when the base config sets
+  `__solo__`. No `solo=` token → inherit the base `__solo__`. It combines with role overrides on the same
+  line (`workers: solo=off, implementation=codex`); newest occurrence wins.
 - **Model selection (SOT-1583):** a worker token may pin a **model** as `worker:model`, so you can steer
   not just the CLI but the specific model a role runs on. Each element of a fallback chain can carry its
   own model:
@@ -164,9 +170,10 @@ are ignored while `__solo__` is active. It is strictly single-AI (no fallback, p
 usage-limited solo worker cools down and retries later rather than handing off. In solo mode the "always
 delegate / do ONLY one role" rules are contextually replaced by an "all roles, one issue" preamble (the
 solo worker still must not launch runners or touch other issues). Remove / null `__solo__` to return to
-the normal per-role dispatch pipeline. Resolver: `resolveSoloWorker`/`loadSoloWorker`
-(`src/lib/workerRoles.ts`); the orchestrator queries `runner-cli solo-worker`. Prompt:
-`prompts/roles/solo.md`. **Current setting: `claude`.**
+the normal per-role dispatch pipeline. A single Linear issue can override this both ways with a `solo=`
+directive (`solo=<worker>` / `solo=off`, see the per-issue override section above). Resolver:
+`resolveSoloWorker`/`loadSoloWorker` (`src/lib/workerRoles.ts`); the orchestrator queries
+`runner-cli solo-worker`. Prompt: `prompts/roles/solo.md`. **Current setting: `claude`.**
 
 ---
 

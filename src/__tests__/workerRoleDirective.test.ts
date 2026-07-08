@@ -113,6 +113,50 @@ describe('parseWorkerRoleDirectives', () => {
     expect(overrides).toEqual({ implementation: ['codex'] });
     expect(models).toEqual({});
   });
+
+  // SOT-1591: per-issue solo override.
+  test('solo=<worker> sets a solo override (no role chain)', () => {
+    const { solo, overrides } = parseWorkerRoleDirectives('workers: solo=codex');
+    expect(solo).toEqual({ disabled: false, worker: 'codex', model: null });
+    expect(overrides).toEqual({});
+  });
+
+  test('solo=<worker>:<model> pins a model on the solo worker', () => {
+    expect(parseWorkerRoleDirectives('workers: solo=claude:sonnet').solo).toEqual({
+      disabled: false, worker: 'claude', model: 'sonnet',
+    });
+  });
+
+  test('the agy alias resolves to antigravity for solo', () => {
+    expect(parseWorkerRoleDirectives('workers: solo=agy').solo).toEqual({
+      disabled: false, worker: 'antigravity', model: null,
+    });
+  });
+
+  test.each(['off', 'OFF', 'none', 'false', '0'])('solo=%s disables solo for the issue', (val) => {
+    expect(parseWorkerRoleDirectives(`workers: solo=${val}`).solo).toEqual({ disabled: true });
+  });
+
+  test('solo combines with role overrides on the same line', () => {
+    const { solo, overrides } = parseWorkerRoleDirectives('workers: solo=off, implementation=codex');
+    expect(solo).toEqual({ disabled: true });
+    expect(overrides).toEqual({ implementation: ['codex'] });
+  });
+
+  test('an unknown solo worker is ignored with a warning (solo stays undefined)', () => {
+    const { solo, warnings } = parseWorkerRoleDirectives('workers: solo=bogus');
+    expect(solo).toBeUndefined();
+    expect(warnings.some((w) => w.includes('unknown worker "bogus" for solo'))).toBe(true);
+  });
+
+  test('the newest solo directive wins (description then comments, oldest→newest)', () => {
+    const text = ['workers: solo=claude', 'workers: solo=off', 'workers: solo=codex'].join('\n');
+    expect(parseWorkerRoleDirectives(text).solo).toEqual({ disabled: false, worker: 'codex', model: null });
+  });
+
+  test('no solo token → solo is undefined (inherit base __solo__)', () => {
+    expect(parseWorkerRoleDirectives('workers: implementation=codex').solo).toBeUndefined();
+  });
 });
 
 describe('mergeWorkerRoleOverrides', () => {
