@@ -293,15 +293,14 @@ async function foreground() {
       try {
         const query = core.buildActiveIssuesQuery();
         const data = await runner.linearQuery(query);
-        const activeIssues = core.parseActiveIssueMeta(data);
+        const activeIdentifiers = core.parseActiveIdentifiers(data);
 
-        if (activeIssues.length > 0) {
+        if (activeIdentifiers.length > 0) {
           log('--- Active issues found — enqueuing and draining ---');
-          for (const { identifier: id, createdAt } of activeIssues) {
+          for (const id of activeIdentifiers) {
             log(`Enqueuing: ${id}`);
-            // Note: Directly using runner.enqueue to match scheduler.sh calling runner-cli.js enqueue.
-            // Pass createdAt so todos execute in Linear creation order (SOT-1637).
-            runner.enqueue(id, 'scheduler', null, { reason: 'scheduler', createdAt });
+            // Note: Directly using runner.enqueue to match scheduler.sh calling runner-cli.js enqueue
+            runner.enqueue(id, 'scheduler', null, { reason: 'scheduler' });
           }
           await runDrain(notifier);
           log('--- Drain complete ---');

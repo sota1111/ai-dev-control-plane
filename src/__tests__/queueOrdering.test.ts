@@ -15,38 +15,7 @@ describe('queueOrdering', () => {
     });
   });
 
-  describe('creationOrderTime', () => {
-    test('prefers createdAt, falls back to enqueuedAt, then 0', () => {
-      expect(queueOrdering.creationOrderTime({ createdAt: '2023-01-01T10:00:00Z', enqueuedAt: '2023-06-01T00:00:00Z' }))
-        .toBe(new Date('2023-01-01T10:00:00Z').getTime());
-      expect(queueOrdering.creationOrderTime({ enqueuedAt: '2023-02-02T00:00:00Z' }))
-        .toBe(new Date('2023-02-02T00:00:00Z').getTime());
-      expect(queueOrdering.creationOrderTime({})).toBe(0);
-      // invalid createdAt falls through to enqueuedAt
-      expect(queueOrdering.creationOrderTime({ createdAt: 'not-a-date', enqueuedAt: '2023-02-02T00:00:00Z' }))
-        .toBe(new Date('2023-02-02T00:00:00Z').getTime());
-    });
-  });
-
   describe('selectNextReadyIndex', () => {
-    test('within same priority, orders by createdAt even when enqueuedAt disagrees (SOT-1637)', () => {
-      // Older-created issue was enqueued LATER; it must still run first.
-      const queue = [
-        { issueId: 'newer-created', priority: 3, createdAt: '2023-01-01T11:00:00Z', enqueuedAt: '2023-01-01T09:00:00Z' },
-        { issueId: 'older-created', priority: 3, createdAt: '2023-01-01T10:00:00Z', enqueuedAt: '2023-01-01T09:30:00Z' }
-      ];
-      expect(queueOrdering.selectNextReadyIndex(queue, { now })).toBe(1);
-    });
-
-    test('createdAt falls back to enqueuedAt when only one item has createdAt', () => {
-      const queue = [
-        { issueId: 'no-created', priority: 3, enqueuedAt: '2023-01-01T09:00:00Z' },
-        { issueId: 'has-created', priority: 3, createdAt: '2023-01-01T08:00:00Z', enqueuedAt: '2023-01-01T09:30:00Z' }
-      ];
-      // has-created's createdAt (08:00) is earlier than no-created's enqueuedAt fallback (09:00)
-      expect(queueOrdering.selectNextReadyIndex(queue, { now })).toBe(1);
-    });
-
     test('selects urgent item regardless of position', () => {
       const queue = [
         { issueId: 'normal', priority: 3, enqueuedAt: '2023-01-01T10:00:00Z' },
@@ -193,16 +162,6 @@ describe('queueOrdering', () => {
       ];
       expect(queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId))
         .toEqual(['earlier', 'later']);
-    });
-
-    test('rank tie broken by createdAt ascending, before enqueuedAt (SOT-1637)', () => {
-      // 'older' was created first but enqueued last — creation order must win.
-      const queue = [
-        { issueId: 'newer', priority: 3, createdAt: '2023-01-01T11:00:00Z', enqueuedAt: '2023-01-01T09:00:00Z' },
-        { issueId: 'older', priority: 3, createdAt: '2023-01-01T10:00:00Z', enqueuedAt: '2023-01-01T12:00:00Z' }
-      ];
-      expect(queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId))
-        .toEqual(['older', 'newer']);
     });
 
     test('is stable for fully-equal items (keeps input order)', () => {

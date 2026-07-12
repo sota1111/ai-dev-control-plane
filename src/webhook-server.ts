@@ -125,7 +125,7 @@ async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
 
   let enqueuedCount = 0;
   for (const issue of issues) {
-    const { identifier, priority, priorityLabel, parentIssueId, parentIssueIdentifier, stateName, createdAt } = issue;
+    const { identifier, priority, priorityLabel, parentIssueId, parentIssueIdentifier, stateName } = issue;
 
     if (runner.isQueued(identifier)) {
       runner.log('SCAN', `${trigger}: skip ${identifier} (already queued)`);
@@ -156,8 +156,7 @@ async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
       priority,
       priorityLabel,
       parentIssueId,
-      parentIssueIdentifier,
-      createdAt
+      parentIssueIdentifier
     });
     runner.log('SCAN', `${trigger}: enqueued ${identifier}${retryAt ? ` retryAt=${retryAt}` : ''}`);
     enqueuedCount++;
@@ -471,7 +470,6 @@ app.post('/webhooks/linear', (req: any, res: any) => {
     priorityLabel: body.data?.priorityLabel ?? null,
     parentIssueId: body.data?.parent?.id ?? null,
     parentIssueIdentifier: body.data?.parent?.identifier ?? null,
-    createdAt: body.data?.createdAt ?? null,
   };
   scheduleIssueEvent(issueId, meta);
 });
@@ -481,7 +479,6 @@ interface IssueEventMeta {
   priorityLabel: string | null;
   parentIssueId: string | null;
   parentIssueIdentifier: string | null;
-  createdAt: string | null;
 }
 
 // 同一 issue に対する未発火の debounce タイマー（issueId -> timer）。coalesce（最新イベント優先）用。
@@ -526,7 +523,7 @@ async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise
       runner.log('WEBHOOK', `code=70 human-wait suppression cleared by issue webhook`, { issue: issueId });
     }
 
-    const { priority: issuePriority, priorityLabel: issuePriorityLabel, parentIssueId, parentIssueIdentifier, createdAt: issueCreatedAt } = meta;
+    const { priority: issuePriority, priorityLabel: issuePriorityLabel, parentIssueId, parentIssueIdentifier } = meta;
     const isUrgent = issuePriority === 1;
 
     const cooldown = runner.getUsageLimitCooldownUntil();
@@ -536,8 +533,7 @@ async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise
         priority: issuePriority,
         priorityLabel: issuePriorityLabel,
         parentIssueId,
-        parentIssueIdentifier,
-        createdAt: issueCreatedAt
+        parentIssueIdentifier
       });
       runner.log('WEBHOOK', `usage limit cooldown active, queued until ${cooldownRetryAt}`, { issue: issueId });
       return;
@@ -549,8 +545,7 @@ async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise
         priority: issuePriority,
         priorityLabel: issuePriorityLabel,
         parentIssueId,
-        parentIssueIdentifier,
-        createdAt: issueCreatedAt
+        parentIssueIdentifier
       });
       runner.log('WEBHOOK', `non-Urgent issue (priority=${issuePriority}) queued while locked, queue size=${runner.loadQueue().length}`, { issue: issueId });
       return;
@@ -573,8 +568,7 @@ async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise
       priority: issuePriority,
       priorityLabel: issuePriorityLabel,
       parentIssueId,
-      parentIssueIdentifier,
-      createdAt: issueCreatedAt
+      parentIssueIdentifier
     });
     // Refresh queued items' priority from Linear before selecting. Priority-only changes do not
     // fire a webhook, so a recently-bumped Urgent/High issue would otherwise stay behind a lower
@@ -599,8 +593,7 @@ async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise
         priority: item.priority ?? null,
         priorityLabel: item.priorityLabel ?? null,
         parentIssueId: item.parentIssueId ?? null,
-        parentIssueIdentifier: item.parentIssueIdentifier ?? null,
-        createdAt: item.createdAt ?? null
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null
       });
       return;
     }
