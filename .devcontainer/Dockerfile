@@ -82,6 +82,22 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
+# Google Cloud CLI (gcloud)
+#   ai-auth tmuxinator セッション（.config/tmuxinator/ai-auth.yml）の
+#   `gcloud auth login` / `gcloud auth application-default login` を実行できる
+#   ようにする。稼働コンテナを再ビルドしても残るよう恒久化する。公式 apt リポジトリ
+#   から google-cloud-cli を導入する（gh / Azure CLI と同じ keyring 方式）。
+# ---------------------------------------------------------------------------
+RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+      | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg \
+    && chmod go+r /usr/share/keyrings/cloud.google.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+      > /etc/apt/sources.list.d/google-cloud-sdk.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends google-cloud-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
 # Azure CLI
 # ---------------------------------------------------------------------------
 RUN mkdir -p /etc/apt/keyrings \
