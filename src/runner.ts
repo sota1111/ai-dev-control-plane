@@ -560,8 +560,6 @@ export interface QueueItem {
   trigger: string | null;
   retryAt: string | null;
   enqueuedAt: string;
-  // Linear issue creation time; ordering key so todos execute in creation order (SOT-1637).
-  createdAt: string | null;
   lastAttemptAt: string | null;
   attemptCount: number;
   reason: string | null;
@@ -1166,8 +1164,7 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
         parentIssueId: item.parentIssueId ?? null,
         parentIssueIdentifier: item.parentIssueIdentifier ?? null,
         queueGroup: item.queueGroup ?? null,
-        queueGroupOrder: item.queueGroupOrder ?? null,
-        createdAt: item.createdAt ?? null
+        queueGroupOrder: item.queueGroupOrder ?? null
       });
       return { lockConflict: true, resultKind: result.kind }; // signal drainQueue to stop this pass
     }
@@ -1186,8 +1183,7 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
         parentIssueId: item.parentIssueId ?? null,
         parentIssueIdentifier: item.parentIssueIdentifier ?? null,
         queueGroup: item.queueGroup ?? null,
-        queueGroupOrder: item.queueGroupOrder ?? null,
-        createdAt: item.createdAt ?? null
+        queueGroupOrder: item.queueGroupOrder ?? null
       });
       return { lockConflict: true, resultKind: result.kind }; // signal drainQueue to stop this pass
     }
@@ -1243,8 +1239,7 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
         parentIssueId: item.parentIssueId ?? null,
         parentIssueIdentifier: item.parentIssueIdentifier ?? null,
         queueGroup: item.queueGroup ?? null,
-        queueGroupOrder: item.queueGroupOrder ?? null,
-        createdAt: item.createdAt ?? null
+        queueGroupOrder: item.queueGroupOrder ?? null
       });
       log('RETRY', 'scheduled', { trigger: item.trigger || 'queue', issue: issueId, retryAt: classification.retryAt });
       break;
@@ -1378,8 +1373,7 @@ async function drainQueuePooled(maxParallel: number): Promise<void> {
         parentIssueId: item.parentIssueId ?? null,
         parentIssueIdentifier: item.parentIssueIdentifier ?? null,
         queueGroup: item.queueGroup ?? null,
-        queueGroupOrder: item.queueGroupOrder ?? null,
-        createdAt: item.createdAt ?? null
+        queueGroupOrder: item.queueGroupOrder ?? null
       });
       log('QUEUE', `drain(pool): item ${item.issueId} has future retryAt=${item.retryAt}, stopping batch`);
       break;
@@ -1418,8 +1412,7 @@ async function drainQueuePooled(maxParallel: number): Promise<void> {
         parentIssueId: item.parentIssueId ?? null,
         parentIssueIdentifier: item.parentIssueIdentifier ?? null,
         queueGroup: item.queueGroup ?? null,
-        queueGroupOrder: item.queueGroupOrder ?? null,
-        createdAt: item.createdAt ?? null
+        queueGroupOrder: item.queueGroupOrder ?? null
       });
       return;
     }
@@ -1502,8 +1495,7 @@ async function drainQueue(): Promise<void> {
         parentIssueId: item.parentIssueId ?? null,
         parentIssueIdentifier: item.parentIssueIdentifier ?? null,
         queueGroup: item.queueGroup ?? null,
-        queueGroupOrder: item.queueGroupOrder ?? null,
-        createdAt: item.createdAt ?? null
+        queueGroupOrder: item.queueGroupOrder ?? null
       });
       log('QUEUE', `drain: item ${item.issueId} has future retryAt=${item.retryAt}, stopping drain`);
       break;
@@ -1532,8 +1524,7 @@ async function drainQueue(): Promise<void> {
         parentIssueId: item.parentIssueId ?? null,
         parentIssueIdentifier: item.parentIssueIdentifier ?? null,
         queueGroup: item.queueGroup ?? null,
-        queueGroupOrder: item.queueGroupOrder ?? null,
-        createdAt: item.createdAt ?? null
+        queueGroupOrder: item.queueGroupOrder ?? null
       });
       break;
     }

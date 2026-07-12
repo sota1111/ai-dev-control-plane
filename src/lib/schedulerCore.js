@@ -82,7 +82,6 @@ function buildActiveIssuesQuery() {
           id
           identifier
           title
-          createdAt
         }
       }
     }
@@ -101,22 +100,6 @@ function parseActiveIdentifiers(data) {
   return data.issues.nodes
     .map((node) => node.identifier)
     .filter((id) => !!id);
-}
-
-/**
- * Parses active issues with their Linear creation time from the API response (SOT-1637).
- * Returns [{ identifier, createdAt }] so the scheduler can carry createdAt onto queue items and
- * execute todos in creation order. Nodes without an identifier are dropped.
- * @param {any} data
- * @returns {{ identifier: string, createdAt: string | null }[]}
- */
-function parseActiveIssueMeta(data) {
-  if (!data || !data.issues || !data.issues.nodes) {
-    return [];
-  }
-  return data.issues.nodes
-    .filter((node) => !!node.identifier)
-    .map((node) => ({ identifier: node.identifier, createdAt: node.createdAt || null }));
 }
 
 /**
@@ -180,6 +163,5 @@ export {
   getConfig,
   buildActiveIssuesQuery,
   parseActiveIdentifiers,
-  parseActiveIssueMeta,
   formatStatusLines,
 };

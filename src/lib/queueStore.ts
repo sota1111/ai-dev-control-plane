@@ -148,8 +148,6 @@ export function normalizeQueue(queue: QueueItem[]): QueueItem[] {
       lastAttemptAt: mergedLastAttemptAt,
       // Restore some fields from existing if they were null in item
       issueIdentifier: item.issueIdentifier || existing.issueIdentifier || null,
-      // createdAt is the immutable Linear creation time — keep the first non-null (SOT-1637)
-      createdAt: existing.createdAt || item.createdAt || null,
       trigger: item.trigger || existing.trigger || null,
       reason: item.reason || existing.reason || null,
       priority: item.priority !== null ? item.priority : existing.priority,
@@ -344,7 +342,6 @@ interface EnqueueOptions {
   parentIssueIdentifier?: string | null;
   queueGroup?: string | null;
   queueGroupOrder?: string | null;
-  createdAt?: string | null;
 }
 
 export function enqueue(issueId: string, trigger: string | null, retryAt: string | null = null, {
@@ -355,8 +352,7 @@ export function enqueue(issueId: string, trigger: string | null, retryAt: string
   parentIssueId = null,
   parentIssueIdentifier = null,
   queueGroup = null,
-  queueGroupOrder = null,
-  createdAt = null
+  queueGroupOrder = null
 }: EnqueueOptions = {}): void {
   const { log } = requireDeps();
   try {
@@ -388,8 +384,6 @@ export function enqueue(issueId: string, trigger: string | null, retryAt: string
         attemptCount: (existing.attemptCount || 0) + 1,
         reason: reason || existing.reason || null,
         ...(issueIdentifier && !existing.issueIdentifier ? { issueIdentifier } : {}),
-        // createdAt is the immutable Linear creation time: adopt it only if not already known (SOT-1637)
-        ...(createdAt && !existing.createdAt ? { createdAt } : {}),
         // Update priority if provided
         ...(priority !== null ? {
           priority,
@@ -419,7 +413,6 @@ export function enqueue(issueId: string, trigger: string | null, retryAt: string
       trigger,
       retryAt,
       enqueuedAt: now,
-      createdAt: createdAt ?? null,
       lastAttemptAt: null,
       attemptCount: 0,
       reason: reason || null,
