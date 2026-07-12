@@ -44,6 +44,29 @@ RUN npm install -g @openai/codex
 RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin
 
 # ---------------------------------------------------------------------------
+# tmux + tmuxinator
+#   認証・常駐起動用の tmux セッション構成（.config/tmuxinator/ai-auth.yml /
+#   ai-dev.yml）を一括起動するために使う。稼働コンテナを再ビルドしても残るよう
+#   恒久化する。tmuxinator は Ruby gem（thor / erubi の純 Ruby 依存のみ、ネイティブ
+#   拡張なし）なので ruby だけで足りる。
+#   設定ファイルはリポジトリ（/workspaces/ai-dev-control-plane/.config/tmuxinator/）
+#   に置かれ、実行時に bind-mount される。tmuxinator はデフォルトで
+#   ~/.config/tmuxinator/ を読むため、ここへシンボリックリンクを張る。~/.config/
+#   tmuxinator はボリュームマウント対象外なのでイメージに残り、リンク先はビルド時
+#   点では dangling だが、起動時の bind-mount で解決される。remoteUser=vscode(uid
+#   1000) の HOME に作成する。
+# ---------------------------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tmux ruby \
+    && rm -rf /var/lib/apt/lists/* \
+    && gem install --no-document tmuxinator \
+    && su vscode -c "mkdir -p ~/.config/tmuxinator \
+        && ln -sf /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-auth.yml ~/.config/tmuxinator/ai-auth.yml \
+        && ln -sf /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-dev.yml  ~/.config/tmuxinator/ai-dev.yml" \
+    && printf '%s\n' 'export EDITOR=vi' > /etc/profile.d/editor.sh \
+    && chmod +x /etc/profile.d/editor.sh
+
+# ---------------------------------------------------------------------------
 # GitHub CLI
 # ---------------------------------------------------------------------------
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
