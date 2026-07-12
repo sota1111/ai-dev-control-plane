@@ -88,7 +88,8 @@ tmuxinator start -p .config/tmuxinator/ai-dev.yml
 ```
 
 起動される window:
-- **webhook**: Webhook サーバー（`npm run dev:webhook`）と ngrok（`ngrok http 3000`）が別 pane で起動
+- **webhook**: Webhook サーバー（`npm run start:webhook`）を起動
+- **ngrok**: ngrok トンネル（`ngrok http 3000`）を起動
 - **claude**: Claude CLI
 - **codex**: Codex CLI
 - **antigravity**: Antigravity CLI
@@ -96,7 +97,7 @@ tmuxinator start -p .config/tmuxinator/ai-dev.yml
 
 ### ngrok 公開URL の確認
 
-ngrok 起動後、webhook pane の ngrok ログで `Forwarding` 行を確認:
+ngrok 起動後、ngrok window のログで `Forwarding` 行を確認:
 
 ```
 Forwarding  https://xxxx-xx-xx-xxx-xx.ngrok-free.app -> http://localhost:3000

@@ -2,9 +2,10 @@ name: ai-dev
 root: /workspaces/ai-dev-control-plane
 windows:
   - webhook:
-      layout: even-horizontal
       panes:
-        - echo "=== Webhook サーバー起動 ===" && npm run dev:webhook
+        - echo "=== Webhook サーバー起動 ===" && npm run start:webhook
+  - ngrok:
+      panes:
         - echo "=== ngrok 起動 (port 3000) ===" && ngrok http 3000
   - claude:
       panes:
