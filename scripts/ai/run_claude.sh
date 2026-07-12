@@ -53,7 +53,10 @@ if [ ! -f "$PROMPT_FILE" ]; then
   exit 1
 fi
 
-echo "== Claude CLI: dispatched worker =="
+# SOT-1615: surface the model in the banner so run_auto.sh's tag filter can render `[claude-<model>]`
+# in the log instead of a bare `[claude]`. Claude always resolves to a concrete model (default `opus`,
+# same default applied at invocation below), so the tag always carries it.
+echo "== Claude CLI: dispatched worker == model=${CLAUDE_MODEL:-opus}"
 
 # Per-lane WORKER_TIMEOUT (same policy as run_codex.sh).
 DEFAULT_WORKER_TIMEOUT=1800
