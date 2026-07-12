@@ -238,6 +238,16 @@ You are a debugging/verification worker. You do NOT interact with the human dire
 ## Next Action    READY_FOR_REVIEW | NEEDS_DEBUG | NEEDS_USER_INPUT | BLOCKED
 ```
 
+**Codex receives the same harness directives as Claude (SOT-1614).** The Claude worker runs `claude -p`
+from the control-plane repo root and therefore auto-loads this `CLAUDE.md` as project context. `codex exec`
+has no equivalent auto-load (and run_codex.sh cd's into `TARGET_REPO`, so Codex's native 32KB-capped
+`AGENTS.md` project-doc would not read the >32KB control-plane spec either). So `scripts/ai/run_codex.sh`
+injects `CLAUDE.md` into Codex's prompt directly — cwd-independently — prefixed with the same constrained-
+worker / solo preamble the Claude worker prepends (`run_claude.sh`): a `solo` dispatch owns the whole
+lifecycle for one issue; any other role is pinned to a single role for a single issue and must ignore the
+orchestrator instructions. Toggle with `CODEX_HARNESS_SPEC` (default on; `0`/`false`/`no`/`off` disables
+the injection, e.g. for a pure target-repo task where the control-plane spec only adds token cost).
+
 ---
 
 ## Workflow

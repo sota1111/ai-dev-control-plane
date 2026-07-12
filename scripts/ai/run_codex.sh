@@ -157,10 +157,69 @@ if [ -n "${TARGET_REPO:-}" ]; then
   cd "$TARGET_REPO"
 fi
 
+PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
+
+# --- Harness spec injection (SOT-1614): give Codex the SAME directives as Claude ---
+# The Claude worker runs `claude -p` from the control-plane repo root and therefore AUTO-LOADS CLAUDE.md
+# (the full harness spec: role definitions, quality gates, GitHub/Linear/safety policy) as project
+# context. `codex exec` has no such auto-load, and — because run_codex.sh cd's into TARGET_REPO above —
+# even Codex's native AGENTS.md project-doc (which is also 32KB-capped, below CLAUDE.md's size) would not
+# be read from the control-plane repo. So we inject CLAUDE.md explicitly into Codex's prompt here, cwd-
+# independently, mirroring the constraint preamble the Claude worker prepends in run_claude.sh (SOT-1459):
+# a `solo` dispatch owns the whole lifecycle for one issue; every other role is a single-role worker.
+# This makes Codex a true peer that receives Claude's directive set. Default on; disable with
+# CODEX_HARNESS_SPEC=0 (e.g. a pure target-repo task where the control-plane spec adds only token cost).
+HARNESS_SPEC_ENABLED=1
+case "$(printf '%s' "${CODEX_HARNESS_SPEC:-1}" | tr '[:upper:]' '[:lower:]')" in
+  0|false|no|off) HARNESS_SPEC_ENABLED=0 ;;
+esac
+CLAUDE_MD_FILE="$CONTROL_PLANE_DIR/CLAUDE.md"
+if [ "$HARNESS_SPEC_ENABLED" -eq 1 ] && [ -f "$CLAUDE_MD_FILE" ]; then
+  if [ "${WORKER_ROLE:-}" = "solo" ]; then
+    CODEX_PREAMBLE="# YOU ARE THE SOLO WORKER — ONE AI, THE WHOLE LIFECYCLE FOR ONE ISSUE
+
+You were dispatched by scripts/ai/run_worker.sh in SOLO MODE to run the ENTIRE lifecycle for the single
+target issue in docs/ai/pipeline/context.md, yourself, in this one session — with NO per-role script
+handoff. Follow CLAUDE.md's role specs, quality gates, GitHub policy, and Linear policy, but you perform
+every step directly: task-check (incl. 分解判断) → implementation → verification → acceptance → github
+(branch/PR/merge) → linear-report. Hard rules:
+- Work on ONLY the one target issue. Do NOT select or process any other Linear issue.
+- Do NOT run scripts/ai/run_auto.sh, scripts/ai/run_worker.sh, scripts/ai/scheduler.sh, the webhook
+  server, or the runner queue/drain. Do NOT spawn or trigger any other run.
+- Do NOT run anything in the background or start long-lived processes."
+  else
+    CODEX_PREAMBLE="# YOU ARE A CONSTRAINED WORKER — NOT THE ORCHESTRATOR
+
+You were dispatched by scripts/ai/run_worker.sh to perform EXACTLY ONE role for the single target issue
+described below / in docs/ai/pipeline/context.md. CLAUDE.md in this repo describes the ORCHESTRATOR;
+IGNORE its instructions about selecting issues, decomposing, driving the pipeline, or processing any
+other issue. Hard rules:
+- Do ONLY the one role task in this prompt, for ONLY the one target issue. Then write your report and stop.
+- Do NOT run scripts/ai/run_auto.sh, scripts/ai/run_worker.sh, scripts/ai/scheduler.sh, the webhook
+  server, or the runner queue/drain. Do NOT spawn or trigger any other run. Do NOT process other issues.
+- Do NOT run anything in the background or start long-lived processes."
+  fi
+  PROMPT_CONTENT="$CODEX_PREAMBLE
+
+---
+
+# CONTROL-PLANE HARNESS SPECIFICATION (CLAUDE.md)
+
+The following is CLAUDE.md — the same harness spec the Claude worker auto-loads. Follow it together with
+the constraints above and your role instruction at the end.
+
+$(cat "$CLAUDE_MD_FILE")
+
+---
+
+# YOUR ROLE INSTRUCTION
+
+$PROMPT_CONTENT"
+fi
+
 # --- Handoff context (SOT-1459) ---
 # On a mid-processing handoff, the dispatcher (run_worker.sh) points WORKER_HANDOFF_REPORT at the
 # previous worker's partial report so Codex continues its work instead of restarting from scratch.
-PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
 if [ -n "${WORKER_HANDOFF_REPORT:-}" ] && [ -s "${WORKER_HANDOFF_REPORT:-/nonexistent}" ]; then
   PROMPT_CONTENT="## Handoff from previous worker (${WORKER_HANDOFF_FROM:-unknown})
 
