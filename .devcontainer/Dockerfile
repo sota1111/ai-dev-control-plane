@@ -55,6 +55,8 @@ RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr
 #   tmuxinator はボリュームマウント対象外なのでイメージに残り、リンク先はビルド時
 #   点では dangling だが、起動時の bind-mount で解決される。remoteUser=vscode(uid
 #   1000) の HOME に作成する。
+#   併せて tmux 本体の設定（.config/tmux/tmux.conf、マウス操作有効化）を ~/.tmux.conf
+#   へシンボリックリンクし、マウスクリックでの window / pane 選択を有効にする。
 # ---------------------------------------------------------------------------
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tmux ruby \
@@ -62,7 +64,8 @@ RUN apt-get update \
     && gem install --no-document tmuxinator \
     && su vscode -c "mkdir -p ~/.config/tmuxinator \
         && ln -sf /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-auth.yml ~/.config/tmuxinator/ai-auth.yml \
-        && ln -sf /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-dev.yml  ~/.config/tmuxinator/ai-dev.yml" \
+        && ln -sf /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-dev.yml  ~/.config/tmuxinator/ai-dev.yml \
+        && ln -sf /workspaces/ai-dev-control-plane/.config/tmux/tmux.conf ~/.tmux.conf" \
     && printf '%s\n' 'export EDITOR=vi' > /etc/profile.d/editor.sh \
     && chmod +x /etc/profile.d/editor.sh
 

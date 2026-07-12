@@ -20,7 +20,18 @@ gem install tmuxinator
 # シンボリックリンクを張る
 ln -s /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-auth.yml ~/.config/tmuxinator/ai-auth.yml
 ln -s /workspaces/ai-dev-control-plane/.config/tmuxinator/ai-dev.yml  ~/.config/tmuxinator/ai-dev.yml
+
+# tmux 本体の設定（マウス操作有効化）— DevContainer では Dockerfile が自動でリンク済み
+ln -s /workspaces/ai-dev-control-plane/.config/tmux/tmux.conf ~/.tmux.conf
 ```
+
+## マウス操作
+
+`.config/tmux/tmux.conf` で `set -g mouse on` を有効化しているため、**マウスクリックで
+window / pane を選択**できる（ステータスバーの window 名クリックで切り替え、pane クリックで
+フォーカス移動、境界ドラッグでサイズ変更、ホイールでスクロール）。DevContainer では
+`~/.tmux.conf` へ自動リンクされ、tmux 起動時に読み込まれる。起動中のセッションに反映するには
+`tmux source-file ~/.tmux.conf` を実行する。
 
 ## 起動コマンド
 
