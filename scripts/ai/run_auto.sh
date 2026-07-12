@@ -194,20 +194,36 @@ plog() { echo "[pipeline] $*" | tee -a "$LOG_FILE"; }
 # (workers emit \x1b[..m colored output → Discord/ログに生エスケープが出るのを防ぐ) and prefix each
 # line with the ACTOR tag inferred from the worker banner (== Codex/Antigravity/Claude CLI ==), so the
 # Discord/ログ行が `[agy] ...` のように読める。runner.ts が更に `[RUN:<id>]` を前置する。
+# SOT-1615: the worker banner now carries a trailing ` model=<model>` (emitted by run_<worker>.sh) when
+# the model is known, so the actor tag becomes `[codex-sol]` / `[claude-opus]` etc. — the model is shown
+# alongside the AI. No ` model=` on the banner → tag stays the bare `[codex]` (backward compatible).
 _PIPE_TAG_FILTER='
 import sys, re
 ANSI = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+MODEL = re.compile(r" model=(.+?)\s*$")
 actor = "dispatch"
 def worker_of(s):
     if s.startswith("== Codex CLI"): return "codex"
     if s.startswith("== Antigravity CLI"): return "agy"
     if s.startswith("== Claude CLI"): return "claude"
     return None
+def actor_of(s):
+    w = worker_of(s)
+    if not w:
+        return None
+    m = MODEL.search(s)
+    if m:
+        # compact the model id for a tag-friendly suffix (ids may carry dots/spaces/parens, e.g.
+        # "Gemini 3.5 Flash (High)"): collapse runs of non [\w.-] to a single "-".
+        slug = re.sub(r"[^\w.-]+", "-", m.group(1).strip()).strip("-")
+        if slug:
+            return f"{w}-{slug}"
+    return w
 for raw in sys.stdin:
     line = ANSI.sub("", raw.rstrip("\n"))
-    w = worker_of(line.lstrip())
-    if w:
-        actor = w
+    a = actor_of(line.lstrip())
+    if a:
+        actor = a
     if line.strip() == "":
         continue
     print(f"[{actor}] {line}", flush=True)

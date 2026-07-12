@@ -55,7 +55,10 @@ if [ ! -f "$PROMPT_FILE" ]; then
   exit 1
 fi
 
-echo "== Antigravity CLI: implementation worker =="
+# SOT-1615: surface the model in the banner so run_auto.sh's tag filter can render `[agy-<model>]` in
+# the log instead of a bare `[agy]`. Only when a model pin is set (AGY_MODEL via run_worker.sh); absent
+# → no suffix → the filter keeps the historical `[agy]` tag (backward compatible).
+echo "== Antigravity CLI: implementation worker ==${AGY_MODEL:+ model=${AGY_MODEL}}"
 
 # Per-lane WORKER_TIMEOUT (SOT-916). Priority (highest first):
 #  1) WORKER_TIMEOUT_<LANE>  — lane-specific override (lane upper-cased, `-` -> `_`)

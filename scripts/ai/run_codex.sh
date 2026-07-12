@@ -55,7 +55,10 @@ if [ ! -f "$PROMPT_FILE" ]; then
   exit 1
 fi
 
-echo "== Codex CLI: debugging worker =="
+# SOT-1615: surface the model in the banner so run_auto.sh's tag filter can render `[codex-<model>]`
+# in the log instead of a bare `[codex]`. Only when a model pin is set (CODEX_MODEL via run_worker.sh);
+# absent → no suffix → the filter keeps the historical `[codex]` tag (backward compatible).
+echo "== Codex CLI: debugging worker ==${CODEX_MODEL:+ model=${CODEX_MODEL}}"
 
 # Per-lane WORKER_TIMEOUT (SOT-916). Priority (highest first):
 #  1) WORKER_TIMEOUT_<LANE>  — lane-specific override (lane upper-cased, `-` -> `_`)
