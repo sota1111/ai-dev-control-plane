@@ -98,6 +98,23 @@ RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
+# ngrok
+#   ai-dev tmuxinator セッション（.config/tmuxinator/ai-dev.yml）の webhook pane が
+#   `ngrok http 3000`（`npm run start:ngrok` / `NGROK_COMMAND`）を実行して Linear /
+#   Discord の Webhook をローカル公開できるようにする。稼働コンテナを再ビルドしても
+#   残るよう恒久化する。公式 apt リポジトリから ngrok を導入する（gh / gcloud と同じ
+#   keyring 方式）。
+# ---------------------------------------------------------------------------
+RUN curl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
+      | gpg --dearmor -o /usr/share/keyrings/ngrok.gpg \
+    && chmod go+r /usr/share/keyrings/ngrok.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/ngrok.gpg] https://ngrok-agent.s3.amazonaws.com buster main" \
+      > /etc/apt/sources.list.d/ngrok.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ngrok \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
 # Azure CLI
 # ---------------------------------------------------------------------------
 RUN mkdir -p /etc/apt/keyrings \
