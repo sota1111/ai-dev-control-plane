@@ -1,34 +1,31 @@
-# Acceptance Check — SOT-1558（acceptance separate-context checker）
+# Acceptance Check — SOT-1596「分割を戻した後」
 
-対象: `/workspaces/ai-dev-control-plane`, branch `feat/sot-1558-acceptance-separate-context`
-コミット: `64abf52 feat(SOT-1558): make acceptance a separate-context checker with machine-readable PASS/FAIL`
+Issue: タスク分割を戻すボタンを押したら、やることリスト一覧ページ（`/tasks`）へ遷移する。
+Repo: `/workspaces/toddler-private-rag` · Branch: `feat/sot-1596-revert-split-goto-tasks`（commit `0e47972`）· Label: なし（`snapshot` なし）
 
-## 受け入れ条件の判定
+## 独立レビュー（diff main...HEAD を各条件に照合）
+変更は frontend の2ファイルのみ（8 insertions / 5 deletions）:
+- `frontend/src/pages/DataDetailPage.tsx` — `revertSplitMutation.onSuccess` を `navigate('/tasks')` に変更（旧: `/data/:mergedId` or `/registered`）。未使用の `merged` 引数・`nextId` を除去。`invalidateQueries` 群は維持。`onError` は従来どおり遷移しない。
+- `frontend/src/pages/DraftsPage.tsx` — `useNavigate` を import・取得。`handleRevertSplit` の `revertSplitDrafts` 成功（`refreshAll()` 後）に `navigate('/tasks')` を追加。`catch`（失敗時）は遷移しない。
 
-- [x] **IMPLEMENT/FIX/DEBUG では acceptance が実装ワーカーと別コンテキスト（別ワーカー／別セッション）で走る。** — `config/worker_roles.json:5-7` sets implementation primary to `claude` and acceptance primary to `codex`; `scripts/ai/run_auto.sh:311-318` records the actual implementation winner in `PIPELINE_IMPL_WORKER`; `scripts/ai/run_worker.sh:59-64` and `scripts/ai/run_worker.sh:81-85` move that worker to the back of the acceptance chain. Unit coverage: `src/__tests__/workerRoles.test.ts:210-279`.
-- [x] **SOT-1555 の NOT_REQUIRED ピン留めは非コード生成タスク限定にし、IMPLEMENT/FIX/DEBUG では acceptance を別コンテキストに保つ。** — `scripts/ai/run_auto.sh:323-336` only sets `PIPELINE_PINNED_WORKER` when task-check emits `## Implementation: NOT_REQUIRED`; otherwise code-building tasks proceed without pinning and use `PIPELINE_IMPL_WORKER` separation. `scripts/ai/run_worker.sh:77-85` gives the pin precedence over checker separation, making pin and separation mutually exclusive. Unit coverage includes pin/separation inverse behavior at `src/__tests__/workerRoles.test.ts:262-270`.
-- [x] **acceptance レポートが機械可読の `## Acceptance: PASS|FAIL` を必須出力し、`run_auto.sh` のゲートがこの行を機械的に読む。** — `prompts/roles/acceptance.md:35-58` requires the machine-readable verdict; `docs/ai/70_acceptance_check.md` now uses this concrete report format; `scripts/ai/run_auto.sh:360-390` parses `^## Acceptance: PASS|FAIL` and loops on `FAIL` before falling back to `Next Action`.
-- [x] **UI を持つ target repo では実ユーザー動作検証が acceptance の標準ステップになる。非 UI repo は E2E 不要。** — `prompts/roles/acceptance.md:21-33` requires E2E/screenshot evidence for UI repos and N/A for backend/library/doc-only repos; `prompts/roles/verification.md` also requires the same E2E decision in verification. This target repo has no `e2e` script, no Playwright/e2e harness, and no `docs/screenshots/`; therefore E2E is N/A for this run.
-- [x] **既定挙動の非回帰：非 UI repo は E2E 不要、既存パイプラインの成功/停止判定が壊れない。** — `npm run lint`, `npm run typecheck`, `npm test`, and `bash -n scripts/ai/run_auto.sh scripts/ai/run_worker.sh` all pass. The acceptance gate remains backward-compatible when the `## Acceptance:` line is absent via the fallback at `scripts/ai/run_auto.sh:384-390`.
+配線確認: DataDetailPage `navigate`(L131) / `handleRevertSplit`(L222) / ボタン `onClick`(L655)、DraftsPage ボタン `onClick`(L461)、`/tasks` ルート（App.tsx L186, `<ProtectedRoute><TasksPage/></ProtectedRoute>`）を実コードで確認。
+
+## 受け入れ条件（met/not-met + 根拠）
+- [x] AC1: 登録済み詳細の分割戻し成功後 `/tasks` へ遷移 — **real-action e2e で確認**（就労証明書(1/2)/(2/2) をシード→詳細で「分割前のタスクに戻す」→OK→`toHaveURL(/\/tasks/)` かつ「やることリスト」表示。PASS）。
+- [x] AC2: 下書きの分割戻し成功後 `/tasks` へ遷移 — **real-action e2e で確認**（下書き分割群をシード→/drafts で revert→OK→`/tasks` へ遷移。PASS）。
+- [x] AC3: 遷移は revert-split API 成功後のみ — diff 確認: DataDetailPage は `onSuccess` 内、DraftsPage は `try` の `await` 成功後に `navigate`。`onError`/`catch` では遷移しない。
+- [x] AC4: revert-split 以外の挙動・UI は不変 — diff は revert 経路のみ。既存 e2e 28 件 pass（回帰なし）。out-of-scope 変更なし（working tree clean）。
+- [x] AC5: lint / typecheck / test 通過 — verification: `npm run lint` pass / `npx tsc -b` pass / `npm run e2e` 28 passed（unit test スクリプトは当リポジトリに無し）。
+
+## Real-action verification（UI リポジトリ = 必須）
+- Playwright（既存 mock harness `installApiMocks` / `login` を使用）で本変更の主フローを実行:
+  - 既存フルスイート: **28 passed**（verification ロール）。
+  - 本変更専用の一時スペック（`tmp-sot1596.spec.ts`, 非コミット・実行後削除）: **2 passed** — 登録済み詳細・下書きの両 revert 導線で `/tasks` 遷移を実挙動で確認。
+- Screenshot: `snapshot` ラベル無しのためコミット不要。遷移先 `/tasks`（やることリスト）は既存 e2e（S9/S15/S16/S17 等）で表示健全性が担保済み。after 証跡は上記 e2e の URL アサーション＋「やることリスト」可視アサーションで代替。
+- 一時スペック削除後、`git status` clean（e2e が再生成した `public/howto/*.png` は本変更と無関係のため restore 済み）。
+
+## 判定
+すべての受け入れ条件を満たし、real-action 検証（登録済み詳細・下書き両導線で revert→/tasks）が pass、out-of-scope 変更なし。
 
 ## Acceptance: PASS
-
-## 実ユーザー動作検証（SOT-1558）
-
-- E2E（主要導線）: N/A（非 UI repo: `package.json` has no `e2e` script; `find` found no Playwright/e2e harness and no `docs/screenshots/`）.
-- After スクリーンショット: N/A（非 UI repo / visible screen changeなし）.
-
-## 意図せぬ / スコープ外変更のチェック
-
-- `git diff main...HEAD` is limited to worker role config, SOT-1558 pipeline shell logic, role prompts, acceptance template, SOT-1558 tests, and issue planning docs.
-- Local uncommitted verification artifacts also exist (`docs/ai/60_worker_codex_report.md`, `src/__tests__/runner.test.ts`, `.claude/settings.local.json`, and experiment/benchmark files), but they are outside `main...HEAD` feature diff. The verification-time `runner.test.ts` change was a minimal env-isolation fix for this worker environment.
-
-## 検証サマリ
-
-- `npm run lint` → pass.
-- `npm run typecheck` → pass.
-- `npm test` → pass: 43 suites, 666 tests.
-- `bash -n scripts/ai/run_auto.sh scripts/ai/run_worker.sh` → pass.
-- e2e: N/A（非 UI repo）.
-
 ## Next Action: READY_FOR_REVIEW
