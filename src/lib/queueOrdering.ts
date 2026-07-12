@@ -6,6 +6,7 @@ interface QueueItem {
   priority?: number | null;
   priorityRank?: number;
   retryAt?: string | null;
+  createdAt?: string | null;
   enqueuedAt?: string | null;
   queueGroup?: string | null;
   queueGroupOrder?: string | null;
@@ -38,12 +39,33 @@ export function effectiveRank(item: QueueItem): number {
 }
 
 /**
+ * Creation-order timestamp (ms) for an item (SOT-1637).
+ *
+ * The queue must execute todos in the order the Linear issue was CREATED, not the order it happened to
+ * be enqueued locally (scan/webhook arrival order). This returns the Linear issue `createdAt` when known,
+ * falling back to `enqueuedAt` and finally 0 so items with no createdAt keep their legacy enqueue-time
+ * ordering (fully backward compatible). Invalid dates fall through to the next source.
+ */
+export function creationOrderTime(item: QueueItem): number {
+  if (item.createdAt) {
+    const t = new Date(item.createdAt).getTime();
+    if (!Number.isNaN(t)) return t;
+  }
+  if (item.enqueuedAt) {
+    const t = new Date(item.enqueuedAt).getTime();
+    if (!Number.isNaN(t)) return t;
+  }
+  return 0;
+}
+
+/**
  * Enqueue-time ordering (SOT-1352).
  *
  * Returns a NEW array (the input is never mutated) sorted ascending by the STATIC priority
- * dimensions only: effectiveRank → retryAt → enqueuedAt. This is applied when a webhook enqueues
- * an item so the persisted queue is always stored in priority order, instead of evaluating priority
- * only at execution (dequeue) time.
+ * dimensions only: effectiveRank → retryAt → createdAt → enqueuedAt. This is applied when a webhook
+ * enqueues an item so the persisted queue is always stored in priority order, instead of evaluating
+ * priority only at execution (dequeue) time. Within the same priority/retry, items run in Linear
+ * issue creation order (SOT-1637); `createdAt` falls back to `enqueuedAt` when absent.
  *
  * The DYNAMIC rules that genuinely depend on runtime state — `retryAt` readiness gating,
  * `lastProcessedGroup` group continuation, and Urgent override — still live in
@@ -61,7 +83,12 @@ export function sortQueueByPriority<T extends QueueItem>(queue: T[]): T[] {
     const retryB = b.retryAt ? new Date(b.retryAt).getTime() : -Infinity;
     if (retryA !== retryB) return retryA - retryB;
 
-    // enqueuedAt ascending; null/missing = earliest
+    // creation order ascending (Linear createdAt; falls back to enqueuedAt) — SOT-1637
+    const createdA = creationOrderTime(a);
+    const createdB = creationOrderTime(b);
+    if (createdA !== createdB) return createdA - createdB;
+
+    // enqueuedAt ascending; null/missing = earliest (final stable tiebreak)
     const enqA = a.enqueuedAt ? new Date(a.enqueuedAt).getTime() : 0;
     const enqB = b.enqueuedAt ? new Date(b.enqueuedAt).getTime() : 0;
     if (enqA !== enqB) return enqA - enqB;
@@ -76,8 +103,11 @@ export function sortQueueByPriority<T extends QueueItem>(queue: T[]): T[] {
  * Logic (Step1 -> Step2 -> Step3):
  * 1. Urgent (rank 1) items globally.
  * 2. Group continuation (items with queueGroup === lastProcessedGroup).
- * 3. Normal priority (rank -> retryAt -> enqueuedAt).
- * 
+ * 3. Normal priority (rank -> retryAt -> createdAt -> enqueuedAt).
+ *
+ * Within the same priority/retry, items execute in Linear issue creation order (SOT-1637);
+ * `createdAt` falls back to `enqueuedAt` when absent.
+ *
  * Only items where retryAt is null/missing or in the past are eligible.
  */
 export function selectNextReadyIndex(queue: QueueItem[], { lastProcessedGroup = null, now = new Date() }: SelectNextOptions = {}): number | null {
@@ -113,7 +143,13 @@ export function selectNextReadyIndex(queue: QueueItem[], { lastProcessedGroup = 
       if (retryA > retryB) return bIdx;
     }
 
-    // Compare enqueuedAt (earlier wins)
+    // Compare creation time (Linear createdAt; falls back to enqueuedAt) — earlier wins (SOT-1637)
+    const createdA = creationOrderTime(a);
+    const createdB = creationOrderTime(b);
+    if (createdA < createdB) return aIdx;
+    if (createdA > createdB) return bIdx;
+
+    // Final stable tiebreak: enqueuedAt (earlier wins)
     const enqA = a.enqueuedAt ? new Date(a.enqueuedAt).getTime() : 0;
     const enqB = b.enqueuedAt ? new Date(b.enqueuedAt).getTime() : 0;
     return enqA <= enqB ? aIdx : bIdx;

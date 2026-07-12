@@ -264,6 +264,8 @@ async function handleReorder(): Promise<CommandResult> {
           priorityLabel: active.priorityLabel ?? null,
           priorityRank: runner.getPriorityRank(active.priority),
           linearFetchedAt: now,
+          // Backfill Linear creation time for creation-order sorting (SOT-1637)
+          createdAt: match.createdAt ?? active.createdAt ?? null,
           parentIssueId: active.parentIssueId ?? match.parentIssueId,
           parentIssueIdentifier: active.parentIssueIdentifier ?? match.parentIssueIdentifier,
         });
@@ -274,6 +276,7 @@ async function handleReorder(): Promise<CommandResult> {
           trigger: 'discord-reorder',
           retryAt: null,
           enqueuedAt: now,
+          createdAt: active.createdAt ?? null,
           lastAttemptAt: null,
           attemptCount: 0,
           reason: null,
@@ -291,14 +294,15 @@ async function handleReorder(): Promise<CommandResult> {
       if (active.identifier) processedActiveIds.add(active.identifier);
     }
 
-    // Sort active items: priority ascending, then enqueuedAt ascending
+    // Sort active items: priority ascending, then Linear creation order (SOT-1637;
+    // createdAt falls back to enqueuedAt when unknown)
     rebuilt.sort((a, b) => {
       const rankA = queueOrdering.effectiveRank(a);
       const rankB = queueOrdering.effectiveRank(b);
       if (rankA !== rankB) return rankA - rankB;
-      
-      const timeA = new Date(a.enqueuedAt).getTime();
-      const timeB = new Date(b.enqueuedAt).getTime();
+
+      const timeA = queueOrdering.creationOrderTime(a);
+      const timeB = queueOrdering.creationOrderTime(b);
       return timeA - timeB;
     });
 
