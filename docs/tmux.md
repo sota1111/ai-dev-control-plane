@@ -47,8 +47,8 @@ window / pane を選択**できる（ステータスバーの window 名クリ�
 
 | ウィンドウ | pane | 実行コマンド                                             |
 | ---------- | ---- | -------------------------------------------------------- |
-| `webhook`  | 左   | `npm run dev:webhook`（Webhook サーバー起動）            |
-| `webhook`  | 右   | `ngrok http 3000`（ngrok トンネル起動）                  |
+| `webhook`  | —    | `npm run start:webhook`（Webhook サーバー起動）          |
+| `ngrok`    | —    | `ngrok http 3000`（ngrok トンネル起動）                  |
 | `claude`   | —    | `claude`                                                 |
 | `codex`    | —    | `codex`                                                  |
 | `antigravity` | —  | `agy`                                                    |
