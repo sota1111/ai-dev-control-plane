@@ -1,43 +1,50 @@
-# Task-Check Report — SOT-1559（git worktree 並列隔離 / loop engineering レバー3）
+# Worker Report — task-check (SOT-1596)
 
 ## Summary
-task-check（確認 ＋ 分解判断）を SOT-1559 に実施。本 Issue は親 SOT-1556 から分解済みの実装子 Issue
-（レバー3）。グローバルロックの全直列化問題に対し、git worktree ベースの作業ディレクトリ隔離を導入して
-ロック粒度を repo 全体 → worktree(=branch) 単位へ下げる。IMPLEMENT で actionable、これ以上の分解は不要。
-親指示の実装順序は 1 → 3 → 2 で本 Issue は **2 番目**（レバー1=SOT-1558 の後）。
+対象 Linear Issue: **SOT-1596「分割を戻した後」**（project=toddler-private-rag / repo `/workspaces/toddler-private-rag`）。
+task-check（actionability + 分類 + 分解判断）を実施。**actionable、FIX、分解不要、実装が必要**。
+要件: タスク分割を戻すボタンを押したら、やることリスト一覧ページ（`/tasks`）へ遷移する。
 
-## (a) 状態 / ラベル / 最新コメント
-- Status: Todo → **In Progress**（本 task-check で遷移）
-- Labels: なし（Bug/snapshot ラベル無し）
-- Project: ai-dev-control-plane / Priority: No priority / 親: SOT-1556
-- 既存コメント: なし（本 task-check で分類 ＋ 分解判断 ＋ 作業開始を投稿）
+## (a) Status / Labels / 最新コメント
+- Status: **In Progress**（`run_auto.sh` が起動時に In Progress 化済み。task-check では state 変更なし＝冪等 no-op）。
+- Labels: なし。Priority: No priority。Assignee: sota morohashi。
+- Description: 「タスク分割を戻すボタンを押したら、やることリスト一覧ページに遷移してください。」
+- 既存コメント: なし（新規Issue）。task-check にて分解判断＋作業開始コメントを投稿済み。
 
-## (b) 受け入れ条件（`docs/ai/40_acceptance.md` 参照）
-- lane/issue が専用 git worktree で実行され、完了/失敗時にクリーンアップされる（変更なし自動削除）
-- ロックが repo 全体でなく worktree(branch) 単位になり、異 branch は並列できる
-- 同一 branch は従来通り直列（衝突しない）
-- CLAUDE.md の並列方針（「same repo/branch は serial」）が branch 単位に更新される
+## (b) 受け入れ条件
+`docs/ai/40_acceptance.md` に記載。要点:
+- AC1: 登録済みタスク詳細（`DataDetailPage.tsx`）の「分割前のタスクに戻す」成功後、`/tasks` へ遷移（現状 `/data/:id`・`/registered`）。
+- AC2: 下書き（`DraftsPage.tsx`）の分割戻し成功後、`/tasks` へ遷移（現状は同ページ滞在）。
+- AC3: 遷移は revert-split API 成功後のみ（失敗時は遷移しない）。
+- AC4: revert-split 以外の挙動・UI は不変。
+- AC5: lint / typecheck / test 通過。
 
 ## (c) Actionable?
-Yes。Todo・オープン・要件明確。対象ファイル（`src/lib/runnerLock.ts`, `src/lib/laneNotifier.ts`,
-`scripts/ai/run_codex.sh`/`run_antigravity.sh`, `CLAUDE.md`）はリポジトリに実在を確認済み。
+**Yes（actionable）**。要件は一意で、安全既定（両ボタンとも `/tasks` へ遷移）で進行可能。In Progress。
 
-## (d) Task type + Scope
-- Type: **IMPLEMENT**（複数ファイル・ロジック変更・単体テストを伴うコード実装）。
-- Scope: git worktree による lane 隔離、runnerLock のロックキーを repo → worktree パスに拡張、
-  CLAUDE.md 並列方針の branch 単位緩和、及び対応する単体テスト。対象 repo はハーネス自身
-  `/workspaces/ai-dev-control-plane`。ブランチは親と同一 feat/sot-1556-loop-engineering-improvements。
+## (d) タスク種別 + スコープ
+- 種別: **FIX**（小さなナビゲーション挙動変更）。
+- スコープ: frontend のみ。`frontend/src/pages/DataDetailPage.tsx`（`revertSplitMutation.onSuccess` の遷移先変更）と `frontend/src/pages/DraftsPage.tsx`（revert 成功後に `navigate('/tasks')` 追加、`useNavigate` 取得）。
+- 遷移先: `/tasks`（TasksPage「やることリスト」, React Router v6 `useNavigate`）。
+- スコープ外: revert-split の API/ロジック、他の遷移・文言・レイアウト。
 
-## (e) 分解判断: 不要
-理由: 既に親 SOT-1556 から分解された子 Issue。単一 feature（worktree 隔離＋ロック粒度低下）で対象
-ファイル群が密結合し、実装＋テスト＋ドキュメントが 1 PR にまとまる単位。3 段の「段階導入」は独立
-rollback/PR 単位ではなく実装ステップ。さらなる分割は overhead > value。子 Issue は作成しない。
+## (e) 分解判断
+**不要**。理由: 単一のナビゲーション挙動変更で少数ファイル・単一PRに収まる。独立機能・別デプロイ単位・複数PRのいずれにも該当しない。Linear に `分解判断: 不要` を投稿済み。子Issueなし。
 
-## 成果物
-- `docs/ai/10_plan.md` — 実装計画（実装ロール向け）
-- `docs/ai/30_tasks.md` — 具体タスクリスト（3 段）
-- `docs/ai/40_acceptance.md` — 受け入れ条件
-- Linear: 分類 ＋ 分解判断（不要）コメント、作業開始 Progress コメント、Todo → In Progress
+## Changed Files（本ロール）
+- `docs/ai/10_plan.md` — 要件解釈・実装方針。
+- `docs/ai/30_tasks.md` — タスクリスト（分解不要、親=作業単位）。
+- `docs/ai/40_acceptance.md` — 受け入れ条件。
+
+## Commands Run
+- Linear MCP: get_issue / list_comments / save_comment（分解判断＋作業開始）。
+- Discord: 開始・完了通知。
+
+## Acceptance Criteria
+- [ ] 実装ロール以降で充足予定（本ロールは actionability 判定と計画のみ）。
+
+## Risks
+- 「タスク分割を戻すボタン」は2箇所（登録済み詳細・下書き）に存在。安全既定として両方 `/tasks` へ遷移させる方針。人間が片方のみを意図していた場合は Human Check で調整。
 
 ## Implementation: REQUIRED
 

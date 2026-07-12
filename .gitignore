@@ -9,7 +9,7 @@ node_modules/
 
 docs/ai/auto_logs/*
 
-# AI worker ephemeral artifacts
+# AI worker ephemeral artifacts (per-run pipeline reports — regenerated every run)
 docs/ai/10_plan.md
 docs/ai/20_design.md
 docs/ai/30_tasks.md
@@ -18,6 +18,12 @@ docs/ai/50_worker_antigravity_report.md
 docs/ai/55_worker_claude_report.md
 docs/ai/60_worker_codex_report.md
 docs/ai/70_final_report.md
+docs/ai/70_acceptance_check.md
+docs/ai/75_github_report.md
+docs/ai/80_linear_report.md
+docs/ai/task_check_report.md
+docs/ai/decomposition_report.md
+docs/ai/*_proposal.md
 prompts/antigravity/implement.md
 prompts/codex/debug.md
 prompts/claude/worker.md

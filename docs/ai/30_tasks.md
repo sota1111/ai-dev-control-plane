@@ -1,36 +1,38 @@
-# Tasks — SOT-1558（分解不要: 親 SOT-1556 の分解済み子 Issue を単一作業単位として実装）
+# Tasks — SOT-1594 「分割を戻す」ボタンのバグ（REOPEN #4）
 
-分解判断: 不要。単一 feature（acceptance 強化）で、対象ファイル群（workerRoles.ts / worker_roles.json /
-run_auto.sh / prompts/roles/*.md / 70_acceptance_check.md）が密結合し 1 PR にまとまる。SOT-1558 自体が既に
-親 SOT-1556 から分解済みのレバーであり、更なる子 Issue 化は overhead > value。
-Task type: IMPLEMENT（PR → merge → In Review）。Repository: `/workspaces/ai-dev-control-plane`。
-Branch: feat/sot-1556-loop-engineering-improvements（親と同一 feature ブランチ）。
+分解判断: **不要**（単一バグの追加是正。backend の復元ロジック＋テストが1PRに収まり、独立した
+rollback/deploy 単位や並行 PR の利得がない）。親Issueをそのまま作業単位とする。
 
-## 実装タスク（順序: 1 → 3 → 2、親 SOT-1556 指示に従う）
+対象リポジトリ: `/workspaces/toddler-private-rag`（backend, FastAPI）
 
-### 1. doer/checker 分離 ＋ NOT_REQUIRED ピン留め限定
-- [ ] `src/lib/workerRoles.ts` に doer/checker 分離ロジックを追加。acceptance ロールは直前に実装したワーカー
-      とは別ワーカー／別セッションで走ることを既定にする（実装ワーカーと同一なら別ワーカーへ回す/別セッション化）。
-- [ ] `config/worker_roles.json` の acceptance チェーンを実装チェーンと意図的に食い違わせる（先頭が実装 primary と
-      別ワーカーになるように）。
-- [ ] `scripts/ai/run_auto.sh` の SOT-1555 NOT_REQUIRED ピン留めを非コード生成タスク（DOC/REVIEW/PLAN/QUESTION/
-      SECURITY-scan/純調査）限定に制限。IMPLEMENT/FIX/DEBUG では acceptance を別コンテキストに保つ（ピンしない）。
+## Task list（implementation ロール向け）
 
-### 3. 実動作検証（snapshot/E2E）を acceptance の標準ステップ化
-- [ ] `prompts/roles/acceptance.md` / `prompts/roles/verification.md` に、既存 snapshot ラベル導線 ＋ e2e/Playwright
-      モックハーネスを標準ステップとして組み込み、after スクリーンショット ＋ 主要導線 E2E を受け入れ証跡として要求。
-- [ ] repo 種別・`docs/screenshots/` 有無で UI/非UI を判定し、バックエンド/ライブラリは E2E 不要とする。
-- [ ] `docs/ai/70_acceptance_check.md` 様式を規定。
+1. **実フロー再現テストを先に書く（root cause 確定, AC7）**
+   - `build_task_drafts`(手順2) で写真1枚→複数タスク draft を作り、そのうち提出物タスクに対して
+     `run_submission_agent` 相当（`routers/info.py:728` の締切調査フロー）を実行して締切グループ (1/N)…(N/N)
+     ＋ offset-0 アンカーを作る。
+   - その (n/N) タスクで `/drafts/{id}/revert-split`（および本登録版）を実エンドポイント経由で叩く。
+   - 復元 content が **手順2タスク本文** と一致し、生文字起こし全文でも締切調査結果の羅列でもないこと、
+     title が写真書類でなくアンカーのタイトルであることを assert（AC2/AC3/AC4）。
+   - このテストが **現行 main で pass するか fail するか** を最初に確認する。
 
-### 2. 機械可読 `## Acceptance: PASS|FAIL` ゲート化
-- [ ] acceptance レポートに `## Acceptance: PASS|FAIL`（criteria 単位の [x]/[ ]）を必須化。
-- [ ] `scripts/ai/run_auto.sh` の acceptance ゲートが自然文でなくこの行を機械的に読むよう改修。
+2. **fail する場合のみ最小修正（AC1–AC6）**
+   - `_find_anchor_dict` / `_resolve_revert_group`（`routers/info.py:437,462`）のアンカー特定が実データで
+     正しく offset-0・非付随タスクを引けているか確認。引けていなければ是正。
+   - 必要なら締切エージェント起動前（手順2）の本文をスナップショットとして永続化し、そこから復元する方針に
+     切り替える（アンカー content が実データで手順2本文を保持していない場合）。
+   - `merge_split_drafts_to_single`（`extraction.py:1121`）の anchor 復元・フォールバックガードは維持。
+   - PR #398 の締切グループ限定スコープを退行させない（AC5）。
 
-### 検証 / gate
-- [ ] `src/lib/workerRoles.ts` の doer/checker 分離ロジックの単体テスト。
-- [ ] ピン留め条件（NOT_REQUIRED 限定）のテスト。
-- [ ] 機械可読 PASS/FAIL ゲート読取の検証。
-- [ ] 既定挙動の非回帰（非 UI repo は E2E 不要、既存判定が壊れない）。
-- [ ] lint / typecheck / test green。
+3. **pass する場合（AC9）**
+   - コードは正しく、残差は本番未デプロイの可能性が高い旨を報告に明記し Human Check とする。
+   - それでも実データ固有の乖離が疑わしければ、実 DB レコード形状に近いフィクスチャで追試する。
 
-## Next Action: READY_FOR_REVIEW（実装ロールへ）
+4. **検証（AC8）**
+   - backend フルスイート（pytest）pass、coverage floor（70%）維持、revert/split 系テスト緑。
+   - 変更は backend のみ・意図しない差分なしを確認。
+
+## 備考
+- REOPEN #4。過去 PR #398（グループ限定スコープ）/#401（title/content をアンカー復元）/#403（生文字起こし
+  フォールバックガード）は全て main マージ済み。今回は「まだ締切エージェント起動後の状態に戻る」という
+  再報告に対し、**実フロー通しの再現で前提と実データの食い違いを潰す**のが主眼。
