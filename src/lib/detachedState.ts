@@ -250,6 +250,7 @@ export async function reapCompletedDetachedRuns(): Promise<string[]> {
         trigger: 'detached',
         retryAt: null,
         enqueuedAt: new Date().toISOString(),
+        createdAt: null,
         lastAttemptAt: null,
         attemptCount: 0,
         reason: null,

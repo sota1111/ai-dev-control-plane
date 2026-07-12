@@ -69,6 +69,28 @@ describe('schedulerCore', () => {
     expect(core.parseActiveIdentifiers({ issues: { nodes: [] } })).toEqual([]);
   });
 
+  test('buildActiveIssuesQuery requests createdAt for creation-order (SOT-1637)', () => {
+    expect(core.buildActiveIssuesQuery()).toContain('createdAt');
+  });
+
+  test('parseActiveIssueMeta returns identifier + createdAt (SOT-1637)', () => {
+    const data = {
+      issues: {
+        nodes: [
+          { identifier: 'ID-1', createdAt: '2023-01-01T10:00:00Z' },
+          { identifier: 'ID-2' },
+          { title: 'no-identifier' },
+        ],
+      },
+    };
+    expect(core.parseActiveIssueMeta(data)).toEqual([
+      { identifier: 'ID-1', createdAt: '2023-01-01T10:00:00Z' },
+      { identifier: 'ID-2', createdAt: null },
+    ]);
+    expect(core.parseActiveIssueMeta(null)).toEqual([]);
+    expect(core.parseActiveIssueMeta({ issues: { nodes: [] } })).toEqual([]);
+  });
+
   test('formatStatusLines running', () => {
     const lines = core.formatStatusLines({
       running: true,
