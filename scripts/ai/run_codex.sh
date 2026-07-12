@@ -188,10 +188,27 @@ fi
 # When set, pass it to a FRESH `codex exec` as `-m <model>` (Codex's `-p` is a profile, not the model).
 # A resumed session (`exec resume --last`) already inherits the model chosen when it was created, so the
 # flag is applied to fresh sessions only. Unset → no `-m` flag → Codex's default model (backward compat).
+# Friendly model aliases for the Codex worker. A Linear directive can select a Codex model by a short
+# human name (e.g. `workers: implementation=codex:sol`) instead of typing the full `codex exec -m` id.
+# Resolve the alias to the canonical model id here; matching is case-insensitive and unknown values pass
+# through verbatim, so any raw `-m` id (`codex:gpt-5.5`, etc.) still works. Add new aliases to this case.
+#   sol / "gpt-5.6 sol" / gpt-5.6-sol  → GPT-5.6 Sol (canonical id: gpt-5.6-sol)
+resolve_codex_model_alias() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    sol|"gpt-5.6 sol"|gpt-5.6-sol) echo "gpt-5.6-sol" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 CODEX_MODEL_ARGS=()
 if [ -n "${CODEX_MODEL:-}" ]; then
-  CODEX_MODEL_ARGS=(-m "$CODEX_MODEL")
-  echo "run_codex.sh: using model '$CODEX_MODEL' (codex exec -m)" >&2
+  CODEX_RESOLVED_MODEL="$(resolve_codex_model_alias "$CODEX_MODEL")"
+  CODEX_MODEL_ARGS=(-m "$CODEX_RESOLVED_MODEL")
+  if [ "$CODEX_RESOLVED_MODEL" != "$CODEX_MODEL" ]; then
+    echo "run_codex.sh: model alias '$CODEX_MODEL' → '$CODEX_RESOLVED_MODEL' (codex exec -m)" >&2
+  else
+    echo "run_codex.sh: using model '$CODEX_MODEL' (codex exec -m)" >&2
+  fi
 fi
 
 run_codex_cli() {
