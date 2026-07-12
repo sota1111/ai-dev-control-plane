@@ -199,7 +199,21 @@ fi
 
 # SOT-1583: a per-issue directive `workers: <role>=claude:<model>` sets CLAUDE_MODEL (via
 # run_worker.sh); it is consumed here as `--model`. Unset → default `opus` (backward compatible).
-CLAUDE_MODEL="${CLAUDE_MODEL:-opus}"
+#
+# Friendly model aliases for the Claude worker. A Linear directive can select a Claude model by a short
+# human name (e.g. `workers: implementation=claude:fable`) instead of the full `--model` id. Resolve the
+# alias to the canonical id here; matching is case-insensitive and unknown values pass through verbatim,
+# so the built-in shorthands (`opus`/`sonnet`/`haiku`) and raw ids (`claude-opus-4-8`, etc.) still work.
+# Add new aliases to this case.
+#   fable / fable-5 / fable5  → Fable 5 (canonical id: claude-fable-5)
+resolve_claude_model_alias() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    fable|fable-5|fable5) echo "claude-fable-5" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+CLAUDE_MODEL="$(resolve_claude_model_alias "${CLAUDE_MODEL:-opus}")"
 export CLAUDE_MODEL
 
 ADD_DIR_ARGS=()

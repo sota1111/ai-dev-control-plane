@@ -107,11 +107,16 @@ workers: implementation=codex, verification=claude
   worker's run script via its model env var — Codex `CODEX_MODEL` (→ `codex exec -m <model>`),
   Antigravity `AGY_MODEL` (→ `agy --model "<model>"`), Claude `CLAUDE_MODEL` (→ `claude --model <model>`,
   default `opus`). No model validation is done — an unknown model is passed through and the CLI errors.
-  **Codex model aliases:** `run_codex.sh` resolves a few short, human-friendly Codex model names to their
-  canonical `-m` id before invoking the CLI (case-insensitive; unknown values pass through verbatim, so
-  raw ids like `codex:gpt-5.5` still work). Current aliases: `sol` / `gpt-5.6 sol` → `gpt-5.6-sol`
-  (**GPT-5.6 Sol**), e.g. `workers: implementation=codex:sol` or `workers: solo=codex:sol`. Add new
-  aliases in the `resolve_codex_model_alias` case in `scripts/ai/run_codex.sh`.
+  **Model aliases:** the Codex and Claude run scripts resolve a few short, human-friendly model names to
+  their canonical id before invoking the CLI (case-insensitive; unknown values pass through verbatim, so
+  the built-in shorthands and raw ids still work). Current aliases:
+  - Codex (`resolve_codex_model_alias` in `scripts/ai/run_codex.sh`): `sol` / `gpt-5.6 sol` → `gpt-5.6-sol`
+    (**GPT-5.6 Sol**), e.g. `workers: implementation=codex:sol` or `workers: solo=codex:sol`.
+  - Claude (`resolve_claude_model_alias` in `scripts/ai/run_claude.sh`): `fable` / `fable-5` → `claude-fable-5`
+    (**Fable 5**), e.g. `workers: implementation=claude:fable` or `workers: solo=claude:fable`. (`opus` /
+    `sonnet` / `haiku` remain the CLI's own shorthands; the default is still `opus` when no model is pinned.)
+
+  Add new aliases in the corresponding `resolve_*_model_alias` case.
 - The directive may appear in the description or any comment; the **newest occurrence wins** per role.
 - Mechanics: at pipeline start `run_auto.sh` calls `runner-cli resolve-worker-roles <issue>`, which
   merges overrides onto the base config, writes `docs/ai/pipeline/worker_roles.<issue>.json` (with any
