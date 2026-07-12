@@ -6,7 +6,7 @@ windows:
         - echo "=== Webhook サーバー起動 ===" && npm run start:webhook
   - ngrok:
       panes:
-        - echo "=== ngrok 起動 (port 3000) ===" && ngrok http 3000
+        - echo "=== ngrok 起動 (port 3000) ===" && set -a && source .env && set +a && ngrok http 3000
   - claude:
       panes:
         - claude
