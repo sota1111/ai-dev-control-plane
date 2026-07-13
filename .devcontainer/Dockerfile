@@ -44,6 +44,17 @@ RUN npm install -g @openai/codex
 RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin
 
 # ---------------------------------------------------------------------------
+# uv / uvx (Astral)
+#   MCP サーバ arxiv-mcp-server（.mcp.json、`uvx arxiv-mcp-server`）を起動できる
+#   ようにする。uvx は uv に同梱されるため uv を導入すれば足りる。稼働コンテナを
+#   再ビルドしても残るよう恒久化する。UV_INSTALL_DIR=/usr/local/bin で全ユーザー
+#   （vscode 含む）の PATH 上に配置し、PATH 編集を不要にする。
+# ---------------------------------------------------------------------------
+RUN curl -LsSf https://astral.sh/uv/install.sh \
+      | env UV_INSTALL_DIR=/usr/local/bin INSTALLER_NO_MODIFY_PATH=1 sh \
+    && uv --version && uvx --version
+
+# ---------------------------------------------------------------------------
 # tmux + tmuxinator
 #   認証・常駐起動用の tmux セッション構成（.config/tmuxinator/ai-auth.yml /
 #   ai-dev.yml）を一括起動するために使う。稼働コンテナを再ビルドしても残るよう

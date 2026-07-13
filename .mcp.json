@@ -3,6 +3,14 @@
     "linear-server": {
       "type": "http",
       "url": "https://mcp.linear.app/mcp"
+    },
+    "arxiv-mcp-server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "arxiv-mcp-server"
+      ],
+      "env": {}
     }
   }
 }
