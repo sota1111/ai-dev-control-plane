@@ -49,11 +49,13 @@ Do not expose unnecessary internal details about Antigravity CLI or Codex CLI.
 
 ## Completion Policy
 
-Do not mark as Done unless:
+When automated work is complete, move the issue to `In Review` only after:
 
 - Acceptance criteria are checked
 - Verification was performed
 - Remaining issues are documented
 - Human check items are clear
 
-If verification could not be performed, use `In Review` or `Blocked`, not `Done`.
+Never auto-mark the issue `Done`; that transition is reserved for human confirmation.
+
+If verification could not be performed, use `Blocked` and report the failed or unavailable check.

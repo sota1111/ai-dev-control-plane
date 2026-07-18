@@ -69,9 +69,9 @@ Note: Generated child Issues use feature-outcome titles (e.g. `...を追加す�
 Backlog     未確認
 Todo        認識済み
 In Progress 作業中
-In Review   確認待ち
+In Review   自動作業完了・確認待ち
 Blocked     停止中
-Done        完了
+Done        人間による確認完了
 ```
 
 ## Claude Code Work Policy
@@ -85,7 +85,7 @@ Claude Code must:
 5. Decide whether worker tools are needed
 6. Execute implementation or verification
 7. Post progress back to Linear
-8. Mark issue as Done only after verification
+8. After verification, move the issue to In Review for human confirmation; do not auto-mark it Done
 
 ## Worker Tool Policy
 
@@ -129,7 +129,7 @@ Status: In Progress
 ```markdown
 ## Completion Report
 
-Status: Done
+Status: In Review
 
 ### Summary
 
