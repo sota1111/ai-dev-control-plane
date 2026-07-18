@@ -624,7 +624,14 @@ if [ "$PIPELINE_ENABLED" -eq 1 ] && [ -n "$TARGET_ISSUE" ]; then
   if [ "$EXIT_CODE" -eq "$WORKER_UNAVAILABLE" ]; then
     echo "[pipeline] WORKER_UNAVAILABLE (71): all workers transiently non-responsive → skip ensure-issue-reviewed, leave issue active for retry"
   else
-    run_cli ensure-issue-reviewed "$TARGET_ISSUE" >/dev/null 2>&1 || true
+    # A clean completion can still leave the issue active when the worker's best-effort Linear sync
+    # did not run. Preserve the loop-breaker transition, but do not misreport that successful run as
+    # "completion not reached" (SOT-1732).
+    if [ "$EXIT_CODE" -eq 0 ]; then
+      run_cli ensure-issue-reviewed "$TARGET_ISSUE" completed >/dev/null 2>&1 || true
+    else
+      run_cli ensure-issue-reviewed "$TARGET_ISSUE" incomplete >/dev/null 2>&1 || true
+    fi
   fi
   echo ""
   echo "== Finished pipeline: $(date +"%Y%m%d_%H%M%S") (exit: ${EXIT_CODE}) =="
