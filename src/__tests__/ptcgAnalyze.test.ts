@@ -51,7 +51,10 @@ function tmpDir(): string {
 }
 
 /** Runner that gives seat0 an exact win count per shard id, with turns/time populated. */
-function scriptedRunner(seat0Wins: Record<string, number>, opts: { withTurns?: boolean; faultEvery?: number } = {}): ShardRunner {
+function scriptedRunner(
+  seat0Wins: Record<string, number>,
+  opts: { withTurns?: boolean; faultEvery?: number } = {}
+): ShardRunner {
   const withTurns = opts.withTurns ?? true;
   const faultEvery = opts.faultEvery ?? 0;
   return async (shard: ShardSpec) => {
@@ -79,8 +82,17 @@ function scriptedRunner(seat0Wins: Record<string, number>, opts: { withTurns?: b
 async function buildRun(
   cfg: RunConfig,
   seat0Wins: Record<string, number>,
-  opts: { withTurns?: boolean; faultEvery?: number; deckOverrides?: Partial<Record<string, string>> } = {}
-): Promise<{ dir: string; store: LocalObjectStore; manifest: Manifest; inputs: ContestantInput[] }> {
+  opts: {
+    withTurns?: boolean;
+    faultEvery?: number;
+    deckOverrides?: Partial<Record<string, string>>;
+  } = {}
+): Promise<{
+  dir: string;
+  store: LocalObjectStore;
+  manifest: Manifest;
+  inputs: ContestantInput[];
+}> {
   const dir = tmpDir();
   const store = new LocalObjectStore(path.join(dir, 'obj'));
   const inp = inputs(opts.deckOverrides);
@@ -137,8 +149,26 @@ describe('readRawGames — recompute source is the raw log, checksum-verified', 
 describe('tallyAgent', () => {
   it('tallies wins/losses/draws/faults and averages turns & time', () => {
     const games: GameRecord[] = [
-      { shardId: 's', matchIndex: 0, seat0: 'matsu', seat1: 'take', winner: 'matsu', fault: false, turns: 10, durationMs: 400 },
-      { shardId: 's', matchIndex: 1, seat0: 'matsu', seat1: 'take', winner: 'take', fault: true, turns: 20, durationMs: 600 },
+      {
+        shardId: 's',
+        matchIndex: 0,
+        seat0: 'matsu',
+        seat1: 'take',
+        winner: 'matsu',
+        fault: false,
+        turns: 10,
+        durationMs: 400,
+      },
+      {
+        shardId: 's',
+        matchIndex: 1,
+        seat0: 'matsu',
+        seat1: 'take',
+        winner: 'take',
+        fault: true,
+        turns: 20,
+        durationMs: 600,
+      },
       { shardId: 's', matchIndex: 2, seat0: 'take', seat1: 'matsu', winner: 'draw', fault: false }, // no turns
     ];
     const m = tallyAgent(games, 'matsu', '松');
@@ -225,7 +255,10 @@ describe('decideRanking — never assert an order without evidence', () => {
       { matchesPerShard: 5, seed: 1, deckMode: 'own', chunksPerOrientation: 1 },
       SEPARATED
     );
-    const a = computeAnalysis(manifest, readRawGames(manifest, store), { generatedAt: NOW, minSample: 30 });
+    const a = computeAnalysis(manifest, readRawGames(manifest, store), {
+      generatedAt: NOW,
+      minSample: 30,
+    });
     expect(a.ranking.determined).toBe(false);
     expect(a.warnings.some((w) => w.includes('サンプル不足'))).toBe(true);
     expect(a.ranking.note).toContain('サンプル不足');
@@ -238,7 +271,7 @@ describe('decideRanking (direct)', () => {
 
   it('determined when all adjacencies are CI-separated and sample sufficient', () => {
     const r = decideRanking(
-      [stat('a', 0.85, 0.81, 0.89), stat('b', 0.45, 0.40, 0.50), stat('c', 0.2, 0.16, 0.24)],
+      [stat('a', 0.85, 0.81, 0.89), stat('b', 0.45, 0.4, 0.5), stat('c', 0.2, 0.16, 0.24)],
       30
     );
     expect(r.determined).toBe(true);
@@ -303,6 +336,113 @@ describe('computeAnalysis — full breakdown', () => {
   });
 });
 
+describe('computeAnalysis — tactic × deck combo and mirror breakdown', () => {
+  const matrixInputs: ContestantInput[] = [
+    {
+      label: 'matsu:01',
+      tactic: 'matsu',
+      deckId: '01',
+      kanji: '松',
+      repo: 'm',
+      commit: 'a'.repeat(40),
+      deckHash: sha256Hex('d1'),
+    },
+    {
+      label: 'matsu:02',
+      tactic: 'matsu',
+      deckId: '02',
+      kanji: '松',
+      repo: 'm',
+      commit: 'a'.repeat(40),
+      deckHash: sha256Hex('d2'),
+    },
+    {
+      label: 'take:01',
+      tactic: 'take',
+      deckId: '01',
+      kanji: '竹',
+      repo: 't',
+      commit: 'b'.repeat(40),
+      deckHash: sha256Hex('d1'),
+    },
+    {
+      label: 'take:02',
+      tactic: 'take',
+      deckId: '02',
+      kanji: '竹',
+      repo: 't',
+      commit: 'b'.repeat(40),
+      deckHash: sha256Hex('d2'),
+    },
+  ];
+
+  function matrixManifest(): Manifest {
+    return {
+      schemaVersion: 'ptcg-battle-lab/v2',
+      runId: 'matrix',
+      createdAt: NOW,
+      updatedAt: NOW,
+      config: { matchesPerShard: 1, seed: 1, deckMode: 'mirror', chunksPerOrientation: 1 },
+      inputs: matrixInputs,
+      shards: [],
+      aggregate: null,
+    };
+  }
+
+  function games(wins: Array<[string, string, string]>, repeats = 40): GameRecord[] {
+    return wins.flatMap(([seat0, seat1, winner], shard) =>
+      Array.from({ length: repeats }, (_, matchIndex) => ({
+        shardId: `s${shard}`,
+        matchIndex,
+        seat0,
+        seat1,
+        winner,
+        fault: false,
+        turns: 10,
+        durationMs: 100,
+      }))
+    );
+  }
+
+  it('sorts combo standings with CI and determines a separated best combo', () => {
+    const raw = games([
+      ['matsu:01', 'matsu:02', 'matsu:01'],
+      ['matsu:01', 'take:01', 'matsu:01'],
+      ['matsu:01', 'take:02', 'matsu:01'],
+      ['matsu:02', 'take:01', 'matsu:02'],
+      ['matsu:02', 'take:02', 'matsu:02'],
+      ['take:01', 'take:02', 'take:01'],
+    ]);
+    const a = computeAnalysis(matrixManifest(), raw, { generatedAt: NOW, minSample: 30 });
+    expect(a.byCombo.map((x) => x.label)).toEqual(['matsu:01', 'matsu:02', 'take:01', 'take:02']);
+    expect(a.byCombo.every((x) => x.ciLow <= x.winRate && x.winRate <= x.ciHigh)).toBe(true);
+    expect(a.bestCombo).toMatchObject({ determined: true, tactic: 'matsu', deckId: '01' });
+    expect(a.bestCombo.note).toContain('確定');
+  });
+
+  it('keeps best combo undetermined with explicit CI/sample evidence and reports mirrors', () => {
+    const raw = games(
+      [
+        ['matsu:01', 'matsu:02', 'matsu:01'],
+        ['matsu:02', 'matsu:01', 'matsu:02'],
+        ['take:01', 'take:02', 'take:01'],
+      ],
+      10
+    );
+    const a = computeAnalysis(matrixManifest(), raw, { generatedAt: NOW, minSample: 30 });
+    expect(a.bestCombo.determined).toBe(false);
+    expect(a.bestCombo.note).toMatch(/CI重複|サンプル不足/);
+    expect(a.mirrors.map((x) => x.tactic)).toEqual(['matsu', 'take']);
+    expect(a.mirrors.find((x) => x.tactic === 'matsu')!.standings).toHaveLength(2);
+    expect(a.mirrors.find((x) => x.tactic === 'take')!.standings[0].matches).toBe(10);
+    const md = renderReport(a);
+    expect(md).toContain('Combo standings (tactic × deck)');
+    expect(md).toContain('## Best combo');
+    expect(md).toContain('Mirror analysis');
+    expect(md).toContain('### matsu');
+  });
+});
+
 describe('computeDiff — vs a baseline', () => {
   it('diffs winRate and matches vs a prior Analysis', () => {
     const prev = {
@@ -325,7 +465,9 @@ describe('computeDiff — vs a baseline', () => {
   });
 
   it('null deltas for an agent absent from the baseline', () => {
-    const prev = { agents: [{ label: 'matsu', winRate: 0.8, decided: 400 }] } as unknown as Analysis;
+    const prev = {
+      agents: [{ label: 'matsu', winRate: 0.8, decided: 400 }],
+    } as unknown as Analysis;
     const cur = [{ label: 'ume', winRate: 0.2, decided: 100 }] as ReturnType<typeof tallyAgent>[];
     const diff = computeDiff(cur, prev, 'base')!;
     expect(diff.agents[0].winRateDelta).toBeNull();
@@ -355,7 +497,9 @@ describe('renderReport + buildNotification + redaction', () => {
   });
 
   it('assertReportClean flags a leaked host path', () => {
-    expect(() => assertReportClean('see /workspaces/ptcg-agent-matsu/deck.csv', {})).toThrow(/disallowed/);
+    expect(() => assertReportClean('see /workspaces/ptcg-agent-matsu/deck.csv', {})).toThrow(
+      /disallowed/
+    );
   });
 
   it('buildNotification includes run-id, verdict, standings and report path', async () => {
@@ -396,7 +540,14 @@ describe('analyzeRun — on-disk artifacts + regeneration from raw records', () 
     // First analyze writes aggregate.r.json; copy it as a baseline run id.
     const base = analyzeRun({ dir, runId: 'r', store, generatedAt: NOW, env: {} });
     fs.copyFileSync(base.aggregatePath, path.join(dir, 'aggregate.base.json'));
-    const withDiff = analyzeRun({ dir, runId: 'r', store, generatedAt: NOW, baselineRunId: 'base', env: {} });
+    const withDiff = analyzeRun({
+      dir,
+      runId: 'r',
+      store,
+      generatedAt: NOW,
+      baselineRunId: 'base',
+      env: {},
+    });
     expect(withDiff.analysis.diff).not.toBeNull();
     expect(withDiff.analysis.diff!.baselineRunId).toBe('base');
     // Same data → zero deltas.
@@ -406,6 +557,8 @@ describe('analyzeRun — on-disk artifacts + regeneration from raw records', () 
   it('throws a clear error when the manifest is missing', () => {
     const dir = tmpDir();
     const store = new LocalObjectStore(path.join(dir, 'obj'));
-    expect(() => analyzeRun({ dir, runId: 'nope', store, generatedAt: NOW })).toThrow(/no manifest/);
+    expect(() => analyzeRun({ dir, runId: 'nope', store, generatedAt: NOW })).toThrow(
+      /no manifest/
+    );
   });
 });

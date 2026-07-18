@@ -102,6 +102,26 @@ export interface DeckStat {
   ciHigh: number;
 }
 
+/** Per (tactic × deck) contestant statistics. Additive to the v1 artifact schema. */
+export interface ComboStat extends AgentStat {
+  tactic: string;
+  deckId: string;
+}
+
+/** Same-tactic, different-deck comparison reconstructed from only mirror games. */
+export interface MirrorBreakdown {
+  tactic: string;
+  standings: ComboStat[];
+}
+
+export interface BestCombo {
+  determined: boolean;
+  label: string | null;
+  tactic: string | null;
+  deckId: string | null;
+  note: string;
+}
+
 /** One adjacency in the winRate-sorted order and whether its two rows' CIs overlap. */
 export interface RankingAdjacency {
   higher: string;
@@ -164,6 +184,12 @@ export interface Analysis {
   byPair: PairStat[];
   /** Per-deck stats keyed by deck hash. */
   byDeck: DeckStat[];
+  /** Overall (tactic × deck) standings, sorted by win rate descending. */
+  byCombo: ComboStat[];
+  /** Evidence-qualified best combination, using the same ranking rule as overall standings. */
+  bestCombo: BestCombo;
+  /** Same-tactic / different-deck games only, grouped by tactic. */
+  mirrors: MirrorBreakdown[];
   ranking: Ranking;
   diff: RunDiff | null;
   /** Operator-facing warnings (faults present, sample不足, CI重複). */
@@ -346,9 +372,7 @@ export function decideRanking(agents: AgentStat[], minSample: number): Ranking {
   } else {
     const reasons: string[] = [];
     if (ambiguities.length > 0) {
-      reasons.push(
-        `CI重複: ${ambiguities.map((x) => `${x.higher}↔${x.lower}`).join(', ')}`
-      );
+      reasons.push(`CI重複: ${ambiguities.map((x) => `${x.higher}↔${x.lower}`).join(', ')}`);
     }
     if (thin.length > 0) reasons.push(`サンプル不足(decided<${minSample}): ${thin.join(', ')}`);
     note = `順位未確定（${reasons.join(' / ')}）— 暫定順: ${order.join(' > ')}`;
@@ -357,7 +381,11 @@ export function decideRanking(agents: AgentStat[], minSample: number): Ranking {
 }
 
 /** Compute the diff of the current agents vs a baseline analyze aggregate (per-agent winRate/matches). */
-export function computeDiff(agents: AgentStat[], baseline: Aggregate | Analysis | null, baselineRunId: string): RunDiff | null {
+export function computeDiff(
+  agents: AgentStat[],
+  baseline: Aggregate | Analysis | null,
+  baselineRunId: string
+): RunDiff | null {
   if (!baseline) return null;
   // Accept either an analyze Analysis (has `agents`) or a battle-lab Aggregate (has `standings`).
   const prevRows: Array<{ label: string; winRate: number; matches: number }> =
@@ -390,7 +418,11 @@ export interface ComputeOptions {
 }
 
 /** Recompute the full Analysis from a manifest + the raw records read out of the object store. */
-export function computeAnalysis(manifest: Manifest, games: GameRecord[], opts: ComputeOptions): Analysis {
+export function computeAnalysis(
+  manifest: Manifest,
+  games: GameRecord[],
+  opts: ComputeOptions
+): Analysis {
   const minSample = opts.minSample ?? DEFAULT_MIN_SAMPLE;
   const kanjiOf = new Map(manifest.inputs.map((i) => [i.label, i.kanji]));
 
@@ -450,6 +482,65 @@ export function computeAnalysis(manifest: Manifest, games: GameRecord[], opts: C
   }
   byDeck.sort((a, b) => b.winRate - a.winRate || a.deckHash.localeCompare(b.deckHash));
 
+  // A v2 input is already one (tactic × deck) contestant. Legacy v1 inputs remain readable by
+  // deriving stable fallback dimensions; this keeps the aggregate schema change purely additive.
+  const comboMeta = new Map(
+    manifest.inputs.map((inp) => [
+      inp.label,
+      {
+        tactic: inp.tactic ?? inp.label,
+        deckId: inp.deckId ?? inp.deckHash.slice(0, 12),
+        kanji: inp.kanji,
+      },
+    ])
+  );
+  const byCombo: ComboStat[] = manifest.inputs
+    .map((inp) => ({
+      ...tallyAgent(games, inp.label, inp.kanji, 'any'),
+      tactic: comboMeta.get(inp.label)!.tactic,
+      deckId: comboMeta.get(inp.label)!.deckId,
+    }))
+    .sort((a, b) => b.winRate - a.winRate || a.label.localeCompare(b.label));
+  const comboRanking = decideRanking(byCombo, minSample);
+  const top = byCombo[0] ?? null;
+  const bestCombo: BestCombo = {
+    determined: top !== null && comboRanking.determined,
+    label: top?.label ?? null,
+    tactic: top?.tactic ?? null,
+    deckId: top?.deckId ?? null,
+    note:
+      top === null
+        ? '未確定（組み合わせデータなし）'
+        : comboRanking.determined
+          ? `確定: ${top.tactic} × deck ${top.deckId}（${comboRanking.note}）`
+          : `未確定: 暫定首位 ${top.tactic} × deck ${top.deckId}（${comboRanking.note}）`,
+  };
+
+  const tactics = [
+    ...new Set(manifest.inputs.map((inp) => inp.tactic).filter((x): x is string => Boolean(x))),
+  ].sort();
+  const mirrors: MirrorBreakdown[] = tactics.map((tactic) => {
+    const tacticInputs = manifest.inputs.filter(
+      (inp) => inp.tactic === tactic && inp.deckId !== undefined
+    );
+    const tacticLabels = new Set(tacticInputs.map((inp) => inp.label));
+    const mirrorGames = games.filter((g) => {
+      if (!tacticLabels.has(g.seat0) || !tacticLabels.has(g.seat1)) return false;
+      return comboMeta.get(g.seat0)?.deckId !== comboMeta.get(g.seat1)?.deckId;
+    });
+    const standings = tacticInputs
+      .map((inp) => ({
+        ...tallyAgent(mirrorGames, inp.label, inp.kanji, 'any'),
+        tactic,
+        deckId: inp.deckId!,
+      }))
+      .sort(
+        (a, b) =>
+          b.winRate - a.winRate || a.deckId.localeCompare(b.deckId, undefined, { numeric: true })
+      );
+    return { tactic, standings };
+  });
+
   const shardsCompleted = manifest.shards.filter((s) => s.status === 'completed').length;
   const totalDecided = agents.reduce((n, a) => n + a.decided, 0); // each decided game counts its 2 seats
   const totalDraws = agents.reduce((n, a) => n + a.draws, 0);
@@ -467,7 +558,8 @@ export function computeAnalysis(manifest: Manifest, games: GameRecord[], opts: C
   const warnings: string[] = [];
   if (totals.faults > 0) warnings.push(`faults present: ${totals.faults}`);
   for (const a of agents) {
-    if (a.decided < minSample) warnings.push(`サンプル不足: ${a.label} (decided=${a.decided} < ${minSample})`);
+    if (a.decided < minSample)
+      warnings.push(`サンプル不足: ${a.label} (decided=${a.decided} < ${minSample})`);
   }
   for (const x of ranking.ambiguities) warnings.push(`CI重複: ${x.higher} ↔ ${x.lower}`);
 
@@ -485,6 +577,9 @@ export function computeAnalysis(manifest: Manifest, games: GameRecord[], opts: C
     bySeat,
     byPair,
     byDeck,
+    byCombo,
+    bestCombo,
+    mirrors,
     ranking,
     diff,
     warnings,
@@ -526,13 +621,19 @@ export function renderReport(a: Analysis): string {
 
   L.push('## 順位 (ranking)');
   L.push('');
-  L.push(a.ranking.determined ? `**順位確定** — ${a.ranking.note}` : `**順位未確定** — ${a.ranking.note}`);
+  L.push(
+    a.ranking.determined ? `**順位確定** — ${a.ranking.note}` : `**順位未確定** — ${a.ranking.note}`
+  );
   L.push('');
 
   L.push('## Overall standings (raw records から再計算)');
   L.push('');
-  L.push('| # | agent | winRate | Wilson95% CI | W-L | decided | draws | faults | 平均手数 | 平均時間(ms) |');
-  L.push('|---|-------|--------:|--------------|-----|--------:|------:|-------:|--------:|-------------:|');
+  L.push(
+    '| # | agent | winRate | Wilson95% CI | W-L | decided | draws | faults | 平均手数 | 平均時間(ms) |'
+  );
+  L.push(
+    '|---|-------|--------:|--------------|-----|--------:|------:|-------:|--------:|-------------:|'
+  );
   a.agents.forEach((s, i) => {
     L.push(
       `| ${i + 1} | ${s.kanji} ${s.label} | ${pct(s.winRate)} | ${ci(s.ciLow, s.ciHigh)} | ${s.wins}-${s.losses} | ${s.decided} | ${s.draws} | ${s.faults} | ${num(s.avgTurns)} | ${num(s.avgDurationMs, 0)} |`
@@ -546,7 +647,10 @@ export function renderReport(a: Analysis): string {
   L.push('|-------|------|--------:|--------------|-----|--------:|');
   for (const label of a.agents.map((x) => x.label)) {
     const sp = a.bySeat[label];
-    for (const [seatName, s] of [['先手', sp.first], ['後手', sp.second]] as const) {
+    for (const [seatName, s] of [
+      ['先手', sp.first],
+      ['後手', sp.second],
+    ] as const) {
       L.push(
         `| ${s.kanji} ${label} | ${seatName} | ${pct(s.winRate)} | ${ci(s.ciLow, s.ciHigh)} | ${s.wins}-${s.losses} | ${s.decided} |`
       );
@@ -576,6 +680,44 @@ export function renderReport(a: Analysis): string {
   }
   L.push('');
 
+  L.push('## Combo standings (tactic × deck)');
+  L.push('');
+  L.push(
+    '| # | tactic | deck | winRate | Wilson95% CI | W-L | decided | draws | faults | 平均手数 | 平均時間(ms) |'
+  );
+  L.push(
+    '|---|--------|------|--------:|--------------|-----|--------:|------:|-------:|--------:|-------------:|'
+  );
+  a.byCombo.forEach((s, i) => {
+    L.push(
+      `| ${i + 1} | ${s.kanji} ${s.tactic} | ${s.deckId} | ${pct(s.winRate)} | ${ci(s.ciLow, s.ciHigh)} | ${s.wins}-${s.losses} | ${s.decided} | ${s.draws} | ${s.faults} | ${num(s.avgTurns)} | ${num(s.avgDurationMs, 0)} |`
+    );
+  });
+  L.push('');
+
+  L.push('## Best combo');
+  L.push('');
+  L.push(
+    a.bestCombo.determined ? `**確定** — ${a.bestCombo.note}` : `**未確定** — ${a.bestCombo.note}`
+  );
+  L.push('');
+
+  L.push('## Mirror analysis (same tactic, different decks only)');
+  L.push('');
+  if (a.mirrors.length === 0) L.push('- v2 tactic/deck metadataなし（legacy run）');
+  for (const mirror of a.mirrors) {
+    L.push(`### ${mirror.tactic}`);
+    L.push('');
+    L.push('| deck | winRate | Wilson95% CI | W-L | decided | draws | faults |');
+    L.push('|------|--------:|--------------|-----|--------:|------:|-------:|');
+    for (const s of mirror.standings) {
+      L.push(
+        `| ${s.deckId} | ${pct(s.winRate)} | ${ci(s.ciLow, s.ciHigh)} | ${s.wins}-${s.losses} | ${s.decided} | ${s.draws} | ${s.faults} |`
+      );
+    }
+    L.push('');
+  }
+
   if (a.diff) {
     L.push(`## Diff vs baseline run \`${a.diff.baselineRunId}\``);
     L.push('');
@@ -602,7 +744,9 @@ export function renderReport(a: Analysis): string {
   L.push('| agent | repo | commit[:12] | deckHash[:12] |');
   L.push('|-------|------|-------------|---------------|');
   for (const inp of a.inputs) {
-    L.push(`| ${inp.kanji} ${inp.label} | ${inp.repo} | \`${inp.commit.slice(0, 12)}\` | \`${inp.deckHash.slice(0, 12)}\` |`);
+    L.push(
+      `| ${inp.kanji} ${inp.label} | ${inp.repo} | \`${inp.commit.slice(0, 12)}\` | \`${inp.deckHash.slice(0, 12)}\` |`
+    );
   }
   L.push('');
   return L.join('\n') + '\n';
@@ -614,9 +758,7 @@ export function renderReport(a: Analysis): string {
 
 /** Build the one-line Discord/Linear notification: run-id, verdict, standings summary, report path. */
 export function buildNotification(a: Analysis, reportPath: string): string {
-  const standings = a.agents
-    .map((s) => `${s.kanji}${s.label} ${pct(s.winRate)}`)
-    .join(' > ');
+  const standings = a.agents.map((s) => `${s.kanji}${s.label} ${pct(s.winRate)}`).join(' > ');
   const verdict = a.ranking.determined ? '順位確定' : '順位未確定';
   const faults = a.totals.faults === 0 ? 'fault0' : `fault${a.totals.faults}`;
   return `PTCG analyze run=${a.runId}: ${verdict} ${standings} (${faults}, n=${a.totals.matches}) report=${reportPath}`;
