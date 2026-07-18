@@ -154,6 +154,21 @@ specified**:
 - `run`/`analyze` require only `--run-id`. Override any default explicitly only when working off a
   non-standard layout.
 
+Repository-less Linear requests that contain a PTCG intent are resolved through
+`config/ptcg_profiles.json`. The schema-validated profile pins the 松・竹・梅 remotes, local checkout
+paths, branches, decks, run defaults, and this repository as the canonical harness. An explicit
+repository or Linear Project always wins. Set `PTCG_PROFILE_ENABLED=0` to disable this fallback and
+retain the normal repository resolution behavior.
+
+Before a real run, perform the bounded, offline environment check:
+
+```bash
+tsx src/ptcg-profile-cli.ts preflight
+```
+
+It checks repository presence, Python environment metadata, decks, the harness entrypoint, and schema
+compatibility. Diagnostics use stable profile names and never print local/host paths or secrets.
+
 ## Resume & failure diagnosis
 
 - **Resume:** re-invoke `run` with the same `--run-id`. Completed shards are skipped; each shard's
