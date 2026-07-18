@@ -216,6 +216,32 @@ export interface Manifest {
   aggregate: Aggregate | null;
 }
 
+export interface TotalBattleState {
+  schemaVersion: 'ptcg-total-battle/v1';
+  runId: string;
+  phase: 'screen' | 'confirm' | 'completed';
+  screenRunId: string;
+  confirmRunId: string;
+  keepTop: number;
+  selectedLabels: string[];
+}
+
+export interface TotalBattleOptions {
+  dir: string;
+  runId: string;
+  inputs: ContestantInput[];
+  screenMatches: number;
+  confirmMatches: number;
+  keepTop: number;
+  seed: number;
+  chunksPerOrientation: number;
+  deckMode: string;
+  store: ObjectStore;
+  runner: ShardRunner;
+  now: () => string;
+  onShard?: (phase: 'screen' | 'confirm', shardId: string, action: 'run' | 'skip') => void;
+}
+
 /** A pluggable battle backend: runs one shard's matches. Kept async so a real backend can shell out. */
 export type ShardRunner = (shard: ShardSpec, inputs: ContestantInput[]) => Promise<ShardResult>;
 
@@ -302,7 +328,15 @@ export class LocalObjectStore implements ObjectStore {
 // --------------------------------------------------------------------------- //
 
 /** Absolute-path prefixes that are host-specific and must never appear in an artifact. */
-const HOST_PATH_PREFIXES = ['/home/', '/Users/', '/root/', '/workspaces/', '/tmp/', 'C:\\', '/var/'];
+const HOST_PATH_PREFIXES = [
+  '/home/',
+  '/Users/',
+  '/root/',
+  '/workspaces/',
+  '/tmp/',
+  'C:\\',
+  '/var/',
+];
 
 /** Token-ish patterns that indicate a leaked secret. */
 const SECRET_PATTERNS: RegExp[] = [
@@ -745,6 +779,78 @@ export async function runRoundRobin(opts: RunOptions): Promise<Manifest> {
   return manifest;
 }
 
+/** Durable state path for the two-phase total-battle driver. */
+export function totalBattleStatePath(dir: string, runId: string): string {
+  return path.join(dir, `total-battle.${runId}.json`);
+}
+
+/**
+ * Run (or resume) a cheap all-contestant screen followed by a high-sample top-K confirmation.
+ * Each phase uses the normal atomic manifest/object pipeline, so interruption resumes at the first
+ * unfinished shard and completed work can neither be rerun nor double-counted.
+ */
+export async function runTotalBattle(opts: TotalBattleOptions): Promise<{
+  state: TotalBattleState;
+  screen: Manifest;
+  confirm: Manifest;
+}> {
+  if (opts.inputs.length < 2) throw new Error('total-battle requires at least 2 contestants');
+  if (!Number.isInteger(opts.keepTop) || opts.keepTop < 2 || opts.keepTop > opts.inputs.length) {
+    throw new Error(`keepTop must be an integer from 2 to ${opts.inputs.length}`);
+  }
+  const stateFile = totalBattleStatePath(opts.dir, opts.runId);
+  let state: TotalBattleState = fs.existsSync(stateFile)
+    ? (JSON.parse(fs.readFileSync(stateFile, 'utf8')) as TotalBattleState)
+    : {
+        schemaVersion: 'ptcg-total-battle/v1',
+        runId: opts.runId,
+        phase: 'screen',
+        screenRunId: `${opts.runId}-screen`,
+        confirmRunId: `${opts.runId}-confirm`,
+        keepTop: opts.keepTop,
+        selectedLabels: [],
+      };
+  if (state.runId !== opts.runId || state.keepTop !== opts.keepTop) {
+    throw new Error('existing total-battle state does not match run-id/keep-top');
+  }
+  const common = { deckMode: opts.deckMode, chunksPerOrientation: opts.chunksPerOrientation };
+  const screen = await runRoundRobin({
+    dir: opts.dir,
+    runId: state.screenRunId,
+    inputs: opts.inputs,
+    config: { ...common, matchesPerShard: opts.screenMatches, seed: opts.seed },
+    store: opts.store,
+    runner: opts.runner,
+    now: opts.now,
+    onShard: (id, action) => opts.onShard?.('screen', id, action),
+  });
+  if (state.selectedLabels.length === 0) {
+    state.selectedLabels = screen
+      .aggregate!.standings.slice(0, opts.keepTop)
+      .map((row) => row.label);
+    state.phase = 'confirm';
+    writeFileAtomic(stateFile, JSON.stringify(state, null, 2) + '\n');
+  }
+  const selected = state.selectedLabels.map((label) => {
+    const input = opts.inputs.find((candidate) => candidate.label === label);
+    if (!input) throw new Error(`selected contestant missing from inputs: ${label}`);
+    return input;
+  });
+  const confirm = await runRoundRobin({
+    dir: opts.dir,
+    runId: state.confirmRunId,
+    inputs: selected,
+    config: { ...common, matchesPerShard: opts.confirmMatches, seed: opts.seed + 1_000_000 },
+    store: opts.store,
+    runner: opts.runner,
+    now: opts.now,
+    onShard: (id, action) => opts.onShard?.('confirm', id, action),
+  });
+  state.phase = 'completed';
+  writeFileAtomic(stateFile, JSON.stringify(state, null, 2) + '\n');
+  return { state, screen, confirm };
+}
+
 // --------------------------------------------------------------------------- //
 // Schema validation
 // --------------------------------------------------------------------------- //
@@ -767,7 +873,8 @@ export function validateManifest(obj: unknown): string[] {
       push('config.matchesPerShard must be a positive number');
     if (typeof cfg.seed !== 'number') push('config.seed must be a number');
     if (typeof cfg.deckMode !== 'string') push('config.deckMode must be a string');
-    if (typeof cfg.chunksPerOrientation !== 'number') push('config.chunksPerOrientation must be a number');
+    if (typeof cfg.chunksPerOrientation !== 'number')
+      push('config.chunksPerOrientation must be a number');
   }
   if (!Array.isArray(m.inputs) || m.inputs.length === 0) {
     push('inputs must be a non-empty array');
@@ -775,7 +882,8 @@ export function validateManifest(obj: unknown): string[] {
     m.inputs.forEach((inp, i) => {
       const c = inp as Record<string, unknown>;
       if (typeof c.label !== 'string') push(`inputs[${i}].label must be a string`);
-      if (typeof c.commit !== 'string' || !c.commit) push(`inputs[${i}].commit must be a non-empty string`);
+      if (typeof c.commit !== 'string' || !c.commit)
+        push(`inputs[${i}].commit must be a non-empty string`);
       if (typeof c.deckHash !== 'string' || !c.deckHash)
         push(`inputs[${i}].deckHash must be a non-empty string`);
     });
