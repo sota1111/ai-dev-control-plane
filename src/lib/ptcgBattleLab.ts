@@ -20,8 +20,23 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** Manifest/artifact schema version. Bump on any breaking shape change. */
-export const SCHEMA_VERSION = 'ptcg-battle-lab/v1';
+/**
+ * Manifest/artifact schema version. Bumped to v2 (SOT-1715) when contestants became
+ * (tactic × deck) tuples carrying `tactic`/`deckId`. v1 manifests (the legacy 3-contestant
+ * own-deck run) remain readable — see {@link SUPPORTED_SCHEMA_VERSIONS} / {@link loadManifest}.
+ */
+export const SCHEMA_VERSION = 'ptcg-battle-lab/v2';
+
+/**
+ * Schema versions this build can READ. New manifests are always written at {@link SCHEMA_VERSION},
+ * but a run started under an older schema must still resume, so `loadManifest` accepts any listed
+ * version. The v1→v2 shape change is purely additive (optional `tactic`/`deckId` on inputs), so a
+ * v1 manifest validates and resumes unchanged.
+ */
+export const SUPPORTED_SCHEMA_VERSIONS: readonly string[] = [
+  'ptcg-battle-lab/v1',
+  'ptcg-battle-lab/v2',
+] as const;
 
 /** The three contestants. label = stable id used in shard ids and aggregates. */
 export interface Contestant {
@@ -39,8 +54,33 @@ export const CONTESTANTS: readonly Contestant[] = [
   { label: 'ume', kanji: '梅', repo: 'ptcg-agent-ume' },
 ] as const;
 
+/**
+ * A tactic (playing style) — one of 松/竹/梅, backed by a sibling agent repo. In the (tactic × deck)
+ * model a tactic is combined with each deck to form a contestant. `TACTICS` mirrors `CONTESTANTS`;
+ * the two exist side-by-side so the legacy 3-contestant own-deck run and the 75-contestant matrix
+ * run share the same tactic/kanji/repo metadata.
+ */
+export interface Tactic {
+  /** Stable rōmaji tactic id (matsu/take/ume). */
+  tactic: string;
+  /** Kanji display name (松/竹/梅). */
+  kanji: string;
+  /** Sibling repo directory name (never an absolute path). */
+  repo: string;
+}
+
+export const TACTICS: readonly Tactic[] = [
+  { tactic: 'matsu', kanji: '松', repo: 'ptcg-agent-matsu' },
+  { tactic: 'take', kanji: '竹', repo: 'ptcg-agent-take' },
+  { tactic: 'ume', kanji: '梅', repo: 'ptcg-agent-ume' },
+] as const;
+
 /** Per-contestant inputs pinned into the manifest so a run is reproducible/attributable. */
 export interface ContestantInput {
+  /**
+   * Stable id used in shard ids, keys, aggregates. In the legacy own-deck run this is a bare tactic
+   * (`matsu`); in the (tactic × deck) matrix it is `${tactic}:${deckId}` (e.g. `matsu:01`).
+   */
   label: string;
   kanji: string;
   repo: string;
@@ -48,6 +88,16 @@ export interface ContestantInput {
   commit: string;
   /** sha256 of the deck the contestant plays (content hash, NOT a path). */
   deckHash: string;
+  /**
+   * v2: the tactic (matsu/take/ume) this contestant plays. Optional/backward-compatible — v1
+   * own-deck inputs omit it (there the tactic is just the label).
+   */
+  tactic?: string;
+  /**
+   * v2: the deck id (e.g. `01`) drawn from `decks/initial`. Optional/backward-compatible — v1
+   * own-deck inputs omit it (each contestant plays its repo's own deck.csv).
+   */
+  deckId?: string;
 }
 
 /** Run configuration recorded in the manifest (the "conditions" acceptance criterion). */
@@ -372,6 +422,108 @@ export function roundRobinShards(inputs: ContestantInput[], config: RunConfig): 
 }
 
 // --------------------------------------------------------------------------- //
+// (tactic × deck) contestant model — SOT-1715.
+// --------------------------------------------------------------------------- //
+
+/** A deck drawn from `decks/initial`: a stable id + the content hash of its csv (never a path). */
+export interface DeckRef {
+  /** Deck id, e.g. `01` — the numeric prefix of the csv filename. */
+  deckId: string;
+  /** sha256 hex of the deck csv content. */
+  deckHash: string;
+}
+
+/**
+ * Derive a deck id from a `decks/initial` csv filename: the leading numeric token (`01_dragapult.csv`
+ * → `01`), falling back to the extension-less basename when there is no numeric prefix. Keeping the
+ * short numeric id is what makes contestant labels read as `matsu:01`.
+ */
+export function deckIdFromFilename(filename: string): string {
+  const base = path.basename(filename, path.extname(filename));
+  const m = base.match(/^(\d+)/);
+  return m ? m[1] : base;
+}
+
+/**
+ * Enumerate `decks/initial/*.csv` into `DeckRef`s sorted by deckId ascending (numeric-aware), hashing
+ * each deck's content. Non-csv files (README.md, manifest.json) are ignored. This is the deck pool the
+ * (tactic × deck) matrix is built from; the three sibling repos ship identical decks, so a single
+ * enumeration suffices and matsu:01 / take:01 / ume:01 share the same deckHash by construction.
+ */
+export function enumerateDecks(decksDir: string): DeckRef[] {
+  const files = fs.readdirSync(decksDir).filter((f) => f.toLowerCase().endsWith('.csv'));
+  const refs: DeckRef[] = files.map((f) => ({
+    deckId: deckIdFromFilename(f),
+    deckHash: sha256Hex(fs.readFileSync(path.join(decksDir, f))),
+  }));
+  refs.sort((a, b) => a.deckId.localeCompare(b.deckId, undefined, { numeric: true }));
+  return refs;
+}
+
+export interface TupleContestantOptions {
+  /** The deck pool (typically `enumerateDecks(decksDir)`). */
+  decks: DeckRef[];
+  /** Resolve the git commit SHA for a tactic's repo (host-path-free). */
+  commitForTactic: (tactic: Tactic) => string;
+  /** Tactics to cross with the decks; defaults to the three {@link TACTICS}. */
+  tactics?: readonly Tactic[];
+}
+
+/**
+ * Expand tactics × decks into contestants. With the default 3 tactics and 25 decks this yields the
+ * **75 contestants** of the full matrix, each labelled `${tactic}:${deckId}` (e.g. `matsu:01`) and
+ * carrying its `tactic`, `deckId`, and the deck's `deckHash`. Ordered tactic-major / deck-minor so the
+ * plan lists matsu:01…matsu:25, take:01…, ume:… — which also makes same-tactic (mirror) pairs adjacent.
+ */
+export function buildTupleContestants(opts: TupleContestantOptions): ContestantInput[] {
+  const tactics = opts.tactics ?? TACTICS;
+  const out: ContestantInput[] = [];
+  for (const t of tactics) {
+    const commit = opts.commitForTactic(t);
+    for (const d of opts.decks) {
+      out.push({
+        label: `${t.tactic}:${d.deckId}`,
+        kanji: t.kanji,
+        repo: t.repo,
+        commit,
+        deckHash: d.deckHash,
+        tactic: t.tactic,
+        deckId: d.deckId,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Does a contestant match one `tactic:deck` glob pattern? `*` (or empty) on either side is a wildcard,
+ * so `matsu:*` matches every matsu deck, `*:01` every tactic's deck 01, `matsu:01` exactly one, and a
+ * bare `*` everything. A pattern with no colon (`matsu`) matches by tactic (deck wildcard implied).
+ */
+export function matchContestant(c: ContestantInput, pattern: string): boolean {
+  const trimmed = pattern.trim();
+  if (trimmed === '' || trimmed === '*') return true;
+  const [tac, deck] = trimmed.split(':');
+  const tacOk = tac === '' || tac === '*' || tac === (c.tactic ?? c.label);
+  const deckOk = deck === undefined || deck === '' || deck === '*' || deck === c.deckId;
+  return tacOk && deckOk;
+}
+
+/**
+ * Select the subset of contestants matching a comma-separated spec of `tactic:deck` globs
+ * (e.g. `matsu:*` or `matsu:01,take:07`). Order follows the input list (not the spec). `*` or an empty
+ * spec selects all. Preserves each contestant at most once even if several patterns match it.
+ */
+export function selectContestants(all: ContestantInput[], spec: string): ContestantInput[] {
+  const patterns = spec
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (patterns.length === 0) return all.slice();
+  return all.filter((c) => patterns.some((p) => matchContestant(c, p)));
+}
+
+// --------------------------------------------------------------------------- //
 // Manifest lifecycle
 // --------------------------------------------------------------------------- //
 
@@ -418,8 +570,10 @@ export function loadManifest(dir: string, runId: string): Manifest | null {
   if (errors.length > 0) {
     throw new Error(`manifest ${p} failed validation:\n  - ${errors.join('\n  - ')}`);
   }
-  if (parsed.schemaVersion !== SCHEMA_VERSION) {
-    throw new Error(`manifest schema ${parsed.schemaVersion} != expected ${SCHEMA_VERSION}`);
+  if (!SUPPORTED_SCHEMA_VERSIONS.includes(parsed.schemaVersion)) {
+    throw new Error(
+      `manifest schema ${parsed.schemaVersion} not supported (expected one of ${SUPPORTED_SCHEMA_VERSIONS.join(', ')})`
+    );
   }
   return parsed;
 }
