@@ -62,6 +62,28 @@ variable. `saveManifest` refuses to persist anything that trips it.
 
 ## Analysis & reporting (`analyze`, SOT-1711)
 
+## Staged 75-contestant battle (`total-battle`)
+
+Running all 75 tactic×deck contestants at the final sample size is expensive. `total-battle` uses the
+same resumable, atomic shard pipeline in two phases: a cheap all-contestant **screen**, then a larger
+**confirm** run containing only the screen's top K by win rate.
+
+```bash
+tsx src/ptcg-battle-lab-cli.ts total-battle \
+  --run-id 20260718-total --screen-matches 8 --keep-top 10 --confirm-matches 40 --chunks 4
+```
+
+- Screen schedules every ordered pairing for all 75 contestants at `--screen-matches` per shard.
+- Confirm schedules only the selected `--keep-top` contestants at `--confirm-matches` per shard.
+- `--chunks` deterministically splits both phases by seed. `--runner fixture` (default) runs entirely
+  in the control-plane/CI; use `--runner python` only when the real engine and sibling repos exist.
+- Re-run the identical command and `--run-id` after interruption. Phase manifests plus
+  `total-battle.<run-id>.json` persist selection; completed shards are skipped and duplicate recording
+  remains rejected. Changing `--keep-top` for an existing run is rejected to preserve scoping.
+- On completion the CLI analyzes the confirm raw records and prints `best-combo`, whether it is
+  statistically **確定/未確定**, and the Wilson-CI/sample-size evidence plus report path. The screen is
+  a resource-saving filter, so the final claim is explicitly scoped to its selected top K.
+
 `run`/`status` orchestrate and tally; **`analyze` recomputes the statistics from the RAW game records**
 (the `games.jsonl` objects, read back and **checksum-verified** against the manifest ref — the manifest
 tally is never trusted) and writes two artifacts:
@@ -166,8 +188,8 @@ specified**:
   aggregation, redaction, schema validation.
 - `src/lib/ptcgAnalyze.ts` — raw-record readback, per-agent/seat/pair/deck statistics, Wilson-CI-overlap
   ranking (順位確定/未確定), diff, report rendering, notification line (SOT-1711).
-- `src/ptcg-battle-lab-cli.ts` — the single CLI entrypoint (`run` / `status` / `analyze` / `smoke` /
-  `preflight`).
+- `src/ptcg-battle-lab-cli.ts` — the single CLI entrypoint (`run` / `total-battle` / `status` /
+  `analyze` / `smoke` / `preflight`).
 - `src/__tests__/ptcgBattleLab.test.ts` — fixture preflight → battle → artifact integration plus the
   interruption / resume / duplicate-rejection / atomicity / schema-validation / redaction tests.
 - `src/__tests__/ptcgAnalyze.test.ts` — raw-record readback, tallies, ranking-evidence (CI overlap /

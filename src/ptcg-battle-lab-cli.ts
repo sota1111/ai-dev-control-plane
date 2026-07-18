@@ -26,6 +26,7 @@ import {
   enumerateDecks,
   loadManifest,
   runRoundRobin,
+  runTotalBattle,
   selectContestants,
   sha256Hex,
   type ContestantInput,
@@ -110,7 +111,11 @@ function defaultDecksDir(siblingsRoot: string): string {
  * comma-separated `tactic:deck` glob spec (`matsu:*`, `matsu:01,take:07`); `*`/empty ⇒ all 75.
  * Throws with an actionable message when the deck pool is missing or the subset selects nobody.
  */
-function resolveTupleInputs(siblingsRoot: string, decksDir: string, subset: string): ContestantInput[] {
+function resolveTupleInputs(
+  siblingsRoot: string,
+  decksDir: string,
+  subset: string
+): ContestantInput[] {
   if (!fs.existsSync(decksDir)) {
     throw new Error(
       `deck pool not found: ${path.basename(path.dirname(decksDir))}/${path.basename(decksDir)} — pass --decks <dir> (e.g. a sibling repo's decks/initial)`
@@ -135,7 +140,7 @@ function resolveTupleInputs(siblingsRoot: string, decksDir: string, subset: stri
  * is charged as a fault to the loser to exercise the fault-accounting path.
  */
 const fixtureRunner: ShardRunner = async (shard: ShardSpec) => {
-  let state = (shard.seed >>> 0) || 1;
+  let state = shard.seed >>> 0 || 1;
   const next = (): number => {
     // Numerical Recipes LCG.
     state = (Math.imul(1664525, state) + 1013904223) >>> 0;
@@ -166,7 +171,7 @@ const fixtureRunner: ShardRunner = async (shard: ShardSpec) => {
  * fault — used by `smoke` so the real-repository end-to-end check asserts fault 0 regardless of N.
  */
 const smokeRunner: ShardRunner = async (shard: ShardSpec) => {
-  let state = (shard.seed >>> 0) || 1;
+  let state = shard.seed >>> 0 || 1;
   const next = (): number => {
     state = (Math.imul(1664525, state) + 1013904223) >>> 0;
     return state / 0x100000000;
@@ -228,8 +233,7 @@ function pythonRunner(siblingsRoot: string, deckMode: string): ShardRunner {
     const games: GameRecord[] = [];
     const pairing = (parsed.pairings ?? []).find(
       (p) =>
-        (p.a === shard.seat0 && p.b === shard.seat1) ||
-        (p.a === shard.seat1 && p.b === shard.seat0)
+        (p.a === shard.seat0 && p.b === shard.seat1) || (p.a === shard.seat1 && p.b === shard.seat0)
     );
     if (pairing) {
       const seat0Wins = pairing.a === shard.seat0 ? pairing.a_wins : pairing.b_wins;
@@ -256,7 +260,8 @@ function isoNow(): string {
 async function cmdRun(args: Args): Promise<number> {
   const siblingsRoot = args['siblings-root'] ?? path.dirname(CONTROL_PLANE_ROOT);
   const dir = args.dir ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'runs');
-  const storeRoot = args.store ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'objects');
+  const storeRoot =
+    args.store ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'objects');
   const runId = args['run-id'];
   if (!runId) {
     console.error('error: --run-id is required');
@@ -291,7 +296,9 @@ async function cmdRun(args: Args): Promise<number> {
   const runner: ShardRunner =
     runnerKind === 'python' ? pythonRunner(siblingsRoot, config.deckMode) : fixtureRunner;
 
-  console.log(`ptcg-battle-lab run ${runId} (runner=${runnerKind}, matches/shard=${config.matchesPerShard})`);
+  console.log(
+    `ptcg-battle-lab run ${runId} (runner=${runnerKind}, matches/shard=${config.matchesPerShard})`
+  );
   const manifest = await runRoundRobin({
     dir,
     runId,
@@ -303,7 +310,84 @@ async function cmdRun(args: Args): Promise<number> {
     onShard: (id, action) => console.log(`  ${action === 'skip' ? 'skip (done)' : 'run '} ${id}`),
   });
   printStandings(manifest.aggregate);
-  console.log(`manifest: ${path.relative(CONTROL_PLANE_ROOT, path.join(dir, `manifest.${runId}.json`))}`);
+  console.log(
+    `manifest: ${path.relative(CONTROL_PLANE_ROOT, path.join(dir, `manifest.${runId}.json`))}`
+  );
+  return 0;
+}
+
+async function cmdTotalBattle(args: Args): Promise<number> {
+  const runId = args['run-id'];
+  if (!runId) {
+    console.error('error: --run-id is required');
+    return 2;
+  }
+  const siblingsRoot = args['siblings-root'] ?? path.dirname(CONTROL_PLANE_ROOT);
+  const dir = args.dir ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'runs');
+  const storeRoot =
+    args.store ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'objects');
+  const screenMatches = Number(args['screen-matches'] ?? 8);
+  const confirmMatches = Number(args['confirm-matches'] ?? 40);
+  const keepTop = Number(args['keep-top'] ?? 10);
+  const chunks = Number(args.chunks ?? 1);
+  const seed = Number(args.seed ?? 20260718);
+  const decksDir = args.decks ?? defaultDecksDir(siblingsRoot);
+  let inputs: ContestantInput[];
+  try {
+    inputs = resolveTupleInputs(siblingsRoot, decksDir, '*');
+  } catch (err) {
+    console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
+    return 2;
+  }
+  const numbers = { screenMatches, confirmMatches, keepTop, chunks };
+  for (const [name, value] of Object.entries(numbers)) {
+    if (!Number.isInteger(value) || value < 1) {
+      console.error(
+        `error: --${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)} must be a positive integer`
+      );
+      return 2;
+    }
+  }
+  if (keepTop < 2 || keepTop > inputs.length || !Number.isInteger(seed)) {
+    console.error(`error: --keep-top must be 2..${inputs.length} and --seed must be an integer`);
+    return 2;
+  }
+  const runnerKind = args.runner ?? 'fixture';
+  const runner = runnerKind === 'python' ? pythonRunner(siblingsRoot, 'matrix') : fixtureRunner;
+  const store = new LocalObjectStore(storeRoot);
+  console.log(
+    `ptcg-battle-lab total-battle ${runId} (${inputs.length} contestants, screen=${screenMatches}, top=${keepTop}, confirm=${confirmMatches})`
+  );
+  const result = await runTotalBattle({
+    dir,
+    runId,
+    inputs,
+    screenMatches,
+    confirmMatches,
+    keepTop,
+    seed,
+    chunksPerOrientation: chunks,
+    deckMode: 'matrix',
+    store,
+    runner,
+    now: isoNow,
+    onShard: (phase, id, action) =>
+      console.log(`  ${phase}: ${action === 'skip' ? 'skip (done)' : 'run '} ${id}`),
+  });
+  console.log(`screen top-${keepTop}: ${result.state.selectedLabels.join(', ')}`);
+  const analyzed = analyzeRun({
+    dir,
+    runId: result.state.confirmRunId,
+    store,
+    generatedAt: isoNow(),
+    minSample: args['min-sample'] ? Number(args['min-sample']) : undefined,
+  });
+  const best = analyzed.analysis.bestCombo;
+  console.log(
+    `best-combo: ${best.label ?? 'undetermined'} (${best.determined ? '確定' : '未確定'})`
+  );
+  console.log(`evidence: ${best.note}`);
+  console.log(`report: ${path.relative(CONTROL_PLANE_ROOT, analyzed.reportPath)}`);
   return 0;
 }
 
@@ -350,7 +434,8 @@ function cmdPreflight(args: Args): number {
  */
 async function cmdAnalyze(args: Args): Promise<number> {
   const dir = args.dir ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'runs');
-  const storeRoot = args.store ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'objects');
+  const storeRoot =
+    args.store ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'objects');
   const runId = args['run-id'];
   if (!runId) {
     console.error('error: --run-id is required');
@@ -380,10 +465,14 @@ async function cmdAnalyze(args: Args): Promise<number> {
   if (args.notify === 'true' || args.notify === '1') {
     const msg = buildNotification(analysis, relReport);
     try {
-      execFileSync('bash', [path.join(CONTROL_PLANE_ROOT, 'scripts', 'ai', 'notify_discord.sh'), msg], {
-        cwd: CONTROL_PLANE_ROOT,
-        stdio: 'ignore',
-      });
+      execFileSync(
+        'bash',
+        [path.join(CONTROL_PLANE_ROOT, 'scripts', 'ai', 'notify_discord.sh'), msg],
+        {
+          cwd: CONTROL_PLANE_ROOT,
+          stdio: 'ignore',
+        }
+      );
       console.log('notified Discord.');
     } catch {
       console.log('notify failed (best-effort); message would have been:');
@@ -404,16 +493,26 @@ async function cmdSmoke(args: Args): Promise<number> {
   const runId = args['run-id'] ?? 'smoke';
   const matches = Number(args.matches ?? 6);
   const dir = args.dir ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'runs');
-  const storeRoot = args.store ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'objects');
+  const storeRoot =
+    args.store ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'objects');
   const inputs = resolveInputs(siblingsRoot);
   const missing = inputs.filter((i) => i.commit === 'unknown').map((i) => i.repo);
   if (missing.length > 0) {
-    console.error(`smoke: sibling repo(s) not resolvable: ${missing.join(', ')} (siblings-root=${path.basename(siblingsRoot)})`);
+    console.error(
+      `smoke: sibling repo(s) not resolvable: ${missing.join(', ')} (siblings-root=${path.basename(siblingsRoot)})`
+    );
     return 1;
   }
-  const config: RunConfig = { matchesPerShard: matches, seed: 20260718, deckMode: 'own', chunksPerOrientation: 1 };
+  const config: RunConfig = {
+    matchesPerShard: matches,
+    seed: 20260718,
+    deckMode: 'own',
+    chunksPerOrientation: 1,
+  };
   const store = new LocalObjectStore(storeRoot);
-  console.log(`ptcg-battle-lab smoke ${runId} (real inputs, fault-free runner, matches/shard=${matches})`);
+  console.log(
+    `ptcg-battle-lab smoke ${runId} (real inputs, fault-free runner, matches/shard=${matches})`
+  );
   const manifest = await runRoundRobin({
     dir,
     runId,
@@ -445,7 +544,9 @@ async function cmdSmoke(args: Args): Promise<number> {
     }
   }
   printAnalysisStandings(result.analysis);
-  console.log(`  faults: ${result.analysis.totals.faults} · shards: ${manifest.shards.length} · objects: ${objectDirs.length}`);
+  console.log(
+    `  faults: ${result.analysis.totals.faults} · shards: ${manifest.shards.length} · objects: ${objectDirs.length}`
+  );
   console.log(`  report: ${path.relative(CONTROL_PLANE_ROOT, result.reportPath)}`);
   console.log(ok ? 'SMOKE OK (fault 0, all artifacts present)' : 'SMOKE FAILED');
   return ok ? 0 : 1;
@@ -460,8 +561,13 @@ function printAnalysisStandings(a: ReturnType<typeof analyzeRun>['analysis']): v
   }
 }
 
-function printStandings(aggregate: ReturnType<typeof loadManifest> extends null ? never : unknown): void {
-  const agg = aggregate as { standings?: Array<Record<string, number | string>>; totalFaults?: number } | null;
+function printStandings(
+  aggregate: ReturnType<typeof loadManifest> extends null ? never : unknown
+): void {
+  const agg = aggregate as {
+    standings?: Array<Record<string, number | string>>;
+    totalFaults?: number;
+  } | null;
   if (!agg || !agg.standings || agg.standings.length === 0) return;
   console.log('standings:');
   for (const row of agg.standings) {
@@ -484,6 +590,9 @@ function usage(): void {
       '              # matrix mode: 松/竹/梅 × decks/initial = 75 contestants (tactic × deck).',
       '              # --contestants selects a subset, e.g. matsu:* or matsu:01,take:07 (default all 75).',
       '  status    --run-id <id> [--dir D]',
+      '  total-battle --run-id <id> [--screen-matches N] [--keep-top K] [--confirm-matches N]',
+      '            [--chunks N] [--seed N] [--runner fixture|python] [--decks D] [--dir D] [--store D]',
+      '              # all tactic×deck contestants are screened, then only top-K are confirmed/analyzed.',
       '  analyze   --run-id <id> [--baseline <run-id>] [--min-sample N] [--notify]',
       '            [--dir D] [--store D]   # recompute stats from raw records → aggregate.json + report.md',
       '  smoke     [--run-id <id>] [--matches N] [--siblings-root D]   # real-inputs fault-0 end-to-end check',
@@ -504,6 +613,9 @@ async function main(): Promise<void> {
       break;
     case 'status':
       code = cmdStatus(args);
+      break;
+    case 'total-battle':
+      code = await cmdTotalBattle(args);
       break;
     case 'analyze':
       code = await cmdAnalyze(args);

@@ -24,6 +24,7 @@ import {
   recordShardResult,
   roundRobinShards,
   runRoundRobin,
+  runTotalBattle,
   saveManifest,
   selectContestants,
   sha256Hex,
@@ -39,7 +40,12 @@ import {
 } from '../lib/ptcgBattleLab.js';
 
 const NOW = '2026-07-18T06:00:00.000Z';
-const CONFIG: RunConfig = { matchesPerShard: 10, seed: 42, deckMode: 'own', chunksPerOrientation: 1 };
+const CONFIG: RunConfig = {
+  matchesPerShard: 10,
+  seed: 42,
+  deckMode: 'own',
+  chunksPerOrientation: 1,
+};
 
 function inputs(): ContestantInput[] {
   return CONTESTANTS.map((c, i) => ({
@@ -110,6 +116,79 @@ describe('roundRobinShards — 先後入替 round-robin', () => {
   });
 });
 
+describe('runTotalBattle — staged screen → confirm', () => {
+  function matrixInputs(): ContestantInput[] {
+    return Array.from({ length: 75 }, (_, i) => ({
+      label: `matsu:${String(i + 1).padStart(2, '0')}`,
+      kanji: `松/${i + 1}`,
+      repo: 'ptcg-agent-matsu',
+      commit: 'a'.repeat(40),
+      deckHash: sha256Hex(`deck-${i + 1}`),
+      tactic: 'matsu',
+      deckId: String(i + 1).padStart(2, '0'),
+    }));
+  }
+
+  it('screens all 75 at small N, confirms only top-K at high N, and resumes without duplicates', async () => {
+    const dir = tmpDir();
+    const all = matrixInputs();
+    const store = new LocalObjectStore(path.join(dir, 'obj'));
+    const screenIds = new Set<string>();
+    const confirmIds = new Set<string>();
+    const runner: ShardRunner = async (shard) => {
+      const games = Array.from(
+        { length: shard.matches },
+        (_, matchIndex): GameRecord => ({
+          shardId: shard.shardId,
+          matchIndex,
+          seat0: shard.seat0,
+          seat1: shard.seat1,
+          winner:
+            Number(shard.seat0.split(':')[1]) < Number(shard.seat1.split(':')[1])
+              ? shard.seat0
+              : shard.seat1,
+          fault: false,
+        })
+      );
+      return { games };
+    };
+    const opts = {
+      dir,
+      runId: 'total',
+      inputs: all,
+      screenMatches: 1,
+      confirmMatches: 7,
+      keepTop: 5,
+      seed: 10,
+      chunksPerOrientation: 1,
+      deckMode: 'matrix',
+      store,
+      runner,
+      now: () => NOW,
+      onShard: (phase: 'screen' | 'confirm', id: string, action: 'run' | 'skip') => {
+        if (action === 'run') (phase === 'screen' ? screenIds : confirmIds).add(id);
+      },
+    };
+    const first = await runTotalBattle(opts);
+    expect(first.screen.inputs).toHaveLength(75);
+    expect(first.screen.shards).toHaveLength(75 * 74);
+    expect(first.screen.shards.every((s) => s.matches === 1)).toBe(true);
+    expect(first.confirm.inputs).toHaveLength(5);
+    expect(first.confirm.shards).toHaveLength(5 * 4);
+    expect(first.confirm.shards.every((s) => s.matches === 7)).toBe(true);
+    expect(first.state.selectedLabels).toHaveLength(5);
+    expect(screenIds.size).toBe(75 * 74);
+    expect(confirmIds.size).toBe(5 * 4);
+
+    screenIds.clear();
+    confirmIds.clear();
+    const resumed = await runTotalBattle(opts);
+    expect(screenIds.size).toBe(0);
+    expect(confirmIds.size).toBe(0);
+    expect(resumed.confirm.aggregate).toEqual(first.confirm.aggregate);
+  });
+});
+
 describe('writeFileAtomic', () => {
   it('writes content and leaves no temp file behind', () => {
     const dir = tmpDir();
@@ -160,9 +239,9 @@ describe('redaction — no secret / host info in artifacts', () => {
   });
 
   it('passes a clean artifact (repo names + hashes only)', () => {
-    expect(findArtifactLeaks({ repo: 'ptcg-agent-matsu', commit: 'abc123', deckHash: 'ff00' }, {})).toEqual(
-      []
-    );
+    expect(
+      findArtifactLeaks({ repo: 'ptcg-agent-matsu', commit: 'abc123', deckHash: 'ff00' }, {})
+    ).toEqual([]);
     expect(() => assertArtifactClean({ repo: 'ptcg-agent-take' }, {})).not.toThrow();
   });
 
@@ -290,7 +369,15 @@ describe('interruption + resume', () => {
       return fixedRunner(6)(shard, inputs());
     };
     await expect(
-      runRoundRobin({ dir, runId, inputs: inputs(), config: CONFIG, store, runner: flaky, now: () => NOW })
+      runRoundRobin({
+        dir,
+        runId,
+        inputs: inputs(),
+        config: CONFIG,
+        store,
+        runner: flaky,
+        now: () => NOW,
+      })
     ).rejects.toThrow(/boom/);
 
     // The on-disk manifest is valid and has exactly the 2 completed shards.
@@ -356,7 +443,10 @@ describe('interruption + resume', () => {
     };
     await runRoundRobin(opts);
     const skips: string[] = [];
-    const b = await runRoundRobin({ ...opts, onShard: (id, act) => act === 'skip' && skips.push(id) });
+    const b = await runRoundRobin({
+      ...opts,
+      onShard: (id, act) => act === 'skip' && skips.push(id),
+    });
     expect(skips).toHaveLength(6); // all skipped on the second invocation
     expect(b.aggregate!.standings.map((s) => [s.label, s.wins, s.matches])).toEqual(
       a.aggregate!.standings.map((s) => [s.label, s.wins, s.matches])
@@ -397,10 +487,18 @@ describe('(tactic × deck) contestant model — SOT-1715', () => {
 
   it('buildTupleContestants expands 3 tactics × 25 decks into 75 labelled contestants', () => {
     const decks = enumerateDecks(fixtureDecksDir(25));
-    const contestants = buildTupleContestants({ decks, commitForTactic: (t) => `commit-${t.tactic}` });
+    const contestants = buildTupleContestants({
+      decks,
+      commitForTactic: (t) => `commit-${t.tactic}`,
+    });
     expect(contestants).toHaveLength(75);
     // First 25 are matsu (tactic-major ordering), each carrying tactic + deckId + deckHash.
-    expect(contestants[0]).toMatchObject({ label: 'matsu:01', tactic: 'matsu', kanji: '松', deckId: '01' });
+    expect(contestants[0]).toMatchObject({
+      label: 'matsu:01',
+      tactic: 'matsu',
+      kanji: '松',
+      deckId: '01',
+    });
     expect(contestants[24].label).toBe('matsu:25');
     expect(contestants[25]).toMatchObject({ label: 'take:01', tactic: 'take', kanji: '竹' });
     expect(contestants[74]).toMatchObject({ label: 'ume:25', tactic: 'ume', kanji: '梅' });
@@ -415,7 +513,7 @@ describe('(tactic × deck) contestant model — SOT-1715', () => {
     const contestants = buildTupleContestants({ decks, commitForTactic: () => 'c'.repeat(40) });
     const shards = roundRobinShards(contestants, CONFIG);
     // C(75,2) unordered pairs × 2 seat orientations.
-    expect(shards).toHaveLength((75 * 74) / 2 * 2);
+    expect(shards).toHaveLength(((75 * 74) / 2) * 2);
     const ids = new Set(shards.map((s) => s.shardId));
     expect(ids.size).toBe(shards.length); // all shard ids unique
     // Same-tactic mirror shard (different deck) is present in both orientations.
@@ -439,7 +537,7 @@ describe('(tactic × deck) contestant model — SOT-1715', () => {
       runner: fixedRunner(3),
       now: () => NOW,
     });
-    expect(m.shards).toHaveLength((9 * 8) / 2 * 2);
+    expect(m.shards).toHaveLength(((9 * 8) / 2) * 2);
     expect(m.shards.every((s) => s.status === 'completed')).toBe(true);
     expect(m.schemaVersion).toBe(SCHEMA_VERSION);
     // A same-tactic mirror shard actually ran and produced a summary.
@@ -452,7 +550,10 @@ describe('(tactic × deck) contestant model — SOT-1715', () => {
 
 describe('selectContestants — subset globs', () => {
   const decks = enumerateDecks(fixtureDecksDir(25));
-  const all = buildTupleContestants({ decks, commitForTactic: (t) => `c-${t.tactic}`.padEnd(8, 'x') });
+  const all = buildTupleContestants({
+    decks,
+    commitForTactic: (t) => `c-${t.tactic}`.padEnd(8, 'x'),
+  });
 
   it('matches a single tactic wildcard', () => {
     const matsu = selectContestants(all, 'matsu:*');
@@ -509,7 +610,13 @@ describe('backward compatibility — v1 manifest is still readable (SOT-1715)', 
     const store = new LocalObjectStore(path.join(dir, 'obj'));
     // Seed a manifest at v1 on disk, then resume it — completed shards must map 1:1.
     let m = buildManifest('resumeV1', inputs(), CONFIG, NOW);
-    m = recordShardResult(m, m.shards[0].shardId, { games: fixedRunnerGames(m.shards[0].seat0, m.shards[0].seat1, 10, 6, 0) }, store, NOW);
+    m = recordShardResult(
+      m,
+      m.shards[0].shardId,
+      { games: fixedRunnerGames(m.shards[0].seat0, m.shards[0].seat1, 10, 6, 0) },
+      store,
+      NOW
+    );
     m.schemaVersion = 'ptcg-battle-lab/v1';
     writeFileAtomic(manifestPath(dir, 'resumeV1'), JSON.stringify(m, null, 2));
     const skips: string[] = [];
