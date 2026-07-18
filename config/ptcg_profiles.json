@@ -1,0 +1,41 @@
+{
+  "enabled": true,
+  "schemaVersion": "ptcg-profile/v1",
+  "harness": {
+    "repo": "sota1111/ai-dev-control-plane",
+    "localPath": "/workspaces/ai-dev-control-plane",
+    "branch": "main",
+    "entrypoint": "src/ptcg-battle-lab-cli.ts",
+    "compatibleSchemaVersions": ["ptcg-battle-lab/v1", "ptcg-battle-lab/v2"],
+    "defaults": { "matches": 40, "seed": 20260718, "deckMode": "own" }
+  },
+  "profiles": [
+    {
+      "id": "matsu",
+      "aliases": ["松", "matsu"],
+      "repo": "sota1111/ptcg-agent-matsu",
+      "localPath": "/workspaces/ptcg-agent-matsu",
+      "branch": "main",
+      "deck": "deck.csv",
+      "defaults": { "matches": 40, "seed": 20260718, "deckMode": "own" }
+    },
+    {
+      "id": "take",
+      "aliases": ["竹", "take"],
+      "repo": "sota1111/ptcg-agent-take",
+      "localPath": "/workspaces/ptcg-agent-take",
+      "branch": "main",
+      "deck": "deck.csv",
+      "defaults": { "matches": 40, "seed": 20260718, "deckMode": "own" }
+    },
+    {
+      "id": "ume",
+      "aliases": ["梅", "ume"],
+      "repo": "sota1111/ptcg-agent-ume",
+      "localPath": "/workspaces/ptcg-agent-ume",
+      "branch": "main",
+      "deck": "deck.csv",
+      "defaults": { "matches": 40, "seed": 20260718, "deckMode": "own" }
+    }
+  ]
+}
