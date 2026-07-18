@@ -157,6 +157,26 @@ describe('parseWorkerRoleDirectives', () => {
   test('no solo token → solo is undefined (inherit base __solo__)', () => {
     expect(parseWorkerRoleDirectives('workers: implementation=codex').solo).toBeUndefined();
   });
+
+  test.each(['on', 'true', 'yes', '1', 'allow'])('handoff=%s allows worker handoff', (value) => {
+    expect(parseWorkerRoleDirectives(`workers: handoff=${value}`).handoff).toBe(true);
+  });
+
+  test.each(['off', 'false', 'no', '0', 'deny'])('handoff=%s disables worker handoff', (value) => {
+    expect(parseWorkerRoleDirectives(`workers: handoff=${value}`).handoff).toBe(false);
+  });
+
+  test('the newest handoff directive wins and combines with role overrides', () => {
+    const parsed = parseWorkerRoleDirectives('workers: handoff=off\nworkers: implementation=codex>claude, handoff=on');
+    expect(parsed.handoff).toBe(true);
+    expect(parsed.overrides.implementation).toEqual(['codex', 'claude']);
+  });
+
+  test('invalid handoff values are ignored with a warning', () => {
+    const { handoff, warnings } = parseWorkerRoleDirectives('workers: handoff=maybe');
+    expect(handoff).toBeUndefined();
+    expect(warnings.some((w) => w.includes('invalid handoff value'))).toBe(true);
+  });
 });
 
 describe('mergeWorkerRoleOverrides', () => {

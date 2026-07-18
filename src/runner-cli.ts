@@ -108,12 +108,12 @@ async function main() {
         process.exit(0);
       }
 
-      const { overrides, models, solo, warnings } = parseWorkerRoleDirectives(text);
+      const { overrides, models, solo, handoff, warnings } = parseWorkerRoleDirectives(text);
       for (const w of warnings) process.stderr.write(`resolve-worker-roles: ${w}\n`);
       const overriddenRoles = Object.keys(overrides);
       const modelledRoles = Object.keys(models);
-      // SOT-1591: a solo directive alone (e.g. `workers: solo=off`) must also produce a per-issue file.
-      if (overriddenRoles.length === 0 && modelledRoles.length === 0 && !solo) {
+      // A solo or handoff directive alone must also produce a per-issue file.
+      if (overriddenRoles.length === 0 && modelledRoles.length === 0 && !solo && handoff === undefined) {
         process.stdout.write('');
         process.exit(0);
       }
@@ -132,6 +132,7 @@ async function main() {
       // loader (loadWorkerRolesConfig) and the dispatcher's chain reader both ignore it; run_worker.sh
       // reads `__models__[role][worker]` to pass the model to the selected worker's run script.
       const output: Record<string, unknown> = { ...merged };
+      if (handoff !== undefined) output.__handoff__ = handoff;
       // SOT-1583 role model pins + SOT-1591 solo model pin share the `__models__` section (run_worker.sh
       // reads `__models__[role][worker]`; the synthetic `solo` role is looked up the same way).
       const modelsOut: Record<string, Record<string, string>> = {};
@@ -165,7 +166,8 @@ async function main() {
       const modelSummary = modelledRoles
         .map((r) => `${r}{${Object.entries((models as any)[r]).map(([w, m]) => `${w}:${m}`).join(',')}}`)
         .join(', ');
-      const summary = [overrideSummary, modelSummary, soloSummary].filter(Boolean).join(' | ');
+      const handoffSummary = handoff === undefined ? '' : `handoff=${handoff ? 'on' : 'off'}`;
+      const summary = [overrideSummary, modelSummary, soloSummary, handoffSummary].filter(Boolean).join(' | ');
       process.stderr.write(`resolve-worker-roles: ${issueId} overrides ${summary} → ${outPath}\n`);
       runner.log('WORKER_ROLES', `${issueId} per-issue override: ${summary}`, { issue: issueId });
       process.stdout.write(outPath);

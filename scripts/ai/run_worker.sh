@@ -77,6 +77,8 @@ CHAIN="$(PIPELINE_PINNED_WORKER="${PIPELINE_PINNED_WORKER:-}" node -e '
     if (WORKERS.includes(pin) && out.includes(pin)) {
       out = [pin, ...out.filter((w) => w !== pin)];
     }
+    // Linear `workers: handoff=off` disables cross-worker fallback for this issue.
+    if (cfg.__handoff__ === false) out = out.slice(0, 1);
     process.stdout.write(out.join(" "));
   } catch (e) { process.stdout.write(""); }
 ' "$WORKER_ROLES_FILE" "$ROLE" 2>/dev/null || echo '')"
