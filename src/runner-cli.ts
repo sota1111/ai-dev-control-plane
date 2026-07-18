@@ -135,7 +135,16 @@ async function main() {
       if (handoff !== undefined) output.__handoff__ = handoff;
       // SOT-1583 role model pins + SOT-1591 solo model pin share the `__models__` section (run_worker.sh
       // reads `__models__[role][worker]`; the synthetic `solo` role is looked up the same way).
-      const modelsOut: Record<string, Record<string, string>> = {};
+      let baseModels: Record<string, Record<string, string>> = {};
+      try {
+        const rawBase = JSON.parse(fs.readFileSync(baseConfigPath, 'utf8'));
+        if (rawBase?.__models__ && typeof rawBase.__models__ === 'object') {
+          baseModels = JSON.parse(JSON.stringify(rawBase.__models__));
+        }
+      } catch {
+        // The validated role config already loaded successfully; invalid optional metadata is ignored.
+      }
+      const modelsOut: Record<string, Record<string, string>> = baseModels;
       for (const [r, m] of Object.entries(models)) modelsOut[r] = { ...(m as Record<string, string>) };
       // SOT-1591: resolve the effective solo selector for this issue.
       // - `solo=<worker>` directive → force solo on that worker (+ optional model pin);
