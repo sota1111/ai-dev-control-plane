@@ -22,14 +22,18 @@ import { fileURLToPath } from 'node:url';
 import {
   CONTESTANTS,
   LocalObjectStore,
+  buildTupleContestants,
+  enumerateDecks,
   loadManifest,
   runRoundRobin,
+  selectContestants,
   sha256Hex,
   type ContestantInput,
   type GameRecord,
   type RunConfig,
   type ShardRunner,
   type ShardSpec,
+  type Tactic,
 } from './lib/ptcgBattleLab.js';
 import { analyzeRun, buildNotification } from './lib/ptcgAnalyze.js';
 
@@ -93,6 +97,38 @@ function resolveInputs(siblingsRoot: string): ContestantInput[] {
   });
 }
 
+/** Default deck pool location: the matsu sibling's decks/initial (all three siblings ship identical decks). */
+function defaultDecksDir(siblingsRoot: string): string {
+  const sibling = path.join(siblingsRoot, 'ptcg-agent-matsu', 'decks', 'initial');
+  if (fs.existsSync(sibling)) return sibling;
+  // Fall back to a control-plane-local pool if one is ever vendored here.
+  return path.join(CONTROL_PLANE_ROOT, 'decks', 'initial');
+}
+
+/**
+ * Build the (tactic × deck) contestant matrix and select the requested subset. `subset` is a
+ * comma-separated `tactic:deck` glob spec (`matsu:*`, `matsu:01,take:07`); `*`/empty ⇒ all 75.
+ * Throws with an actionable message when the deck pool is missing or the subset selects nobody.
+ */
+function resolveTupleInputs(siblingsRoot: string, decksDir: string, subset: string): ContestantInput[] {
+  if (!fs.existsSync(decksDir)) {
+    throw new Error(
+      `deck pool not found: ${path.basename(path.dirname(decksDir))}/${path.basename(decksDir)} — pass --decks <dir> (e.g. a sibling repo's decks/initial)`
+    );
+  }
+  const decks = enumerateDecks(decksDir);
+  if (decks.length === 0) throw new Error(`no *.csv decks in ${decksDir}`);
+  const all = buildTupleContestants({
+    decks,
+    commitForTactic: (t: Tactic) => repoCommit(path.join(siblingsRoot, t.repo)),
+  });
+  const selected = selectContestants(all, subset);
+  if (selected.length === 0) {
+    throw new Error(`--contestants "${subset}" selected 0 contestants (of ${all.length})`);
+  }
+  return selected;
+}
+
 /**
  * Deterministic fixture runner. Uses a seeded LCG (no Math.random) so a run is byte-reproducible and the
  * pipeline is exercisable without the engine. Seat 0 wins with a fixed per-pair bias; every ~17th match
@@ -152,9 +188,13 @@ const smokeRunner: ShardRunner = async (shard: ShardSpec) => {
   return { games };
 };
 
-/** Fixed illustrative strength bias by contestant (fixture only; not a claim about real strength). */
+/**
+ * Fixed illustrative strength bias by contestant (fixture only; not a claim about real strength).
+ * Keyed by tactic, so tuple labels like `matsu:01` bias by their `matsu` prefix.
+ */
 function biasFor(label: string): number {
-  return { matsu: 0.15, take: 0.0, ume: -0.1 }[label] ?? 0;
+  const tactic = label.split(':')[0];
+  return { matsu: 0.15, take: 0.0, ume: -0.1 }[tactic] ?? 0;
 }
 
 /** Real runner: shell to matsu's cross-battle driver per shard. Best-effort; needs the engine. */
@@ -222,13 +262,30 @@ async function cmdRun(args: Args): Promise<number> {
     console.error('error: --run-id is required');
     return 2;
   }
+  // Tuple (tactic × deck) matrix mode: entered by --contestants or --matrix. Otherwise the legacy
+  // 3-contestant own-deck run (each plays its repo's deck.csv) is preserved for backward compatibility.
+  const tupleMode = args.contestants !== undefined || args.matrix === 'true';
   const config: RunConfig = {
     matchesPerShard: Number(args.matches ?? 40),
     seed: Number(args.seed ?? 20260718),
-    deckMode: args['deck-mode'] ?? 'own',
+    deckMode: args['deck-mode'] ?? (tupleMode ? 'matrix' : 'own'),
     chunksPerOrientation: Number(args.chunks ?? 1),
   };
-  const inputs = resolveInputs(siblingsRoot);
+  let inputs: ContestantInput[];
+  if (tupleMode) {
+    // A bare --contestants / --matrix (no value) selects all 75; otherwise the given subset spec.
+    const subset = args.contestants && args.contestants !== 'true' ? args.contestants : '*';
+    const decksDir = args.decks ?? defaultDecksDir(siblingsRoot);
+    try {
+      inputs = resolveTupleInputs(siblingsRoot, decksDir, subset);
+    } catch (err) {
+      console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
+      return 2;
+    }
+    console.log(`  contestants: ${inputs.length} (tactic × deck; subset="${subset}")`);
+  } else {
+    inputs = resolveInputs(siblingsRoot);
+  }
   const store = new LocalObjectStore(storeRoot);
   const runnerKind = args.runner ?? 'fixture';
   const runner: ShardRunner =
@@ -423,6 +480,9 @@ function usage(): void {
       'commands:',
       '  run       --run-id <id> [--matches N] [--seed N] [--deck-mode own|mirror]',
       '            [--chunks N] [--runner fixture|python] [--dir D] [--store D] [--siblings-root D]',
+      '            [--matrix | --contestants <subset>] [--decks <dir>]',
+      '              # matrix mode: 松/竹/梅 × decks/initial = 75 contestants (tactic × deck).',
+      '              # --contestants selects a subset, e.g. matsu:* or matsu:01,take:07 (default all 75).',
       '  status    --run-id <id> [--dir D]',
       '  analyze   --run-id <id> [--baseline <run-id>] [--min-sample N] [--notify]',
       '            [--dir D] [--store D]   # recompute stats from raw records → aggregate.json + report.md',

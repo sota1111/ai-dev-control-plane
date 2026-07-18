@@ -10,16 +10,22 @@ import {
   CONTESTANTS,
   LocalObjectStore,
   SCHEMA_VERSION,
+  TACTICS,
   assertArtifactClean,
   buildManifest,
+  buildTupleContestants,
+  deckIdFromFilename,
+  enumerateDecks,
   findArtifactLeaks,
   isShardCompleted,
   loadManifest,
   manifestPath,
+  matchContestant,
   recordShardResult,
   roundRobinShards,
   runRoundRobin,
   saveManifest,
+  selectContestants,
   sha256Hex,
   summarizeGames,
   validateManifest,
@@ -355,6 +361,170 @@ describe('interruption + resume', () => {
     expect(b.aggregate!.standings.map((s) => [s.label, s.wins, s.matches])).toEqual(
       a.aggregate!.standings.map((s) => [s.label, s.wins, s.matches])
     );
+  });
+});
+
+/** Create a fixture decks/initial dir with `n` numbered csvs plus non-deck files (README/manifest). */
+function fixtureDecksDir(n: number): string {
+  const dir = tmpDir();
+  for (let i = 1; i <= n; i++) {
+    const id = String(i).padStart(2, '0');
+    fs.writeFileSync(path.join(dir, `${id}_deck_${id}.csv`), `card-${id},4\n`);
+  }
+  // Non-csv files must be ignored by enumeration.
+  fs.writeFileSync(path.join(dir, 'README.md'), '# decks');
+  fs.writeFileSync(path.join(dir, 'manifest.json'), '{}');
+  return dir;
+}
+
+describe('(tactic × deck) contestant model — SOT-1715', () => {
+  it('deckIdFromFilename takes the numeric prefix, else the basename', () => {
+    expect(deckIdFromFilename('01_dragapult.csv')).toBe('01');
+    expect(deckIdFromFilename('25_mega_lopunny_ex.csv')).toBe('25');
+    expect(deckIdFromFilename('/abs/path/07_foo.csv')).toBe('07');
+    expect(deckIdFromFilename('custom.csv')).toBe('custom');
+  });
+
+  it('enumerateDecks lists only *.csv, sorted numerically, with content hashes', () => {
+    const dir = fixtureDecksDir(25);
+    const decks = enumerateDecks(dir);
+    expect(decks).toHaveLength(25); // README.md / manifest.json ignored
+    expect(decks.map((d) => d.deckId)).toEqual(
+      Array.from({ length: 25 }, (_, i) => String(i + 1).padStart(2, '0'))
+    );
+    expect(decks[0].deckHash).toBe(sha256Hex('card-01,4\n'));
+  });
+
+  it('buildTupleContestants expands 3 tactics × 25 decks into 75 labelled contestants', () => {
+    const decks = enumerateDecks(fixtureDecksDir(25));
+    const contestants = buildTupleContestants({ decks, commitForTactic: (t) => `commit-${t.tactic}` });
+    expect(contestants).toHaveLength(75);
+    // First 25 are matsu (tactic-major ordering), each carrying tactic + deckId + deckHash.
+    expect(contestants[0]).toMatchObject({ label: 'matsu:01', tactic: 'matsu', kanji: '松', deckId: '01' });
+    expect(contestants[24].label).toBe('matsu:25');
+    expect(contestants[25]).toMatchObject({ label: 'take:01', tactic: 'take', kanji: '竹' });
+    expect(contestants[74]).toMatchObject({ label: 'ume:25', tactic: 'ume', kanji: '梅' });
+    // matsu:01 / take:01 / ume:01 share the same deck → same deckHash.
+    const deck01 = contestants.filter((c) => c.deckId === '01').map((c) => c.deckHash);
+    expect(new Set(deck01).size).toBe(1);
+    expect(contestants.every((c) => c.commit === `commit-${c.tactic}`)).toBe(true);
+  });
+
+  it('roundRobinShards over 75 contestants yields C(75,2)*2 shards including same-tactic mirrors', () => {
+    const decks = enumerateDecks(fixtureDecksDir(25));
+    const contestants = buildTupleContestants({ decks, commitForTactic: () => 'c'.repeat(40) });
+    const shards = roundRobinShards(contestants, CONFIG);
+    // C(75,2) unordered pairs × 2 seat orientations.
+    expect(shards).toHaveLength((75 * 74) / 2 * 2);
+    const ids = new Set(shards.map((s) => s.shardId));
+    expect(ids.size).toBe(shards.length); // all shard ids unique
+    // Same-tactic mirror shard (different deck) is present in both orientations.
+    expect(ids.has('matsu:01-vs-matsu:02')).toBe(true);
+    expect(ids.has('matsu:02-vs-matsu:01')).toBe(true);
+    // Cross-tactic shard present too.
+    expect(ids.has('matsu:01-vs-take:01')).toBe(true);
+  });
+
+  it('the built matrix aggregates end-to-end through the fixture runner (mirror shards included)', async () => {
+    const decks = enumerateDecks(fixtureDecksDir(3)); // keep it small: 3 tactics × 3 decks = 9 contestants
+    const contestants = buildTupleContestants({ decks, commitForTactic: () => 'c'.repeat(40) });
+    expect(contestants).toHaveLength(9);
+    const dir = tmpDir();
+    const m = await runRoundRobin({
+      dir,
+      runId: 'matrix',
+      inputs: contestants,
+      config: { ...CONFIG, matchesPerShard: 4 },
+      store: new LocalObjectStore(path.join(dir, 'obj')),
+      runner: fixedRunner(3),
+      now: () => NOW,
+    });
+    expect(m.shards).toHaveLength((9 * 8) / 2 * 2);
+    expect(m.shards.every((s) => s.status === 'completed')).toBe(true);
+    expect(m.schemaVersion).toBe(SCHEMA_VERSION);
+    // A same-tactic mirror shard actually ran and produced a summary.
+    const mirror = m.shards.find((s) => s.shardId === 'matsu:01-vs-matsu:02');
+    expect(mirror?.summary?.matches).toBe(4);
+    // Every contestant is represented in the standings.
+    expect(m.aggregate!.standings).toHaveLength(9);
+  });
+});
+
+describe('selectContestants — subset globs', () => {
+  const decks = enumerateDecks(fixtureDecksDir(25));
+  const all = buildTupleContestants({ decks, commitForTactic: (t) => `c-${t.tactic}`.padEnd(8, 'x') });
+
+  it('matches a single tactic wildcard', () => {
+    const matsu = selectContestants(all, 'matsu:*');
+    expect(matsu).toHaveLength(25);
+    expect(matsu.every((c) => c.tactic === 'matsu')).toBe(true);
+  });
+
+  it('matches an explicit comma list', () => {
+    const picked = selectContestants(all, 'matsu:01,take:07');
+    expect(picked.map((c) => c.label)).toEqual(['matsu:01', 'take:07']);
+  });
+
+  it('matches a single exact label and a deck wildcard across tactics', () => {
+    expect(selectContestants(all, 'ume:25').map((c) => c.label)).toEqual(['ume:25']);
+    const deck01 = selectContestants(all, '*:01');
+    expect(deck01.map((c) => c.label)).toEqual(['matsu:01', 'take:01', 'ume:01']);
+  });
+
+  it('* / empty spec selects everyone; unknown selects none; no duplicates when patterns overlap', () => {
+    expect(selectContestants(all, '*')).toHaveLength(75);
+    expect(selectContestants(all, '')).toHaveLength(75);
+    expect(selectContestants(all, 'nope:99')).toHaveLength(0);
+    // Overlapping patterns (matsu:* also covers matsu:01) must not double-list a contestant.
+    expect(selectContestants(all, 'matsu:*,matsu:01')).toHaveLength(25);
+  });
+
+  it('matchContestant treats a bare tactic (no colon) as a tactic match', () => {
+    expect(matchContestant(all[0], 'matsu')).toBe(true); // matsu:01
+    expect(matchContestant(all[25], 'matsu')).toBe(false); // take:01
+  });
+});
+
+describe('backward compatibility — v1 manifest is still readable (SOT-1715)', () => {
+  it('TACTICS mirrors CONTESTANTS', () => {
+    expect(TACTICS.map((t) => t.tactic)).toEqual(CONTESTANTS.map((c) => c.label));
+    expect(TACTICS.map((t) => t.kanji)).toEqual(CONTESTANTS.map((c) => c.kanji));
+  });
+
+  it('loadManifest reads a legacy v1 own-deck manifest (inputs without tactic/deckId)', () => {
+    const dir = tmpDir();
+    // A v1 manifest: 3 own-deck contestants, schemaVersion pinned to v1, no tactic/deckId on inputs.
+    const m = buildManifest('legacy', inputs(), CONFIG, NOW);
+    m.schemaVersion = 'ptcg-battle-lab/v1';
+    expect(m.inputs.every((i) => i.tactic === undefined && i.deckId === undefined)).toBe(true);
+    expect(validateManifest(m)).toEqual([]);
+    writeFileAtomic(manifestPath(dir, 'legacy'), JSON.stringify(m, null, 2));
+    const loaded = loadManifest(dir, 'legacy');
+    expect(loaded!.schemaVersion).toBe('ptcg-battle-lab/v1');
+    expect(loaded!.shards).toHaveLength(6);
+  });
+
+  it('a v1 own-deck run resumes unchanged (labels/shard ids identical to before the bump)', async () => {
+    const dir = tmpDir();
+    const store = new LocalObjectStore(path.join(dir, 'obj'));
+    // Seed a manifest at v1 on disk, then resume it — completed shards must map 1:1.
+    let m = buildManifest('resumeV1', inputs(), CONFIG, NOW);
+    m = recordShardResult(m, m.shards[0].shardId, { games: fixedRunnerGames(m.shards[0].seat0, m.shards[0].seat1, 10, 6, 0) }, store, NOW);
+    m.schemaVersion = 'ptcg-battle-lab/v1';
+    writeFileAtomic(manifestPath(dir, 'resumeV1'), JSON.stringify(m, null, 2));
+    const skips: string[] = [];
+    const final = await runRoundRobin({
+      dir,
+      runId: 'resumeV1',
+      inputs: inputs(),
+      config: CONFIG,
+      store,
+      runner: fixedRunner(6),
+      now: () => NOW,
+      onShard: (id, act) => act === 'skip' && skips.push(id),
+    });
+    expect(skips).toEqual([m.shards[0].shardId]); // the pre-completed shard is skipped, not re-run
+    expect(final.shards.every((s) => s.status === 'completed')).toBe(true);
   });
 });
 
