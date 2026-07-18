@@ -7,6 +7,10 @@ node_modules/
 # object key + checksum + size (SOT-1713). Manifests under artifacts/ptcg-battle-lab/runs/ MAY be
 # committed per-run as the git-managed artifact.
 artifacts/ptcg-battle-lab/objects/
+# ptcg-analyze regenerable outputs (SOT-1711) — aggregate.<run>.json / report.<run>.md are recomputed
+# from the raw records on demand; kept out of git like the object store.
+artifacts/ptcg-battle-lab/runs/aggregate.*.json
+artifacts/ptcg-battle-lab/runs/report.*.md
 
 # 環境変数（シークレットを含むため追跡しない）
 .env

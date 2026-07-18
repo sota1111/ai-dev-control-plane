@@ -31,6 +31,7 @@ import {
   type ShardRunner,
   type ShardSpec,
 } from './lib/ptcgBattleLab.js';
+import { analyzeRun, buildNotification } from './lib/ptcgAnalyze.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -116,6 +117,36 @@ const fixtureRunner: ShardRunner = async (shard: ShardSpec) => {
       seat1: shard.seat1,
       winner,
       fault,
+      // Deterministic per-match turns/time so analyze can report 平均手数・時間 without the engine.
+      turns: 8 + Math.floor(next() * 20),
+      durationMs: 200 + Math.floor(next() * 800),
+    });
+  }
+  return { games };
+};
+
+/**
+ * Fault-free deterministic smoke runner. Same seeded LCG as the fixture runner but NEVER charges a
+ * fault — used by `smoke` so the real-repository end-to-end check asserts fault 0 regardless of N.
+ */
+const smokeRunner: ShardRunner = async (shard: ShardSpec) => {
+  let state = (shard.seed >>> 0) || 1;
+  const next = (): number => {
+    state = (Math.imul(1664525, state) + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+  const games: GameRecord[] = [];
+  for (let i = 0; i < shard.matches; i++) {
+    const seat0Wins = next() < 0.5 + biasFor(shard.seat0) - biasFor(shard.seat1);
+    games.push({
+      shardId: shard.shardId,
+      matchIndex: i,
+      seat0: shard.seat0,
+      seat1: shard.seat1,
+      winner: seat0Wins ? shard.seat0 : shard.seat1,
+      fault: false,
+      turns: 8 + Math.floor(next() * 20),
+      durationMs: 200 + Math.floor(next() * 800),
     });
   }
   return { games };
@@ -255,6 +286,123 @@ function cmdPreflight(args: Args): number {
   return ok ? 0 : 1;
 }
 
+/**
+ * analyze — recompute statistics FROM RAW RECORDS and write aggregate.<run-id>.json + report.<run-id>.md.
+ * Prints the run-id and report path (for Linear/Discord tracking); `--notify` also posts a one-line
+ * Discord update via scripts/ai/notify_discord.sh.
+ */
+async function cmdAnalyze(args: Args): Promise<number> {
+  const dir = args.dir ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'runs');
+  const storeRoot = args.store ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'objects');
+  const runId = args['run-id'];
+  if (!runId) {
+    console.error('error: --run-id is required');
+    return 2;
+  }
+  const store = new LocalObjectStore(storeRoot);
+  const result = analyzeRun({
+    dir,
+    runId,
+    store,
+    generatedAt: isoNow(),
+    minSample: args['min-sample'] ? Number(args['min-sample']) : undefined,
+    baselineRunId: args.baseline,
+  });
+  const { analysis } = result;
+  console.log(`ptcg-analyze run ${runId} — ${analysis.ranking.note}`);
+  printAnalysisStandings(analysis);
+  const relReport = path.relative(CONTROL_PLANE_ROOT, result.reportPath);
+  const relAgg = path.relative(CONTROL_PLANE_ROOT, result.aggregatePath);
+  console.log(`aggregate: ${relAgg}`);
+  console.log(`report:    ${relReport}`);
+  if (analysis.warnings.length > 0) {
+    console.log('warnings:');
+    for (const w of analysis.warnings) console.log(`  - ${w}`);
+  }
+
+  if (args.notify === 'true' || args.notify === '1') {
+    const msg = buildNotification(analysis, relReport);
+    try {
+      execFileSync('bash', [path.join(CONTROL_PLANE_ROOT, 'scripts', 'ai', 'notify_discord.sh'), msg], {
+        cwd: CONTROL_PLANE_ROOT,
+        stdio: 'ignore',
+      });
+      console.log('notified Discord.');
+    } catch {
+      console.log('notify failed (best-effort); message would have been:');
+      console.log(`  ${msg}`);
+    }
+  }
+  return 0;
+}
+
+/**
+ * smoke — resolve REAL contestant inputs (松竹梅 sibling repos: commit + deck hash) and run a small
+ * fault-free end-to-end round-robin, then analyze it. Asserts fault 0 and that every artifact (manifest,
+ * object logs, aggregate.json, report.md) exists. This is the "実 repository smoke" acceptance check; it
+ * uses the deterministic fault-free runner so it is reproducible in the control-plane without the engine.
+ */
+async function cmdSmoke(args: Args): Promise<number> {
+  const siblingsRoot = args['siblings-root'] ?? path.dirname(CONTROL_PLANE_ROOT);
+  const runId = args['run-id'] ?? 'smoke';
+  const matches = Number(args.matches ?? 6);
+  const dir = args.dir ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'runs');
+  const storeRoot = args.store ?? path.join(CONTROL_PLANE_ROOT, 'artifacts', 'ptcg-battle-lab', 'objects');
+  const inputs = resolveInputs(siblingsRoot);
+  const missing = inputs.filter((i) => i.commit === 'unknown').map((i) => i.repo);
+  if (missing.length > 0) {
+    console.error(`smoke: sibling repo(s) not resolvable: ${missing.join(', ')} (siblings-root=${path.basename(siblingsRoot)})`);
+    return 1;
+  }
+  const config: RunConfig = { matchesPerShard: matches, seed: 20260718, deckMode: 'own', chunksPerOrientation: 1 };
+  const store = new LocalObjectStore(storeRoot);
+  console.log(`ptcg-battle-lab smoke ${runId} (real inputs, fault-free runner, matches/shard=${matches})`);
+  const manifest = await runRoundRobin({
+    dir,
+    runId,
+    inputs,
+    config,
+    store,
+    runner: smokeRunner,
+    now: isoNow,
+  });
+  const result = analyzeRun({ dir, runId, store, generatedAt: isoNow() });
+  // Assertions: fault 0 and all artifacts present.
+  const artifacts = [
+    path.join(dir, `manifest.${runId}.json`),
+    result.aggregatePath,
+    result.reportPath,
+  ];
+  const objectDirs = manifest.shards.map((s) => s.gamesRef?.key).filter(Boolean) as string[];
+  let ok = result.analysis.totals.faults === 0;
+  for (const p of artifacts) {
+    if (!fs.existsSync(p)) {
+      ok = false;
+      console.error(`  MISSING artifact: ${path.relative(CONTROL_PLANE_ROOT, p)}`);
+    }
+  }
+  for (const key of objectDirs) {
+    if (!store.has(key)) {
+      ok = false;
+      console.error(`  MISSING object: ${key}`);
+    }
+  }
+  printAnalysisStandings(result.analysis);
+  console.log(`  faults: ${result.analysis.totals.faults} · shards: ${manifest.shards.length} · objects: ${objectDirs.length}`);
+  console.log(`  report: ${path.relative(CONTROL_PLANE_ROOT, result.reportPath)}`);
+  console.log(ok ? 'SMOKE OK (fault 0, all artifacts present)' : 'SMOKE FAILED');
+  return ok ? 0 : 1;
+}
+
+function printAnalysisStandings(a: ReturnType<typeof analyzeRun>['analysis']): void {
+  console.log('standings:');
+  for (const s of a.agents) {
+    console.log(
+      `  ${s.kanji} ${s.label}: winRate=${s.winRate.toFixed(3)} [${s.ciLow.toFixed(3)}, ${s.ciHigh.toFixed(3)}] (decided=${s.decided}, faults=${s.faults}, 手数≈${s.avgTurns === null ? '—' : s.avgTurns.toFixed(1)})`
+    );
+  }
+}
+
 function printStandings(aggregate: ReturnType<typeof loadManifest> extends null ? never : unknown): void {
   const agg = aggregate as { standings?: Array<Record<string, number | string>>; totalFaults?: number } | null;
   if (!agg || !agg.standings || agg.standings.length === 0) return;
@@ -276,9 +424,13 @@ function usage(): void {
       '  run       --run-id <id> [--matches N] [--seed N] [--deck-mode own|mirror]',
       '            [--chunks N] [--runner fixture|python] [--dir D] [--store D] [--siblings-root D]',
       '  status    --run-id <id> [--dir D]',
+      '  analyze   --run-id <id> [--baseline <run-id>] [--min-sample N] [--notify]',
+      '            [--dir D] [--store D]   # recompute stats from raw records → aggregate.json + report.md',
+      '  smoke     [--run-id <id>] [--matches N] [--siblings-root D]   # real-inputs fault-0 end-to-end check',
       '  preflight [--siblings-root D]',
       '',
       're-invoke `run` with the same --run-id to resume; completed shards are skipped.',
+      '`analyze` reads the raw games.jsonl objects back (checksum-verified) and never trusts the manifest tally.',
     ].join('\n')
   );
 }
@@ -292,6 +444,12 @@ async function main(): Promise<void> {
       break;
     case 'status':
       code = cmdStatus(args);
+      break;
+    case 'analyze':
+      code = await cmdAnalyze(args);
+      break;
+    case 'smoke':
+      code = await cmdSmoke(args);
       break;
     case 'preflight':
       code = cmdPreflight(args);
