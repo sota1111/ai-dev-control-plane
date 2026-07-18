@@ -55,6 +55,20 @@ kaggle competitions submissions -c pokemon-tcg-ai-battle
 Validation Error の場合は Kaggle の submission log を取得して原因を修正し、日次上限を
 浪費しないようローカル検証後に再提出する。
 
+```bash
+# submission ref から validation episode id を調べる
+kaggle competitions episodes <submission-ref> --format json
+
+# episode 内の各 agent（validation は通常 0 と 1）のログを取得する
+kaggle competitions logs <episode-id> 0 --path /tmp/kaggle-agent-logs
+kaggle competitions logs <episode-id> 1 --path /tmp/kaggle-agent-logs
+```
+
+Kaggle は `main.py` を通常の script import ではなく raw Python として `exec()` するため、
+`__file__` や実行 cwd を前提にしない。トップレベル package 名が実行環境の package と
+衝突する場合は、traceback 上の submission root（現在は `/kaggle_simulations/agent`）を
+`sys.path` の先頭へ追加し、同梱 package が選ばれることを validation で確認する。
+
 ## 運用上の注意
 
 - Simulation 部門は提出回数と最終評価対象数に制約があるため、同一 artifact を重複提出しない。
