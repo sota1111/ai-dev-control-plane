@@ -5,6 +5,7 @@ FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 # ---------------------------------------------------------------------------
 ARG NODE_MAJOR=20
 ARG FLUTTER_VERSION=3.44.4
+ARG KAGGLE_VERSION=2.2.3
 
 # ---------------------------------------------------------------------------
 # Base build / runtime dependencies
@@ -17,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
+    pipx \
     ripgrep \
     jq \
     gpg \
@@ -53,6 +55,17 @@ RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr
 RUN curl -LsSf https://astral.sh/uv/install.sh \
       | env UV_INSTALL_DIR=/usr/local/bin INSTALLER_NO_MODIFY_PATH=1 sh \
     && uv --version && uvx --version
+
+# ---------------------------------------------------------------------------
+# Kaggle CLI
+#   Python アプリを隔離して導入するため pipx を使う。remoteUser=vscode のユーザー
+#   領域へ、稼働コンテナで検証済みのバージョンを固定してインストールする。
+#   ENV で PATH を設定し、対話シェルだけでなく CI やスクリプトからも利用可能にする。
+#   認証情報はイメージに含めず、コンテナ起動後に `kaggle auth login` で設定する。
+# ---------------------------------------------------------------------------
+ENV PATH="/home/vscode/.local/bin:${PATH}"
+RUN su vscode -c "pipx install kaggle==${KAGGLE_VERSION}" \
+    && kaggle --version
 
 # ---------------------------------------------------------------------------
 # tmux + tmuxinator
