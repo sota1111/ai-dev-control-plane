@@ -3,6 +3,11 @@
 # Node.js
 node_modules/
 
+# ptcg-battle-lab raw game logs (object store) — kept out of git; the manifest references them by
+# object key + checksum + size (SOT-1713). Manifests under artifacts/ptcg-battle-lab/runs/ MAY be
+# committed per-run as the git-managed artifact.
+artifacts/ptcg-battle-lab/objects/
+
 # 環境変数（シークレットを含むため追跡しない）
 .env
 .env.local
