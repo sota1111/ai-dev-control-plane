@@ -158,6 +158,15 @@
 workers: implementation=codex, verification=claude
 ```
 
+worker の失敗時に別 worker へ引き継ぐかも issue 単位で指定できる（未指定は `on`）:
+
+```text
+workers: handoff=off, implementation=codex>claude
+```
+
+`handoff=off` では各ロールの先頭 worker だけを実行し、失敗しても次候補へ引き継がない。
+再び許可する場合は `handoff=on` を指定する。
+
 - ロール: task-check / decomposition / implementation / verification / acceptance / github / linear-report
 - worker: claude / codex / antigravity（別名 `agy`）。フォールバックは `>` 区切り（例 `implementation=codex>claude`）
 - 説明文でもコメントでも可。同じロールは**最新の記述が優先**。パイプライン開始時に `run_auto.sh` が

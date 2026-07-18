@@ -33,6 +33,11 @@
 // When no solo token is present the base config's __solo__ is inherited. A solo token combines with role
 // overrides on the same line (e.g. `workers: solo=off, implementation=codex`).
 //
+// A Linear issue may also control whether a failed worker is handed off to the next worker:
+//
+//   workers: handoff=on     → allow the normal fallback chain (default)
+//   workers: handoff=off    → try only the first worker for every role
+//
 // This module is pure (no I/O): it parses directive text and merges overrides onto a base config. The
 // runner-cli `resolve-worker-roles` subcommand fetches the issue text, calls these, and writes a
 // per-issue merged config that run_auto.sh points WORKER_ROLES_FILE at for the pipeline run.
@@ -76,6 +81,8 @@ export interface DirectiveParseResult {
   models: RoleModelMap;
   /** SOT-1591: per-issue solo override from a `solo=` token (undefined when not specified). */
   solo?: SoloDirective;
+  /** Per-issue cross-worker handoff policy (undefined means inherit the default: allowed). */
+  handoff?: boolean;
   /** Human-readable notes about ignored/invalid tokens (never throws). */
   warnings: string[];
 }
@@ -94,6 +101,7 @@ export function parseWorkerRoleDirectives(text: string | null | undefined): Dire
   const models: RoleModelMap = {};
   const warnings: string[] = [];
   let solo: SoloDirective | undefined;
+  let handoff: boolean | undefined;
   if (!text) return { overrides, models, warnings };
 
   const lineRe = /^\s*workers?\s*:\s*(.+?)\s*$/i;
@@ -110,6 +118,17 @@ export function parseWorkerRoleDirectives(text: string | null | undefined): Dire
         continue;
       }
       const role = pair.slice(0, eq).trim().toLowerCase();
+      if (role === 'handoff') {
+        const value = pair.slice(eq + 1).trim().toLowerCase();
+        if (['on', 'true', 'yes', '1', 'allow', 'allowed'].includes(value)) {
+          handoff = true;
+        } else if (['off', 'false', 'no', '0', 'deny', 'denied'].includes(value)) {
+          handoff = false;
+        } else {
+          warnings.push(`invalid handoff value "${value}" (valid: on or off)`);
+        }
+        continue;
+      }
       // SOT-1591: `solo=<worker>[:model]` / `solo=off` is a special directive, not a role chain. It sets
       // (or disables) solo mode for this issue. Handle it before the role check. Newest occurrence wins.
       if (role === 'solo') {
@@ -169,7 +188,7 @@ export function parseWorkerRoleDirectives(text: string | null | undefined): Dire
       }
     }
   }
-  return { overrides, models, solo, warnings };
+  return { overrides, models, solo, handoff, warnings };
 }
 
 /**
