@@ -314,7 +314,7 @@ run_role_pipeline() {
     rm -f "$scap"
     if [ "$src" -ne 0 ] || [ -z "$sreport" ] || [ ! -f "$sreport" ]; then
       # rc=75 = solo worker transiently non-responsive (usage limit / crash): leave active, retry later
-      # (mirrors the per-role dispatcher-exhaustion handling). No fallback in solo mode by design.
+      # (mirrors the per-role dispatcher-exhaustion handling). Only reached after the solo handoff chain is exhausted.
       if [ "$src" -eq 75 ]; then
         plog "PIPELINE_RETRY: solo worker '$solo_worker' transiently non-responsive (rc=75) → leave active, retry when it recovers"
         return "$WORKER_UNAVAILABLE"

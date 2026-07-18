@@ -16,12 +16,12 @@ npm run start:webhook
 
 ## 起動時 bootstrap scan
 
-`WEBHOOK_BOOTSTRAP_SCAN_ENABLED=true` を設定すると、webhook サーバー起動時に Linear の未処理 Issue を確認し、共通 runner queue に自動投入します。
+webhook サーバーは起動時に Linear の未処理 Issue を確認し、共通 runner queue に自動投入します。起動時 scan はデフォルトで有効です。
 
 | 設定 | 説明 |
 |------|------|
-| `WEBHOOK_BOOTSTRAP_SCAN_ENABLED=true` | 起動時に Linear の Todo/In Progress Issue を scan して enqueue する |
-| `WEBHOOK_BOOTSTRAP_SCAN_ENABLED=false`（デフォルト） | scan を行わない |
+| 未設定または `WEBHOOK_BOOTSTRAP_SCAN_ENABLED=true`（デフォルト） | 起動時に Linear の Todo/In Progress Issue を scan して enqueue する |
+| `WEBHOOK_BOOTSTRAP_SCAN_ENABLED=false` | 必要な場合のみ起動時 scan を無効化する |
 
 **動作詳細**:
 

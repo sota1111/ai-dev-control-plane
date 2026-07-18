@@ -34,7 +34,7 @@ for arg in "$@"; do
 done
 
 # SOT-1591: `solo` is a synthetic dispatch role — one worker runs the whole lifecycle in one session.
-# Its chain is the single `__solo__` worker from the config (no fallback); its prompt is prompts/roles/solo.md.
+# Its primary is `__solo__`; when handoff is enabled, remaining workers follow the task-check chain.
 VALID_ROLES="task-check decomposition implementation verification acceptance github linear-report solo"
 if [ -z "$ROLE" ] || [[ " $VALID_ROLES " != *" $ROLE "* ]]; then
   echo "run_worker.sh: role must be one of: $VALID_ROLES (got '${ROLE:-}')" >&2
@@ -67,9 +67,10 @@ CHAIN="$(PIPELINE_PINNED_WORKER="${PIPELINE_PINNED_WORKER:-}" node -e '
   if (!ROLES.includes(role)) { process.stdout.write(""); process.exit(0); }
   try {
     const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
-    // SOT-1591 solo mode: the `solo` role resolves to the single `__solo__` worker (no fallback chain).
+    // Solo keeps one worker responsible for the whole lifecycle, but an unavailable primary may hand
+    // the whole lifecycle to the remaining configured workers. handoff=off below keeps it primary-only.
     const raw = role === "solo"
-      ? [cfg.__solo__]
+      ? [cfg.__solo__, ...(Array.isArray(cfg["task-check"]) ? cfg["task-check"] : [cfg["task-check"]])]
       : (Array.isArray(cfg[role]) ? cfg[role] : [cfg[role]]);
     const seen = new Set(); let out = [];
     for (const w of raw) { if (WORKERS.includes(w) && !seen.has(w)) { seen.add(w); out.push(w); } }
