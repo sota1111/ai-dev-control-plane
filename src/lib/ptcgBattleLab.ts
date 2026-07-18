@@ -82,10 +82,17 @@ export interface GameRecord {
   matchIndex: number;
   seat0: string;
   seat1: string;
-  /** Winner label, or 'fault' when the loser faulted, or 'draw'. */
+  /** Winner label, or 'draw'. (When `fault` is set the loser faulted; `winner` still names the winner.) */
   winner: string;
   /** Whether the result was decided by a fault (illegal move / crash / timeout). */
   fault: boolean;
+  /**
+   * Number of turns/moves the match lasted. Optional and backward-compatible: v1 records written before
+   * SOT-1711 omit it, and `analyze` averages only over the games that carry it.
+   */
+  turns?: number;
+  /** Match wall-clock duration in milliseconds. Optional/backward-compatible like `turns`. */
+  durationMs?: number;
 }
 
 /** Small per-shard tally kept in the manifest (safe to store; drives aggregation without raw logs). */
