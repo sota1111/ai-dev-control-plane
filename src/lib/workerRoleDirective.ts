@@ -108,6 +108,17 @@ export interface DirectiveParseResult {
   warnings: string[];
 }
 
+/** Parse `graph: <name>` lines. Description/comments must be concatenated oldest first. */
+export function parseGraphDirective(text: string | null | undefined): string | undefined {
+  if (!text) return undefined;
+  let selected: string | undefined;
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*graph\s*:\s*([a-zA-Z0-9][a-zA-Z0-9_-]*)\s*$/i);
+    if (match) selected = match[1];
+  }
+  return selected;
+}
+
 function isWorkerRole(value: string): value is WorkerRole {
   return (WORKER_ROLES as readonly string[]).includes(value);
 }

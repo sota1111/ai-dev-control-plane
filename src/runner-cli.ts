@@ -22,7 +22,7 @@ import { formatOutcomeSummary, promotionCandidates } from './lib/outcomeStats.js
 import { classifyWorkerFailure, writeAuthUnhealthy, readAuthUnhealthy, shouldSkipForAuthUnhealthy, type WorkerName } from './lib/workerHealth.js';
 import { workerAuthUnhealthyTtlSeconds } from './config/env.js';
 import { loadWorkerRolesConfig, loadSoloWorker, type WorkerRoleConfig, type WorkerRole } from './lib/workerRoles.js';
-import { parseWorkerRoleDirectives, mergeWorkerRoleOverrides } from './lib/workerRoleDirective.js';
+import { parseWorkerRoleDirectives, mergeWorkerRoleOverrides, parseGraphDirective } from './lib/workerRoleDirective.js';
 import { buildDelegationPreflight } from './lib/delegationPreflight.js';
 import { pipelineReviewComment, type PipelineReviewOutcome } from './lib/pipelineReviewComment.js';
 import {
@@ -189,6 +189,47 @@ async function main() {
       process.stderr.write(`resolve-worker-roles: ${issueId} overrides ${summary} → ${outPath}\n`);
       runner.log('WORKER_ROLES', `${issueId} per-issue override: ${summary}`, { issue: issueId });
       process.stdout.write(outPath);
+      process.exit(0);
+      break;
+    }
+    case 'resolve-pipeline-graph': {
+      const issueId = args[0];
+      if (!issueId) {
+        process.stderr.write('Usage: runner-cli.js resolve-pipeline-graph <issueIdentifier>\n');
+        process.exit(1);
+      }
+      let text = '';
+      try {
+        const data: any = await runner.linearQuery(
+          'query($id: String!) { issue(id: $id) { description comments(first: 50) { nodes { body } } } }',
+          { id: issueId },
+        );
+        const description = typeof data?.issue?.description === 'string' ? data.issue.description : '';
+        const comments = (data?.issue?.comments?.nodes || []).map((n: any) => typeof n?.body === 'string' ? n.body : '');
+        text = [description, ...comments].join('\n');
+      } catch (err: any) {
+        process.stderr.write(`resolve-pipeline-graph: could not fetch ${issueId}: ${err?.message || err}; using default\n`);
+        process.stdout.write(DEFAULT_GRAPH_PATH);
+        process.exit(0);
+      }
+      const name = parseGraphDirective(text);
+      const topicDir = path.join(__dirname, '..', 'docs', 'ai', 'pipeline');
+      fs.mkdirSync(topicDir, { recursive: true });
+      const safeIssue = String(issueId).replace(/[^a-zA-Z0-9_-]/g, '_');
+      fs.writeFileSync(path.join(topicDir, `discussion_topic.${safeIssue}.md`), text);
+      if (!name || name === 'default') {
+        process.stdout.write(DEFAULT_GRAPH_PATH);
+        process.exit(0);
+      }
+      const graphPath = path.join(__dirname, '..', 'config', 'graphs', `${name}.json`);
+      const loaded = loadPipelineGraph(graphPath);
+      if (!loaded.graph) {
+        process.stderr.write(`resolve-pipeline-graph: unknown/invalid graph "${name}"; using default\n`);
+        process.stdout.write(DEFAULT_GRAPH_PATH);
+      } else {
+        process.stderr.write(`resolve-pipeline-graph: ${issueId} selected graph=${name}\n`);
+        process.stdout.write(graphPath);
+      }
       process.exit(0);
       break;
     }
@@ -568,7 +609,7 @@ async function main() {
       break;
     }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report, notify-discord, aggregate-outcomes, worker-health-record, auth-unhealthy-status, delegation-preflight, pipeline-graph\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, pipeline-graph, ...\n`);
       process.exit(1);
     }
   }

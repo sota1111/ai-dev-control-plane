@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "entry": "task-check",
+  "budgets": { "debug": { "max": { "env": "PIPELINE_MAX_DEBUG_CYCLES", "default": 2 }, "on_exhausted": "__stop__" } },
+  "nodes": {
+    "task-check": { "role": "task-check", "on": { "READY_FOR_REVIEW": "discussion", "*": "__done_no_pr__" } },
+    "discussion": { "type": "discussion", "role": "discussion", "on": { "READY_FOR_REVIEW": "implementation", "*": "__stop__" } },
+    "implementation": { "role": "implementation", "max_visits": { "env": "PIPELINE_MAX_DEBUG_CYCLES", "default": 2, "plus": 1 }, "on": { "READY_FOR_REVIEW": "verification", "NEEDS_DEBUG": { "to": "verification", "counts": "debug" }, "*": "__stop__" } },
+    "verification": { "role": "verification", "max_visits": { "env": "PIPELINE_MAX_DEBUG_CYCLES", "default": 2, "plus": 1 }, "on": { "READY_FOR_REVIEW": "acceptance", "NEEDS_DEBUG": { "to": "implementation", "counts": "debug" }, "*": "__stop__" } },
+    "acceptance": { "role": "acceptance", "verdict_source": "acceptance", "on": { "ACCEPTANCE_FAIL": { "to": "implementation", "counts": "debug" }, "ACCEPTANCE_PASS": "github", "READY_FOR_REVIEW": "github", "NEEDS_DEBUG": { "to": "implementation", "counts": "debug" }, "*": "__stop__" } },
+    "github": { "role": "github", "on": { "READY_FOR_REVIEW": "linear-report", "NEEDS_DEBUG": { "to": "verification", "counts": "debug" }, "*": "__stop__" } },
+    "linear-report": { "role": "linear-report", "on": { "READY_FOR_REVIEW": "__done__", "NEEDS_DEBUG": { "to": "verification", "counts": "debug" }, "*": "__stop__" } }
+  }
+}

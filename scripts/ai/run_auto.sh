@@ -330,14 +330,27 @@ run_graph_role_loop() {
     fi
 
     local cap; cap="$(mktemp)"
+    local report="" winner="" dispatch_done="" rc=0
     set +e
-    bash scripts/ai/run_worker.sh "$role" 2>&1 | python3 -u -c "$_PIPE_TAG_FILTER" | tee -a "$LOG_FILE" "$cap"
-    local rc=${PIPESTATUS[0]}
+    if [ "$role" = "discussion" ]; then
+      local topic_file="docs/ai/pipeline/discussion_topic.$issue.md"
+      if [ -s "$topic_file" ]; then
+        bash scripts/ai/run_discussion.sh --issue "$issue" --topic-file "$topic_file" 2>&1 | tee -a "$LOG_FILE" "$cap"
+      else
+        DISCUSSION_TOPIC="Review Linear issue $issue and agree on the implementation approach before implementation." \
+          bash scripts/ai/run_discussion.sh --issue "$issue" 2>&1 | tee -a "$LOG_FILE" "$cap"
+      fi
+      rc=${PIPESTATUS[0]}
+      report="docs/ai/pipeline/discussion_$issue.md"
+      winner="discussion"
+    else
+      bash scripts/ai/run_worker.sh "$role" 2>&1 | python3 -u -c "$_PIPE_TAG_FILTER" | tee -a "$LOG_FILE" "$cap"
+      rc=${PIPESTATUS[0]}
+      dispatch_done="$(grep -oE 'WORKER_DISPATCH_DONE role=[^ ]+ worker=[^ ]+ report=[^ ]+' "$cap" 2>/dev/null | tail -1 || true)"
+      report="$(printf '%s' "$dispatch_done" | sed 's/.*report=//' || true)"
+      winner="$(printf '%s' "$dispatch_done" | sed -E 's/.*worker=([^ ]+).*/\1/' || true)"
+    fi
     set -e
-
-    local dispatch_done; dispatch_done="$(grep -oE 'WORKER_DISPATCH_DONE role=[^ ]+ worker=[^ ]+ report=[^ ]+' "$cap" 2>/dev/null | tail -1 || true)"
-    local report; report="$(printf '%s' "$dispatch_done" | sed 's/.*report=//' || true)"
-    local winner; winner="$(printf '%s' "$dispatch_done" | sed -E 's/.*worker=([^ ]+).*/\1/' || true)"
     rm -f "$cap"
 
     if [ "$rc" -ne 0 ] || [ -z "$report" ] || [ ! -f "$report" ]; then
@@ -385,6 +398,15 @@ run_graph_role_loop() {
       return "$COMPLETION_UNVERIFIED"
     fi
     plog "PIPELINE_GRAPH: $step"
+    {
+      echo "# Pipeline Graph Run: $issue"
+      echo
+      echo "- Graph: ${PIPELINE_GRAPH_FILE:-config/pipeline_graph.json}"
+      echo "- Node path: $(node -e 'const s=require(process.argv[1]); console.log([...(s.history||[]).map(x=>x.from), s.current].filter((x,i,a)=>i===0||x!==a[i-1]).join(" → "))' "$state_file" 2>/dev/null || true)"
+      if [ -f "docs/ai/pipeline/discussion_$issue.md" ]; then
+        grep -E '^- Rounds completed:|^- Outcome:' "docs/ai/pipeline/discussion_$issue.md" || true
+      fi
+    } > "docs/ai/pipeline/graph_run_summary.$issue.md"
     case "$step" in
       TERMINAL=done_no_pr*)
         plog "PIPELINE_DONE: graph terminal done_no_pr for $issue → success no-op"
@@ -465,13 +487,22 @@ run_role_pipeline() {
   run_cli set-issue-in-progress "$issue" >/dev/null 2>>"$LOG_FILE" || true
   plog "issue $issue → In Progress (pipeline start)"
 
+  # Resolve a per-issue `graph: <name>` before solo-mode selection. An explicitly named graph is an
+  # instruction to run that graph, so it takes precedence over the repository's default __solo__.
+  local selected_graph graph_is_named=0
+  selected_graph="$(run_cli resolve-pipeline-graph "$issue" 2>>"$LOG_FILE" || true)"
+  if [ -n "$selected_graph" ]; then
+    export PIPELINE_GRAPH_FILE="$selected_graph"
+    [ "$selected_graph" != "$PWD/config/pipeline_graph.json" ] && graph_is_named=1
+  fi
+
   # SOT-1591 SOLO MODE: if the worker-roles config sets `__solo__`, ONE AI runs the entire lifecycle in a
   # SINGLE dispatch — no per-role loop, no script handoff/gating in between. Query the resolved config
   # (WORKER_ROLES_FILE carries the per-issue merge; solo mode is preserved through it). Fail-open: empty
   # output → fall through to the normal per-role pipeline below.
   local solo_worker
   solo_worker="$(run_cli solo-worker 2>>"$LOG_FILE" || true)"
-  if [ -n "$solo_worker" ]; then
+  if [ -n "$solo_worker" ] && [ "$graph_is_named" -eq 0 ]; then
     plog "SOLO MODE: worker=$solo_worker runs the whole lifecycle in one dispatch (no per-role handoff)"
     PIPELINE_NO_PR=0
     local scap; scap="$(mktemp)"
@@ -522,6 +553,7 @@ run_role_pipeline() {
   case "$(printf '%s' "${PIPELINE_GRAPH:-0}" | tr '[:upper:]' '[:lower:]')" in
     1|true|yes|on) graph_enabled=1 ;;
   esac
+  [ "$graph_is_named" -eq 1 ] && graph_enabled=1
   if [ "$graph_enabled" -eq 1 ]; then
     local graph_state="docs/ai/pipeline/graph_state.$issue.json"
     local graph_first="" graph_rc=0
