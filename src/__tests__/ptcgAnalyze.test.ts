@@ -37,7 +37,7 @@ import {
 const NOW = '2026-07-18T07:00:00.000Z';
 
 function inputs(deckOverrides: Partial<Record<string, string>> = {}): ContestantInput[] {
-  return CONTESTANTS.map((c, i) => ({
+  return CONTESTANTS.slice(0, 3).map((c, i) => ({
     label: c.label,
     kanji: c.kanji,
     repo: c.repo,

@@ -52,6 +52,7 @@ export const CONTESTANTS: readonly Contestant[] = [
   { label: 'matsu', kanji: '松', repo: 'ptcg-agent-matsu' },
   { label: 'take', kanji: '竹', repo: 'ptcg-agent-take' },
   { label: 'ume', kanji: '梅', repo: 'ptcg-agent-ume' },
+  { label: 'zero', kanji: '零', repo: 'ptcg-agent-zero' },
 ] as const;
 
 /**
@@ -73,6 +74,7 @@ export const TACTICS: readonly Tactic[] = [
   { tactic: 'matsu', kanji: '松', repo: 'ptcg-agent-matsu' },
   { tactic: 'take', kanji: '竹', repo: 'ptcg-agent-take' },
   { tactic: 'ume', kanji: '梅', repo: 'ptcg-agent-ume' },
+  { tactic: 'zero', kanji: '零', repo: 'ptcg-agent-zero' },
 ] as const;
 
 /** Per-contestant inputs pinned into the manifest so a run is reproducible/attributable. */
