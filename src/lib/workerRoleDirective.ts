@@ -38,6 +38,16 @@
 //   workers: handoff=on     → allow the normal fallback chain (default)
 //   workers: handoff=off    → try only the first worker for every role
 //
+// SOT-1753: a `discussion=` token names the PARTICIPANTS of the multi-round discussion mode
+// (scripts/ai/run_discussion.sh). Unlike a role chain (`>` = fallback order, one worker acts), the
+// participants are joined with `+` because they ALL take part, each speaking every round:
+//
+//   workers: discussion=codex:sol+claude:fable
+//
+// Each participant is a `worker[:model]` token (same model syntax as role chains — everything after
+// the first colon). Duplicated workers with different models are allowed (e.g. two codex participants
+// debating on different models). Newest occurrence wins.
+//
 // This module is pure (no I/O): it parses directive text and merges overrides onto a base config. The
 // runner-cli `resolve-worker-roles` subcommand fetches the issue text, calls these, and writes a
 // per-issue merged config that run_auto.sh points WORKER_ROLES_FILE at for the pipeline run.
@@ -71,6 +81,12 @@ export type SoloDirective =
   | { disabled: true }
   | { disabled: false; worker: Worker; model: string | null };
 
+/** SOT-1753: one participant of the discussion mode, parsed from a `worker[:model]` token. */
+export interface DiscussionParticipant {
+  worker: Worker;
+  model: string | null;
+}
+
 export interface DirectiveParseResult {
   /** Role → overridden worker chain. Later directives (e.g. a newer comment) win. */
   overrides: Partial<Record<WorkerRole, Worker[]>>;
@@ -83,6 +99,11 @@ export interface DirectiveParseResult {
   solo?: SoloDirective;
   /** Per-issue cross-worker handoff policy (undefined means inherit the default: allowed). */
   handoff?: boolean;
+  /**
+   * SOT-1753: discussion-mode participants from a `discussion=w1[:m1]+w2[:m2]` token (undefined when
+   * not specified). Order is preserved — participants speak in this order each round.
+   */
+  discussion?: DiscussionParticipant[];
   /** Human-readable notes about ignored/invalid tokens (never throws). */
   warnings: string[];
 }
@@ -102,6 +123,7 @@ export function parseWorkerRoleDirectives(text: string | null | undefined): Dire
   const warnings: string[] = [];
   let solo: SoloDirective | undefined;
   let handoff: boolean | undefined;
+  let discussion: DiscussionParticipant[] | undefined;
   if (!text) return { overrides, models, warnings };
 
   const lineRe = /^\s*workers?\s*:\s*(.+?)\s*$/i;
@@ -127,6 +149,32 @@ export function parseWorkerRoleDirectives(text: string | null | undefined): Dire
         } else {
           warnings.push(`invalid handoff value "${value}" (valid: on or off)`);
         }
+        continue;
+      }
+      // SOT-1753: `discussion=w1[:m1]+w2[:m2]` names the discussion-mode participants. Not a role
+      // chain — `+` joins participants who ALL speak each round (vs `>` = fallback order). Handle it
+      // before the role check. Newest occurrence wins.
+      if (role === 'discussion') {
+        const participants: DiscussionParticipant[] = [];
+        for (const tokenRaw of pair.slice(eq + 1).split('+')) {
+          const token = tokenRaw.trim();
+          if (!token) continue;
+          // Same `worker:model` split as role chains: everything after the FIRST colon is the model.
+          const colon = token.indexOf(':');
+          const workerToken = (colon < 0 ? token : token.slice(0, colon)).trim().toLowerCase();
+          const modelToken = colon < 0 ? '' : token.slice(colon + 1).trim();
+          const worker = WORKER_ALIASES[workerToken];
+          if (!worker) {
+            warnings.push(`unknown worker "${workerToken}" for discussion`);
+            continue;
+          }
+          participants.push({ worker, model: modelToken || null });
+        }
+        if (participants.length === 0) {
+          warnings.push('no valid participant specified for discussion');
+          continue;
+        }
+        discussion = participants;
         continue;
       }
       // SOT-1591: `solo=<worker>[:model]` / `solo=off` is a special directive, not a role chain. It sets
@@ -188,7 +236,7 @@ export function parseWorkerRoleDirectives(text: string | null | undefined): Dire
       }
     }
   }
-  return { overrides, models, solo, handoff, warnings };
+  return { overrides, models, solo, handoff, discussion, warnings };
 }
 
 /**
