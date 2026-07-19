@@ -246,6 +246,21 @@ describe('default graph (config/pipeline_graph.json)', () => {
   });
 });
 
+describe('named discussion graph', () => {
+  test('validates and uses the discussion report Next Action for its outgoing edge', () => {
+    const graphPath = path.join(path.dirname(DEFAULT_GRAPH_PATH), 'graphs', 'plan-with-discussion.json');
+    const { graph, errors } = loadPipelineGraph(graphPath);
+    expect(errors).toEqual([]);
+    const state = beginPipelineGraph(graph!);
+    expect(stepPipelineGraph(graph!, state, 'READY_FOR_REVIEW', '')).toMatchObject({
+      kind: 'node', node: 'discussion', role: 'discussion', event: 'READY_FOR_REVIEW',
+    });
+    expect(stepPipelineGraph(graph!, state, 'READY_FOR_REVIEW', '')).toMatchObject({
+      kind: 'node', node: 'implementation', role: 'implementation', event: 'READY_FOR_REVIEW',
+    });
+  });
+});
+
 describe('validatePipelineGraph', () => {
   const minimal = () => ({
     version: 1,

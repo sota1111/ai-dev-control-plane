@@ -77,6 +77,8 @@ export interface GraphEdge {
 }
 
 export interface GraphNode {
+  /** Standard nodes dispatch a role; discussion nodes run run_discussion.sh directly. */
+  type?: 'role' | 'discussion';
   /** The run_worker.sh role this node dispatches. */
   role: string;
   /** 'acceptance' → the `## Acceptance: PASS|FAIL` machine verdict takes precedence for events. */
@@ -207,6 +209,12 @@ export function validatePipelineGraph(raw: unknown): string[] {
     const n = nRaw as Record<string, unknown>;
     if (typeof n.role !== 'string' || n.role.trim() === '') {
       errors.push(`node "${id}" must declare a non-empty "role"`);
+    }
+    if (n.type !== undefined && n.type !== 'role' && n.type !== 'discussion') {
+      errors.push(`node "${id}" type must be "role" or "discussion" when present`);
+    }
+    if (n.type === 'discussion' && n.role !== 'discussion') {
+      errors.push(`discussion node "${id}" must use role "discussion"`);
     }
     if (n.verdict_source !== undefined && n.verdict_source !== 'acceptance') {
       errors.push(`node "${id}" verdict_source must be "acceptance" when present`);

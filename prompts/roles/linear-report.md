@@ -5,6 +5,8 @@ You are a dispatched worker in a script-driven pipeline. Do ONLY this role, then
 ## Context
 - Read `docs/ai/pipeline/context.md` for the target issue id.
 - Read the github/acceptance/verification reports for the outcome (PR link, merge result, criteria).
+- When present, read `docs/ai/pipeline/graph_run_summary.<ISSUE_ID>.md` and include its node path,
+  discussion round count, and consensus/moderator-verdict outcome in the Completion Report.
 
 ## Task
 Sync the final state back to Linear (the only human-facing report channel in autonomous mode):

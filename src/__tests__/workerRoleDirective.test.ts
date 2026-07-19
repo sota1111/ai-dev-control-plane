@@ -1,8 +1,18 @@
 import {
   parseWorkerRoleDirectives,
   mergeWorkerRoleOverrides,
+  parseGraphDirective,
 } from '../lib/workerRoleDirective.js';
 import type { WorkerRoleConfig } from '../lib/workerRoles.js';
+
+describe('parseGraphDirective', () => {
+  test('newest graph directive wins', () => {
+    expect(parseGraphDirective('graph: default\ntext\ngraph: plan-with-discussion')).toBe('plan-with-discussion');
+  });
+  test('ignores embedded and malformed directives', () => {
+    expect(parseGraphDirective('Use graph: unsafe\ngraph: ../../unsafe')).toBeUndefined();
+  });
+});
 
 const BASE: WorkerRoleConfig = {
   'task-check': ['codex', 'claude', 'antigravity'],
