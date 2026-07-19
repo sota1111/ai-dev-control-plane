@@ -51,3 +51,27 @@ npx tsx src/ptcg-league-contract-cli.ts validate-jsonl matches.jsonl registry.js
 Writers must preserve the schema fields and bump the schema version for breaking changes. Readers may
 store additional transport metadata outside the record, but must not infer agent or deck identity from
 the submission ID; always resolve it through the registry.
+
+## Four-agent baseline league
+
+`src/lib/ptcgBaselineLeague.ts` connects the current 松・竹・梅・Zero entrypoints through one
+`AgentAdapter.invoke(request)` contract. `runBaselineLeague` registers every agent×deck submission,
+schedules every distinct submission pair for every requested seed in both seat orientations, and emits:
+
+- the validated registry and raw match records (seed, first/second seat, structured fault, latency);
+- an ordered agent×deck payoff matrix with win rate and Wilson 95% confidence interval;
+- run KPIs for result count, faults, fallbacks, and average/maximum latency.
+
+The checked-in deterministic baseline can be reproduced without sibling repositories or the battle
+engine:
+
+```bash
+npx tsx src/ptcg-baseline-cli.ts \
+  --run-id baseline.sot-1750 \
+  --seeds 1750,1751 \
+  --output artifacts/ptcg-baseline/baseline.sot-1750.json
+```
+
+Expected smoke result: 4 submissions, 24 matches, 12 ordered payoff cells, zero faults/fallbacks.
+The fixture runner is deliberately deterministic; production executors provide the same adapter
+contract while launching the entrypoint recorded on each adapter.
