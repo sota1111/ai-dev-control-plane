@@ -1,0 +1,67 @@
+{
+  "__doc__": "SOT-1754 declarative pipeline graph. Externalizes the role pipeline that run_auto.sh historically hard-coded (task-check → implementation → verification → acceptance → github → linear-report, bounded NEEDS_DEBUG back-edges, BLOCKED/NEEDS_USER_INPUT terminals) into data. Opt-in: run_auto.sh drives this graph only when PIPELINE_GRAPH is truthy; otherwise (and whenever this file is missing/invalid — fail-open) the serial bash loop runs unchanged. Node execution is unchanged either way: each node dispatches `run_worker.sh <role>`; this graph only decides where to go next. Engine/validator: src/lib/pipelineGraph.ts, CLI: `runner-cli pipeline-graph validate|begin|next`. Keys starting with __ are docs.",
+  "__events_doc__": "Edge keys are report verdicts: the `## Next Action` token (READY_FOR_REVIEW / NEEDS_DEBUG / NEEDS_USER_INPUT / BLOCKED), NONE (no token parsed), and `*` (mandatory default). Nodes with verdict_source=acceptance additionally emit ACCEPTANCE_FAIL (machine verdict `## Acceptance: FAIL` — wins over any Next Action) and ACCEPTANCE_PASS (PASS and Next Action is not a human-stop); a missing acceptance verdict falls back to the Next Action token, mirroring the serial path's PIPELINE_WARN fallback (SOT-1558). Targets are node ids or the terminals __done__ (COMPLETED), __done_no_pr__ (successful no-op → COMPLETED_NO_PR), __stop__ (needs attention → COMPLETION_UNVERIFIED).",
+  "__bounds_doc__": "Cycle bounding. The shared `debug` budget is the faithful mapping of the serial loop's single debug_cycles counter: EVERY back-edge (verification/acceptance → implementation, NEEDS_DEBUG re-verification) declares counts=debug, so loop-backs are bounded GLOBALLY at PIPELINE_MAX_DEBUG_CYCLES (default 2) across all loop kinds combined — identical to the serial gate. Exhaustion maps to __stop__ (PIPELINE_STOP, needs attention) without dispatching the target again. Per-node max_visits (= PIPELINE_MAX_DEBUG_CYCLES + 1 initial visit) is a pure backstop on the loop nodes; the budget always trips first.",
+  "version": 1,
+  "entry": "task-check",
+  "budgets": {
+    "debug": {
+      "max": { "env": "PIPELINE_MAX_DEBUG_CYCLES", "default": 2 },
+      "on_exhausted": "__stop__"
+    }
+  },
+  "nodes": {
+    "task-check": {
+      "role": "task-check",
+      "on": {
+        "READY_FOR_REVIEW": "implementation",
+        "*": "__done_no_pr__"
+      }
+    },
+    "implementation": {
+      "role": "implementation",
+      "max_visits": { "env": "PIPELINE_MAX_DEBUG_CYCLES", "default": 2, "plus": 1 },
+      "on": {
+        "READY_FOR_REVIEW": "verification",
+        "NEEDS_DEBUG": { "to": "verification", "counts": "debug" },
+        "*": "__stop__"
+      }
+    },
+    "verification": {
+      "role": "verification",
+      "max_visits": { "env": "PIPELINE_MAX_DEBUG_CYCLES", "default": 2, "plus": 1 },
+      "on": {
+        "READY_FOR_REVIEW": "acceptance",
+        "NEEDS_DEBUG": { "to": "implementation", "counts": "debug" },
+        "*": "__stop__"
+      }
+    },
+    "acceptance": {
+      "role": "acceptance",
+      "verdict_source": "acceptance",
+      "on": {
+        "ACCEPTANCE_FAIL": { "to": "implementation", "counts": "debug" },
+        "ACCEPTANCE_PASS": "github",
+        "READY_FOR_REVIEW": "github",
+        "NEEDS_DEBUG": { "to": "implementation", "counts": "debug" },
+        "*": "__stop__"
+      }
+    },
+    "github": {
+      "role": "github",
+      "on": {
+        "READY_FOR_REVIEW": "linear-report",
+        "NEEDS_DEBUG": { "to": "verification", "counts": "debug" },
+        "*": "__stop__"
+      }
+    },
+    "linear-report": {
+      "role": "linear-report",
+      "on": {
+        "READY_FOR_REVIEW": "__done__",
+        "NEEDS_DEBUG": { "to": "verification", "counts": "debug" },
+        "*": "__stop__"
+      }
+    }
+  }
+}

@@ -257,6 +257,177 @@ _cb_fingerprint() {
     | sha1sum 2>/dev/null | awk '{print $1}'
 }
 
+# SOT-1754: graph-driven role loop — the opt-in (PIPELINE_GRAPH=1) alternative to the hard-coded
+# serial loop in run_role_pipeline. Node execution is IDENTICAL (same dispatcher run_worker.sh, same
+# tag filter / report parsing / circuit breaker / SOT-1555 pin handling); only "which role runs next"
+# is decided by the declarative graph (config/pipeline_graph.json) via `runner-cli pipeline-graph
+# next`, which maps `## Next Action` / `## Acceptance` verdicts to edges, bounds NEEDS_DEBUG
+# back-edges with the shared debug budget (= PIPELINE_MAX_DEBUG_CYCLES, exactly the serial
+# debug_cycles counter), and classifies terminals (done / done_no_pr / stop). The default graph is a
+# faithful copy of the serial pipeline, so both paths behave identically.
+run_graph_role_loop() {
+  local issue="$1" state_file="$2" first_line="$3"
+  local target_repo="${WEBHOOK_TARGET_REPO:-${TARGET_REPO:-}}"
+  local node role
+  node="$(printf '%s\n' "$first_line" | sed -n 's/.*NODE=\([^ ]*\).*/\1/p')"
+  role="$(printf '%s\n' "$first_line" | sed -n 's/.*ROLE=\([^ ]*\).*/\1/p')"
+  if [ -z "$node" ] || [ -z "$role" ]; then
+    plog "PIPELINE_STOP: unparseable graph entry '$first_line' → needs attention"
+    return "$COMPLETION_UNVERIFIED"
+  fi
+  plog "PIPELINE_GRAPH: graph-driven role loop active (entry=$node state=$state_file)"
+
+  PIPELINE_NO_PR=0
+  GITHUB_REPORT=""
+  unset PIPELINE_PINNED_WORKER
+  local pipeline_start_ms; pipeline_start_ms="$(date +%s%3N 2>/dev/null || echo '')"
+  local cb_no_progress=0 cb_last_fp="" debug_spent=0
+
+  # Delegation preflight (SOT-1574) — same best-effort block as the serial loop.
+  local _delegation_preflight_enabled=1
+  case "$(printf '%s' "${DELEGATION_PREFLIGHT:-1}" | tr '[:upper:]' '[:lower:]')" in
+    0|false|no|off) _delegation_preflight_enabled=0 ;;
+  esac
+  if [ "$_delegation_preflight_enabled" -eq 0 ]; then
+    plog "delegation preflight disabled by DELEGATION_PREFLIGHT; skipping"
+  else
+    set +e
+    run_cli delegation-preflight "$issue" 2>>"$LOG_FILE" | while IFS= read -r _pf_line; do
+      plog "$_pf_line"
+    done
+    set -e
+  fi
+
+  while :; do
+    plog "── graph node: $node → role $role (issue $issue) ──"
+
+    if [ ! -s "prompts/roles/$role.md" ]; then
+      plog "PIPELINE_STOP: missing canonical prompt prompts/roles/$role.md"
+      return "$COMPLETION_UNVERIFIED"
+    fi
+
+    # Circuit breaker (SOT-1560) — identical to the serial loop; the graph's debug-budget spend
+    # stands in for the serial debug_cycles counter.
+    if [ "$role" = "implementation" ]; then
+      local cb_fp; cb_fp="$(_cb_fingerprint "${target_repo:-.}")"
+      if [ -n "$cb_last_fp" ]; then
+        if [ "$cb_fp" = "$cb_last_fp" ]; then cb_no_progress=$((cb_no_progress + 1)); else cb_no_progress=0; fi
+      fi
+      cb_last_fp="$cb_fp"
+    fi
+    local cb_out cb_rc
+    set +e
+    cb_out="$(CB_STARTED_AT_MS="$pipeline_start_ms" \
+              CB_CONSECUTIVE_FAILURES="$debug_spent" \
+              CB_NO_PROGRESS_CYCLES="$cb_no_progress" \
+              run_breaker_cli 2>>"$LOG_FILE")"
+    cb_rc=$?
+    set -e
+    if [ "$cb_rc" -eq 10 ]; then
+      plog "PIPELINE_HALT: circuit breaker tripped at role=$role → $cb_out"
+      run_cli move-on-hold "$issue" "$cb_out" >/dev/null 2>&1 || true
+      return "$COMPLETION_UNVERIFIED"
+    fi
+
+    local cap; cap="$(mktemp)"
+    set +e
+    bash scripts/ai/run_worker.sh "$role" 2>&1 | python3 -u -c "$_PIPE_TAG_FILTER" | tee -a "$LOG_FILE" "$cap"
+    local rc=${PIPESTATUS[0]}
+    set -e
+
+    local dispatch_done; dispatch_done="$(grep -oE 'WORKER_DISPATCH_DONE role=[^ ]+ worker=[^ ]+ report=[^ ]+' "$cap" 2>/dev/null | tail -1 || true)"
+    local report; report="$(printf '%s' "$dispatch_done" | sed 's/.*report=//' || true)"
+    local winner; winner="$(printf '%s' "$dispatch_done" | sed -E 's/.*worker=([^ ]+).*/\1/' || true)"
+    rm -f "$cap"
+
+    if [ "$rc" -ne 0 ] || [ -z "$report" ] || [ ! -f "$report" ]; then
+      if [ "$rc" -eq 75 ]; then
+        plog "PIPELINE_RETRY: role=$role dispatcher rc=75 (all workers transiently non-responsive) → leave issue active, retry when a worker recovers"
+        return "$WORKER_UNAVAILABLE"
+      fi
+      plog "PIPELINE_STOP: role=$role dispatcher rc=$rc (no report) → needs attention"
+      return "$COMPLETION_UNVERIFIED"
+    fi
+
+    local na; na="$(awk '/[Nn]ext[[:space:]]*[Aa]ction/{cap=1; buf=""} cap{buf=buf"\n"$0} END{print buf}' "$report" 2>/dev/null | grep -oiE 'READY_FOR_REVIEW|NEEDS_DEBUG|NEEDS_USER_INPUT|BLOCKED' | head -n1 | tr '[:lower:]' '[:upper:]' || true)"
+    plog "role=$role next_action='${na:-<none>}' report=$report"
+
+    [ "$role" = "github" ] && GITHUB_REPORT="$report"
+
+    # SOT-1555 pin — same as the serial task-check gate.
+    if [ "$role" = "task-check" ] && printf '%s' "$na" | grep -q 'READY_FOR_REVIEW'; then
+      if grep -qiE '^##[[:space:]]*Implementation:[[:space:]]*NOT_REQUIRED' "$report" 2>/dev/null; then
+        if [ -n "$winner" ]; then
+          export PIPELINE_PINNED_WORKER="$winner"
+          plog "PIPELINE_PIN: task-check flagged implementation-not-required → pin all remaining roles to worker=$winner (no handoff)"
+        else
+          plog "PIPELINE_PIN: implementation-not-required flagged but winning worker unknown → not pinning"
+        fi
+      fi
+    fi
+
+    # Acceptance machine verdict (SOT-1558) — handed to the engine, which applies the same
+    # FAIL-wins / PASS-unless-human-stop / fallback-to-Next-Action precedence as the serial gate.
+    local acc="NONE"
+    if [ "$role" = "acceptance" ]; then
+      acc="$(grep -ioE '^##[[:space:]]*Acceptance:[[:space:]]*(PASS|FAIL)' "$report" 2>/dev/null | grep -ioE '(PASS|FAIL)' | tail -1 | tr '[:lower:]' '[:upper:]' || true)"
+      [ -z "$acc" ] && acc="NONE"
+      plog "role=acceptance machine_verdict='$([ "$acc" = "NONE" ] && echo '<none>' || echo "$acc")' next_action='${na:-<none>}'"
+    fi
+
+    local step step_rc
+    set +e
+    step="$(run_cli pipeline-graph next --state "$state_file" --next-action "${na:-NONE}" --acceptance "$acc" 2>>"$LOG_FILE")"
+    step_rc=$?
+    set -e
+    if [ "$step_rc" -ne 0 ] || [ -z "$step" ]; then
+      plog "PIPELINE_STOP: graph transition failed (rc=$step_rc node=$node na='${na:-<none>}') → needs attention"
+      return "$COMPLETION_UNVERIFIED"
+    fi
+    plog "PIPELINE_GRAPH: $step"
+    case "$step" in
+      TERMINAL=done_no_pr*)
+        plog "PIPELINE_DONE: graph terminal done_no_pr for $issue → success no-op"
+        PIPELINE_NO_PR=1
+        return 0
+        ;;
+      TERMINAL=done*)
+        break
+        ;;
+      TERMINAL=stop*)
+        plog "PIPELINE_STOP: graph terminal stop at role=$role → needs attention"
+        return "$COMPLETION_UNVERIFIED"
+        ;;
+      NODE=*)
+        local next_spent; next_spent="$(printf '%s\n' "$step" | sed -n 's/.*DEBUG_SPENT=\([0-9]*\).*/\1/p')"
+        [ -n "$next_spent" ] && debug_spent="$next_spent"
+        node="$(printf '%s\n' "$step" | sed -n 's/.*NODE=\([^ ]*\).*/\1/p')"
+        role="$(printf '%s\n' "$step" | sed -n 's/.*ROLE=\([^ ]*\).*/\1/p')"
+        if [ -z "$node" ] || [ -z "$role" ]; then
+          plog "PIPELINE_STOP: unparseable graph step '$step' → needs attention"
+          return "$COMPLETION_UNVERIFIED"
+        fi
+        ;;
+      *)
+        plog "PIPELINE_STOP: unparseable graph step '$step' → needs attention"
+        return "$COMPLETION_UNVERIFIED"
+        ;;
+    esac
+  done
+
+  # PR detection — same as the serial loop's end (SOT-1550).
+  if [ -n "$GITHUB_REPORT" ] && [ -f "$GITHUB_REPORT" ]; then
+    if grep -qiE 'pull/[0-9]+|PR[ :*]*#[0-9]+' "$GITHUB_REPORT" 2>/dev/null; then
+      PIPELINE_NO_PR=0
+    else
+      PIPELINE_NO_PR=1
+    fi
+  fi
+
+  plog "PIPELINE_DONE: all graph roles completed for $issue (no_pr=$PIPELINE_NO_PR)"
+  return 0
+}
+
 run_role_pipeline() {
   local issue="$1"
   local target_repo="${WEBHOOK_TARGET_REPO:-${TARGET_REPO:-}}"
@@ -339,6 +510,30 @@ run_role_pipeline() {
     if grep -qiE 'pull/[0-9]+|PR[ :*]*#[0-9]+' "$sreport" 2>/dev/null; then PIPELINE_NO_PR=0; else PIPELINE_NO_PR=1; fi
     plog "PIPELINE_DONE: solo lifecycle completed for $issue (no_pr=$PIPELINE_NO_PR)"
     return 0
+  fi
+
+  # SOT-1754: opt-in graph-driven role loop. When PIPELINE_GRAPH is truthy AND the declarative graph
+  # (config/pipeline_graph.json) loads/validates, the role sequence is driven by the graph engine
+  # (runner-cli pipeline-graph → run_graph_role_loop above) instead of the hard-coded serial loop
+  # below. The default graph is a faithful copy of the serial pipeline, so behavior is identical.
+  # Fail-open: PIPELINE_GRAPH unset (default) skips this entirely (fully backward compatible); a
+  # missing/invalid graph logs and falls through to the serial loop instead of exiting.
+  local graph_enabled=0
+  case "$(printf '%s' "${PIPELINE_GRAPH:-0}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) graph_enabled=1 ;;
+  esac
+  if [ "$graph_enabled" -eq 1 ]; then
+    local graph_state="docs/ai/pipeline/graph_state.$issue.json"
+    local graph_first="" graph_rc=0
+    set +e
+    graph_first="$(run_cli pipeline-graph begin --state "$graph_state" 2>>"$LOG_FILE")"
+    graph_rc=$?
+    set -e
+    if [ "$graph_rc" -eq 0 ] && [ -n "$graph_first" ]; then
+      run_graph_role_loop "$issue" "$graph_state" "$graph_first"
+      return $?
+    fi
+    plog "PIPELINE_GRAPH: graph unavailable/invalid (rc=$graph_rc) → fail-open to the serial role loop"
   fi
 
   # SOT-1553: task-check now folds in the decomposition work (check + 分解判断 + child-issue registration)
