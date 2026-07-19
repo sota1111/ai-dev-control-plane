@@ -7,7 +7,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const DEFAULT_CONFIG = path.join(ROOT, 'config', 'ptcg_profiles.json');
 const SAFE_REPO = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
 const SAFE_BRANCH = /^[a-zA-Z0-9._/-]+$/;
-const PTCG_INTENT = /(?:PTCG|ポケモンカード|ポケカ|松竹梅|(?:^|\s)(?:matsu|take|ume)(?:\s|$))/iu;
+const PTCG_INTENT = /(?:PTCG|ポケモンカード|ポケカ|松竹梅|(?:^|\s)(?:matsu|take|ume|zero)(?:\s|$))/iu;
 
 export interface PtcgDefaults {
   matches: number;
@@ -21,6 +21,7 @@ export interface PtcgAgentProfile {
   localPath: string;
   branch: string;
   deck: string;
+  entrypoint?: string;
   defaults: PtcgDefaults;
 }
 export interface PtcgHarnessProfile {
@@ -79,14 +80,14 @@ export function validatePtcgProfileConfig(value: unknown): PtcgProfileConfig {
   ) {
     throw new Error('harness.defaults is invalid');
   }
-  if (!Array.isArray(c.profiles) || c.profiles.length !== 3)
-    throw new Error('profiles must contain exactly 松・竹・梅');
+  if (!Array.isArray(c.profiles) || c.profiles.length !== 4)
+    throw new Error('profiles must contain exactly 松・竹・梅・zero');
   const ids = new Set<string>();
   for (const [i, p] of c.profiles.entries()) {
     if (!p || typeof p !== 'object') throw new Error(`profiles[${i}] must be an object`);
     nonEmpty(p.id, `profiles[${i}].id`);
-    if (!['matsu', 'take', 'ume'].includes(p.id) || ids.has(p.id))
-      throw new Error('profiles must uniquely define matsu, take, and ume');
+    if (!['matsu', 'take', 'ume', 'zero'].includes(p.id) || ids.has(p.id))
+      throw new Error('profiles must uniquely define matsu, take, ume, and zero');
     ids.add(p.id);
     if (
       !Array.isArray(p.aliases) ||
@@ -102,6 +103,7 @@ export function validatePtcgProfileConfig(value: unknown): PtcgProfileConfig {
     if (!SAFE_BRANCH.test(p.branch) || p.branch.includes('..'))
       throw new Error(`profiles[${i}].branch is invalid`);
     safeRelative(p.deck, `profiles[${i}].deck`);
+    if (p.entrypoint !== undefined) nonEmpty(p.entrypoint, `profiles[${i}].entrypoint`);
     if (
       !p.defaults ||
       !Number.isInteger(p.defaults.matches) ||
