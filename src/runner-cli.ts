@@ -25,6 +25,14 @@ import { loadWorkerRolesConfig, loadSoloWorker, type WorkerRoleConfig, type Work
 import { parseWorkerRoleDirectives, mergeWorkerRoleOverrides } from './lib/workerRoleDirective.js';
 import { buildDelegationPreflight } from './lib/delegationPreflight.js';
 import { pipelineReviewComment, type PipelineReviewOutcome } from './lib/pipelineReviewComment.js';
+import {
+  DEFAULT_GRAPH_PATH,
+  loadPipelineGraph,
+  beginPipelineGraph,
+  stepPipelineGraph,
+  readPipelineGraphState,
+  writePipelineGraphState,
+} from './lib/pipelineGraph.js';
 
 const [,, command, ...args] = process.argv;
 
@@ -502,8 +510,65 @@ async function main() {
       }
       break;
     }
+    case 'pipeline-graph': {
+      // SOT-1754: declarative pipeline graph engine (src/lib/pipelineGraph.ts). run_auto.sh drives
+      // the opt-in PIPELINE_GRAPH=1 role loop through this subcommand:
+      //   pipeline-graph validate [--graph <path>]
+      //     → exit 0 + `PIPELINE_GRAPH_OK …` when the graph loads and validates, else errors on
+      //       stderr + exit 1 (run_auto.sh fail-opens to the serial loop on non-zero).
+      //   pipeline-graph begin --state <file> [--graph <path>]
+      //     → initialize run state at the entry node; prints `NODE=<id> ROLE=<role>`.
+      //   pipeline-graph next --state <file> --next-action <TOKEN|NONE> [--acceptance PASS|FAIL|NONE]
+      //     → resolve one transition from the persisted state; prints `NODE=<id> ROLE=<role>
+      //       DEBUG_SPENT=<n> EVENT=<event>` or `TERMINAL=<done|done_no_pr|stop> REASON=<…>`.
+      // The state file keeps the engine stateless per invocation (bash loop ↔ CLI round-trips).
+      const sub = args[0];
+      const flags: Record<string, string> = {};
+      for (let i = 1; i < args.length; i += 1) {
+        const a = args[i];
+        if (a && a.startsWith('--')) {
+          flags[a.slice(2)] = args[i + 1] ?? '';
+          i += 1;
+        }
+      }
+      const graphPath = flags.graph || process.env.PIPELINE_GRAPH_FILE || DEFAULT_GRAPH_PATH;
+      const { graph, errors } = loadPipelineGraph(graphPath);
+      if (!graph) {
+        process.stderr.write(`pipeline-graph: invalid graph ${graphPath}:\n${errors.map((e) => `  - ${e}`).join('\n')}\n`);
+        process.exit(1);
+      }
+      if (sub === 'validate') {
+        process.stdout.write(`PIPELINE_GRAPH_OK entry=${graph.entry} nodes=${Object.keys(graph.nodes).length} graph=${graphPath}\n`);
+        process.exit(0);
+      }
+      const stateFile = flags.state;
+      if ((sub !== 'begin' && sub !== 'next') || !stateFile) {
+        process.stderr.write('Usage: runner-cli.js pipeline-graph validate|begin|next [--graph <path>] --state <file> [--next-action <TOKEN|NONE>] [--acceptance PASS|FAIL|NONE]\n');
+        process.exit(1);
+      }
+      if (sub === 'begin') {
+        const state = beginPipelineGraph(graph);
+        writePipelineGraphState(stateFile, state);
+        process.stdout.write(`NODE=${state.current} ROLE=${graph.nodes[state.current].role}\n`);
+        process.exit(0);
+      }
+      // sub === 'next'
+      const state = readPipelineGraphState(stateFile);
+      const nextAction = flags['next-action'] === 'NONE' ? '' : flags['next-action'];
+      const acceptance = flags.acceptance === 'NONE' ? '' : flags.acceptance;
+      const res = stepPipelineGraph(graph, state, nextAction, acceptance);
+      writePipelineGraphState(stateFile, state);
+      if (res.warning) process.stderr.write(`pipeline-graph: WARN ${res.warning}\n`);
+      if (res.kind === 'terminal') {
+        process.stdout.write(`TERMINAL=${res.terminal} EVENT=${res.event} REASON=${res.reason}\n`);
+      } else {
+        process.stdout.write(`NODE=${res.node} ROLE=${res.role} DEBUG_SPENT=${state.budgets.debug ?? 0} EVENT=${res.event}\n`);
+      }
+      process.exit(0);
+      break;
+    }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report, notify-discord, aggregate-outcomes, worker-health-record, auth-unhealthy-status, delegation-preflight\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, parse-usage-limit-epoch, notify-usage-limit, remove-usage-limit-label, enqueue, drain, status, cooldown-status, notify-cooldown, notify-usage-limit-unknown, notify-worker-report, notify-discord, aggregate-outcomes, worker-health-record, auth-unhealthy-status, delegation-preflight, pipeline-graph\n`);
       process.exit(1);
     }
   }
