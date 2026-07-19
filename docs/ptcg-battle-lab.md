@@ -62,6 +62,21 @@ variable. `saveManifest` refuses to persist anything that trips it.
 
 ## Analysis & reporting (`analyze`, SOT-1711)
 
+## Paired deck/tactic comparisons
+
+`src/lib/ptcgPairedEvaluation.ts` provides the experiment contract used to compare a candidate with
+the current champion (松 MCTS plus its pinned deck) without mixing deck and tactic effects.
+`buildPairedPlan` accepts `{ tactic, deckId }` independently for both agents and emits two games for
+every matchup/seed, swapping seats while reusing the seed. Use a same-tactic candidate to measure only
+the deck change, or the same deck to measure only the tactic change.
+
+`evaluatePaired` clusters the two seat-swapped games by candidate + pair + seed before calculating the
+candidate-minus-baseline win-rate difference and its 95% confidence interval. It rejects incomplete
+pairs. `writePairedReports` writes both `paired.<run-id>.json` (machine-readable) and
+`paired.<run-id>.md` (human-readable); both include game/pair counts and separate candidate/baseline
+fault and timeout counts. A baseline self-comparison is supported as a holdout-suite calibration and
+is expected to center on zero.
+
 ## Staged 75-contestant battle (`total-battle`)
 
 Running all 75 tactic×deck contestants at the final sample size is expensive. `total-battle` uses the
