@@ -48,7 +48,7 @@ const CONFIG: RunConfig = {
 };
 
 function inputs(): ContestantInput[] {
-  return CONTESTANTS.map((c, i) => ({
+  return CONTESTANTS.slice(0, 3).map((c, i) => ({
     label: c.label,
     kanji: c.kanji,
     repo: c.repo,
@@ -83,7 +83,7 @@ function fixedRunner(seat0WinsCount: number, faultEvery = 0): ShardRunner {
 describe('roundRobinShards — 先後入替 round-robin', () => {
   it('produces every pair in both seat orientations, with unique ids', () => {
     const shards = roundRobinShards(inputs(), CONFIG);
-    // 3 contestants → 3 pairs × 2 orientations = 6 shards.
+    // Legacy three-contestant fixture → 3 pairs × 2 orientations = 6 shards.
     expect(shards).toHaveLength(6);
     const ids = shards.map((s) => s.shardId).sort();
     expect(ids).toEqual(
@@ -485,13 +485,13 @@ describe('(tactic × deck) contestant model — SOT-1715', () => {
     expect(decks[0].deckHash).toBe(sha256Hex('card-01,4\n'));
   });
 
-  it('buildTupleContestants expands 3 tactics × 25 decks into 75 labelled contestants', () => {
+  it('buildTupleContestants expands 4 tactics × 25 decks into 100 labelled contestants', () => {
     const decks = enumerateDecks(fixtureDecksDir(25));
     const contestants = buildTupleContestants({
       decks,
       commitForTactic: (t) => `commit-${t.tactic}`,
     });
-    expect(contestants).toHaveLength(75);
+    expect(contestants).toHaveLength(100);
     // First 25 are matsu (tactic-major ordering), each carrying tactic + deckId + deckHash.
     expect(contestants[0]).toMatchObject({
       label: 'matsu:01',
@@ -502,18 +502,22 @@ describe('(tactic × deck) contestant model — SOT-1715', () => {
     expect(contestants[24].label).toBe('matsu:25');
     expect(contestants[25]).toMatchObject({ label: 'take:01', tactic: 'take', kanji: '竹' });
     expect(contestants[74]).toMatchObject({ label: 'ume:25', tactic: 'ume', kanji: '梅' });
+    expect(contestants[99]).toMatchObject({ label: 'zero:25', tactic: 'zero', kanji: '零' });
     // matsu:01 / take:01 / ume:01 share the same deck → same deckHash.
     const deck01 = contestants.filter((c) => c.deckId === '01').map((c) => c.deckHash);
     expect(new Set(deck01).size).toBe(1);
     expect(contestants.every((c) => c.commit === `commit-${c.tactic}`)).toBe(true);
   });
 
-  it('roundRobinShards over 75 contestants yields C(75,2)*2 shards including same-tactic mirrors', () => {
+  it('roundRobinShards over 100 contestants yields C(100,2)*2 shards including mirrors', () => {
     const decks = enumerateDecks(fixtureDecksDir(25));
-    const contestants = buildTupleContestants({ decks, commitForTactic: () => 'c'.repeat(40) });
+    const contestants = buildTupleContestants({
+      decks,
+      commitForTactic: () => 'c'.repeat(40),
+    });
     const shards = roundRobinShards(contestants, CONFIG);
-    // C(75,2) unordered pairs × 2 seat orientations.
-    expect(shards).toHaveLength(((75 * 74) / 2) * 2);
+    // C(100,2) unordered pairs × 2 seat orientations.
+    expect(shards).toHaveLength(100 * 99);
     const ids = new Set(shards.map((s) => s.shardId));
     expect(ids.size).toBe(shards.length); // all shard ids unique
     // Same-tactic mirror shard (different deck) is present in both orientations.
@@ -525,7 +529,11 @@ describe('(tactic × deck) contestant model — SOT-1715', () => {
 
   it('the built matrix aggregates end-to-end through the fixture runner (mirror shards included)', async () => {
     const decks = enumerateDecks(fixtureDecksDir(3)); // keep it small: 3 tactics × 3 decks = 9 contestants
-    const contestants = buildTupleContestants({ decks, commitForTactic: () => 'c'.repeat(40) });
+    const contestants = buildTupleContestants({
+      decks,
+      tactics: TACTICS.slice(0, 3),
+      commitForTactic: () => 'c'.repeat(40),
+    });
     expect(contestants).toHaveLength(9);
     const dir = tmpDir();
     const m = await runRoundRobin({
@@ -569,12 +577,12 @@ describe('selectContestants — subset globs', () => {
   it('matches a single exact label and a deck wildcard across tactics', () => {
     expect(selectContestants(all, 'ume:25').map((c) => c.label)).toEqual(['ume:25']);
     const deck01 = selectContestants(all, '*:01');
-    expect(deck01.map((c) => c.label)).toEqual(['matsu:01', 'take:01', 'ume:01']);
+    expect(deck01.map((c) => c.label)).toEqual(['matsu:01', 'take:01', 'ume:01', 'zero:01']);
   });
 
   it('* / empty spec selects everyone; unknown selects none; no duplicates when patterns overlap', () => {
-    expect(selectContestants(all, '*')).toHaveLength(75);
-    expect(selectContestants(all, '')).toHaveLength(75);
+    expect(selectContestants(all, '*')).toHaveLength(100);
+    expect(selectContestants(all, '')).toHaveLength(100);
     expect(selectContestants(all, 'nope:99')).toHaveLength(0);
     // Overlapping patterns (matsu:* also covers matsu:01) must not double-list a contestant.
     expect(selectContestants(all, 'matsu:*,matsu:01')).toHaveLength(25);

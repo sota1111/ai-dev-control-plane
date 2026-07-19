@@ -36,6 +36,16 @@
       "branch": "main",
       "deck": "deck.csv",
       "defaults": { "matches": 40, "seed": 20260718, "deckMode": "own" }
+    },
+    {
+      "id": "zero",
+      "aliases": ["零", "zero"],
+      "repo": "sota1111/ptcg-agent-zero",
+      "localPath": "/workspaces/ptcg-agent-zero",
+      "branch": "main",
+      "deck": "deck.csv",
+      "entrypoint": "main.agent",
+      "defaults": { "matches": 40, "seed": 20260718, "deckMode": "own" }
     }
   ]
 }

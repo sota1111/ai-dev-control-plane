@@ -199,7 +199,7 @@ const smokeRunner: ShardRunner = async (shard: ShardSpec) => {
  */
 function biasFor(label: string): number {
   const tactic = label.split(':')[0];
-  return { matsu: 0.15, take: 0.0, ume: -0.1 }[tactic] ?? 0;
+  return { matsu: 0.15, take: 0.0, ume: -0.1, zero: 0.05 }[tactic] ?? 0;
 }
 
 /** Real runner: shell to matsu's cross-battle driver per shard. Best-effort; needs the engine. */

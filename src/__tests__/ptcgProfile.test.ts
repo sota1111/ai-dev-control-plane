@@ -40,7 +40,7 @@ function fixture(root: string): PtcgProfileConfig {
       compatibleSchemaVersions: ['ptcg-battle-lab/v2'],
       defaults: { matches: 40, seed: 7, deckMode: 'own' },
     },
-    profiles: ['matsu', 'take', 'ume'].map((id) => ({
+    profiles: ['matsu', 'take', 'ume', 'zero'].map((id) => ({
       id,
       aliases: [id],
       repo: `owner/${id}`,
@@ -53,9 +53,9 @@ function fixture(root: string): PtcgProfileConfig {
 }
 
 describe('PTCG profile schema and resolution', () => {
-  test('loads the canonical 松・竹・梅 profile', () => {
+  test('loads the canonical 松・竹・梅・zero profile', () => {
     const config = loadPtcgProfileConfig();
-    expect(config.profiles.map((p) => p.id)).toEqual(['matsu', 'take', 'ume']);
+    expect(config.profiles.map((p) => p.id)).toEqual(['matsu', 'take', 'ume', 'zero']);
     expect(config.harness.repo).toBe('sota1111/ai-dev-control-plane');
   });
 
@@ -67,7 +67,7 @@ describe('PTCG profile schema and resolution', () => {
     });
     expect(result?.source).toBe('ptcg-profile');
     expect(result?.target.repo).toBe(config.harness.repo);
-    expect(result?.ptcg?.profiles).toHaveLength(3);
+    expect(result?.ptcg?.profiles).toHaveLength(4);
   });
 
   test('explicit repository and Project always take precedence', () => {
@@ -145,7 +145,7 @@ describe('bounded preflight', () => {
   test('passes against fake compatible repositories without exposing host paths', () => {
     const result = preflightPtcg(fixture(root));
     expect(result.ok).toBe(true);
-    expect(result.checks).toHaveLength(13);
+    expect(result.checks).toHaveLength(16);
     expect(JSON.stringify(result)).not.toContain(root);
   });
 
