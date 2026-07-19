@@ -214,12 +214,12 @@ export async function syncQueueWithLinear(): Promise<void> {
 }
 
 /**
- * Refreshes the priority of items already in the local queue from Linear's current state.
+ * Refreshes ordering metadata of items already in the local queue from Linear's current state.
  *
  * Priority-only changes in Linear do NOT fire a webhook, so an issue bumped to High/Urgent after
  * it was enqueued would otherwise stay ordered on its stale enqueue-time priority. This re-stamps
- * each queued item's priority/priorityLabel/priorityRank with the latest Linear value so the next
- * dequeue() selects the genuinely highest-priority issue.
+ * each queued item's priority and updatedAt with the latest Linear values so the next dequeue()
+ * selects by priority first and most-recent update second.
  *
  * Fail-open: on any error (e.g. Linear API failure) the queue is left untouched and execution is
  * never blocked. This only affects selection of the NEXT item — items already running under the
@@ -233,9 +233,13 @@ export async function refreshQueuePriorities(): Promise<void> {
 
     const active = await fetchActiveIssues();
     // Key by both identifier and id, since queue items store issueId as either.
-    const byKey = new Map<string, { priority: number | null; priorityLabel: string | null }>();
+    const byKey = new Map<string, { priority: number | null; priorityLabel: string | null; issueUpdatedAt: string | null }>();
     for (const issue of active) {
-      const entry = { priority: issue.priority ?? null, priorityLabel: issue.priorityLabel ?? null };
+      const entry = {
+        priority: issue.priority ?? null,
+        priorityLabel: issue.priorityLabel ?? null,
+        issueUpdatedAt: issue.updatedAt ?? null
+      };
       if (issue.identifier) byKey.set(issue.identifier, entry);
       if (issue.id) byKey.set(issue.id, entry);
     }
@@ -246,11 +250,12 @@ export async function refreshQueuePriorities(): Promise<void> {
       if (!fresh) continue;
       const newRank = getPriorityRank(fresh.priority);
       const oldRank = item.priorityRank ?? getPriorityRank(item.priority);
-      if (newRank !== oldRank || fresh.priority !== item.priority) {
+      if (newRank !== oldRank || fresh.priority !== item.priority || fresh.issueUpdatedAt !== (item.issueUpdatedAt ?? null)) {
         changed.push(`${item.issueId}:${oldRank}->${newRank}`);
         item.priority = fresh.priority;
         item.priorityLabel = fresh.priorityLabel;
         item.priorityRank = newRank;
+        item.issueUpdatedAt = fresh.issueUpdatedAt;
       }
     }
 
@@ -420,6 +425,7 @@ export function enqueue(issueId: string, trigger: string | null, retryAt: string
       priorityLabel: priorityLabel ?? null,
       priorityRank: priority !== null ? getPriorityRank(priority) : getPriorityRank(null),
       linearFetchedAt: priority !== null ? now : null,
+      issueUpdatedAt: null,
       parentIssueId: parentIssueId ?? null,
       parentIssueIdentifier: parentIssueIdentifier ?? null,
       queueGroup: resolvedQueueGroup,

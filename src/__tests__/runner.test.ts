@@ -1144,6 +1144,24 @@ describe('runner', () => {
       expect(queueWriteCalls().length).toBe(0);
     });
 
+    it('refreshes Linear updatedAt used to order equal-priority issues', async () => {
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([
+        { issueId: 'SOT-1', priority: 2, priorityRank: 2, issueUpdatedAt: '2026-07-18T10:00:00Z' },
+        { issueId: 'SOT-2', priority: 2, priorityRank: 2, issueUpdatedAt: '2026-07-18T11:00:00Z' }
+      ]));
+      setupLinearMocks([{ issues: { nodes: [
+        { id: 'SOT-1', identifier: 'SOT-1', priority: 2, priorityLabel: 'High', updatedAt: '2026-07-19T12:00:00Z', state: { type: 'started', name: 'In Progress' } },
+        { id: 'SOT-2', identifier: 'SOT-2', priority: 2, priorityLabel: 'High', updatedAt: '2026-07-18T11:00:00Z', state: { type: 'started', name: 'In Progress' } }
+      ] } }]);
+
+      await runner.refreshQueuePriorities();
+
+      const saved = queueWriteCalls().at(-1)?.[1];
+      expect(saved).toBeDefined();
+      expect(JSON.parse(saved).map((item: any) => item.issueId)).toEqual(['SOT-1', 'SOT-2']);
+    });
+
     it('fail-open: does not write or throw on API error', async () => {
       fs.existsSync.mockReturnValue(true);
       fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-1', priority: 3, priorityRank: 3 }]));
