@@ -128,6 +128,11 @@ export interface ShardSpec {
   seed: number;
 }
 
+/** Convert a shard's tuple contestants into the explicit Python driver seat contract. */
+export function pythonSeatArgs(shard: Pick<ShardSpec, 'seat0' | 'seat1'>): string[] {
+  return ['--seat0', shard.seat0, '--seat1', shard.seat1];
+}
+
 /** One raw game record (persisted to object storage, never inlined into the git manifest). */
 export interface GameRecord {
   shardId: string;

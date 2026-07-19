@@ -21,6 +21,7 @@ import {
   loadManifest,
   manifestPath,
   matchContestant,
+  pythonSeatArgs,
   recordShardResult,
   roundRobinShards,
   runRoundRobin,
@@ -81,6 +82,14 @@ function fixedRunner(seat0WinsCount: number, faultEvery = 0): ShardRunner {
 }
 
 describe('roundRobinShards — 先後入替 round-robin', () => {
+  it('maps tuple contestants to explicit Python runner seats', () => {
+    expect(pythonSeatArgs({ seat0: 'matsu:01', seat1: 'take:07' })).toEqual([
+      '--seat0', 'matsu:01', '--seat1', 'take:07',
+    ]);
+    expect(pythonSeatArgs({ seat0: 'matsu:01', seat1: 'matsu:02' })).toEqual([
+      '--seat0', 'matsu:01', '--seat1', 'matsu:02',
+    ]);
+  });
   it('produces every pair in both seat orientations, with unique ids', () => {
     const shards = roundRobinShards(inputs(), CONFIG);
     // Legacy three-contestant fixture → 3 pairs × 2 orientations = 6 shards.
