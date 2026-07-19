@@ -177,6 +177,55 @@ describe('parseWorkerRoleDirectives', () => {
     expect(handoff).toBeUndefined();
     expect(warnings.some((w) => w.includes('invalid handoff value'))).toBe(true);
   });
+
+  test('discussion=codex:sol+claude:fable parses the participant list with models (SOT-1753)', () => {
+    const { discussion, warnings } = parseWorkerRoleDirectives(
+      'workers: discussion=codex:sol+claude:fable',
+    );
+    expect(discussion).toEqual([
+      { worker: 'codex', model: 'sol' },
+      { worker: 'claude', model: 'fable' },
+    ]);
+    expect(warnings).toEqual([]);
+  });
+
+  test('discussion participants accept model-less tokens and the agy alias', () => {
+    const { discussion } = parseWorkerRoleDirectives('workers: discussion=codex+agy:Gemini 3.5 Flash (High)');
+    expect(discussion).toEqual([
+      { worker: 'codex', model: null },
+      { worker: 'antigravity', model: 'Gemini 3.5 Flash (High)' },
+    ]);
+  });
+
+  test('discussion combines with role overrides on the same line and the newest occurrence wins', () => {
+    const parsed = parseWorkerRoleDirectives(
+      'workers: discussion=codex+claude, implementation=codex\nworkers: discussion=claude:fable+codex:sol',
+    );
+    expect(parsed.discussion).toEqual([
+      { worker: 'claude', model: 'fable' },
+      { worker: 'codex', model: 'sol' },
+    ]);
+    expect(parsed.overrides.implementation).toEqual(['codex']);
+  });
+
+  test('unknown discussion workers are skipped with a warning; valid ones are kept', () => {
+    const { discussion, warnings } = parseWorkerRoleDirectives('workers: discussion=gemini+codex:sol');
+    expect(discussion).toEqual([{ worker: 'codex', model: 'sol' }]);
+    expect(warnings.some((w) => w.includes('unknown worker "gemini" for discussion'))).toBe(true);
+  });
+
+  test('a discussion token with no valid participant is ignored with a warning', () => {
+    const { discussion, warnings } = parseWorkerRoleDirectives('workers: discussion=gemini');
+    expect(discussion).toBeUndefined();
+    expect(warnings.some((w) => w.includes('no valid participant specified for discussion'))).toBe(true);
+  });
+
+  test('no discussion token → discussion is undefined (existing syntax unaffected)', () => {
+    const parsed = parseWorkerRoleDirectives('workers: implementation=codex>claude, solo=off');
+    expect(parsed.discussion).toBeUndefined();
+    expect(parsed.overrides.implementation).toEqual(['codex', 'claude']);
+    expect(parsed.solo).toEqual({ disabled: true });
+  });
 });
 
 describe('mergeWorkerRoleOverrides', () => {
