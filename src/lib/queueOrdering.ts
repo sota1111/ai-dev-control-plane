@@ -7,6 +7,7 @@ interface QueueItem {
   priorityRank?: number;
   retryAt?: string | null;
   enqueuedAt?: string | null;
+  issueUpdatedAt?: string | null;
   queueGroup?: string | null;
   queueGroupOrder?: string | null;
   issueId?: string;
@@ -41,7 +42,7 @@ export function effectiveRank(item: QueueItem): number {
  * Enqueue-time ordering (SOT-1352).
  *
  * Returns a NEW array (the input is never mutated) sorted ascending by the STATIC priority
- * dimensions only: effectiveRank → retryAt → enqueuedAt. This is applied when a webhook enqueues
+ * dimensions only: effectiveRank → issueUpdatedAt (newest first) → retryAt → enqueuedAt. This is applied when a webhook enqueues
  * an item so the persisted queue is always stored in priority order, instead of evaluating priority
  * only at execution (dequeue) time.
  *
@@ -55,6 +56,12 @@ export function sortQueueByPriority<T extends QueueItem>(queue: T[]): T[] {
     const rankA = effectiveRank(a);
     const rankB = effectiveRank(b);
     if (rankA !== rankB) return rankA - rankB;
+
+    // Same-priority issues are ordered by their latest Linear update.
+    // Missing timestamps sort last so legacy queue entries remain valid.
+    const updatedA = a.issueUpdatedAt ? new Date(a.issueUpdatedAt).getTime() : -Infinity;
+    const updatedB = b.issueUpdatedAt ? new Date(b.issueUpdatedAt).getTime() : -Infinity;
+    if (updatedA !== updatedB) return updatedB - updatedA;
 
     // retryAt ascending; null/missing = earliest
     const retryA = a.retryAt ? new Date(a.retryAt).getTime() : -Infinity;
@@ -98,6 +105,11 @@ export function selectNextReadyIndex(queue: QueueItem[], { lastProcessedGroup = 
 
     if (rankA < rankB) return aIdx;
     if (rankA > rankB) return bIdx;
+
+    const updatedA = a.issueUpdatedAt ? new Date(a.issueUpdatedAt).getTime() : -Infinity;
+    const updatedB = b.issueUpdatedAt ? new Date(b.issueUpdatedAt).getTime() : -Infinity;
+    if (updatedA > updatedB) return aIdx;
+    if (updatedA < updatedB) return bIdx;
 
     if (groupMode) {
       // Within group: compare queueGroupOrder first (lower/earlier wins, null last)

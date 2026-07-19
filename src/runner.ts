@@ -568,6 +568,7 @@ export interface QueueItem {
   priorityLabel: string | null;
   priorityRank: number;
   linearFetchedAt: string | null;
+  issueUpdatedAt?: string | null;
   parentIssueId: string | null;
   parentIssueIdentifier: string | null;
   queueGroup: string | null;

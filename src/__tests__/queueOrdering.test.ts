@@ -61,6 +61,14 @@ describe('queueOrdering', () => {
       expect(queueOrdering.selectNextReadyIndex(queue3, { now })).toBe(1);
     });
 
+    test('selects the most recently updated issue within the same priority', () => {
+      const queue = [
+        { issueId: 'older', priority: 3, issueUpdatedAt: '2023-01-01T10:00:00Z' },
+        { issueId: 'newer', priority: 3, issueUpdatedAt: '2023-01-01T11:00:00Z' }
+      ];
+      expect(queueOrdering.selectNextReadyIndex(queue, { now })).toBe(1);
+    });
+
     test('ignores items not yet ready', () => {
       const queue = [
         { issueId: 'waiting', priority: 1, retryAt: '2023-01-01T13:00:00Z' },
@@ -162,6 +170,24 @@ describe('queueOrdering', () => {
       ];
       expect(queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId))
         .toEqual(['earlier', 'later']);
+    });
+
+    test('rank tie is broken by Linear updatedAt descending', () => {
+      const queue = [
+        { issueId: 'older-update', priority: 3, issueUpdatedAt: '2023-01-01T10:00:00Z', enqueuedAt: '2023-01-01T11:00:00Z' },
+        { issueId: 'newer-update', priority: 3, issueUpdatedAt: '2023-01-01T12:00:00Z', enqueuedAt: '2023-01-01T09:00:00Z' }
+      ];
+      expect(queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId))
+        .toEqual(['newer-update', 'older-update']);
+    });
+
+    test('missing Linear updatedAt sorts after a timestamp at the same priority', () => {
+      const queue = [
+        { issueId: 'missing-update', priority: 3 },
+        { issueId: 'known-update', priority: 3, issueUpdatedAt: '2023-01-01T12:00:00Z' }
+      ];
+      expect(queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId))
+        .toEqual(['known-update', 'missing-update']);
     });
 
     test('is stable for fully-equal items (keeps input order)', () => {
