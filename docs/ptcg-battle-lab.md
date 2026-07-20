@@ -239,3 +239,16 @@ compatibility. Diagnostics use stable profile names and never print local/host p
 
 The pool and event values are plain JSON-compatible objects. A durable adapter can persist them without
 changing the deterministic selection or replay rules.
+
+## Reproducible comparison protocol (SOT-1782)
+
+`src/lib/ptcgEvaluationHarness.ts` is the common interface for fair cross-method evaluation. An
+`EvaluationProtocol` pins the protocol and environment versions, base seed, repetitions, deck ids and
+content hashes, immutable opponent snapshot/artifact ids, and evaluated method artifacts. The harness
+canonicalizes those conditions and records their SHA-256 fingerprint in every `EvaluationRun`.
+
+`buildEvaluationPlan()` gives every method the identical deck × opponent × repetition matrix. Each
+condition reuses one derived seed for both methods and both seat orientations, explicitly controlling
+先後 bias. `runEvaluation()` accepts one runner per method behind the same `EvaluationRunner` contract;
+the returned artifact contains the complete protocol, fingerprint, scheduled inputs, and outcomes.
+With deterministic runners, serializing two runs under the same protocol produces identical bytes.
