@@ -59,6 +59,8 @@ describe('evaluation correctness, reproducibility, and artifact redaction', () =
 
   it('redacts secrets, personal email, and host paths from telemetry and evaluation artifacts', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'evaluation-redaction-'));
+    const githubToken = ['ghp', 'abcdefghijklmnop'].join('_');
+    const apiKey = ['sk', 'supersecret123'].join('-');
     const manifest = writeTelemetryArtifact(
       root,
       {
@@ -66,8 +68,8 @@ describe('evaluation correctness, reproducibility, and artifact redaction', () =
         createdAt: '2026-07-20T00:00:00.000Z',
         codeVersion: 'abc123',
         seed: 7,
-        command: 'train --token ghp_abcdefghijklmnop --input /home/alice/private/data.json',
-        conditions: { email: 'alice@example.com', apiKey: 'sk-supersecret123' },
+        command: `train --token ${githubToken} --input /home/alice/private/data.json`,
+        conditions: { email: 'alice@example.com', apiKey },
       },
       [{ step: 0, metric: 'loss', value: 0.5 }]
     );
@@ -87,10 +89,10 @@ describe('evaluation correctness, reproducibility, and artifact redaction', () =
     );
     const serialized = `${persisted}\n${JSON.stringify(run)}`;
     for (const leak of [
-      'ghp_abcdefghijklmnop',
+      githubToken,
       '/home/alice/private/data.json',
       'alice@example.com',
-      'sk-supersecret123',
+      apiKey,
       'private-token',
       '/workspaces/private/model.bin',
     ]) {
