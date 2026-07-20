@@ -29,6 +29,111 @@ export const PTCG_AGENT_CONFIG_DEFAULTS = Object.freeze({
   maxRetries: 0,
 });
 
+export const PTCG_ENVIRONMENT_SCHEMA_VERSION = 'ptcg-environment/v1' as const;
+
+export interface PtcgEnvironmentAction {
+  id: string;
+  kind: 'play-card' | 'attack' | 'pass';
+  source?: string;
+  target?: string;
+}
+
+export interface PtcgEnvironmentObservation {
+  schemaVersion: typeof PTCG_ENVIRONMENT_SCHEMA_VERSION;
+  seat: Seat;
+  turn: number;
+  publicState: {
+    active: Record<Seat, string>;
+    prizeCount: Record<Seat, number>;
+    opponentHandCount: number;
+  };
+  privateState: { hand: string[]; deckCount: number };
+  actionSpace: PtcgEnvironmentAction[];
+  legalActionIds: string[];
+  legalActionMask: boolean[];
+}
+
+/** Strictly validates the algorithm-independent environment boundary. */
+export function validatePtcgEnvironmentObservation(value: unknown): PtcgEnvironmentObservation {
+  const root = record(value, 'observation');
+  exactKeys(
+    root,
+    [
+      'schemaVersion',
+      'seat',
+      'turn',
+      'publicState',
+      'privateState',
+      'actionSpace',
+      'legalActionIds',
+      'legalActionMask',
+    ],
+    'observation'
+  );
+  if (root.schemaVersion !== PTCG_ENVIRONMENT_SCHEMA_VERSION) {
+    throw new Error(`observation schemaVersion must be ${PTCG_ENVIRONMENT_SCHEMA_VERSION}`);
+  }
+  if (root.seat !== 'first' && root.seat !== 'second')
+    throw new Error('observation.seat is invalid');
+  const publicState = record(root.publicState, 'observation.publicState');
+  exactKeys(publicState, ['active', 'prizeCount', 'opponentHandCount'], 'observation.publicState');
+  const privateState = record(root.privateState, 'observation.privateState');
+  exactKeys(privateState, ['hand', 'deckCount'], 'observation.privateState');
+  if (
+    !Array.isArray(privateState.hand) ||
+    !privateState.hand.every((card) => typeof card === 'string')
+  ) {
+    throw new Error('observation.privateState.hand must be a string array');
+  }
+  const actions = root.actionSpace;
+  if (!Array.isArray(actions)) throw new Error('observation.actionSpace must be an array');
+  const actionSpace = actions.map((candidate, index) => {
+    const action = record(candidate, `observation.actionSpace[${index}]`);
+    exactKeys(action, ['id', 'kind', 'source', 'target'], `observation.actionSpace[${index}]`);
+    if (!['play-card', 'attack', 'pass'].includes(String(action.kind))) {
+      throw new Error(`observation.actionSpace[${index}].kind is invalid`);
+    }
+    return action as unknown as PtcgEnvironmentAction;
+  });
+  const ids = actionSpace.map((action) => nonEmpty(action.id, 'action.id'));
+  if (new Set(ids).size !== ids.length)
+    throw new Error('observation.actionSpace ids must be unique');
+  if (
+    !Array.isArray(root.legalActionIds) ||
+    !root.legalActionIds.every((id) => typeof id === 'string')
+  ) {
+    throw new Error('observation.legalActionIds must be a string array');
+  }
+  if (
+    !Array.isArray(root.legalActionMask) ||
+    !root.legalActionMask.every((bit) => typeof bit === 'boolean')
+  ) {
+    throw new Error('observation.legalActionMask must be a boolean array');
+  }
+  if (root.legalActionMask.length !== actionSpace.length) {
+    throw new Error('observation.legalActionMask length must match actionSpace');
+  }
+  const maskedIds = ids.filter((_, index) => (root.legalActionMask as boolean[])[index]);
+  if (
+    new Set(root.legalActionIds).size !== root.legalActionIds.length ||
+    root.legalActionIds.some((id) => !ids.includes(id)) ||
+    maskedIds.length !== root.legalActionIds.length ||
+    maskedIds.some((id) => !(root.legalActionIds as string[]).includes(id))
+  ) {
+    throw new Error('observation legalActionIds must exactly match legalActionMask');
+  }
+  nonNegativeInteger(root.turn, 'observation.turn');
+  nonNegativeInteger(publicState.opponentHandCount, 'observation.publicState.opponentHandCount');
+  nonNegativeInteger(privateState.deckCount, 'observation.privateState.deckCount');
+  return value as PtcgEnvironmentObservation;
+}
+
+export function roundTripPtcgEnvironmentObservation(
+  observation: PtcgEnvironmentObservation
+): PtcgEnvironmentObservation {
+  return validatePtcgEnvironmentObservation(JSON.parse(JSON.stringify(observation)));
+}
+
 export interface PtcgAgentRequest {
   matchId: string;
   seed: number;
