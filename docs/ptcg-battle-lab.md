@@ -224,3 +224,18 @@ compatibility. Diagnostics use stable profile names and never print local/host p
   interruption / resume / duplicate-rejection / atomicity / schema-validation / redaction tests.
 - `src/__tests__/ptcgAnalyze.test.ts` — raw-record readback, tallies, ranking-evidence (CI overlap /
   sample-insufficiency), diff, report rendering, and on-disk artifact regeneration tests.
+
+## Opponent Pool and auditable ratings (SOT-1773)
+
+`src/lib/ptcgOpponentPool.ts` provides the league-facing model registry and rating boundary:
+
+- `OpponentPool` registers immutable snapshot identities with generation, active/inactive status,
+  artifact lineage, creation time, and string metadata. Selection sorts eligible candidates before
+  deriving an index from SHA-256 of the seed and candidate ids, so registration order cannot affect a
+  replay. Inactive snapshots are never eligible; callers may also exclude ids or cap generations.
+- `RatingEventStore` appends an Elo event containing the result, K-factor, both prior ratings, expected
+  score, delta, and both resulting ratings. `replay()` reconstructs ratings from the event sequence and
+  rejects duplicate or tampered calculations, making the update history independently auditable.
+
+The pool and event values are plain JSON-compatible objects. A durable adapter can persist them without
+changing the deterministic selection or replay rules.
