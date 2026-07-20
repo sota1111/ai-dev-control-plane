@@ -188,7 +188,8 @@ Post your judgment as a Linear comment on the parent Issue:
    - parentId: the parent Issue ID
    - Title: start with the feature/outcome (例: `queueのdequeue順をLinear priority準拠にする`). Do NOT use process prefixes ([IMPLEMENT]/[DEBUG]/[PLAN]/Debug:/Implement:/Test:/Refactor:).
    - Description (child Issue body template): 目的 / 変更範囲 / 実装内容 / 検証内容（Debug・Testはここに含める） / 想定commit / 受け入れ条件 / 関連する親Issue
-   - Status: Todo
+   - Status: `In Review` when the parent is a `PLAN` task; otherwise `Todo`. PLAN children are review
+     deliverables and must not enter the automatic implementation queue on creation.
    - Priority: inherit from parent
 3. Post a summary comment on the parent Issue listing all created child Issues
 4. Create local tracking file: `docs/ai/linear/<PARENT_ISSUE_ID>.md`
