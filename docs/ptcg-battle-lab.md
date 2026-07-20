@@ -252,3 +252,17 @@ condition reuses one derived seed for both methods and both seat orientations, e
 先後 bias. `runEvaluation()` accepts one runner per method behind the same `EvaluationRunner` contract;
 the returned artifact contains the complete protocol, fingerprint, scheduled inputs, and outcomes.
 With deterministic runners, serializing two runs under the same protocol produces identical bytes.
+
+## Statistical benchmark and versioned baselines (SOT-1783)
+
+`src/lib/ptcgStatisticalBenchmark.ts` compares an evaluation run with a versioned baseline only when
+the environment, seed, repetitions, deck hashes, and opponent snapshot pool match. For every method it
+records game counts, candidate/baseline win rates, their difference, and a Newcombe-Wilson 95%
+confidence interval. The configured equivalence margin and minimum game count produce one explicit
+`improved`, `equivalent`, `regressed`, or `inconclusive` result; only improved/equivalent results pass.
+
+Scheduled jobs should pin `generatedAt` to the scheduler's run timestamp and call
+`writeBenchmarkReport()`. Its versioned, stable pretty-JSON artifact includes the baseline version,
+policy, condition fingerprint, both protocol fingerprints, statistical rationale, and aggregate pass
+status. Re-running with the same fixed protocol, runners, baseline, policy, and timestamp is byte
+identical. A changed seed, pool, deck, repetition count, or environment is rejected rather than compared.
