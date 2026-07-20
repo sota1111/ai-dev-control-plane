@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { assertArtifactRedacted, redactArtifact } from './ptcgArtifactRedaction.js';
 
 export const EVALUATION_PROTOCOL_VERSION = 'ptcg-evaluation-protocol/v1' as const;
 
@@ -173,7 +174,7 @@ export async function runEvaluation(
   protocol: EvaluationProtocol,
   runners: Readonly<Record<string, EvaluationRunner>>
 ): Promise<EvaluationRun> {
-  const fixed = canonicalProtocol(protocol);
+  const fixed = redactArtifact(canonicalProtocol(protocol));
   const results: EvaluationResult[] = [];
   for (const match of buildEvaluationPlan(fixed)) {
     const runner = runners[match.methodId];
@@ -181,7 +182,13 @@ export async function runEvaluation(
     const outcome = await runner(structuredClone(match));
     if (!['method', 'opponent', 'draw'].includes(outcome.winner))
       throw new Error(`runner ${match.methodId} returned an invalid winner`);
-    results.push({ ...match, outcome: structuredClone(outcome) });
+    results.push({ ...match, outcome: redactArtifact(structuredClone(outcome)) });
   }
-  return { protocol: fixed, protocolFingerprint: evaluationProtocolFingerprint(fixed), results };
+  const run = {
+    protocol: fixed,
+    protocolFingerprint: evaluationProtocolFingerprint(fixed),
+    results,
+  };
+  assertArtifactRedacted(run);
+  return run;
 }
