@@ -481,9 +481,11 @@ Start the title with the feature/outcome, NOT a process name (avoid Implement/De
 
 ### Registration Procedure
 
-Use `mcp__linear-server__create_issue`: (1) create child, (2) link via `parentId`, (3) Status `Todo`,
-(4) inherit Priority from parent, (5) inherit Project (`project`/`projectId`), (6) comment the
-decomposition result on the parent.
+Use `mcp__linear-server__create_issue`: (1) create child, (2) link via `parentId`, (3) set Status to
+`In Review` when the parent is a `PLAN` task, otherwise `Todo`, (4) inherit Priority from parent,
+(5) inherit Project (`project`/`projectId`), (6) comment the decomposition result on the parent.
+PLAN children are planning deliverables awaiting human review; they must not enter the automatic
+implementation queue merely because they were created.
 
 **Issue-cap recovery ("cannot add issue").** If `create_issue` fails because the workspace hit its
 Issue cap (free plan = 250): (1) `bash scripts/ai/archive_linear_issues.sh --execute` to archive old
