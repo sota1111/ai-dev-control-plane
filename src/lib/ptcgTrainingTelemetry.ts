@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { assertArtifactRedacted, redactArtifact } from './ptcgArtifactRedaction.js';
 
 export const TELEMETRY_SCHEMA_VERSION = 'ptcg-training-telemetry/v1' as const;
 export const TELEMETRY_GENERATOR_VERSION = 'ptcg-telemetry-generator/v1' as const;
@@ -113,15 +114,16 @@ export function writeTelemetryArtifact(
   metadata: TelemetryRunMetadata,
   points: TelemetryPoint[]
 ): TelemetryManifest {
-  validateMetadata(metadata);
+  const safeMetadata = redactArtifact(metadata);
+  validateMetadata(safeMetadata);
   points.forEach(validatePoint);
-  const runDir = path.join(root, metadata.runId);
+  const runDir = path.join(root, safeMetadata.runId);
   const raw = `${points.map((point) => stableJson(point)).join('\n')}${points.length ? '\n' : ''}`;
   const rawBytes = Buffer.from(raw);
   const manifest: TelemetryManifest = {
     schemaVersion: TELEMETRY_SCHEMA_VERSION,
     generatorVersion: TELEMETRY_GENERATOR_VERSION,
-    metadata: structuredClone(metadata),
+    metadata: safeMetadata,
     raw: {
       file: 'metrics.jsonl',
       sha256: sha256(rawBytes),
@@ -129,6 +131,7 @@ export function writeTelemetryArtifact(
       points: points.length,
     },
   };
+  assertArtifactRedacted(manifest);
   atomicWrite(path.join(runDir, manifest.raw.file), rawBytes);
   atomicWrite(path.join(runDir, 'manifest.json'), `${stableJson(manifest)}\n`);
   return manifest;
