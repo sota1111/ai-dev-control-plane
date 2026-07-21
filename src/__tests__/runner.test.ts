@@ -807,6 +807,7 @@ describe('runner', () => {
     const startedState = { name: 'In Progress', type: 'started' };
     const doneState = { name: 'Done', type: 'completed' };
     const reviewState = { name: 'In Review', type: 'started' };
+    const holdState = { name: 'On Hold', type: 'completed' };
 
     it('returns false immediately when parentId is null (no Linear calls)', async () => {
       const result = await runner.finalizeParentIfChildrenComplete('SOT-831', null);
@@ -883,6 +884,27 @@ describe('runner', () => {
       const result = await runner.finalizeParentIfChildrenComplete('SOT-832', 'SOT-829');
 
       expect(result).toBe(true);
+    });
+
+    it('resumes an On Hold parent to Todo when all prerequisite children complete (SOT-1816)', async () => {
+      setupLinearMocks([
+        { issue: { id: 'parent-uuid', identifier: 'SOT-1813', state: holdState, team: { id: 'team-1' },
+          children: { nodes: [{ identifier: 'SOT-1815', state: reviewState }] } } },
+        { issue: { comments: { nodes: [] } } },
+        { workflowStates: { nodes: [
+          { id: 'state-todo', name: 'Todo', type: 'unstarted' },
+          { id: 'state-review', name: 'In Review', type: 'started' }
+        ] } },
+        { issueUpdate: { success: true } },
+        { commentCreate: { success: true } }
+      ]);
+
+      const result = await runner.finalizeParentIfChildrenComplete('SOT-1815', 'SOT-1813');
+
+      expect(result).toBe(true);
+      const written = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(written.some((b: any) => b.includes('issueUpdate') && b.includes('state-todo'))).toBe(true);
+      expect(written.some((b: any) => b.includes('commentCreate') && b.includes('auto-parent-resumed'))).toBe(true);
     });
 
     it('does nothing when a child is still active (Todo/In Progress) even if others are In Review (SOT-1551)', async () => {

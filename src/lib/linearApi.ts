@@ -47,6 +47,7 @@ export interface EligibilityResult {
 
 // Marker embedded in the auto-finalization comment so we never finalize a parent twice.
 const PARENT_FINALIZED_MARKER = '<!-- auto-parent-finalized -->';
+const PARENT_RESUMED_MARKER = '<!-- auto-parent-resumed -->';
 
 // SOT-1440 / P7: mark transient (retryable) transport errors so linearQuery can retry them with
 // backoff. GraphQL user/validation errors are marked NON-transient (permanent) and never retried.
@@ -493,7 +494,9 @@ export async function setIssueOnHold(issueId: string, commentBody?: string): Pro
 }
 
 // When a CHILD issue reaches a completed state (terminal Done/Canceled OR In Review),
-// advance its parent to In Review if all of the parent's children are now complete. Child
+// advance its parent if all of the parent's children are now complete. A parent explicitly
+// parked On Hold is resumed to Todo because its children were prerequisites; other active
+// parents are finalized to In Review because their children were the deliverables. Child
 // issues are processed in independent Linear-webhook single-issue runs, so without this
 // nobody returns to finalize the parent and it stays stuck in Todo/In Progress (see
 // SOT-840 / SOT-829 / SOT-1551). Fail-open: never throws.
@@ -519,7 +522,9 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
       return false;
     }
 
-    if (isTerminalState(parent.state)) {
+    // Some Linear workspaces model On Hold with type=completed. It is still a resumable
+    // hold state, not a finished parent, so let the resume branch below handle it.
+    if (isTerminalState(parent.state) && !isHoldState(parent.state)) {
       log('WEBHOOK', `finalizeParent: ${parent.identifier} already terminal (${parent.state?.name}), skip`, { issue: parent.identifier });
       return false;
     }
@@ -543,37 +548,47 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
       return false;
     }
 
-    // Idempotency: bail if we already posted the finalization marker.
+    const resumeParent = (parent.state?.name || '').toLowerCase() === 'on hold';
+    const marker = resumeParent ? PARENT_RESUMED_MARKER : PARENT_FINALIZED_MARKER;
+
+    // Idempotency: bail if we already posted the applicable transition marker.
     const commentsData: any = await linearQuery(
       'query($id: String!) { issue(id: $id) { comments(first: 50) { nodes { body } } } }',
       { id: parent.id }
     );
     const existingComments = commentsData.issue?.comments?.nodes || [];
-    if (existingComments.some((c: any) => (c.body || '').includes(PARENT_FINALIZED_MARKER))) {
-      log('WEBHOOK', `finalizeParent: ${parent.identifier} already finalized (marker present), skip`, { issue: parent.identifier });
+    if (existingComments.some((c: any) => (c.body || '').includes(marker))) {
+      log('WEBHOOK', `finalizeParent: ${parent.identifier} already ${resumeParent ? 'resumed' : 'finalized'} (marker present), skip`, { issue: parent.identifier });
       return false;
     }
 
-    // Resolve the team's "In Review" workflow state by name (both In Progress and In
-    // Review are type "started", so we must match on name, not type).
+    // Resolve the target by name. Todo causes the normal Issue webhook path to enqueue a
+    // resumed parent; In Review remains the terminal handoff for decomposition-only parents.
     const statesData: any = await linearQuery(
       'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
       { teamId: parent.team.id }
     );
     const stateNodes = statesData.workflowStates?.nodes || [];
-    const reviewState = stateNodes.find((s: any) => (s.name || '').toLowerCase() === 'in review');
-    if (!reviewState) {
-      log('WEBHOOK', `finalizeParent: no In Review state for team ${parent.team.id}, skip`, { issue: parent.identifier });
+    const targetName = resumeParent ? 'todo' : 'in review';
+    const targetState = stateNodes.find((s: any) => (s.name || '').toLowerCase() === targetName);
+    if (!targetState) {
+      log('WEBHOOK', `finalizeParent: no ${resumeParent ? 'Todo' : 'In Review'} state for team ${parent.team.id}, skip`, { issue: parent.identifier });
       return false;
     }
 
     await linearQuery(
       'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
-      { id: parent.id, stateId: reviewState.id }
+      { id: parent.id, stateId: targetState.id }
     );
 
     const childList = children.map((c: any) => `- ${c.identifier} (${c.state?.name})`).join('\n');
-    const body = `${PARENT_FINALIZED_MARKER}
+    const body = resumeParent ? `${PARENT_RESUMED_MARKER}
+## 親Issue自動再開
+
+全ての前提子Issueが完了したため、親Issueを **Todo** に戻しました（trigger: ${childIdentifier} 完了）。通常の webhook 実行キューから自動再開します。
+
+### 子Issue
+${childList}` : `${PARENT_FINALIZED_MARKER}
 ## 親Issue自動ファイナライズ
 
 全ての子Issueが完了したため、親Issueを **In Review** に更新しました（trigger: ${childIdentifier} 完了）。
@@ -587,7 +602,7 @@ ${childList}
       { issueId: parent.id, body }
     );
 
-    log('WEBHOOK', `finalizeParent: ${parent.identifier} -> In Review (all ${children.length} children complete, trigger ${childIdentifier})`, { issue: parent.identifier });
+    log('WEBHOOK', `finalizeParent: ${parent.identifier} -> ${resumeParent ? 'Todo (resume)' : 'In Review'} (all ${children.length} children complete, trigger ${childIdentifier})`, { issue: parent.identifier });
     return true;
   } catch (err: any) {
     log('ERROR', `finalizeParentIfChildrenComplete failed: ${err.message}`, { issue: parentId || '' });
