@@ -77,9 +77,9 @@ pairs. `writePairedReports` writes both `paired.<run-id>.json` (machine-readable
 fault and timeout counts. A baseline self-comparison is supported as a holdout-suite calibration and
 is expected to center on zero.
 
-## Staged 75-contestant battle (`total-battle`)
+## Staged mixed-deck battle (`total-battle`)
 
-Running all 75 tactic×deck contestants at the final sample size is expensive. `total-battle` uses the
+Running a large tactic×deck field at the final sample size is expensive. `total-battle` uses the
 same resumable, atomic shard pipeline in two phases: a cheap all-contestant **screen**, then a larger
 **confirm** run containing only the screen's top K by win rate.
 
@@ -88,7 +88,10 @@ tsx src/ptcg-battle-lab-cli.ts total-battle \
   --run-id 20260718-total --screen-matches 8 --keep-top 10 --confirm-matches 40 --chunks 4
 ```
 
-- Screen schedules every ordered pairing for all 75 contestants at `--screen-matches` per shard.
+- `--contestants 'matsu:*,take:*,ume:*,zero:*,fable,sol'` selects 25 tournament decks for the first
+  four tactics and each repository's own champion package for Fable/sol (102 contestants). A bare
+  tactic means its champion only; `tactic:*` means every pool deck.
+- Screen schedules every ordered pairing for the selected contestants at `--screen-matches` per shard.
 - Confirm schedules only the selected `--keep-top` contestants at `--confirm-matches` per shard.
 - `--chunks` deterministically splits both phases by seed. `--runner fixture` (default) runs entirely
   in the control-plane/CI; use `--runner python` only when the real engine and sibling repos exist.

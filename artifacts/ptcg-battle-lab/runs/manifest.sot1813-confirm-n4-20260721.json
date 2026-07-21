@@ -1,0 +1,880 @@
+{
+  "schemaVersion": "ptcg-battle-lab/v2",
+  "runId": "sot1813-confirm-n4-20260721",
+  "createdAt": "2026-07-21T11:26:05.809Z",
+  "updatedAt": "2026-07-21T11:40:06.222Z",
+  "config": {
+    "matchesPerShard": 4,
+    "seed": 20260721,
+    "deckMode": "own",
+    "chunksPerOrientation": 1
+  },
+  "inputs": [
+    {
+      "label": "matsu",
+      "kanji": "松",
+      "repo": "ptcg-agent-matsu",
+      "commit": "58ca1eb3efffeffca8ee84581c4346eecead6807",
+      "deckHash": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+    },
+    {
+      "label": "take",
+      "kanji": "竹",
+      "repo": "ptcg-agent-take",
+      "commit": "5d7eef8f050fbe421860e9c397d20b23e580b54b",
+      "deckHash": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+    },
+    {
+      "label": "ume",
+      "kanji": "梅",
+      "repo": "ptcg-agent-ume",
+      "commit": "a20b32461a6bfa899ba1284c2cff97d59fa8898c",
+      "deckHash": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+    },
+    {
+      "label": "zero",
+      "kanji": "零",
+      "repo": "ptcg-agent-zero",
+      "commit": "7cb77a2bdf4bd630d287429dfce3078fc240c19d",
+      "deckHash": "e92d5717fd04865b0b528307df7a9d9aecc2c7b917bfbd5042fe58e3d1f26997"
+    },
+    {
+      "label": "fable",
+      "kanji": "譚",
+      "repo": "ptcg-agent-fable",
+      "commit": "34064b3d4e802f9026f03cec7bd791b243021c44",
+      "deckHash": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+    },
+    {
+      "label": "sol",
+      "kanji": "陽",
+      "repo": "ptcg-agent-sol",
+      "commit": "bf2087b9a749ebee752f8460b151aa35c6ca93af",
+      "deckHash": "e92d5717fd04865b0b528307df7a9d9aecc2c7b917bfbd5042fe58e3d1f26997"
+    }
+  ],
+  "shards": [
+    {
+      "shardId": "matsu-vs-take",
+      "seat0": "matsu",
+      "seat1": "take",
+      "matches": 4,
+      "seed": 20260721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/matsu-vs-take.games.jsonl",
+        "checksum": "1c43883cca5c2c38b71c7b2cf8bfde42b6cddc08a7a88855b3cfc72a74a942d4",
+        "size": 418
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "matsu": 2,
+          "take": 2
+        },
+        "faults": {
+          "matsu": 0,
+          "take": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:26:39.663Z"
+    },
+    {
+      "shardId": "take-vs-matsu",
+      "seat0": "take",
+      "seat1": "matsu",
+      "matches": 4,
+      "seed": 20261221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/take-vs-matsu.games.jsonl",
+        "checksum": "48fe9f4c2b866263b12f14dadf5565e02c5e65d6e3ceeedb921c240b488b2d3a",
+        "size": 418
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "take": 2,
+          "matsu": 2
+        },
+        "faults": {
+          "take": 0,
+          "matsu": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:27:06.687Z"
+    },
+    {
+      "shardId": "matsu-vs-ume",
+      "seat0": "matsu",
+      "seat1": "ume",
+      "matches": 4,
+      "seed": 20261721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/matsu-vs-ume.games.jsonl",
+        "checksum": "4d88369938d8003fe1e96417c01b72fd87302153b9daae2289a9f0fab0cca107",
+        "size": 404
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "matsu": 0,
+          "ume": 4
+        },
+        "faults": {
+          "matsu": 0,
+          "ume": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:28:04.946Z"
+    },
+    {
+      "shardId": "ume-vs-matsu",
+      "seat0": "ume",
+      "seat1": "matsu",
+      "matches": 4,
+      "seed": 20262221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/ume-vs-matsu.games.jsonl",
+        "checksum": "82a93d9033b5191a95a8efe01c873697acd56f56bb5baf0f3cf869cff4f8275c",
+        "size": 406
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "ume": 3,
+          "matsu": 1
+        },
+        "faults": {
+          "ume": 0,
+          "matsu": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:28:39.186Z"
+    },
+    {
+      "shardId": "matsu-vs-zero",
+      "seat0": "matsu",
+      "seat1": "zero",
+      "matches": 4,
+      "seed": 20262721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/matsu-vs-zero.games.jsonl",
+        "checksum": "7da2b346507dffc9d42c7b20aacfde0fbbb6d50557bf9745cb56ec2a2540a4d0",
+        "size": 419
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "matsu": 3,
+          "zero": 1
+        },
+        "faults": {
+          "matsu": 0,
+          "zero": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:29:07.789Z"
+    },
+    {
+      "shardId": "zero-vs-matsu",
+      "seat0": "zero",
+      "seat1": "matsu",
+      "matches": 4,
+      "seed": 20263221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/zero-vs-matsu.games.jsonl",
+        "checksum": "2cde701ab136948b53a2ba78ec1b717b993f1a29e495d98323d520115d292c5d",
+        "size": 418
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "zero": 2,
+          "matsu": 2
+        },
+        "faults": {
+          "zero": 0,
+          "matsu": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:29:34.631Z"
+    },
+    {
+      "shardId": "matsu-vs-fable",
+      "seat0": "matsu",
+      "seat1": "fable",
+      "matches": 4,
+      "seed": 20263721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/matsu-vs-fable.games.jsonl",
+        "checksum": "5719adb00f1a44d6e69795290547812614d60ca5e2a63e3c4f62d0118bd7f4fe",
+        "size": 428
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "matsu": 2,
+          "fable": 2
+        },
+        "faults": {
+          "matsu": 0,
+          "fable": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:30:15.824Z"
+    },
+    {
+      "shardId": "fable-vs-matsu",
+      "seat0": "fable",
+      "seat1": "matsu",
+      "matches": 4,
+      "seed": 20264221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/fable-vs-matsu.games.jsonl",
+        "checksum": "f93ace8949b80f0b6a9ce1b44f7d7c4eddfee51b2f5cebb2f12ca2a9e08c4a5c",
+        "size": 428
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "fable": 2,
+          "matsu": 2
+        },
+        "faults": {
+          "fable": 0,
+          "matsu": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:31:33.196Z"
+    },
+    {
+      "shardId": "matsu-vs-sol",
+      "seat0": "matsu",
+      "seat1": "sol",
+      "matches": 4,
+      "seed": 20264721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/matsu-vs-sol.games.jsonl",
+        "checksum": "dae7bc0573eb992b9f72c2d168a5f67114b5b60de2318bc6d6222f5580a82b4e",
+        "size": 410
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "matsu": 3,
+          "sol": 1
+        },
+        "faults": {
+          "matsu": 0,
+          "sol": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:32:45.631Z"
+    },
+    {
+      "shardId": "sol-vs-matsu",
+      "seat0": "sol",
+      "seat1": "matsu",
+      "matches": 4,
+      "seed": 20265221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/sol-vs-matsu.games.jsonl",
+        "checksum": "889149ce1f31b65236229304cd323a4a3d0cbe81c88a50f7e36431b409d622f4",
+        "size": 410
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "sol": 1,
+          "matsu": 3
+        },
+        "faults": {
+          "sol": 0,
+          "matsu": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:33:14.102Z"
+    },
+    {
+      "shardId": "take-vs-ume",
+      "seat0": "take",
+      "seat1": "ume",
+      "matches": 4,
+      "seed": 20265721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/take-vs-ume.games.jsonl",
+        "checksum": "a7667d962bf7de82c751a917d311ac2cfeac9a31bfe8abb9e41fb5182a43d69f",
+        "size": 398
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "take": 2,
+          "ume": 2
+        },
+        "faults": {
+          "take": 0,
+          "ume": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:33:30.337Z"
+    },
+    {
+      "shardId": "ume-vs-take",
+      "seat0": "ume",
+      "seat1": "take",
+      "matches": 4,
+      "seed": 20266221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/ume-vs-take.games.jsonl",
+        "checksum": "40ff9c9a0ce57180b0179f6003c7e9f23e6c697af111251906b8f6190523ab70",
+        "size": 398
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "ume": 2,
+          "take": 2
+        },
+        "faults": {
+          "ume": 0,
+          "take": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:33:45.145Z"
+    },
+    {
+      "shardId": "take-vs-zero",
+      "seat0": "take",
+      "seat1": "zero",
+      "matches": 4,
+      "seed": 20266721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/take-vs-zero.games.jsonl",
+        "checksum": "c502826b1b7dfce8fceadec1872603ac31e689394c5f5405344ef8332001a588",
+        "size": 408
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "take": 2,
+          "zero": 2
+        },
+        "faults": {
+          "take": 0,
+          "zero": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:33:45.351Z"
+    },
+    {
+      "shardId": "zero-vs-take",
+      "seat0": "zero",
+      "seat1": "take",
+      "matches": 4,
+      "seed": 20267221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/zero-vs-take.games.jsonl",
+        "checksum": "fde351ced6728f99a0a47cc2ee8ba8e55a5ee0b07566fe51757c42387d9cc5b2",
+        "size": 408
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "zero": 2,
+          "take": 2
+        },
+        "faults": {
+          "zero": 0,
+          "take": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:33:45.564Z"
+    },
+    {
+      "shardId": "take-vs-fable",
+      "seat0": "take",
+      "seat1": "fable",
+      "matches": 4,
+      "seed": 20267721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/take-vs-fable.games.jsonl",
+        "checksum": "ab7ebea67c908a6ea87a4dd425fe0ad922579921493bab7c5a2d20d9582b7102",
+        "size": 417
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "take": 3,
+          "fable": 1
+        },
+        "faults": {
+          "take": 0,
+          "fable": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:34:14.186Z"
+    },
+    {
+      "shardId": "fable-vs-take",
+      "seat0": "fable",
+      "seat1": "take",
+      "matches": 4,
+      "seed": 20268221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/fable-vs-take.games.jsonl",
+        "checksum": "eb4f001d4eadbb22e22f86c4d7107f0b0b9fc5726ba07d1ee43accbc221e1547",
+        "size": 417
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "fable": 1,
+          "take": 3
+        },
+        "faults": {
+          "fable": 0,
+          "take": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:34:41.879Z"
+    },
+    {
+      "shardId": "take-vs-sol",
+      "seat0": "take",
+      "seat1": "sol",
+      "matches": 4,
+      "seed": 20268721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/take-vs-sol.games.jsonl",
+        "checksum": "200970bbefbfc5c493820421062a9088e5586c73ba5a1fc6a4b1b96628ffb002",
+        "size": 400
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "take": 4,
+          "sol": 0
+        },
+        "faults": {
+          "take": 0,
+          "sol": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:34:42.106Z"
+    },
+    {
+      "shardId": "sol-vs-take",
+      "seat0": "sol",
+      "seat1": "take",
+      "matches": 4,
+      "seed": 20269221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/sol-vs-take.games.jsonl",
+        "checksum": "632926b7983647201109935ded5dd590ed684bec72658e67d3796b10826385cc",
+        "size": 400
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "sol": 0,
+          "take": 4
+        },
+        "faults": {
+          "sol": 0,
+          "take": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:34:42.240Z"
+    },
+    {
+      "shardId": "ume-vs-zero",
+      "seat0": "ume",
+      "seat1": "zero",
+      "matches": 4,
+      "seed": 20269721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/ume-vs-zero.games.jsonl",
+        "checksum": "0cc2636e557771541f2b8c3b4843dc7aff651f18a3fe129df5a27d5f8dedf71a",
+        "size": 398
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "ume": 2,
+          "zero": 2
+        },
+        "faults": {
+          "ume": 0,
+          "zero": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:35:02.112Z"
+    },
+    {
+      "shardId": "zero-vs-ume",
+      "seat0": "zero",
+      "seat1": "ume",
+      "matches": 4,
+      "seed": 20270221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/zero-vs-ume.games.jsonl",
+        "checksum": "f48e859ee9629f0fc03a283f428b324ef6531d54004b6cb4b00f3508aa840be2",
+        "size": 398
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "zero": 2,
+          "ume": 2
+        },
+        "faults": {
+          "zero": 0,
+          "ume": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:35:23.961Z"
+    },
+    {
+      "shardId": "ume-vs-fable",
+      "seat0": "ume",
+      "seat1": "fable",
+      "matches": 4,
+      "seed": 20270721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/ume-vs-fable.games.jsonl",
+        "checksum": "eca74d874247185203ce3faa120bc62bd7bb9e3258f0e8133ba2343566f9dc03",
+        "size": 408
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "ume": 2,
+          "fable": 2
+        },
+        "faults": {
+          "ume": 0,
+          "fable": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:36:13.536Z"
+    },
+    {
+      "shardId": "fable-vs-ume",
+      "seat0": "fable",
+      "seat1": "ume",
+      "matches": 4,
+      "seed": 20271221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/fable-vs-ume.games.jsonl",
+        "checksum": "3b458567b38e8347a6274882d9922e7beb98dbf91d9d639fc9c71b88c7bdab9b",
+        "size": 410
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "fable": 3,
+          "ume": 1
+        },
+        "faults": {
+          "fable": 0,
+          "ume": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:36:56.707Z"
+    },
+    {
+      "shardId": "ume-vs-sol",
+      "seat0": "ume",
+      "seat1": "sol",
+      "matches": 4,
+      "seed": 20271721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/ume-vs-sol.games.jsonl",
+        "checksum": "ec63f6b8629de609600c35b29c1e3b82818c78fc76480f19ac15793d5260a4ad",
+        "size": 388
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "ume": 4,
+          "sol": 0
+        },
+        "faults": {
+          "ume": 0,
+          "sol": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:37:12.502Z"
+    },
+    {
+      "shardId": "sol-vs-ume",
+      "seat0": "sol",
+      "seat1": "ume",
+      "matches": 4,
+      "seed": 20272221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/sol-vs-ume.games.jsonl",
+        "checksum": "f4ccc1ef4ad02fb4bd1746a004160d8cd2eb219c5e0efd8f7861ad60d1a9125f",
+        "size": 388
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "sol": 0,
+          "ume": 4
+        },
+        "faults": {
+          "sol": 0,
+          "ume": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:37:25.491Z"
+    },
+    {
+      "shardId": "zero-vs-fable",
+      "seat0": "zero",
+      "seat1": "fable",
+      "matches": 4,
+      "seed": 20272721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/zero-vs-fable.games.jsonl",
+        "checksum": "b32f5ae04e5afa5a45ea484a5d54b16032d9c146eeeecbbc7146f9654d8c6ef7",
+        "size": 420
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "zero": 0,
+          "fable": 4
+        },
+        "faults": {
+          "zero": 0,
+          "fable": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:38:09.859Z"
+    },
+    {
+      "shardId": "fable-vs-zero",
+      "seat0": "fable",
+      "seat1": "zero",
+      "matches": 4,
+      "seed": 20273221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/fable-vs-zero.games.jsonl",
+        "checksum": "b809553304243a17b93f6bf506b403115cca1853a2b0b06728d9be69aa542e87",
+        "size": 419
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "fable": 3,
+          "zero": 1
+        },
+        "faults": {
+          "fable": 0,
+          "zero": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:38:39.498Z"
+    },
+    {
+      "shardId": "zero-vs-sol",
+      "seat0": "zero",
+      "seat1": "sol",
+      "matches": 4,
+      "seed": 20273721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/zero-vs-sol.games.jsonl",
+        "checksum": "46426f3bb7a3a55f101e27356f308470089270dd09686c7c8b08b4eb5f97957b",
+        "size": 399
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "zero": 3,
+          "sol": 1
+        },
+        "faults": {
+          "zero": 0,
+          "sol": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:38:39.756Z"
+    },
+    {
+      "shardId": "sol-vs-zero",
+      "seat0": "sol",
+      "seat1": "zero",
+      "matches": 4,
+      "seed": 20274221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/sol-vs-zero.games.jsonl",
+        "checksum": "b9b39fda4c76589bd82c9c8533418c0200d4f82ecb32d3fe691362fb5640c700",
+        "size": 400
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "sol": 0,
+          "zero": 4
+        },
+        "faults": {
+          "sol": 0,
+          "zero": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:38:39.991Z"
+    },
+    {
+      "shardId": "fable-vs-sol",
+      "seat0": "fable",
+      "seat1": "sol",
+      "matches": 4,
+      "seed": 20274721,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/fable-vs-sol.games.jsonl",
+        "checksum": "cbf37068aa17390a461fd95845de4b564fc954881dc125225e7b1ebb14c061d6",
+        "size": 412
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "fable": 4,
+          "sol": 0
+        },
+        "faults": {
+          "fable": 0,
+          "sol": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:39:08.716Z"
+    },
+    {
+      "shardId": "sol-vs-fable",
+      "seat0": "sol",
+      "seat1": "fable",
+      "matches": 4,
+      "seed": 20275221,
+      "status": "completed",
+      "gamesRef": {
+        "key": "sot1813-confirm-n4-20260721/sol-vs-fable.games.jsonl",
+        "checksum": "faef8ef6955418628956086eeba2acd58ecb7d5709771317e6cec0f00b6443d6",
+        "size": 412
+      },
+      "summary": {
+        "matches": 4,
+        "wins": {
+          "sol": 0,
+          "fable": 4
+        },
+        "faults": {
+          "sol": 0,
+          "fable": 0
+        }
+      },
+      "completedAt": "2026-07-21T11:40:06.222Z"
+    }
+  ],
+  "aggregate": {
+    "totalMatches": 120,
+    "totalFaults": 0,
+    "standings": [
+      {
+        "label": "take",
+        "kanji": "竹",
+        "matches": 40,
+        "wins": 26,
+        "losses": 14,
+        "faults": 0,
+        "winRate": 0.65,
+        "ciLow": 0.4950559699353738,
+        "ciHigh": 0.7786566682895085
+      },
+      {
+        "label": "ume",
+        "kanji": "梅",
+        "matches": 40,
+        "wins": 26,
+        "losses": 14,
+        "faults": 0,
+        "winRate": 0.65,
+        "ciLow": 0.4950559699353738,
+        "ciHigh": 0.7786566682895085
+      },
+      {
+        "label": "fable",
+        "kanji": "譚",
+        "matches": 40,
+        "wins": 26,
+        "losses": 14,
+        "faults": 0,
+        "winRate": 0.65,
+        "ciLow": 0.4950559699353738,
+        "ciHigh": 0.7786566682895085
+      },
+      {
+        "label": "matsu",
+        "kanji": "松",
+        "matches": 40,
+        "wins": 20,
+        "losses": 20,
+        "faults": 0,
+        "winRate": 0.5,
+        "ciLow": 0.35199278797099753,
+        "ciHigh": 0.6480072120290025
+      },
+      {
+        "label": "zero",
+        "kanji": "零",
+        "matches": 40,
+        "wins": 19,
+        "losses": 21,
+        "faults": 0,
+        "winRate": 0.475,
+        "ciLow": 0.32935229550181694,
+        "ciHigh": 0.6250289314607026
+      },
+      {
+        "label": "sol",
+        "kanji": "陽",
+        "matches": 40,
+        "wins": 3,
+        "losses": 37,
+        "faults": 0,
+        "winRate": 0.075,
+        "ciLow": 0.02583555677185823,
+        "ciHigh": 0.19864530159097524
+      }
+    ]
+  }
+}
