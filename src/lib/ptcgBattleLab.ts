@@ -53,6 +53,8 @@ export const CONTESTANTS: readonly Contestant[] = [
   { label: 'take', kanji: '竹', repo: 'ptcg-agent-take' },
   { label: 'ume', kanji: '梅', repo: 'ptcg-agent-ume' },
   { label: 'zero', kanji: '零', repo: 'ptcg-agent-zero' },
+  { label: 'fable', kanji: '譚', repo: 'ptcg-agent-fable' },
+  { label: 'sol', kanji: '陽', repo: 'ptcg-agent-sol' },
 ] as const;
 
 /**
@@ -75,6 +77,8 @@ export const TACTICS: readonly Tactic[] = [
   { tactic: 'take', kanji: '竹', repo: 'ptcg-agent-take' },
   { tactic: 'ume', kanji: '梅', repo: 'ptcg-agent-ume' },
   { tactic: 'zero', kanji: '零', repo: 'ptcg-agent-zero' },
+  { tactic: 'fable', kanji: '譚', repo: 'ptcg-agent-fable' },
+  { tactic: 'sol', kanji: '陽', repo: 'ptcg-agent-sol' },
 ] as const;
 
 /** Per-contestant inputs pinned into the manifest so a run is reproducible/attributable. */
@@ -562,6 +566,36 @@ export function selectContestants(all: ContestantInput[], spec: string): Contest
     .filter((s) => s.length > 0);
   if (patterns.length === 0) return all.slice();
   return all.filter((c) => patterns.some((p) => matchContestant(c, p)));
+}
+
+/**
+ * Select a mixed field where `tactic:*`/`tactic:NN` denotes tournament-pool decks while a bare
+ * tactic denotes that repository's own champion deck. This is intentionally distinct from
+ * {@link selectContestants}, whose historical bare-tactic syntax means every pool deck.
+ *
+ * Example: `matsu:*,take:*,ume:*,zero:*,fable,sol` produces 4×25 pool contestants plus the two
+ * champion packages. Output follows tactic order and is de-duplicated.
+ */
+export function selectMixedContestants(
+  tuples: ContestantInput[],
+  champions: ContestantInput[],
+  spec: string
+): ContestantInput[] {
+  const tokens = spec
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (tokens.length === 0 || tokens.includes('*')) return tuples.slice();
+
+  const tuplePatterns = tokens.filter((token) => token.includes(':'));
+  const championLabels = new Set(tokens.filter((token) => !token.includes(':')));
+  const selectedTuples = selectContestants(tuples, tuplePatterns.join(','));
+  const selectedChampions = champions.filter((candidate) => championLabels.has(candidate.label));
+  const byLabel = new Map<string, ContestantInput>();
+  for (const candidate of [...selectedTuples, ...selectedChampions]) {
+    byLabel.set(candidate.label, candidate);
+  }
+  return [...byLabel.values()];
 }
 
 // --------------------------------------------------------------------------- //

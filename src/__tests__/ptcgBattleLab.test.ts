@@ -28,6 +28,7 @@ import {
   runTotalBattle,
   saveManifest,
   selectContestants,
+  selectMixedContestants,
   sha256Hex,
   summarizeGames,
   validateManifest,
@@ -84,10 +85,16 @@ function fixedRunner(seat0WinsCount: number, faultEvery = 0): ShardRunner {
 describe('roundRobinShards — 先後入替 round-robin', () => {
   it('maps tuple contestants to explicit Python runner seats', () => {
     expect(pythonSeatArgs({ seat0: 'matsu:01', seat1: 'take:07' })).toEqual([
-      '--seat0', 'matsu:01', '--seat1', 'take:07',
+      '--seat0',
+      'matsu:01',
+      '--seat1',
+      'take:07',
     ]);
     expect(pythonSeatArgs({ seat0: 'matsu:01', seat1: 'matsu:02' })).toEqual([
-      '--seat0', 'matsu:01', '--seat1', 'matsu:02',
+      '--seat0',
+      'matsu:01',
+      '--seat1',
+      'matsu:02',
     ]);
   });
   it('produces every pair in both seat orientations, with unique ids', () => {
@@ -499,13 +506,13 @@ describe('(tactic × deck) contestant model — SOT-1715', () => {
     expect(decks[0].deckHash).toBe(sha256Hex('card-01,4\n'));
   });
 
-  it('buildTupleContestants expands 4 tactics × 25 decks into 100 labelled contestants', () => {
+  it('buildTupleContestants expands 6 tactics × 25 decks into 150 labelled contestants', () => {
     const decks = enumerateDecks(fixtureDecksDir(25));
     const contestants = buildTupleContestants({
       decks,
       commitForTactic: (t) => `commit-${t.tactic}`,
     });
-    expect(contestants).toHaveLength(100);
+    expect(contestants).toHaveLength(150);
     // First 25 are matsu (tactic-major ordering), each carrying tactic + deckId + deckHash.
     expect(contestants[0]).toMatchObject({
       label: 'matsu:01',
@@ -517,21 +524,23 @@ describe('(tactic × deck) contestant model — SOT-1715', () => {
     expect(contestants[25]).toMatchObject({ label: 'take:01', tactic: 'take', kanji: '竹' });
     expect(contestants[74]).toMatchObject({ label: 'ume:25', tactic: 'ume', kanji: '梅' });
     expect(contestants[99]).toMatchObject({ label: 'zero:25', tactic: 'zero', kanji: '零' });
+    expect(contestants[124]).toMatchObject({ label: 'fable:25', tactic: 'fable', kanji: '譚' });
+    expect(contestants[149]).toMatchObject({ label: 'sol:25', tactic: 'sol', kanji: '陽' });
     // matsu:01 / take:01 / ume:01 share the same deck → same deckHash.
     const deck01 = contestants.filter((c) => c.deckId === '01').map((c) => c.deckHash);
     expect(new Set(deck01).size).toBe(1);
     expect(contestants.every((c) => c.commit === `commit-${c.tactic}`)).toBe(true);
   });
 
-  it('roundRobinShards over 100 contestants yields C(100,2)*2 shards including mirrors', () => {
+  it('roundRobinShards over 150 contestants yields C(150,2)*2 shards including mirrors', () => {
     const decks = enumerateDecks(fixtureDecksDir(25));
     const contestants = buildTupleContestants({
       decks,
       commitForTactic: () => 'c'.repeat(40),
     });
     const shards = roundRobinShards(contestants, CONFIG);
-    // C(100,2) unordered pairs × 2 seat orientations.
-    expect(shards).toHaveLength(100 * 99);
+    // C(150,2) unordered pairs × 2 seat orientations.
+    expect(shards).toHaveLength(150 * 149);
     const ids = new Set(shards.map((s) => s.shardId));
     expect(ids.size).toBe(shards.length); // all shard ids unique
     // Same-tactic mirror shard (different deck) is present in both orientations.
@@ -591,12 +600,19 @@ describe('selectContestants — subset globs', () => {
   it('matches a single exact label and a deck wildcard across tactics', () => {
     expect(selectContestants(all, 'ume:25').map((c) => c.label)).toEqual(['ume:25']);
     const deck01 = selectContestants(all, '*:01');
-    expect(deck01.map((c) => c.label)).toEqual(['matsu:01', 'take:01', 'ume:01', 'zero:01']);
+    expect(deck01.map((c) => c.label)).toEqual([
+      'matsu:01',
+      'take:01',
+      'ume:01',
+      'zero:01',
+      'fable:01',
+      'sol:01',
+    ]);
   });
 
   it('* / empty spec selects everyone; unknown selects none; no duplicates when patterns overlap', () => {
-    expect(selectContestants(all, '*')).toHaveLength(100);
-    expect(selectContestants(all, '')).toHaveLength(100);
+    expect(selectContestants(all, '*')).toHaveLength(150);
+    expect(selectContestants(all, '')).toHaveLength(150);
     expect(selectContestants(all, 'nope:99')).toHaveLength(0);
     // Overlapping patterns (matsu:* also covers matsu:01) must not double-list a contestant.
     expect(selectContestants(all, 'matsu:*,matsu:01')).toHaveLength(25);
@@ -605,6 +621,29 @@ describe('selectContestants — subset globs', () => {
   it('matchContestant treats a bare tactic (no colon) as a tactic match', () => {
     expect(matchContestant(all[0], 'matsu')).toBe(true); // matsu:01
     expect(matchContestant(all[25], 'matsu')).toBe(false); // take:01
+  });
+});
+
+describe('selectMixedContestants — pool decks plus champion packages', () => {
+  it('builds the requested 4×25 + 2 champion field without expanding champion decks', () => {
+    const decks = enumerateDecks(fixtureDecksDir(25));
+    const tuples = buildTupleContestants({ decks, commitForTactic: (t) => `tuple-${t.tactic}` });
+    const champions = TACTICS.map((t) => ({
+      label: t.tactic,
+      kanji: t.kanji,
+      repo: t.repo,
+      commit: `champion-${t.tactic}`,
+      deckHash: sha256Hex(`champion-deck-${t.tactic}`),
+    }));
+    const selected = selectMixedContestants(
+      tuples,
+      champions,
+      'matsu:*,take:*,ume:*,zero:*,fable,sol'
+    );
+    expect(selected).toHaveLength(102);
+    expect(selected.filter((c) => c.tactic === 'fable')).toHaveLength(0);
+    expect(selected.filter((c) => c.tactic === 'sol')).toHaveLength(0);
+    expect(selected.slice(-2).map((c) => c.label)).toEqual(['fable', 'sol']);
   });
 });
 

@@ -29,6 +29,7 @@ import {
   runRoundRobin,
   runTotalBattle,
   selectContestants,
+  selectMixedContestants,
   sha256Hex,
   type ContestantInput,
   type GameRecord,
@@ -128,7 +129,9 @@ function resolveTupleInputs(
     decks,
     commitForTactic: (t: Tactic) => repoCommit(path.join(siblingsRoot, t.repo)),
   });
-  const selected = selectContestants(all, subset);
+  const selected = subset.split(',').some((token) => token.trim() && !token.includes(':') && token.trim() !== '*')
+    ? selectMixedContestants(all, resolveInputs(siblingsRoot), subset)
+    : selectContestants(all, subset);
   if (selected.length === 0) {
     throw new Error(`--contestants "${subset}" selected 0 contestants (of ${all.length})`);
   }
@@ -200,31 +203,38 @@ const smokeRunner: ShardRunner = async (shard: ShardSpec) => {
  */
 function biasFor(label: string): number {
   const tactic = label.split(':')[0];
-  return { matsu: 0.15, take: 0.0, ume: -0.1, zero: 0.05 }[tactic] ?? 0;
+  return { matsu: 0.15, take: 0.0, ume: -0.1, zero: 0.05, fable: 0.1, sol: 0.08 }[tactic] ?? 0;
 }
 
 /** Real runner: shell to matsu's cross-battle driver per shard. Best-effort; needs the engine. */
-function pythonRunner(siblingsRoot: string, deckMode: string): ShardRunner {
+function pythonRunner(siblingsRoot: string, deckMode: string, decksDir: string): ShardRunner {
   return async (shard: ShardSpec) => {
     const matsu = path.join(siblingsRoot, 'ptcg-agent-matsu');
     const py = fs.existsSync(path.join(matsu, 'venv', 'bin', 'python'))
       ? path.join(matsu, 'venv', 'bin', 'python')
       : 'python3';
+    const driver =
+      process.env.PTCG_BATTLE_DRIVER ?? path.join(matsu, 'eval', 'battle_matsu_take_ume.py');
+    const deckArgs = deckMode === 'own' ? [] : ['--deck-mode', deckMode, '--decks-dir', decksDir];
     const out = execFileSync(
       py,
       [
-        path.join(matsu, 'eval', 'battle_matsu_take_ume.py'),
+        driver,
         '--n',
         String(shard.matches),
         '--seed',
         String(shard.seed),
-        '--deck-mode',
-        deckMode,
+        ...deckArgs,
         ...pythonSeatArgs(shard),
         '--json',
         '-',
       ],
-      { cwd: matsu, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
+      {
+        cwd: matsu,
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+        env: { ...process.env, PTCG_SIBLINGS_ROOT: siblingsRoot },
+      }
     );
     // The driver reports pairing win rates; we translate into per-match records for the single pairing
     // that matches this shard's seat order. (Adapter kept intentionally small; the driver is the source
@@ -279,10 +289,10 @@ async function cmdRun(args: Args): Promise<number> {
     chunksPerOrientation: Number(args.chunks ?? 1),
   };
   let inputs: ContestantInput[];
+  const decksDir = args.decks ?? defaultDecksDir(siblingsRoot);
   if (tupleMode) {
     // A bare --contestants / --matrix (no value) selects all 75; otherwise the given subset spec.
     const subset = args.contestants && args.contestants !== 'true' ? args.contestants : '*';
-    const decksDir = args.decks ?? defaultDecksDir(siblingsRoot);
     try {
       inputs = resolveTupleInputs(siblingsRoot, decksDir, subset);
     } catch (err) {
@@ -296,7 +306,7 @@ async function cmdRun(args: Args): Promise<number> {
   const store = new LocalObjectStore(storeRoot);
   const runnerKind = args.runner ?? 'fixture';
   const runner: ShardRunner =
-    runnerKind === 'python' ? pythonRunner(siblingsRoot, config.deckMode) : fixtureRunner;
+    runnerKind === 'python' ? pythonRunner(siblingsRoot, config.deckMode, decksDir) : fixtureRunner;
 
   console.log(
     `ptcg-battle-lab run ${runId} (runner=${runnerKind}, matches/shard=${config.matchesPerShard})`
@@ -336,7 +346,8 @@ async function cmdTotalBattle(args: Args): Promise<number> {
   const decksDir = args.decks ?? defaultDecksDir(siblingsRoot);
   let inputs: ContestantInput[];
   try {
-    inputs = resolveTupleInputs(siblingsRoot, decksDir, '*');
+    const subset = args.contestants && args.contestants !== 'true' ? args.contestants : '*';
+    inputs = resolveTupleInputs(siblingsRoot, decksDir, subset);
   } catch (err) {
     console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
     return 2;
@@ -355,7 +366,8 @@ async function cmdTotalBattle(args: Args): Promise<number> {
     return 2;
   }
   const runnerKind = args.runner ?? 'fixture';
-  const runner = runnerKind === 'python' ? pythonRunner(siblingsRoot, 'matrix') : fixtureRunner;
+  const runner =
+    runnerKind === 'python' ? pythonRunner(siblingsRoot, 'matrix', decksDir) : fixtureRunner;
   const store = new LocalObjectStore(storeRoot);
   console.log(
     `ptcg-battle-lab total-battle ${runId} (${inputs.length} contestants, screen=${screenMatches}, top=${keepTop}, confirm=${confirmMatches})`
