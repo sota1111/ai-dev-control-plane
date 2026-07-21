@@ -7,7 +7,7 @@ once, with no script in between.)
 
 ## Context
 - Read `docs/ai/pipeline/context.md` for the target Linear issue id, repository, and mode.
-- Process ONLY that issue. Do not select or process any other Linear issue.
+- Begin with the target issue identified in the pipeline context.
 
 ## Part A — Task check (actionability + classification)
 1. Read the Linear issue (via Linear MCP): status, latest comments, labels, description, acceptance criteria.
