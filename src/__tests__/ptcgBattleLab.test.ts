@@ -126,8 +126,13 @@ describe('roundRobinShards — 先後入替 round-robin', () => {
 });
 
 describe('runTotalBattle — staged screen → confirm', () => {
+  const MATRIX_SIZE = 12;
+
   function matrixInputs(): ContestantInput[] {
-    return Array.from({ length: 75 }, (_, i) => ({
+    // This exercises the full ordered-pair pipeline without making the unit suite
+    // rewrite a 5,550-shard manifest after every result. The production runtime
+    // remains size-independent; large-scale throughput belongs in benchmarks.
+    return Array.from({ length: MATRIX_SIZE }, (_, i) => ({
       label: `matsu:${String(i + 1).padStart(2, '0')}`,
       kanji: `松/${i + 1}`,
       repo: 'ptcg-agent-matsu',
@@ -138,7 +143,7 @@ describe('runTotalBattle — staged screen → confirm', () => {
     }));
   }
 
-  it('screens all 75 at small N, confirms only top-K at high N, and resumes without duplicates', async () => {
+  it('screens the full matrix at small N, confirms only top-K at high N, and resumes without duplicates', async () => {
     const dir = tmpDir();
     const all = matrixInputs();
     const store = new LocalObjectStore(path.join(dir, 'obj'));
@@ -179,14 +184,14 @@ describe('runTotalBattle — staged screen → confirm', () => {
       },
     };
     const first = await runTotalBattle(opts);
-    expect(first.screen.inputs).toHaveLength(75);
-    expect(first.screen.shards).toHaveLength(75 * 74);
+    expect(first.screen.inputs).toHaveLength(MATRIX_SIZE);
+    expect(first.screen.shards).toHaveLength(MATRIX_SIZE * (MATRIX_SIZE - 1));
     expect(first.screen.shards.every((s) => s.matches === 1)).toBe(true);
     expect(first.confirm.inputs).toHaveLength(5);
     expect(first.confirm.shards).toHaveLength(5 * 4);
     expect(first.confirm.shards.every((s) => s.matches === 7)).toBe(true);
     expect(first.state.selectedLabels).toHaveLength(5);
-    expect(screenIds.size).toBe(75 * 74);
+    expect(screenIds.size).toBe(MATRIX_SIZE * (MATRIX_SIZE - 1));
     expect(confirmIds.size).toBe(5 * 4);
 
     screenIds.clear();

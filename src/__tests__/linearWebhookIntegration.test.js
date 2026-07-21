@@ -117,6 +117,7 @@ describe('Linear Webhook Integration', () => {
     linearMock.enqueue({ data: { issues: { nodes: [{ id: 'uuid-123' }] } } }); // hasPendingIssues
     linearMock.enqueue({ data: { issues: { nodes: [{ id: 'uuid-123', identifier: 'ENG-1', priority: 2, priorityLabel: 'High', state: { type: 'unstarted', name: 'Todo' } }] } } }); // refreshQueuePriorities -> fetchActiveIssues
     linearMock.enqueue({ data: { issue: { id: 'uuid-123', identifier: 'ENG-1', state: { name: 'Todo', type: 'unstarted' } } } }); // eligibility
+    linearMock.enqueue({ data: { issue: { project: { name: 'ai-dev-control-plane' } } } }); // buildRunEnv -> project resolution
     linearMock.enqueue({ data: { issue: { id: 'uuid-123', state: { name: 'Done', type: 'completed' } } } }); // verifyTaskCompletion
 
     const response = await request(app)
