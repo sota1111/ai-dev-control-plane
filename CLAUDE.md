@@ -71,9 +71,9 @@ each role, `run_auto.sh` reads the winning report's `## Next Action` and gates:
 - any `BLOCKED`/`NEEDS_USER_INPUT` or `WORKER_DISPATCH_EXHAUSTED` → stop (exit `70`, needs human);
 - all roles `READY_FOR_REVIEW` → complete (exit 0).
 
-A dispatched Claude worker gets a hard preamble constraining it to its single role for the single
-target issue, forbidding it from launching `run_auto.sh` / `run_worker.sh` / the scheduler or
-processing other issues. Escape hatch: `PIPELINE_MODE=0` (or a run with no issue id) falls back to the
+A dispatched Claude worker gets a hard preamble constraining it to its assigned role and forbidding it
+from launching `run_auto.sh` / `run_worker.sh` / the scheduler. Linear issue selection is not restricted
+by that preamble. Escape hatch: `PIPELINE_MODE=0` (or a run with no issue id) falls back to the
 legacy single Claude-orchestrator launch, which still routes each role through the dispatcher.
 
 ### Per-issue worker override from Linear (SOT-1459)
@@ -179,7 +179,7 @@ one CLI session, with **no per-role script handoff or gating in between**. The p
 are ignored while `__solo__` is active. It is strictly single-AI (no fallback, per「のみ」): a
 usage-limited solo worker cools down and retries later rather than handing off. In solo mode the "always
 delegate / do ONLY one role" rules are contextually replaced by an "all roles, one issue" preamble (the
-solo worker still must not launch runners or touch other issues). Remove / null `__solo__` to return to
+solo worker still must not launch runners). Remove / null `__solo__` to return to
 the normal per-role dispatch pipeline. A single Linear issue can override this both ways with a `solo=`
 directive (`solo=<worker>` / `solo=off`, see the per-issue override section above). Resolver:
 `resolveSoloWorker`/`loadSoloWorker` (`src/lib/workerRoles.ts`); the orchestrator queries

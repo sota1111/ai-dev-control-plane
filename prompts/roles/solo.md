@@ -29,7 +29,6 @@ final report.
 6. **linear-report.** Sync Linear state (PR link / In Progress → In Review / Completion Report comment).
 
 ## Constraints
-- Work on ONLY the one target issue. Do NOT select or process any other Linear issue.
 - Do NOT run `scripts/ai/run_auto.sh`, `scripts/ai/run_worker.sh`, `scripts/ai/scheduler.sh`, the webhook
   server, or the runner queue/drain. Do NOT spawn or trigger any other run. No background/long-lived
   processes.

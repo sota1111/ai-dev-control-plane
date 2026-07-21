@@ -284,7 +284,7 @@ run_role_pipeline() {
     echo "- Mode: $([ "${RESUME_MODE:-false}" = true ] && echo 'resume (continue previous usage-limited run)' || echo normal)"
     echo "- Resume metadata (if resume): docs/ai/auto_logs/resume/$issue.json"
     echo ""
-    echo "Process ONLY this issue. Do not select or process other Linear issues."
+    echo "Use this issue as the primary target for this pipeline run."
   } > docs/ai/pipeline/context.md
 
   # SOT-1590: move the issue to In Progress the moment work starts — BEFORE dispatching task-check —
@@ -647,7 +647,7 @@ This is a usage-limit resume run for Issue: ${RESUME_ISSUE}
 Context:
 - Resume metadata file: docs/ai/auto_logs/resume/${RESUME_ISSUE}.json
 - This is a continuation of a previous run that hit a usage limit.
-- Process only ${RESUME_ISSUE}. Do not search for or select other Linear issues.
+- Resume work on ${RESUME_ISSUE} as the primary target.
 - Treat this as a continuation of the existing work, not a new task.
 - When ${RESUME_ISSUE} reaches a terminal outcome or there is no work to do, this is a SUCCESS: exit 0 and stop. Reserve a non-zero exit for actual errors only (a non-zero exit is treated downstream as a failure and may be misclassified as a usage limit).
 
@@ -671,7 +671,7 @@ elif [[ -n "${WEBHOOK_ISSUE_ID:-}" ]]; then
 This run was triggered by Linear webhook for Issue: ${WEBHOOK_ISSUE_ID}
 
 Mandatory behavior:
-- Process only ${WEBHOOK_ISSUE_ID}. Do not search for or select other Linear issues.
+- Start with ${WEBHOOK_ISSUE_ID} as the webhook-triggered target.
 - Perform the initial task check exactly once, via the dispatcher (NOT by calling a worker directly).
   Write the task-check instruction to prompts/roles/task-check.md, then run
   \`scripts/ai/run_worker.sh task-check\`. The dispatcher tries the task-check priority chain from
@@ -689,7 +689,7 @@ Mandatory behavior:
 - After the task check is complete, Claude Code owns sequencing the remaining roles (decomposition, child
   issue registration, Linear status updates, PR flow, and final reporting) — each executed through the
   dispatcher as above.
-- When ${WEBHOOK_ISSUE_ID} reaches a terminal outcome for this run, or there is no actionable work (e.g. already terminal, or on hold In Review), this is a SUCCESS: exit immediately with 0. Reserve a non-zero exit for actual errors only. Do not re-check the Linear queue and do not continue to another issue.
+- When ${WEBHOOK_ISSUE_ID} reaches a terminal outcome for this run, or there is no actionable work (e.g. already terminal, or on hold In Review), this is a SUCCESS: exit immediately with 0. Reserve a non-zero exit for actual errors only.
 
 ---
 
