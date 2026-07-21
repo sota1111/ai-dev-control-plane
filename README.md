@@ -336,4 +336,5 @@ model pins under `__models__`) — the single top-level switch. Frequently used 
 - [Linear issue archiving](docs/linear-issue-archive.md) — automatic capacity management
 - [Security and permissions](docs/security.md) — devcontainer least-privilege policy
 - [tmux / tmuxinator](docs/tmux.md) — one-shot session bring-up
+- [Remote SSH + git clone verification](docs/remote-ssh-clone-verification.md) — reachability and clone check for a remote host
 - [Operating specification (CLAUDE.md)](CLAUDE.md) — the contract every worker follows
