@@ -2,6 +2,12 @@
 
 `npm run start:webhook` で webhook サーバーを起動する。
 
+子 Issue の完了（`Done` / `In Review`）を受信したとき、全ての子 Issue が完了していて親が
+`On Hold` なら、前提作業が解消したものとして親を `Todo` に戻します。この状態変更の webhook が
+通常のキュー投入経路を起動するため、親 Issue は手動操作なしで再開されます。親が `On Hold` 以外の
+場合は、従来どおり分解作業の完了として `In Review` に進めます。どちらもマーカー付きコメントで
+冪等化され、同じ完了イベントを再受信しても重複遷移しません。
+
 Linear Webhook の Issue create / update イベントを受信し、対象 Issue を共通実行キューに enqueue して処理する。
 
 ただし以下の Issue の webhook は無視し、キューへの enqueue を行いません。また、実行直前（queue / retry から取り出した際）にも Linear API で最新状態を再検証し、同様の条件に合致する Issue は実行をスキップします：
