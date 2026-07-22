@@ -15,3 +15,21 @@ and expose `main.py` plus `deck.csv`. To reproduce a run, checkout each manifest
 SHA-256, checkout the engine commit, construct `CommonLeagueAdapter` runtimes, then use only its three
 lifecycle methods. `smokeSevenAgentAdapters` exercises the common engine-facing boundary for all seven;
 production runtimes remain responsible for translating each repository's native process protocol.
+
+## Real-process audit
+
+`src/ptcg-real-runtime-league-cli.ts` closes that boundary by running every unordered pair through the
+real cabt engine while loading each repository's `main.py` in an isolated Python process. A fixed agent
+seed is passed as both `AGENT_SEED` and `PYTHONHASHSEED`, and every seed is run in both seat orders.
+
+```bash
+npx tsx src/ptcg-real-runtime-league-cli.ts --seeds 186700 \
+  --output artifacts/ptcg-league/sot-1867-runtime
+```
+
+The output directory contains the pinned manifest, an atomic per-match `checkpoint.json`, the normal
+league report, and `runtime-audit.{json,md}`. Re-running the same command resumes completed matches
+without duplication. The audit compares every representative real-runtime matchup with the synthetic
+SOT-1847 profile, identifies the largest absolute win-rate gap, and separately counts process faults,
+unfinished games, illegal actions, and timeouts. The command fails if its configured (default 8-hour)
+budget is exceeded.

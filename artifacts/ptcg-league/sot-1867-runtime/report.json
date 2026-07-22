@@ -1,0 +1,479 @@
+{
+  "schemaVersion": "ptcg-league-report/v1",
+  "leagueId": "sot-1867-real-runtime-seven-agent",
+  "planned": 42,
+  "recorded": 42,
+  "duplicateMatchIds": [],
+  "missingMatchIds": [],
+  "unknownMatchIds": [],
+  "totals": {
+    "decided": 42,
+    "draws": 0,
+    "faults": 0,
+    "unfinished": 0
+  },
+  "matchups": [
+    {
+      "first": "debate",
+      "second": "fable",
+      "wins": {
+        "first": 0,
+        "second": 2
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0,
+      "firstWinWilson95": {
+        "low": 0,
+        "high": 0.6576280471103807
+      },
+      "firstSeatAdvantage": 0,
+      "thinkTimeMs": {
+        "firstAverage": 11874.07568981871,
+        "secondAverage": 16042.847082251683
+      }
+    },
+    {
+      "first": "debate",
+      "second": "matsu",
+      "wins": {
+        "first": 1,
+        "second": 1
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0.5,
+      "firstWinWilson95": {
+        "low": 0.09452865480086614,
+        "high": 0.9054713451991339
+      },
+      "firstSeatAdvantage": 1,
+      "thinkTimeMs": {
+        "firstAverage": 9964.02866160497,
+        "secondAverage": 7423.929515294731
+      }
+    },
+    {
+      "first": "debate",
+      "second": "sol",
+      "wins": {
+        "first": 0,
+        "second": 2
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0,
+      "firstWinWilson95": {
+        "low": 0,
+        "high": 0.6576280471103807
+      },
+      "firstSeatAdvantage": 0,
+      "thinkTimeMs": {
+        "firstAverage": 14116.345483344048,
+        "secondAverage": 17433.569189626724
+      }
+    },
+    {
+      "first": "debate",
+      "second": "take",
+      "wins": {
+        "first": 2,
+        "second": 0
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 1,
+      "firstWinWilson95": {
+        "low": 0.34237195288961925,
+        "high": 1
+      },
+      "firstSeatAdvantage": 0,
+      "thinkTimeMs": {
+        "firstAverage": 19527.884322218597,
+        "secondAverage": 8.608499309048057
+      }
+    },
+    {
+      "first": "debate",
+      "second": "ume",
+      "wins": {
+        "first": 1,
+        "second": 1
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0.5,
+      "firstWinWilson95": {
+        "low": 0.09452865480086614,
+        "high": 0.9054713451991339
+      },
+      "firstSeatAdvantage": -1,
+      "thinkTimeMs": {
+        "firstAverage": 13479.409521445632,
+        "secondAverage": 6228.404322173446
+      }
+    },
+    {
+      "first": "debate",
+      "second": "zero",
+      "wins": {
+        "first": 1,
+        "second": 1
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0.5,
+      "firstWinWilson95": {
+        "low": 0.09452865480086614,
+        "high": 0.9054713451991339
+      },
+      "firstSeatAdvantage": 1,
+      "thinkTimeMs": {
+        "firstAverage": 4445.701737422496,
+        "secondAverage": 1.7404935788363218
+      }
+    },
+    {
+      "first": "fable",
+      "second": "matsu",
+      "wins": {
+        "first": 1,
+        "second": 1
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0.5,
+      "firstWinWilson95": {
+        "low": 0.09452865480086614,
+        "high": 0.9054713451991339
+      },
+      "firstSeatAdvantage": -1,
+      "thinkTimeMs": {
+        "firstAverage": 14614.353070501238,
+        "secondAverage": 14705.40944300592
+      }
+    },
+    {
+      "first": "fable",
+      "second": "sol",
+      "wins": {
+        "first": 0,
+        "second": 2
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0,
+      "firstWinWilson95": {
+        "low": 0,
+        "high": 0.6576280471103807
+      },
+      "firstSeatAdvantage": 0,
+      "thinkTimeMs": {
+        "firstAverage": 11554.28934423253,
+        "secondAverage": 8678.186953766271
+      }
+    },
+    {
+      "first": "fable",
+      "second": "take",
+      "wins": {
+        "first": 2,
+        "second": 0
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 1,
+      "firstWinWilson95": {
+        "low": 0.34237195288961925,
+        "high": 1
+      },
+      "firstSeatAdvantage": 0,
+      "thinkTimeMs": {
+        "firstAverage": 5275.883379392326,
+        "secondAverage": 3.395011881366372
+      }
+    },
+    {
+      "first": "fable",
+      "second": "ume",
+      "wins": {
+        "first": 1,
+        "second": 1
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0.5,
+      "firstWinWilson95": {
+        "low": 0.09452865480086614,
+        "high": 0.9054713451991339
+      },
+      "firstSeatAdvantage": 1,
+      "thinkTimeMs": {
+        "firstAverage": 19202.917949995026,
+        "secondAverage": 6431.394410785288
+      }
+    },
+    {
+      "first": "fable",
+      "second": "zero",
+      "wins": {
+        "first": 2,
+        "second": 0
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 1,
+      "firstWinWilson95": {
+        "low": 0.34237195288961925,
+        "high": 1
+      },
+      "firstSeatAdvantage": 0,
+      "thinkTimeMs": {
+        "firstAverage": 12549.374935217202,
+        "secondAverage": 3.399873850867152
+      }
+    },
+    {
+      "first": "matsu",
+      "second": "sol",
+      "wins": {
+        "first": 2,
+        "second": 0
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 1,
+      "firstWinWilson95": {
+        "low": 0.34237195288961925,
+        "high": 1
+      },
+      "firstSeatAdvantage": 0,
+      "thinkTimeMs": {
+        "firstAverage": 10068.289952119812,
+        "secondAverage": 8031.693861121312
+      }
+    },
+    {
+      "first": "matsu",
+      "second": "take",
+      "wins": {
+        "first": 1,
+        "second": 1
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0.5,
+      "firstWinWilson95": {
+        "low": 0.09452865480086614,
+        "high": 0.9054713451991339
+      },
+      "firstSeatAdvantage": -1,
+      "thinkTimeMs": {
+        "firstAverage": 4719.178264262155,
+        "secondAverage": 3.285505576059222
+      }
+    },
+    {
+      "first": "matsu",
+      "second": "ume",
+      "wins": {
+        "first": 1,
+        "second": 1
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0.5,
+      "firstWinWilson95": {
+        "low": 0.09452865480086614,
+        "high": 0.9054713451991339
+      },
+      "firstSeatAdvantage": 1,
+      "thinkTimeMs": {
+        "firstAverage": 6423.916933126748,
+        "secondAverage": 3917.464953614399
+      }
+    },
+    {
+      "first": "matsu",
+      "second": "zero",
+      "wins": {
+        "first": 2,
+        "second": 0
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 1,
+      "firstWinWilson95": {
+        "low": 0.34237195288961925,
+        "high": 1
+      },
+      "firstSeatAdvantage": 0,
+      "thinkTimeMs": {
+        "firstAverage": 8199.735176749527,
+        "secondAverage": 1.7807541880756617
+      }
+    },
+    {
+      "first": "sol",
+      "second": "take",
+      "wins": {
+        "first": 1,
+        "second": 1
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0.5,
+      "firstWinWilson95": {
+        "low": 0.09452865480086614,
+        "high": 0.9054713451991339
+      },
+      "firstSeatAdvantage": 1,
+      "thinkTimeMs": {
+        "firstAverage": 4664.6303329616785,
+        "secondAverage": 2.3770104162395
+      }
+    },
+    {
+      "first": "sol",
+      "second": "ume",
+      "wins": {
+        "first": 2,
+        "second": 0
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 1,
+      "firstWinWilson95": {
+        "low": 0.34237195288961925,
+        "high": 1
+      },
+      "firstSeatAdvantage": 0,
+      "thinkTimeMs": {
+        "firstAverage": 11797.61031945236,
+        "secondAverage": 3413.1800055038184
+      }
+    },
+    {
+      "first": "sol",
+      "second": "zero",
+      "wins": {
+        "first": 1,
+        "second": 1
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0.5,
+      "firstWinWilson95": {
+        "low": 0.09452865480086614,
+        "high": 0.9054713451991339
+      },
+      "firstSeatAdvantage": 1,
+      "thinkTimeMs": {
+        "firstAverage": 2908.3119705319405,
+        "secondAverage": 1.0516887996345758
+      }
+    },
+    {
+      "first": "take",
+      "second": "ume",
+      "wins": {
+        "first": 1,
+        "second": 1
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0.5,
+      "firstWinWilson95": {
+        "low": 0.09452865480086614,
+        "high": 0.9054713451991339
+      },
+      "firstSeatAdvantage": 1,
+      "thinkTimeMs": {
+        "firstAverage": 2.8301512356847525,
+        "secondAverage": 2608.7982759345323
+      }
+    },
+    {
+      "first": "take",
+      "second": "zero",
+      "wins": {
+        "first": 2,
+        "second": 0
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 1,
+      "firstWinWilson95": {
+        "low": 0.34237195288961925,
+        "high": 1
+      },
+      "firstSeatAdvantage": 0,
+      "thinkTimeMs": {
+        "firstAverage": 6.651129573583603,
+        "secondAverage": 2.3478916846215725
+      }
+    },
+    {
+      "first": "ume",
+      "second": "zero",
+      "wins": {
+        "first": 1,
+        "second": 1
+      },
+      "draws": 0,
+      "faults": 0,
+      "unfinished": 0,
+      "decided": 2,
+      "firstWinRate": 0.5,
+      "firstWinWilson95": {
+        "low": 0.09452865480086614,
+        "high": 0.9054713451991339
+      },
+      "firstSeatAdvantage": 1,
+      "thinkTimeMs": {
+        "firstAverage": 3814.5370110869408,
+        "secondAverage": 2.3056194186210632
+      }
+    }
+  ]
+}
