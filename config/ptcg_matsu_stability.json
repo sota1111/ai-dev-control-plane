@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "ptcg-matsu-stability/v1",
+  "agent": "matsu",
+  "sourceLeague": "artifacts/ptcg-league/sot-1847/report.json",
+  "archetype": {
+    "id": "matsu-stability-control-v1",
+    "deckArtifact": "matsu:stability-control-01",
+    "strategy": "resource-preserving-control",
+    "distinctFrom": ["take:adaptive-tempo", "ume:high-variance-pressure"]
+  },
+  "policy": {
+    "riskProfile": "conservative",
+    "searchBudgetMs": 250,
+    "maxDepth": 5,
+    "explorationConstant": 0.72,
+    "variancePenalty": 0.28,
+    "reserveValueWeight": 0.22,
+    "illegalActionFallback": "highest-value-legal"
+  },
+  "exploration": {
+    "budgetHours": 8,
+    "seedStart": 184800,
+    "seedCount": 20,
+    "seatSwap": true,
+    "checkpointEvery": 10,
+    "resume": true
+  },
+  "weaknessTargets": ["ume", "take", "sol"]
+}

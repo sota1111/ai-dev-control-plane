@@ -17,6 +17,7 @@
       "localPath": "/workspaces/ptcg-agent-matsu",
       "branch": "main",
       "deck": "deck.csv",
+      "stabilityProfile": "config/ptcg_matsu_stability.json",
       "defaults": { "matches": 40, "seed": 20260718, "deckMode": "own" }
     },
     {
