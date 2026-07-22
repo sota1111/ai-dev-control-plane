@@ -1,0 +1,470 @@
+{
+  "schemaVersion": "ptcg-league-checkpoint/v1",
+  "leagueId": "sot-1867-real-runtime-seven-agent",
+  "plannedMatchIds": [
+    "sol-vs-debate.seed-186700.ab",
+    "sol-vs-debate.seed-186700.ba",
+    "sol-vs-fable.seed-186700.ab",
+    "sol-vs-fable.seed-186700.ba",
+    "sol-vs-matsu.seed-186700.ab",
+    "sol-vs-matsu.seed-186700.ba",
+    "sol-vs-take.seed-186700.ab",
+    "sol-vs-take.seed-186700.ba",
+    "sol-vs-ume.seed-186700.ab",
+    "sol-vs-ume.seed-186700.ba",
+    "sol-vs-zero.seed-186700.ab",
+    "sol-vs-zero.seed-186700.ba",
+    "debate-vs-fable.seed-186700.ab",
+    "debate-vs-fable.seed-186700.ba",
+    "debate-vs-matsu.seed-186700.ab",
+    "debate-vs-matsu.seed-186700.ba",
+    "debate-vs-take.seed-186700.ab",
+    "debate-vs-take.seed-186700.ba",
+    "debate-vs-ume.seed-186700.ab",
+    "debate-vs-ume.seed-186700.ba",
+    "debate-vs-zero.seed-186700.ab",
+    "debate-vs-zero.seed-186700.ba",
+    "fable-vs-matsu.seed-186700.ab",
+    "fable-vs-matsu.seed-186700.ba",
+    "fable-vs-take.seed-186700.ab",
+    "fable-vs-take.seed-186700.ba",
+    "fable-vs-ume.seed-186700.ab",
+    "fable-vs-ume.seed-186700.ba",
+    "fable-vs-zero.seed-186700.ab",
+    "fable-vs-zero.seed-186700.ba",
+    "matsu-vs-take.seed-186700.ab",
+    "matsu-vs-take.seed-186700.ba",
+    "matsu-vs-ume.seed-186700.ab",
+    "matsu-vs-ume.seed-186700.ba",
+    "matsu-vs-zero.seed-186700.ab",
+    "matsu-vs-zero.seed-186700.ba",
+    "take-vs-ume.seed-186700.ab",
+    "take-vs-ume.seed-186700.ba",
+    "take-vs-zero.seed-186700.ab",
+    "take-vs-zero.seed-186700.ba",
+    "ume-vs-zero.seed-186700.ab",
+    "ume-vs-zero.seed-186700.ba"
+  ],
+  "events": [
+    {
+      "matchId": "sol-vs-debate.seed-186700.ab",
+      "first": "sol",
+      "second": "debate",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 12739.792021457106,
+        "second": 6431.040314491838
+      }
+    },
+    {
+      "matchId": "sol-vs-debate.seed-186700.ba",
+      "first": "debate",
+      "second": "sol",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 21801.65065219626,
+        "second": 22127.34635779634
+      }
+    },
+    {
+      "matchId": "sol-vs-fable.seed-186700.ab",
+      "first": "sol",
+      "second": "fable",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 8357.626772020012,
+        "second": 8352.149799000472
+      }
+    },
+    {
+      "matchId": "sol-vs-fable.seed-186700.ba",
+      "first": "fable",
+      "second": "sol",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 14756.428889464587,
+        "second": 8998.74713551253
+      }
+    },
+    {
+      "matchId": "sol-vs-matsu.seed-186700.ab",
+      "first": "sol",
+      "second": "matsu",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 12194.259022828192,
+        "second": 15019.042467698455
+      }
+    },
+    {
+      "matchId": "sol-vs-matsu.seed-186700.ba",
+      "first": "matsu",
+      "second": "sol",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 5117.53743654117,
+        "second": 3869.128699414432
+      }
+    },
+    {
+      "matchId": "sol-vs-take.seed-186700.ab",
+      "first": "sol",
+      "second": "take",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 3539.6692706272006,
+        "second": 1.3295141980051994
+      }
+    },
+    {
+      "matchId": "sol-vs-take.seed-186700.ba",
+      "first": "take",
+      "second": "sol",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 3.4245066344738007,
+        "second": 5789.591395296156
+      }
+    },
+    {
+      "matchId": "sol-vs-ume.seed-186700.ab",
+      "first": "sol",
+      "second": "ume",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 10192.916539497674,
+        "second": 1605.8734990656376
+      }
+    },
+    {
+      "matchId": "sol-vs-ume.seed-186700.ba",
+      "first": "ume",
+      "second": "sol",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 5220.486511941999,
+        "second": 13402.304099407047
+      }
+    },
+    {
+      "matchId": "sol-vs-zero.seed-186700.ab",
+      "first": "sol",
+      "second": "zero",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 3867.9382163099945,
+        "second": 0.5648578517138958
+      }
+    },
+    {
+      "matchId": "sol-vs-zero.seed-186700.ba",
+      "first": "zero",
+      "second": "sol",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 1.538519747555256,
+        "second": 1948.6857247538865
+      }
+    },
+    {
+      "matchId": "debate-vs-fable.seed-186700.ab",
+      "first": "debate",
+      "second": "fable",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 16676.859717816114,
+        "second": 16043.048879597336
+      }
+    },
+    {
+      "matchId": "debate-vs-fable.seed-186700.ba",
+      "first": "fable",
+      "second": "debate",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 16042.64528490603,
+        "second": 7071.291661821306
+      }
+    },
+    {
+      "matchId": "debate-vs-matsu.seed-186700.ab",
+      "first": "debate",
+      "second": "matsu",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 8566.38324027881,
+        "second": 4509.793383069336
+      }
+    },
+    {
+      "matchId": "debate-vs-matsu.seed-186700.ba",
+      "first": "matsu",
+      "second": "debate",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 10338.065647520125,
+        "second": 11361.674082931131
+      }
+    },
+    {
+      "matchId": "debate-vs-take.seed-186700.ab",
+      "first": "debate",
+      "second": "take",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 23553.307550493628,
+        "second": 9.877443313598633
+      }
+    },
+    {
+      "matchId": "debate-vs-take.seed-186700.ba",
+      "first": "take",
+      "second": "debate",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 7.33955530449748,
+        "second": 15502.461093943566
+      }
+    },
+    {
+      "matchId": "debate-vs-ume.seed-186700.ab",
+      "first": "debate",
+      "second": "ume",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 17958.700251299888,
+        "second": 7639.560830779374
+      }
+    },
+    {
+      "matchId": "debate-vs-ume.seed-186700.ba",
+      "first": "ume",
+      "second": "debate",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 4817.247813567519,
+        "second": 9000.118791591376
+      }
+    },
+    {
+      "matchId": "debate-vs-zero.seed-186700.ab",
+      "first": "debate",
+      "second": "zero",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 4380.87590970099,
+        "second": 1.1169258505105972
+      }
+    },
+    {
+      "matchId": "debate-vs-zero.seed-186700.ba",
+      "first": "zero",
+      "second": "debate",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 2.3640613071620464,
+        "second": 4510.527565144002
+      }
+    },
+    {
+      "matchId": "fable-vs-matsu.seed-186700.ab",
+      "first": "fable",
+      "second": "matsu",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 13475.527650211006,
+        "second": 17856.03095544502
+      }
+    },
+    {
+      "matchId": "fable-vs-matsu.seed-186700.ba",
+      "first": "matsu",
+      "second": "fable",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 11554.787930566818,
+        "second": 15753.17849079147
+      }
+    },
+    {
+      "matchId": "fable-vs-take.seed-186700.ab",
+      "first": "fable",
+      "second": "take",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 3569.1781705245376,
+        "second": 1.5616901218891144
+      }
+    },
+    {
+      "matchId": "fable-vs-take.seed-186700.ba",
+      "first": "take",
+      "second": "fable",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 5.22833364084363,
+        "second": 6982.588588260114
+      }
+    },
+    {
+      "matchId": "fable-vs-ume.seed-186700.ab",
+      "first": "fable",
+      "second": "ume",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 5075.477251317352,
+        "second": 1608.1722741946578
+      }
+    },
+    {
+      "matchId": "fable-vs-ume.seed-186700.ba",
+      "first": "ume",
+      "second": "fable",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 11254.616547375917,
+        "second": 33330.3586486727
+      }
+    },
+    {
+      "matchId": "fable-vs-zero.seed-186700.ab",
+      "first": "fable",
+      "second": "zero",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 3531.586091965437,
+        "second": 1.5484858304262161
+      }
+    },
+    {
+      "matchId": "fable-vs-zero.seed-186700.ba",
+      "first": "zero",
+      "second": "fable",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 5.251261871308088,
+        "second": 21567.163778468966
+      }
+    },
+    {
+      "matchId": "matsu-vs-take.seed-186700.ab",
+      "first": "matsu",
+      "second": "take",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 3869.1493328660727,
+        "second": 3.9304825477302074
+      }
+    },
+    {
+      "matchId": "matsu-vs-take.seed-186700.ba",
+      "first": "take",
+      "second": "matsu",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 2.640528604388237,
+        "second": 5569.207195658237
+      }
+    },
+    {
+      "matchId": "matsu-vs-ume.seed-186700.ab",
+      "first": "matsu",
+      "second": "ume",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 5776.878053788096,
+        "second": 4016.0021944902837
+      }
+    },
+    {
+      "matchId": "matsu-vs-ume.seed-186700.ba",
+      "first": "ume",
+      "second": "matsu",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 3818.927712738514,
+        "second": 7070.9558124653995
+      }
+    },
+    {
+      "matchId": "matsu-vs-zero.seed-186700.ab",
+      "first": "matsu",
+      "second": "zero",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 3678.1514063477516,
+        "second": 0.7779286243021488
+      }
+    },
+    {
+      "matchId": "matsu-vs-zero.seed-186700.ba",
+      "first": "zero",
+      "second": "matsu",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 2.7835797518491745,
+        "second": 12721.318947151303
+      }
+    },
+    {
+      "matchId": "take-vs-ume.seed-186700.ab",
+      "first": "take",
+      "second": "ume",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 3.089980687946081,
+        "second": 2407.6146138831973
+      }
+    },
+    {
+      "matchId": "take-vs-ume.seed-186700.ba",
+      "first": "ume",
+      "second": "take",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 2809.9819379858673,
+        "second": 2.5703217834234238
+      }
+    },
+    {
+      "matchId": "take-vs-zero.seed-186700.ab",
+      "first": "take",
+      "second": "zero",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 11.34454645216465,
+        "second": 3.3707437105476856
+      }
+    },
+    {
+      "matchId": "take-vs-zero.seed-186700.ba",
+      "first": "zero",
+      "second": "take",
+      "outcome": "second",
+      "thinkTimeMs": {
+        "first": 1.3250396586954594,
+        "second": 1.9577126950025558
+      }
+    },
+    {
+      "matchId": "ume-vs-zero.seed-186700.ab",
+      "first": "ume",
+      "second": "zero",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 6422.806001268327,
+        "second": 2.3566060699522495
+      }
+    },
+    {
+      "matchId": "ume-vs-zero.seed-186700.ba",
+      "first": "zero",
+      "second": "ume",
+      "outcome": "first",
+      "thinkTimeMs": {
+        "first": 2.254632767289877,
+        "second": 1206.2680209055543
+      }
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+{
+  "schemaVersion": "ptcg-seven-agent-league/v1",
+  "engine": {
+    "id": "cabt",
+    "commit": "f5852db4d482f284e153ef9635f557eeb8b263d1"
+  },
+  "agents": [
+    {
+      "id": "sol",
+      "repository": "ptcg-agent-sol",
+      "commit": "f5852db4d482f284e153ef9635f557eeb8b263d1",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "f5852db4d482f284e153ef9635f557eeb8b263d1",
+        "sha256": "e92d5717fd04865b0b528307df7a9d9aecc2c7b917bfbd5042fe58e3d1f26997"
+      },
+      "model": {
+        "path": null,
+        "commit": "f5852db4d482f284e153ef9635f557eeb8b263d1"
+      },
+      "config": {
+        "path": null,
+        "commit": "f5852db4d482f284e153ef9635f557eeb8b263d1"
+      }
+    },
+    {
+      "id": "debate",
+      "repository": "ptcg-agent-debate",
+      "commit": "fee9554e878e2bf81d9d32c8063298475119cb89",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "fee9554e878e2bf81d9d32c8063298475119cb89",
+        "sha256": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+      },
+      "model": {
+        "path": null,
+        "commit": "fee9554e878e2bf81d9d32c8063298475119cb89"
+      },
+      "config": {
+        "path": null,
+        "commit": "fee9554e878e2bf81d9d32c8063298475119cb89"
+      }
+    },
+    {
+      "id": "fable",
+      "repository": "ptcg-agent-fable",
+      "commit": "03fe3c203731e3f262e90b50ed1d3c0993e6d0be",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "03fe3c203731e3f262e90b50ed1d3c0993e6d0be",
+        "sha256": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+      },
+      "model": {
+        "path": null,
+        "commit": "03fe3c203731e3f262e90b50ed1d3c0993e6d0be"
+      },
+      "config": {
+        "path": null,
+        "commit": "03fe3c203731e3f262e90b50ed1d3c0993e6d0be"
+      }
+    },
+    {
+      "id": "matsu",
+      "repository": "ptcg-agent-matsu",
+      "commit": "7c30409ffa39bf29f76b740a38d6d8cdf490d550",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "7c30409ffa39bf29f76b740a38d6d8cdf490d550",
+        "sha256": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+      },
+      "model": {
+        "path": null,
+        "commit": "7c30409ffa39bf29f76b740a38d6d8cdf490d550"
+      },
+      "config": {
+        "path": null,
+        "commit": "7c30409ffa39bf29f76b740a38d6d8cdf490d550"
+      }
+    },
+    {
+      "id": "take",
+      "repository": "ptcg-agent-take",
+      "commit": "873e2956e3f37a101b694aae283c4233b3f5556e",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "873e2956e3f37a101b694aae283c4233b3f5556e",
+        "sha256": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+      },
+      "model": {
+        "path": null,
+        "commit": "873e2956e3f37a101b694aae283c4233b3f5556e"
+      },
+      "config": {
+        "path": null,
+        "commit": "873e2956e3f37a101b694aae283c4233b3f5556e"
+      }
+    },
+    {
+      "id": "ume",
+      "repository": "ptcg-agent-ume",
+      "commit": "9ecc4542b9273a9cd19b8ee0c7b34955e20e4d66",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "9ecc4542b9273a9cd19b8ee0c7b34955e20e4d66",
+        "sha256": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+      },
+      "model": {
+        "path": null,
+        "commit": "9ecc4542b9273a9cd19b8ee0c7b34955e20e4d66"
+      },
+      "config": {
+        "path": null,
+        "commit": "9ecc4542b9273a9cd19b8ee0c7b34955e20e4d66"
+      }
+    },
+    {
+      "id": "zero",
+      "repository": "ptcg-agent-zero",
+      "commit": "b1be9fba135b5eae0bf27a7257ccd4681620a7b6",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "b1be9fba135b5eae0bf27a7257ccd4681620a7b6",
+        "sha256": "e92d5717fd04865b0b528307df7a9d9aecc2c7b917bfbd5042fe58e3d1f26997"
+      },
+      "model": {
+        "path": null,
+        "commit": "b1be9fba135b5eae0bf27a7257ccd4681620a7b6"
+      },
+      "config": {
+        "path": null,
+        "commit": "b1be9fba135b5eae0bf27a7257ccd4681620a7b6"
+      }
+    }
+  ]
+}

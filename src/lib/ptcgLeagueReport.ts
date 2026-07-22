@@ -12,6 +12,8 @@ export interface LeagueMatchEvent {
   outcome: LeagueOutcome;
   fault?: { seat: 'first' | 'second'; kind: string; code: string };
   thinkTimeMs?: { first: number; second: number };
+  /** Full real-process match duration, used by runtime budget audits. */
+  durationMs?: number;
 }
 
 export interface LeagueCheckpoint {
