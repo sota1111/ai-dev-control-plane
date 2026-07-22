@@ -37,6 +37,7 @@
       "localPath": "/workspaces/ptcg-agent-ume",
       "branch": "main",
       "deck": "deck.csv",
+      "aggressiveProfile": "config/ptcg_ume_aggressive.json",
       "defaults": { "matches": 40, "seed": 20260718, "deckMode": "own" }
     },
     {
