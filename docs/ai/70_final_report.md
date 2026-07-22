@@ -1,22 +1,25 @@
-# Final Report — SOT-1847
+# SOT-1849 Final Report
 
 ## Summary
 
-Published a manifest-pinned seven-agent deterministic common league covering all 21 pairings with 20
-fixed seeds and both seat orientations (840 games). The checkpoint, JSON/Markdown matrix, fault audit,
-and quantitative weakest-matchup analysis are committed under `artifacts/ptcg-league/sot-1847/`.
+- Added Take's machine-readable `adaptive-tempo` deck/policy profile with a balanced risk range.
+- Added a deterministic common-league adapter with an eight-hour exploration budget and checkpoint/resume.
+- Published a 20-seed, seat-reversed A/B and four-agent cross-play artifact (240 games).
 
 ## Verification
 
-- Planned/recorded: 840/840; 21/21 matchups; 40 games per matchup.
-- Missing/duplicate/unknown: 0/0/0.
-- Fault/unfinished/timeout: 0/0/0, separated from W-L.
-- Checkpoint and report SHA-256 stayed identical after resume.
-- `npm run lint`: pass.
-- `npm run typecheck`: pass.
-- `npm test -- --runInBand`: 79 suites, 1047 tests passed.
-- E2E: N/A (no e2e script or browser surface).
-- Merge-tree conflict check against `origin/main`: pass.
+- `npm run lint`: PASS
+- `npm run typecheck`: PASS
+- `npm test -- --runInBand`: PASS (81 suites, 1053 tests)
+- E2E: N/A (no `e2e` script; deterministic CLI evaluation covers this non-UI change)
+- Formatting and `git diff --check`: PASS
+
+## Acceptance Criteria
+
+- [x] Candidate vs baseline: 37-3; Wilson 95% lower bound 0.801 (> 0.50).
+- [x] Take-specific deck and policy profile is recorded in `config/ptcg_take_adaptive.json`.
+- [x] Sol, Debate, Fable, and Zero cross-play completed with 20 fixed seeds and seat reversal.
+- [x] Faults, unfinished games, and illegal actions: 0 / 0 / 0.
 
 ## Acceptance: PASS
 ## Next Action: READY_FOR_REVIEW

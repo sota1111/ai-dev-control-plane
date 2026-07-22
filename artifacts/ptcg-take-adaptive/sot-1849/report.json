@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "ptcg-take-adaptive-evaluation/v1",
+  "profile": "config/ptcg_take_adaptive.json",
+  "sourceLeague": "artifacts/ptcg-league/sot-1847/report.json",
+  "seeds": 20,
+  "seatSwap": true,
+  "results": [
+    {
+      "variant": "baseline",
+      "opponent": "baseline",
+      "games": 40,
+      "wins": 17,
+      "losses": 23,
+      "winRate": 0.425,
+      "wilson95": {
+        "low": 0.28509392559950375,
+        "high": 0.5780493145800892
+      }
+    },
+    {
+      "variant": "candidate",
+      "opponent": "baseline",
+      "games": 40,
+      "wins": 37,
+      "losses": 3,
+      "winRate": 0.925,
+      "wilson95": {
+        "low": 0.8013576647568946,
+        "high": 0.9741639742254119
+      }
+    },
+    {
+      "variant": "candidate",
+      "opponent": "sol",
+      "games": 40,
+      "wins": 36,
+      "losses": 4,
+      "winRate": 0.9,
+      "wilson95": {
+        "low": 0.769482247724777,
+        "high": 0.9604204713173937
+      }
+    },
+    {
+      "variant": "candidate",
+      "opponent": "debate",
+      "games": 40,
+      "wins": 37,
+      "losses": 3,
+      "winRate": 0.925,
+      "wilson95": {
+        "low": 0.8013576647568946,
+        "high": 0.9741639742254119
+      }
+    },
+    {
+      "variant": "candidate",
+      "opponent": "fable",
+      "games": 40,
+      "wins": 36,
+      "losses": 4,
+      "winRate": 0.9,
+      "wilson95": {
+        "low": 0.769482247724777,
+        "high": 0.9604204713173937
+      }
+    },
+    {
+      "variant": "candidate",
+      "opponent": "zero",
+      "games": 40,
+      "wins": 40,
+      "losses": 0,
+      "winRate": 1,
+      "wilson95": {
+        "low": 0.9123783988027134,
+        "high": 1.0000000000000002
+      }
+    }
+  ],
+  "safety": {
+    "faults": 0,
+    "unfinished": 0,
+    "illegalActions": 0
+  }
+}
