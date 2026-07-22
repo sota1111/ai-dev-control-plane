@@ -1,25 +1,22 @@
-# SOT-1850 Final Report
+# SOT-1851 Final Report
 
 ## Summary
 
-- Added Ume's machine-readable high-variance archetype and aggressive risk/search profile.
-- Added a deterministic common-league adapter with an eight-hour exploration budget and checkpoint/resume.
-- Published a 20-seed, seat-reversed A/B and four-agent cross-play artifact (240 games).
+松竹梅の強化済みA/B artifactを共通league設定で統合し、profile多様性、4異種agentとのmatchup matrix、重大退行、安全性を機械可読reportとして再生成できるようにした。
 
 ## Verification
 
 - `npm run lint`: PASS
 - `npm run typecheck`: PASS
-- `npm test`: PASS (82 suites, 1056 tests)
-- E2E: N/A (no `e2e` script; deterministic CLI evaluation covers this non-UI change)
-- Formatting and `git diff --check`: PASS
+- `npm test`: PASS（83 suites / 1059 tests）
+- E2E: N/A（UI・実サービス変更なし、package scriptなし）
+- Ensemble evaluation: PASS（480 cross-play games、20 seeds、先後反転、checkpoint 3/3）
 
-## Acceptance Criteria
+## Acceptance
 
-- [x] Candidate vs baseline: 38-2; Wilson 95% lower bound 0.835 (> 0.50).
-- [x] Ume-specific deck and policy profile is recorded in `config/ptcg_ume_aggressive.json`.
-- [x] Sol, Debate, Fable, and Zero cross-play completed with 20 fixed seeds and seat reversal.
-- [x] Faults, unfinished games, and illegal actions: 0 / 0 / 0.
+- 3 decks / 3 strategies / 3 risk profiles、pairwise policy distance平均0.667
+- Sol / Debate / Fable / Zero の全matchupを統合、重大退行なし
+- fault / unfinished / illegal action = 0
 
 ## Acceptance: PASS
 ## Next Action: READY_FOR_REVIEW
