@@ -2,8 +2,8 @@
 
 Planned 42; recorded 42; decided 42; draws 0; faults 0; unfinished 0.
 
-Missing: none  
-Duplicates: none  
+Missing: none
+Duplicates: none
 Unknown: none
 
 | matchup | W-L | win rate | Wilson 95% | seat advantage | faults | unfinished | think-time ms |

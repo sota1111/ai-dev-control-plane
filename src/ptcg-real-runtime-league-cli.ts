@@ -31,6 +31,10 @@ const checkpoint = await resumeLeague(checkpointFile, 'sot-1867-real-runtime-sev
 });
 const runtime = aggregateLeague(checkpoint);
 writeLeagueReports(output, runtime);
+for (const file of ['report.json', 'report.md']) {
+  const target = path.join(output, file);
+  fs.writeFileSync(target, fs.readFileSync(target, 'utf8').replace(/ +$/gm, ''));
+}
 const synthetic = JSON.parse(fs.readFileSync(path.join(root, 'artifacts', 'ptcg-league', 'sot-1847', 'report.json'), 'utf8')) as LeagueReport;
 const measuredElapsedMs = checkpoint.events.reduce((total, event) => total + (event.durationMs ?? (event.thinkTimeMs ? event.thinkTimeMs.first + event.thinkTimeMs.second : 0)), 0);
 const audit = buildRuntimeAudit({ runtime, synthetic, seeds, timeoutMs, budgetHours, elapsedMs: measuredElapsedMs, events: checkpoint.events });
