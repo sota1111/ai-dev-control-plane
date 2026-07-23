@@ -6,6 +6,9 @@
   "features": {
     "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
   },
+  "hostRequirements": {
+    "gpu": "optional"
+  },
   "remoteUser": "vscode",
   "mounts": [
     "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
@@ -26,5 +29,5 @@
       }
     }
   },
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.codex /home/vscode/.config/antigravity || true && node --version && npm --version && claude --version || true && codex --version || true && agy --version || true && az --version || true && flutter --version || true && java -version || true && flutter doctor || true"
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.codex /home/vscode/.config/antigravity || true && node --version && npm --version && claude --version || true && codex --version || true && agy --version || true && az --version || true && flutter --version || true && java -version || true && flutter doctor || true && python3 -c \"import torch, numpy; print('torch', torch.__version__, '| numpy', numpy.__version__, '| cuda', torch.cuda.is_available())\" || true"
 }

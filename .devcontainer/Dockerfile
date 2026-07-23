@@ -6,6 +6,13 @@ FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 ARG NODE_MAJOR=20
 ARG FLUTTER_VERSION=3.44.4
 ARG KAGGLE_VERSION=2.2.3
+# GPU/ML スタック（value net 学習など）。TORCH_INDEX_URL を PyPI の CUDA 同梱 wheel
+# 配信元に向けることで、NVIDIA GPU 搭載ホストで起動すると torch.cuda.is_available()
+# が True になる。GPU 非搭載ホストでは同じ wheel が CPU で動作する（ビルドは壊れない）。
+# CPU 専用イメージにしたい場合は TORCH_INDEX_URL を https://download.pytorch.org/whl/cpu に。
+ARG NUMPY_VERSION=2.5.1
+ARG TORCH_VERSION=2.13.0
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124
 
 # ---------------------------------------------------------------------------
 # Base build / runtime dependencies
@@ -221,3 +228,23 @@ RUN apt-get update \
     && chmod +x /etc/profile.d/android-sdk.sh \
     && chown -R 1000:1000 /opt/android-sdk \
     && su vscode -c "/opt/flutter/bin/flutter config --android-sdk /opt/android-sdk --jdk-dir /usr/lib/jvm/java-17-openjdk-amd64"
+
+# ---------------------------------------------------------------------------
+# GPU / ML スタック: numpy + torch (SOT-1865)
+#   本コンテナで value net（fable train_value.py --backend torch）などの GPU 学習を
+#   可能にする。torch は CUDA 同梱 wheel（TORCH_INDEX_URL=cu124）を導入するため、
+#   NVIDIA GPU + nvidia-container-toolkit を持つホストで起動すると GPU を使い、
+#   GPU 非搭載ホストでは同じ wheel が CPU で動作する（どちらでもビルドは成功する）。
+#   Ubuntu 24.04 の system Python は externally-managed のため --break-system-packages
+#   を付けてシステム全体に入れ、リポジトリの `python3` 直呼びスクリプトから import 可能に。
+#   --no-cache-dir で pip キャッシュを残さずイメージ肥大を抑える。numpy は torch の
+#   依存でもあるが、GPU index には無いため PyPI から別途 pin する。
+#   GPU パススルーは .devcontainer/devcontainer.json の hostRequirements.gpu=optional で
+#   有効化（GPU が無いホストでは自動でスキップされ起動は壊れない）。
+# ---------------------------------------------------------------------------
+RUN pip3 install --no-cache-dir --break-system-packages "numpy==${NUMPY_VERSION}" \
+    && pip3 install --no-cache-dir --break-system-packages \
+        --index-url "${TORCH_INDEX_URL}" \
+        --extra-index-url https://pypi.org/simple \
+        "torch==${TORCH_VERSION}" \
+    && python3 -c "import numpy, torch; print('numpy', numpy.__version__, '| torch', torch.__version__, '| cuda-build', torch.version.cuda)"
