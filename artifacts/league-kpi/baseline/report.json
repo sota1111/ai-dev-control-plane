@@ -1,0 +1,176 @@
+{
+  "issue": "SOT-1896",
+  "run_id": "baseline",
+  "kpi": "cross-agent round-robin league (aggregate win rate over opponent pool, Wilson 95% CI)",
+  "deck": "01",
+  "deck_mode": "mirror (both seats same deck; isolates agent skill)",
+  "n_per_pairing": 6,
+  "agents": [
+    "matsu",
+    "take",
+    "ume",
+    "zero"
+  ],
+  "payoff_matrix": {
+    "matsu": {
+      "take": 0.6667,
+      "ume": 0.8333,
+      "zero": 1.0
+    },
+    "take": {
+      "matsu": 0.3333,
+      "ume": 1.0,
+      "zero": 0.8333
+    },
+    "ume": {
+      "matsu": 0.1667,
+      "take": 0.0,
+      "zero": 0.6667
+    },
+    "zero": {
+      "matsu": 0.0,
+      "take": 0.1667,
+      "ume": 0.3333
+    }
+  },
+  "pairings": [
+    {
+      "a": "matsu",
+      "b": "take",
+      "n": 6,
+      "decided": 6,
+      "a_wins": 4,
+      "b_wins": 2,
+      "draws": 0,
+      "unfinished": 0,
+      "a_win_rate": 0.6667,
+      "faults": {
+        "matsu": 0,
+        "take": 0
+      }
+    },
+    {
+      "a": "matsu",
+      "b": "ume",
+      "n": 6,
+      "decided": 6,
+      "a_wins": 5,
+      "b_wins": 1,
+      "draws": 0,
+      "unfinished": 0,
+      "a_win_rate": 0.8333,
+      "faults": {
+        "matsu": 0,
+        "ume": 0
+      }
+    },
+    {
+      "a": "matsu",
+      "b": "zero",
+      "n": 6,
+      "decided": 6,
+      "a_wins": 6,
+      "b_wins": 0,
+      "draws": 0,
+      "unfinished": 0,
+      "a_win_rate": 1.0,
+      "faults": {
+        "matsu": 0,
+        "zero": 0
+      }
+    },
+    {
+      "a": "take",
+      "b": "ume",
+      "n": 6,
+      "decided": 6,
+      "a_wins": 6,
+      "b_wins": 0,
+      "draws": 0,
+      "unfinished": 0,
+      "a_win_rate": 1.0,
+      "faults": {
+        "take": 0,
+        "ume": 0
+      }
+    },
+    {
+      "a": "take",
+      "b": "zero",
+      "n": 6,
+      "decided": 6,
+      "a_wins": 5,
+      "b_wins": 1,
+      "draws": 0,
+      "unfinished": 0,
+      "a_win_rate": 0.8333,
+      "faults": {
+        "take": 0,
+        "zero": 0
+      }
+    },
+    {
+      "a": "ume",
+      "b": "zero",
+      "n": 6,
+      "decided": 6,
+      "a_wins": 4,
+      "b_wins": 2,
+      "draws": 0,
+      "unfinished": 0,
+      "a_win_rate": 0.6667,
+      "faults": {
+        "ume": 0,
+        "zero": 0
+      }
+    }
+  ],
+  "standings": [
+    {
+      "agent": "matsu",
+      "pool_wins": 15,
+      "pool_decided": 18,
+      "pool_win_rate": 0.8333,
+      "pool_ci95": [
+        0.6078,
+        0.9416
+      ],
+      "faults": 0
+    },
+    {
+      "agent": "take",
+      "pool_wins": 13,
+      "pool_decided": 18,
+      "pool_win_rate": 0.7222,
+      "pool_ci95": [
+        0.4913,
+        0.875
+      ],
+      "faults": 0
+    },
+    {
+      "agent": "ume",
+      "pool_wins": 5,
+      "pool_decided": 18,
+      "pool_win_rate": 0.2778,
+      "pool_ci95": [
+        0.125,
+        0.5087
+      ],
+      "faults": 0
+    },
+    {
+      "agent": "zero",
+      "pool_wins": 3,
+      "pool_decided": 18,
+      "pool_win_rate": 0.1667,
+      "pool_ci95": [
+        0.0584,
+        0.3922
+      ],
+      "faults": 0
+    }
+  ],
+  "total_faults": 0,
+  "note": "engine has no seed API; results are statistical (Wilson CI), not bit-reproducible. screen small-N here; promote only after a large-N confirm run."
+}
