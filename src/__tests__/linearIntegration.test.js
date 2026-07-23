@@ -276,18 +276,29 @@ describe('Linear Integration', () => {
 
   describe('setIssueInReview (reaper loop-breaker, SOT-1438)', () => {
     it('moves an active (In Progress) issue to In Review and posts the comment', async () => {
-      linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'In Progress', type: 'started' }, team: { id: 't1' } } } });
+      linearMock.enqueue({ data: { issue: {
+        id: 'u1', state: { name: 'In Progress', type: 'started' }, team: { id: 't1' },
+        relations: { nodes: [{ id: 'blocks-out', type: 'blocks' }, { id: 'related', type: 'related' }] },
+        inverseRelations: { nodes: [{ id: 'blocks-in', type: 'blocks' }] },
+      } } });
       linearMock.enqueue({ data: { workflowStates: { nodes: [
         { id: 'sp', name: 'In Progress', type: 'started' },
         { id: 'sr', name: 'In Review', type: 'started' },
       ] } } });
       linearMock.enqueue({ data: { issueUpdate: { success: true } } });
+      linearMock.enqueue({ data: { issueRelationDelete: { success: true } } });
+      linearMock.enqueue({ data: { issueRelationDelete: { success: true } } });
       linearMock.enqueue({ data: { commentCreate: { success: true } } });
 
       const moved = await runner.setIssueInReview('SOT-1', 'ran a pass');
       expect(moved).toBe(true);
       const update = linearMock.calls.find((c) => c.query.includes('issueUpdate'));
       expect(update.variables.stateId).toBe('sr');
+      const deletedIds = linearMock.calls
+        .filter((c) => c.query.includes('issueRelationDelete'))
+        .map((c) => c.variables.id);
+      expect(deletedIds).toEqual(['blocks-out', 'blocks-in']);
+      expect(deletedIds).not.toContain('related');
       expect(linearMock.calls.some((c) => c.query.includes('commentCreate'))).toBe(true);
     });
 
@@ -296,6 +307,21 @@ describe('Linear Integration', () => {
       const moved = await runner.setIssueInReview('SOT-1');
       expect(moved).toBe(false);
       expect(linearMock.calls).toHaveLength(1); // only the state query, no workflowStates/issueUpdate
+    });
+
+    it('cleans stale blocking relations when the issue is already In Review', async () => {
+      linearMock.enqueue({ data: { issue: {
+        id: 'u1', state: { name: 'In Review', type: 'started' }, team: { id: 't1' },
+        relations: { nodes: [{ id: 'blocks-out', type: 'blocks' }] },
+        inverseRelations: { nodes: [{ id: 'blocks-in', type: 'blocks' }] },
+      } } });
+      linearMock.enqueue({ data: { issueRelationDelete: { success: true } } });
+      linearMock.enqueue({ data: { issueRelationDelete: { success: true } } });
+
+      const moved = await runner.setIssueInReview('SOT-1');
+      expect(moved).toBe(false);
+      expect(linearMock.calls.filter((c) => c.query.includes('issueRelationDelete'))).toHaveLength(2);
+      expect(linearMock.calls.some((c) => c.query.includes('issueUpdate'))).toBe(false);
     });
 
     it('is a no-op for a terminal (Done) issue', async () => {

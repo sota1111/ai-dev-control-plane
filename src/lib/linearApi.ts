@@ -49,6 +49,40 @@ export interface EligibilityResult {
 const PARENT_FINALIZED_MARKER = '<!-- auto-parent-finalized -->';
 const PARENT_RESUMED_MARKER = '<!-- auto-parent-resumed -->';
 
+type IssueRelationNode = { id?: string; type?: string };
+
+/** Remove `blocks` edges while preserving related/duplicate links. Linear uses the same relation
+ * type for both directions; incoming edges are exposed through `inverseRelations`. Best-effort so
+ * cleanup failure never prevents the state transition itself. */
+async function removeBlockingRelations(
+  issueId: string,
+  relations: IssueRelationNode[] = [],
+  inverseRelations: IssueRelationNode[] = []
+): Promise<number> {
+  const { log } = requireDeps();
+  const relationIds = [...relations, ...inverseRelations]
+    .filter((relation) => relation?.type === 'blocks' && typeof relation.id === 'string' && relation.id)
+    .map((relation) => relation.id as string);
+
+  let removed = 0;
+  for (const relationId of new Set(relationIds)) {
+    try {
+      await linearQuery(
+        'mutation($id: String!) { issueRelationDelete(id: $id) { success } }',
+        { id: relationId },
+        { retries: 0 }
+      );
+      removed++;
+    } catch (err: any) {
+      log('ERROR', `removeBlockingRelations: failed to delete relation ${relationId}: ${err.message}`, { issue: issueId });
+    }
+  }
+  if (removed > 0) {
+    log('WEBHOOK', `removeBlockingRelations: removed ${removed} stale relation(s)`, { issue: issueId });
+  }
+  return removed;
+}
+
 // SOT-1440 / P7: mark transient (retryable) transport errors so linearQuery can retry them with
 // backoff. GraphQL user/validation errors are marked NON-transient (permanent) and never retried.
 class LinearTransientError extends Error {
@@ -401,12 +435,24 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
   const { log } = requireDeps();
   try {
     const data: any = await linearQuery(
-      'query($id: String!) { issue(id: $id) { id state { name type } team { id } } }',
+      `query($id: String!) {
+        issue(id: $id) {
+          id
+          state { name type }
+          team { id }
+          relations { nodes { id type } }
+          inverseRelations { nodes { id type } }
+        }
+      }`,
       { id: issueId }
     );
     const issue = data.issue;
     if (!issue) return false;
     if (isTerminalState(issue.state)) return false;
+    if ((issue.state?.name || '').toLowerCase() === 'in review') {
+      await removeBlockingRelations(issueId, issue.relations?.nodes, issue.inverseRelations?.nodes);
+      return false;
+    }
     // SOT-1560: skip any hold state (In Review OR On Hold). A circuit-breaker-halted issue is parked in
     // On Hold; the post-run ensure-issue-reviewed step must NOT drag it back to In Review, or the halt
     // would be undone and the re-run loop would resume.
@@ -429,6 +475,7 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
       'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
       { id: issue.id, stateId: reviewState.id }
     );
+    await removeBlockingRelations(issueId, issue.relations?.nodes, issue.inverseRelations?.nodes);
     if (commentBody) {
       await linearQuery(
         'mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }',
@@ -512,6 +559,8 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
           state { name type }
           team { id }
           children(first: 100) { nodes { identifier state { name type } } }
+          relations { nodes { id type } }
+          inverseRelations { nodes { id type } }
         }
       }`,
       { id: parentId }
@@ -580,6 +629,9 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
       'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
       { id: parent.id, stateId: targetState.id }
     );
+    if (!resumeParent) {
+      await removeBlockingRelations(parent.identifier, parent.relations?.nodes, parent.inverseRelations?.nodes);
+    }
 
     const childList = children.map((c: any) => `- ${c.identifier} (${c.state?.name})`).join('\n');
     const body = resumeParent ? `${PARENT_RESUMED_MARKER}
