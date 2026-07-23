@@ -1,0 +1,359 @@
+{
+  "schemaVersion": "ptcg-synthetic-runtime-calibration/v1",
+  "source": {
+    "synthetic": "artifacts/ptcg-league/sot-1847/report.json",
+    "runtimeCheckpoint": "artifacts/ptcg-league/sot-1880-runtime/checkpoint.json"
+  },
+  "split": {
+    "trainingSeeds": [
+      186700,
+      186701
+    ],
+    "holdoutSeeds": [
+      186702
+    ],
+    "trainingEvents": 84,
+    "holdoutEvents": 12
+  },
+  "model": {
+    "kind": "ridge-agent-bias",
+    "ridge": 12,
+    "agentBias": {
+      "debate": 0.0825,
+      "fable": -0.01,
+      "matsu": 0.095,
+      "sol": -0.0525,
+      "take": 0.08,
+      "ume": -0.205,
+      "zero": 0.01
+    }
+  },
+  "training": {
+    "before": {
+      "matchupCount": 21,
+      "mae": 0.228571,
+      "maximumAbsoluteDifference": 0.675,
+      "rankingAgreement": 0.5,
+      "ranking": [
+        "ume",
+        "sol",
+        "fable",
+        "take",
+        "matsu",
+        "debate",
+        "zero"
+      ]
+    },
+    "after": {
+      "matchupCount": 21,
+      "mae": 0.14619,
+      "maximumAbsoluteDifference": 0.54,
+      "rankingAgreement": 0.888889,
+      "ranking": [
+        "sol",
+        "take",
+        "matsu",
+        "fable",
+        "debate",
+        "ume",
+        "zero"
+      ]
+    }
+  },
+  "holdout": {
+    "before": {
+      "matchupCount": 6,
+      "mae": 0.295833,
+      "maximumAbsoluteDifference": 0.65,
+      "rankingAgreement": 0.764706,
+      "ranking": [
+        "sol",
+        "ume",
+        "zero",
+        "matsu",
+        "fable",
+        "take",
+        "debate"
+      ]
+    },
+    "after": {
+      "matchupCount": 6,
+      "mae": 0.294583,
+      "maximumAbsoluteDifference": 0.5125,
+      "rankingAgreement": 0.647059,
+      "ranking": [
+        "sol",
+        "zero",
+        "ume",
+        "matsu",
+        "take",
+        "fable",
+        "debate"
+      ]
+    },
+    "improved": true
+  },
+  "matchupAnalysis": [
+    {
+      "matchup": "debate vs sol",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.75,
+      "syntheticFirstWinRate": 0.075,
+      "calibratedFirstWinRate": 0.21,
+      "beforeAbsoluteDifference": 0.675,
+      "afterAbsoluteDifference": 0.54,
+      "factorHypothesis": "debate is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "matsu vs ume",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.75,
+      "syntheticFirstWinRate": 0.3,
+      "calibratedFirstWinRate": 0.6,
+      "beforeAbsoluteDifference": 0.45,
+      "afterAbsoluteDifference": 0.15,
+      "factorHypothesis": "matsu is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "sol vs ume",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.75,
+      "syntheticFirstWinRate": 0.35,
+      "calibratedFirstWinRate": 0.5025,
+      "beforeAbsoluteDifference": 0.4,
+      "afterAbsoluteDifference": 0.2475,
+      "factorHypothesis": "sol is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "ume vs zero",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.5,
+      "syntheticFirstWinRate": 0.875,
+      "calibratedFirstWinRate": 0.66,
+      "beforeAbsoluteDifference": 0.375,
+      "afterAbsoluteDifference": 0.16,
+      "factorHypothesis": "zero is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "debate vs ume",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.75,
+      "syntheticFirstWinRate": 0.4,
+      "calibratedFirstWinRate": 0.6875,
+      "beforeAbsoluteDifference": 0.35,
+      "afterAbsoluteDifference": 0.0625,
+      "factorHypothesis": "debate is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "take vs zero",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 1,
+      "syntheticFirstWinRate": 0.675,
+      "calibratedFirstWinRate": 0.745,
+      "beforeAbsoluteDifference": 0.325,
+      "afterAbsoluteDifference": 0.255,
+      "factorHypothesis": "take is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "sol vs take",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.5,
+      "syntheticFirstWinRate": 0.8,
+      "calibratedFirstWinRate": 0.6675,
+      "beforeAbsoluteDifference": 0.3,
+      "afterAbsoluteDifference": 0.1675,
+      "factorHypothesis": "take is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "take vs ume",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.75,
+      "syntheticFirstWinRate": 0.45,
+      "calibratedFirstWinRate": 0.735,
+      "beforeAbsoluteDifference": 0.3,
+      "afterAbsoluteDifference": 0.015,
+      "factorHypothesis": "take is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "sol vs zero",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.75,
+      "syntheticFirstWinRate": 0.55,
+      "calibratedFirstWinRate": 0.4875,
+      "beforeAbsoluteDifference": 0.2,
+      "afterAbsoluteDifference": 0.2625,
+      "factorHypothesis": "zero is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "fable vs matsu",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.25,
+      "syntheticFirstWinRate": 0.45,
+      "calibratedFirstWinRate": 0.345,
+      "beforeAbsoluteDifference": 0.2,
+      "afterAbsoluteDifference": 0.095,
+      "factorHypothesis": "matsu is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "fable vs zero",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.75,
+      "syntheticFirstWinRate": 0.95,
+      "calibratedFirstWinRate": 0.93,
+      "beforeAbsoluteDifference": 0.2,
+      "afterAbsoluteDifference": 0.18,
+      "factorHypothesis": "agent-level bias is small; matchup interaction or runtime sampling is the leading hypothesis"
+    },
+    {
+      "matchup": "fable vs ume",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.5,
+      "syntheticFirstWinRate": 0.325,
+      "calibratedFirstWinRate": 0.52,
+      "beforeAbsoluteDifference": 0.175,
+      "afterAbsoluteDifference": 0.02,
+      "factorHypothesis": "fable is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "matsu vs take",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.5,
+      "syntheticFirstWinRate": 0.325,
+      "calibratedFirstWinRate": 0.34,
+      "beforeAbsoluteDifference": 0.175,
+      "afterAbsoluteDifference": 0.16,
+      "factorHypothesis": "agent-level bias is small; matchup interaction or runtime sampling is the leading hypothesis"
+    },
+    {
+      "matchup": "matsu vs sol",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.5,
+      "syntheticFirstWinRate": 0.35,
+      "calibratedFirstWinRate": 0.4975,
+      "beforeAbsoluteDifference": 0.15,
+      "afterAbsoluteDifference": 0.0025,
+      "factorHypothesis": "matsu is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "matsu vs zero",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.5,
+      "syntheticFirstWinRate": 0.625,
+      "calibratedFirstWinRate": 0.71,
+      "beforeAbsoluteDifference": 0.125,
+      "afterAbsoluteDifference": 0.21,
+      "factorHypothesis": "matsu is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "debate vs matsu",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.25,
+      "syntheticFirstWinRate": 0.35,
+      "calibratedFirstWinRate": 0.3375,
+      "beforeAbsoluteDifference": 0.1,
+      "afterAbsoluteDifference": 0.0875,
+      "factorHypothesis": "agent-level bias is small; matchup interaction or runtime sampling is the leading hypothesis"
+    },
+    {
+      "matchup": "debate vs take",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.5,
+      "syntheticFirstWinRate": 0.6,
+      "calibratedFirstWinRate": 0.6025,
+      "beforeAbsoluteDifference": 0.1,
+      "afterAbsoluteDifference": 0.1025,
+      "factorHypothesis": "agent-level bias is small; matchup interaction or runtime sampling is the leading hypothesis"
+    },
+    {
+      "matchup": "debate vs fable",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.25,
+      "syntheticFirstWinRate": 0.325,
+      "calibratedFirstWinRate": 0.4175,
+      "beforeAbsoluteDifference": 0.075,
+      "afterAbsoluteDifference": 0.1675,
+      "factorHypothesis": "debate is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "debate vs zero",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.5,
+      "syntheticFirstWinRate": 0.425,
+      "calibratedFirstWinRate": 0.4975,
+      "beforeAbsoluteDifference": 0.075,
+      "afterAbsoluteDifference": 0.0025,
+      "factorHypothesis": "debate is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "fable vs take",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.5,
+      "syntheticFirstWinRate": 0.45,
+      "calibratedFirstWinRate": 0.36,
+      "beforeAbsoluteDifference": 0.05,
+      "afterAbsoluteDifference": 0.14,
+      "factorHypothesis": "take is systematically stronger in real runtime than synthetic evaluation predicts"
+    },
+    {
+      "matchup": "fable vs sol",
+      "sampleSize": 4,
+      "runtimeFirstWinRate": 0.25,
+      "syntheticFirstWinRate": 0.25,
+      "calibratedFirstWinRate": 0.2925,
+      "beforeAbsoluteDifference": 0,
+      "afterAbsoluteDifference": 0.0425,
+      "factorHypothesis": "fable is systematically stronger in real runtime than synthetic evaluation predicts"
+    }
+  ],
+  "reinforcementPriority": [
+    {
+      "rank": 1,
+      "agent": "ume",
+      "runtimeScore": 0.347222,
+      "calibratedScore": 0.435833,
+      "remainingGap": -0.088611
+    },
+    {
+      "rank": 2,
+      "agent": "zero",
+      "runtimeScore": 0.319444,
+      "calibratedScore": 0.328333,
+      "remainingGap": -0.008889
+    },
+    {
+      "rank": 3,
+      "agent": "debate",
+      "runtimeScore": 0.458333,
+      "calibratedScore": 0.45875,
+      "remainingGap": -0.000417
+    },
+    {
+      "rank": 4,
+      "agent": "sol",
+      "runtimeScore": 0.611111,
+      "calibratedScore": 0.609583,
+      "remainingGap": 0.001528
+    },
+    {
+      "rank": 5,
+      "agent": "fable",
+      "runtimeScore": 0.513889,
+      "calibratedScore": 0.505,
+      "remainingGap": 0.008889
+    },
+    {
+      "rank": 6,
+      "agent": "take",
+      "runtimeScore": 0.597222,
+      "calibratedScore": 0.585,
+      "remainingGap": 0.012222
+    },
+    {
+      "rank": 7,
+      "agent": "matsu",
+      "runtimeScore": 0.652778,
+      "calibratedScore": 0.5775,
+      "remainingGap": 0.075278
+    }
+  ]
+}
