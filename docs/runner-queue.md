@@ -78,7 +78,8 @@ webhook / startup-scan / Discord retry / scheduler の共通 queue は以下の�
 ### 優先順位ルール
 
 1. **実行対象**: `retryAt` 未設定、または `retryAt` が現在時刻以前の item のみ実行
-2. **Linear priority 順**（priorityRank 昇順）:
+2. **Blocking 依存順**: 同じ queue 内の Linear `blockedBy` blocker を先に実行（多段依存はトポロジカル順、循環は既存順へフォールバック）
+3. **Linear priority 順**（priorityRank 昇順）:
    - Urgent (priority=1) → rank 1（最優先）
    - High (priority=2) → rank 2
    - Medium (priority=3) → rank 3
@@ -86,10 +87,10 @@ webhook / startup-scan / Discord retry / scheduler の共通 queue は以下の�
    - No priority (priority=0) → rank 5（最後）
    - 未設定 (null/undefined) → rank 5（最後）
    - **注意**: No priority (0) は最優先ではなく最後に処理されます
-3. **親子 group 優先**: 直前に処理した親Issueの子Issueが queue にある場合、次に優先して実行
+4. **親子 group 優先**: 直前に処理した親Issueの子Issueが queue にある場合、次に優先して実行
    - Urgent は子Issue group より常に優先
    - 子Issue group 内では priorityRank → queueGroupOrder → enqueuedAt の順
-4. **同 priority 内**: retryAt (早い順・null 優先) → enqueuedAt (早い順)
+5. **同 priority 内**: Linear updatedAt（新しい順）→ retryAt (早い順・null 優先) → enqueuedAt (早い順)
 
 ### 親Issue / 子Issue の関係
 
