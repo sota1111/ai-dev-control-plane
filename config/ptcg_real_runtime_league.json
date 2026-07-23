@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "ptcg-real-runtime-league-plan/v1",
+  "leagueId": "sot-1880-multi-seed-real-runtime-seven-agent",
+  "seeds": [186700, 186701, 186702, 186703, 186704],
+  "seatSwap": true,
+  "timeoutMs": 30000,
+  "budgetHours": 8,
+  "estimatedMatchMinutes": 5,
+  "priorityMatchups": [
+    ["sol", "debate"],
+    ["sol", "fable"],
+    ["sol", "matsu"],
+    ["sol", "take"],
+    ["sol", "ume"],
+    ["sol", "zero"]
+  ]
+}
