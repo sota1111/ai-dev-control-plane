@@ -12,9 +12,11 @@ import {
   budgetedMatchCount,
   buildRepresentativeRuntimePlan,
   buildRuntimeAudit,
+  buildRuntimeLatencyProfile,
   parseRuntimeLeagueManifest,
   runRealRuntimeMatch,
   writeRuntimeAudit,
+  writeRuntimeLatencyProfile,
 } from './lib/ptcgRealRuntimeLeague.js';
 import { resolveSevenAgentManifest } from './lib/ptcgSevenAgentLeague.js';
 
@@ -29,6 +31,9 @@ const planFile = path.resolve(root, value('--plan', 'config/ptcg_real_runtime_le
 const runtimePlan = parseRuntimeLeagueManifest(JSON.parse(fs.readFileSync(planFile, 'utf8')));
 const timeoutMs = Number(value('--timeout-ms', String(runtimePlan.timeoutMs)));
 const budgetHours = Number(value('--budget-hours', String(runtimePlan.budgetHours)));
+const requestedMaxMatches = Number(
+  value('--max-matches', String(budgetedMatchCount({ ...runtimePlan, budgetHours })))
+);
 const engineCommit = execFileSync(
   'git',
   ['-C', path.join(siblingsRoot, 'ptcg-agent-sol'), 'rev-parse', 'HEAD'],
@@ -37,7 +42,7 @@ const engineCommit = execFileSync(
 const manifest = resolveSevenAgentManifest(siblingsRoot, engineCommit);
 const plans = buildRepresentativeRuntimePlan(runtimePlan.seeds, {
   priorityMatchups: runtimePlan.priorityMatchups,
-  maxMatches: budgetedMatchCount({ ...runtimePlan, budgetHours }),
+  maxMatches: Math.min(budgetedMatchCount({ ...runtimePlan, budgetHours }), requestedMaxMatches),
 });
 const plansById = new Map(plans.map((plan) => [plan.id, plan]));
 const started = Date.now();
@@ -83,6 +88,7 @@ const audit = buildRuntimeAudit({
   events: checkpoint.events,
 });
 writeRuntimeAudit(output, audit);
+writeRuntimeLatencyProfile(output, buildRuntimeLatencyProfile(checkpoint.events));
 if (
   audit.execution.elapsedMs > budgetHours * 60 * 60 * 1000 ||
   Date.now() - started > budgetHours * 60 * 60 * 1000

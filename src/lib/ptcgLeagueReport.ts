@@ -14,6 +14,13 @@ export interface LeagueMatchEvent {
   thinkTimeMs?: { first: number; second: number };
   /** Full real-process match duration, used by runtime budget audits. */
   durationMs?: number;
+  /** Non-invasive real-runtime phase telemetry. Older checkpoints omit it. */
+  timingMs?: {
+    processStartup: { first: number; second: number };
+    request: { first: number; second: number };
+    inference: { first: number; second: number };
+    engine: number;
+  };
 }
 
 export interface LeagueCheckpoint {
