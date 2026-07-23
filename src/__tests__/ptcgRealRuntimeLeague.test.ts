@@ -6,6 +6,7 @@ import {
   budgetedMatchCount,
   buildRepresentativeRuntimePlan,
   buildRuntimeAudit,
+  buildRuntimeLatencyProfile,
   parseRuntimeLeagueManifest,
 } from '../lib/ptcgRealRuntimeLeague.js';
 
@@ -116,6 +117,68 @@ describe('real runtime seven-agent audit', () => {
         low: expect.any(Number),
         high: expect.any(Number),
       }),
+    });
+  });
+
+  it('profiles agent stages and matchup contribution without changing match results', () => {
+    const events = [
+      {
+        matchId: 'a',
+        first: 'sol',
+        second: 'zero',
+        outcome: 'first' as const,
+        durationMs: 100,
+        timingMs: {
+          processStartup: { first: 10, second: 20 },
+          request: { first: 30, second: 40 },
+          inference: { first: 25, second: 35 },
+          engine: 5,
+        },
+      },
+      {
+        matchId: 'b',
+        first: 'zero',
+        second: 'sol',
+        outcome: 'second' as const,
+        durationMs: 150,
+        timingMs: {
+          processStartup: { first: 22, second: 12 },
+          request: { first: 42, second: 32 },
+          inference: { first: 37, second: 27 },
+          engine: 7,
+        },
+      },
+      {
+        matchId: 'c',
+        first: 'matsu',
+        second: 'take',
+        outcome: 'draw' as const,
+        durationMs: 50,
+        timingMs: {
+          processStartup: { first: 3, second: 4 },
+          request: { first: 5, second: 6 },
+          inference: { first: 4, second: 5 },
+          engine: 2,
+        },
+      },
+    ];
+    const before = events.map(({ outcome }) => outcome);
+    const profile = buildRuntimeLatencyProfile(events);
+    expect(events.map(({ outcome }) => outcome)).toEqual(before);
+    expect(profile.agents.sol?.inference).toMatchObject({
+      samples: 2,
+      p50: 25,
+      p95: 27,
+      max: 27,
+    });
+    expect(profile.bottleneck).toEqual({
+      matchup: 'sol vs zero',
+      totalDurationMs: 250,
+      contributionRate: 250 / 300,
+    });
+    expect(profile.improvementCandidates[0]).toMatchObject({
+      candidate: 'reuse-agent-processes-across-matches',
+      expectedReductionMs: 34,
     });
   });
 });

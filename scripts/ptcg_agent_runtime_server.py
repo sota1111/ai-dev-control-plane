@@ -3,10 +3,20 @@
 
 import json
 import os
+import random
 import sys
+import time
 
 
 def main() -> int:
+    seed = int(os.environ.get("AGENT_SEED", "0"))
+    random.seed(seed)
+    try:
+        import numpy as np
+
+        np.random.seed(seed)
+    except ImportError:
+        pass
     repo = os.getcwd()
     sys.path.insert(0, repo)
     source = os.path.join(repo, "src")
@@ -27,8 +37,14 @@ def main() -> int:
     sys.stderr.flush()
     for line in sys.stdin:
         try:
+            started = time.perf_counter()
             action = submission.agent(json.loads(line))
-            payload = action
+            inference_ms = (time.perf_counter() - started) * 1000
+            payload = (
+                {"action": action, "inferenceMs": inference_ms}
+                if os.environ.get("PTCG_TIMING_TELEMETRY", "1") != "0"
+                else action
+            )
         except Exception as error:
             payload = {"__error__": f"{type(error).__name__}: {error}"}
         sys.stdout.write(json.dumps(payload) + "\n")

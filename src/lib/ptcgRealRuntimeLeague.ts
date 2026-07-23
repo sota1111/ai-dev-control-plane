@@ -5,6 +5,7 @@ import type { LeagueMatchEvent, LeagueReport, WilsonInterval } from './ptcgLeagu
 import type { SevenAgentId, SevenAgentManifest } from './ptcgSevenAgentLeague.js';
 
 export const REAL_RUNTIME_AUDIT_SCHEMA = 'ptcg-real-runtime-audit/v1' as const;
+export const RUNTIME_LATENCY_PROFILE_SCHEMA = 'ptcg-runtime-latency-profile/v1' as const;
 export const REAL_RUNTIME_PLAN_SCHEMA = 'ptcg-real-runtime-league-plan/v1' as const;
 
 export interface RuntimeLeagueManifest {
@@ -55,6 +56,185 @@ export interface RuntimeAudit {
     deltaWilson95: WilsonInterval | null;
   }>;
   bottleneck: { matchup: string; absoluteDelta: number } | null;
+}
+
+type RuntimeStage = 'processStartup' | 'request' | 'inference' | 'engine';
+interface LatencyStats {
+  samples: number;
+  p50: number;
+  p95: number;
+  max: number;
+  total: number;
+}
+export interface RuntimeLatencyProfile {
+  schemaVersion: typeof RUNTIME_LATENCY_PROFILE_SCHEMA;
+  totalDurationMs: number;
+  agents: Record<string, Partial<Record<RuntimeStage, LatencyStats>>>;
+  matchups: Array<{
+    matchup: string;
+    totalDurationMs: number;
+    contributionRate: number;
+    stages: Partial<Record<RuntimeStage, LatencyStats>>;
+  }>;
+  bottleneck: { matchup: string; contributionRate: number; totalDurationMs: number } | null;
+  improvementCandidates: Array<{
+    candidate: string;
+    safety: 'low-risk';
+    expectedReductionMs: number;
+    expectedReductionRate: number;
+    condition: string;
+  }>;
+}
+
+function latencyStats(values: number[]): LatencyStats | undefined {
+  if (!values.length) return undefined;
+  const sorted = [...values].sort((a, b) => a - b);
+  const percentile = (p: number) => sorted[Math.ceil(p * sorted.length) - 1];
+  return {
+    samples: sorted.length,
+    p50: percentile(0.5),
+    p95: percentile(0.95),
+    max: sorted[sorted.length - 1],
+    total: sorted.reduce((sum, value) => sum + value, 0),
+  };
+}
+
+export function buildRuntimeLatencyProfile(events: LeagueMatchEvent[]): RuntimeLatencyProfile {
+  const agents: Record<string, Partial<Record<RuntimeStage, number[]>>> = {};
+  const matchupValues = new Map<
+    string,
+    { duration: number; stages: Record<RuntimeStage, number[]> }
+  >();
+  let totalDurationMs = 0;
+  let reusableStartupMs = 0;
+  const startedAgents = new Set<string>();
+  for (const event of events) {
+    const duration = event.durationMs ?? 0;
+    totalDurationMs += duration;
+    if (!event.timingMs) continue;
+    const pair = [event.first, event.second].sort();
+    const matchup = pair.join(' vs ');
+    const group = matchupValues.get(matchup) ?? {
+      duration: 0,
+      stages: { processStartup: [], request: [], inference: [], engine: [] },
+    };
+    group.duration += duration;
+    for (const [seat, agent] of [
+      ['first', event.first],
+      ['second', event.second],
+    ] as const) {
+      const values = (agents[agent] ??= {});
+      for (const stage of ['processStartup', 'request', 'inference'] as const) {
+        (values[stage] ??= []).push(event.timingMs[stage][seat]);
+        group.stages[stage].push(event.timingMs[stage][seat]);
+      }
+      if (startedAgents.has(agent)) reusableStartupMs += event.timingMs.processStartup[seat];
+      else startedAgents.add(agent);
+    }
+    group.stages.engine.push(event.timingMs.engine);
+    matchupValues.set(matchup, group);
+  }
+  const profiledAgents = Object.fromEntries(
+    Object.entries(agents).map(([agent, stages]) => [
+      agent,
+      Object.fromEntries(
+        Object.entries(stages).flatMap(([stage, values]) => {
+          const stats = latencyStats(values);
+          return stats ? [[stage, stats]] : [];
+        })
+      ),
+    ])
+  );
+  const matchups = [...matchupValues.entries()]
+    .map(([matchup, group]) => ({
+      matchup,
+      totalDurationMs: group.duration,
+      contributionRate: totalDurationMs ? group.duration / totalDurationMs : 0,
+      stages: Object.fromEntries(
+        Object.entries(group.stages).flatMap(([stage, values]) => {
+          const stats = latencyStats(values);
+          return stats ? [[stage, stats]] : [];
+        })
+      ),
+    }))
+    .sort((a, b) => b.totalDurationMs - a.totalDurationMs);
+  const expectedReductionMs = Math.max(0, reusableStartupMs);
+  return {
+    schemaVersion: RUNTIME_LATENCY_PROFILE_SCHEMA,
+    totalDurationMs,
+    agents: profiledAgents,
+    matchups,
+    bottleneck: matchups[0]
+      ? {
+          matchup: matchups[0].matchup,
+          contributionRate: matchups[0].contributionRate,
+          totalDurationMs: matchups[0].totalDurationMs,
+        }
+      : null,
+    improvementCandidates: [
+      {
+        candidate: 'reuse-agent-processes-across-matches',
+        safety: 'low-risk',
+        expectedReductionMs,
+        expectedReductionRate: totalDurationMs ? expectedReductionMs / totalDurationMs : 0,
+        condition:
+          'Reset and reseed both agents before every match; enable only after action/result parity passes.',
+      },
+      {
+        candidate: 'cache-identical-observation-actions',
+        safety: 'low-risk',
+        expectedReductionMs: 0,
+        expectedReductionRate: 0,
+        condition:
+          'Disabled by default; measure repeated canonical observations and require deterministic-agent parity.',
+      },
+    ],
+  };
+}
+
+export function writeRuntimeLatencyProfile(output: string, profile: RuntimeLatencyProfile): void {
+  fs.mkdirSync(output, { recursive: true });
+  fs.writeFileSync(
+    path.join(output, 'latency-profile.json'),
+    `${JSON.stringify(profile, null, 2)}\n`
+  );
+  const f = (value: number) => value.toFixed(3);
+  const agentRows = Object.entries(profile.agents).flatMap(([agent, stages]) =>
+    Object.entries(stages).map(
+      ([stage, stats]) =>
+        `| ${agent} | ${stage} | ${stats.samples} | ${f(stats.p50)} | ${f(stats.p95)} | ${f(stats.max)} |`
+    )
+  );
+  const matchupRows = profile.matchups.map(
+    (row) =>
+      `| ${row.matchup} | ${f(row.totalDurationMs)} | ${(row.contributionRate * 100).toFixed(2)}% |`
+  );
+  const candidates = profile.improvementCandidates.map(
+    (row) =>
+      `| ${row.candidate} | ${f(row.expectedReductionMs)} | ${(row.expectedReductionRate * 100).toFixed(2)}% | ${row.condition} |`
+  );
+  fs.writeFileSync(
+    path.join(output, 'latency-profile.md'),
+    [
+      '# Seven-agent real-runtime latency profile',
+      '',
+      `- Total measured match time: ${f(profile.totalDurationMs)} ms`,
+      `- Largest matchup contribution: ${profile.bottleneck ? `${profile.bottleneck.matchup} (${(profile.bottleneck.contributionRate * 100).toFixed(2)}%)` : 'n/a'}`,
+      '',
+      '| agent | stage | samples | p50 ms | p95 ms | max ms |',
+      '| --- | --- | ---: | ---: | ---: | ---: |',
+      ...agentRows,
+      '',
+      '| matchup | total ms | league contribution |',
+      '| --- | ---: | ---: |',
+      ...matchupRows,
+      '',
+      '| improvement candidate | expected reduction ms | expected reduction | parity condition |',
+      '| --- | ---: | ---: | --- |',
+      ...candidates,
+      '',
+    ].join('\n')
+  );
 }
 
 export function parseRuntimeLeagueManifest(value: unknown): RuntimeLeagueManifest {
@@ -174,6 +354,7 @@ export function runRealRuntimeMatch(options: {
     fault: { agent: string; kind: string } | null;
     thinkTimeMs: { first: number; second: number };
     durationMs: number;
+    timingMs?: LeagueMatchEvent['timingMs'];
   };
   return {
     matchId: plan.id,
@@ -194,6 +375,7 @@ export function runRealRuntimeMatch(options: {
       : undefined,
     thinkTimeMs: result.thinkTimeMs,
     durationMs: result.durationMs,
+    timingMs: result.timingMs,
   };
 }
 
