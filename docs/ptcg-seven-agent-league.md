@@ -22,14 +22,21 @@ production runtimes remain responsible for translating each repository's native 
 real cabt engine while loading each repository's `main.py` in an isolated Python process. A fixed agent
 seed is passed as both `AGENT_SEED` and `PYTHONHASHSEED`, and every seed is run in both seat orders.
 
+The versioned `config/ptcg_real_runtime_league.json` manifest pins the fixed seed set, seat reversal,
+timeout, eight-hour budget, estimated match cost, and representative matchups. The planner schedules
+one seed across every matchup before using later seeds, and places configured priority matchups first
+within each seed. Budget truncation always keeps both seat orientations together.
+
 ```bash
-npx tsx src/ptcg-real-runtime-league-cli.ts --seeds 186700 \
-  --output artifacts/ptcg-league/sot-1867-runtime
+npx tsx src/ptcg-real-runtime-league-cli.ts \
+  --plan config/ptcg_real_runtime_league.json \
+  --output artifacts/ptcg-league/sot-1880-runtime
 ```
 
 The output directory contains the pinned manifest, an atomic per-match `checkpoint.json`, the normal
 league report, and `runtime-audit.{json,md}`. Re-running the same command resumes completed matches
 without duplication. The audit compares every representative real-runtime matchup with the synthetic
-SOT-1847 profile, identifies the largest absolute win-rate gap, and separately counts process faults,
-unfinished games, illegal actions, and timeouts. The command fails if its configured (default 8-hour)
-budget is exceeded.
+SOT-1847 profile, identifies the largest absolute win-rate gap, and reports each matchup's sample size,
+runtime Wilson 95% interval, and a Newcombe-style interval for the runtime/synthetic difference. It
+separately counts process faults, unfinished games, illegal actions, and timeouts. The command fails if
+its configured eight-hour budget is exceeded.

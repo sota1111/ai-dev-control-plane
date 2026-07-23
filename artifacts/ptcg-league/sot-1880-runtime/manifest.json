@@ -1,0 +1,184 @@
+{
+  "schemaVersion": "ptcg-seven-agent-league/v1",
+  "engine": {
+    "id": "cabt",
+    "commit": "f5852db4d482f284e153ef9635f557eeb8b263d1"
+  },
+  "agents": [
+    {
+      "id": "sol",
+      "repository": "ptcg-agent-sol",
+      "commit": "f5852db4d482f284e153ef9635f557eeb8b263d1",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "f5852db4d482f284e153ef9635f557eeb8b263d1",
+        "sha256": "e92d5717fd04865b0b528307df7a9d9aecc2c7b917bfbd5042fe58e3d1f26997"
+      },
+      "model": {
+        "path": null,
+        "commit": "f5852db4d482f284e153ef9635f557eeb8b263d1"
+      },
+      "config": {
+        "path": null,
+        "commit": "f5852db4d482f284e153ef9635f557eeb8b263d1"
+      }
+    },
+    {
+      "id": "debate",
+      "repository": "ptcg-agent-debate",
+      "commit": "fee9554e878e2bf81d9d32c8063298475119cb89",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "fee9554e878e2bf81d9d32c8063298475119cb89",
+        "sha256": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+      },
+      "model": {
+        "path": null,
+        "commit": "fee9554e878e2bf81d9d32c8063298475119cb89"
+      },
+      "config": {
+        "path": null,
+        "commit": "fee9554e878e2bf81d9d32c8063298475119cb89"
+      }
+    },
+    {
+      "id": "fable",
+      "repository": "ptcg-agent-fable",
+      "commit": "822edf79f971e1e2fd4bdf167237e3a334ef0a3b",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "822edf79f971e1e2fd4bdf167237e3a334ef0a3b",
+        "sha256": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+      },
+      "model": {
+        "path": null,
+        "commit": "822edf79f971e1e2fd4bdf167237e3a334ef0a3b"
+      },
+      "config": {
+        "path": null,
+        "commit": "822edf79f971e1e2fd4bdf167237e3a334ef0a3b"
+      }
+    },
+    {
+      "id": "matsu",
+      "repository": "ptcg-agent-matsu",
+      "commit": "7c30409ffa39bf29f76b740a38d6d8cdf490d550",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "7c30409ffa39bf29f76b740a38d6d8cdf490d550",
+        "sha256": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+      },
+      "model": {
+        "path": null,
+        "commit": "7c30409ffa39bf29f76b740a38d6d8cdf490d550"
+      },
+      "config": {
+        "path": null,
+        "commit": "7c30409ffa39bf29f76b740a38d6d8cdf490d550"
+      }
+    },
+    {
+      "id": "take",
+      "repository": "ptcg-agent-take",
+      "commit": "269cd83ab688fdf5b7488de62b448a819a5e00cb",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "269cd83ab688fdf5b7488de62b448a819a5e00cb",
+        "sha256": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+      },
+      "model": {
+        "path": null,
+        "commit": "269cd83ab688fdf5b7488de62b448a819a5e00cb"
+      },
+      "config": {
+        "path": null,
+        "commit": "269cd83ab688fdf5b7488de62b448a819a5e00cb"
+      }
+    },
+    {
+      "id": "ume",
+      "repository": "ptcg-agent-ume",
+      "commit": "2762691f31e6971f93dc64ab23f8834908000ce0",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "2762691f31e6971f93dc64ab23f8834908000ce0",
+        "sha256": "42068a1803902756badcfd418f6f348b7901365a281d78af0692cbf2589f0799"
+      },
+      "model": {
+        "path": null,
+        "commit": "2762691f31e6971f93dc64ab23f8834908000ce0"
+      },
+      "config": {
+        "path": null,
+        "commit": "2762691f31e6971f93dc64ab23f8834908000ce0"
+      }
+    },
+    {
+      "id": "zero",
+      "repository": "ptcg-agent-zero",
+      "commit": "daff9788416253eb835cb0bbcb3709a077cc86af",
+      "entrypoint": "main.py",
+      "deck": {
+        "path": "deck.csv",
+        "commit": "daff9788416253eb835cb0bbcb3709a077cc86af",
+        "sha256": "e92d5717fd04865b0b528307df7a9d9aecc2c7b917bfbd5042fe58e3d1f26997"
+      },
+      "model": {
+        "path": null,
+        "commit": "daff9788416253eb835cb0bbcb3709a077cc86af"
+      },
+      "config": {
+        "path": null,
+        "commit": "daff9788416253eb835cb0bbcb3709a077cc86af"
+      }
+    }
+  ],
+  "runtimeLeague": {
+    "schemaVersion": "ptcg-real-runtime-league-plan/v1",
+    "leagueId": "sot-1880-multi-seed-real-runtime-seven-agent",
+    "seeds": [
+      186700,
+      186701,
+      186702,
+      186703,
+      186704
+    ],
+    "seatSwap": true,
+    "timeoutMs": 30000,
+    "budgetHours": 8,
+    "estimatedMatchMinutes": 5,
+    "priorityMatchups": [
+      [
+        "sol",
+        "debate"
+      ],
+      [
+        "sol",
+        "fable"
+      ],
+      [
+        "sol",
+        "matsu"
+      ],
+      [
+        "sol",
+        "take"
+      ],
+      [
+        "sol",
+        "ume"
+      ],
+      [
+        "sol",
+        "zero"
+      ]
+    ],
+    "plannedMatches": 96
+  }
+}
