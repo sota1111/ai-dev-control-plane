@@ -10,6 +10,7 @@ interface QueueItem {
   issueUpdatedAt?: string | null;
   queueGroup?: string | null;
   queueGroupOrder?: string | null;
+  blockedByIssueIds?: string[] | null;
   issueId?: string;
   issueIdentifier?: string | null;
 }
@@ -52,7 +53,7 @@ export function effectiveRank(item: QueueItem): number {
  * `queueGroup`. The comparator is stable (returns 0 on a full tie), so equal items keep input order.
  */
 export function sortQueueByPriority<T extends QueueItem>(queue: T[]): T[] {
-  return [...queue].sort((a, b) => {
+  const baseSorted = [...queue].sort((a, b) => {
     const rankA = effectiveRank(a);
     const rankB = effectiveRank(b);
     if (rankA !== rankB) return rankA - rankB;
@@ -75,6 +76,39 @@ export function sortQueueByPriority<T extends QueueItem>(queue: T[]): T[] {
 
     return 0;
   });
+  const keyToIndex = new Map<string, number>();
+  baseSorted.forEach((item, index) => {
+    if (item.issueId) keyToIndex.set(item.issueId, index);
+    if (item.issueIdentifier) keyToIndex.set(item.issueIdentifier, index);
+  });
+  const dependents = new Map<number, number[]>();
+  const indegree = baseSorted.map(() => 0);
+  baseSorted.forEach((item, dependentIndex) => {
+    const blockerIndices = new Set((item.blockedByIssueIds || [])
+      .map(key => keyToIndex.get(key))
+      .filter((index): index is number => index != null && index !== dependentIndex));
+    for (const blockerIndex of blockerIndices) {
+      indegree[dependentIndex]++;
+      dependents.set(blockerIndex, [...(dependents.get(blockerIndex) || []), dependentIndex]);
+    }
+  });
+  const ready = indegree.map((degree, index) => ({ degree, index }))
+    .filter(({ degree }) => degree === 0).map(({ index }) => index);
+  const result: T[] = [];
+  while (ready.length > 0) {
+    ready.sort((a, b) => a - b);
+    const index = ready.shift()!;
+    result.push(baseSorted[index]);
+    for (const dependentIndex of dependents.get(index) || []) {
+      indegree[dependentIndex]--;
+      if (indegree[dependentIndex] === 0) ready.push(dependentIndex);
+    }
+  }
+  if (result.length < baseSorted.length) {
+    const emitted = new Set(result);
+    result.push(...baseSorted.filter(item => !emitted.has(item)));
+  }
+  return result;
 }
 
 /**
@@ -95,6 +129,25 @@ export function selectNextReadyIndex(queue: QueueItem[], { lastProcessedGroup = 
   }, []);
 
   if (readyIndices.length === 0) return null;
+  const queuedKeys = new Set<string>();
+  queue.forEach(item => {
+    if (item.issueId) queuedKeys.add(item.issueId);
+    if (item.issueIdentifier) queuedKeys.add(item.issueIdentifier);
+  });
+  const dependencyReadyIndices = readyIndices.filter(i =>
+    !(queue[i].blockedByIssueIds || []).some(blockerId => queuedKeys.has(blockerId)));
+  let selectableIndices = dependencyReadyIndices;
+  if (selectableIndices.length === 0) {
+    const readyKeys = new Set<string>();
+    readyIndices.forEach(i => {
+      if (queue[i].issueId) readyKeys.add(queue[i].issueId!);
+      if (queue[i].issueIdentifier) readyKeys.add(queue[i].issueIdentifier!);
+    });
+    const cycle = readyIndices.every(i =>
+      (queue[i].blockedByIssueIds || []).some(blockerId => readyKeys.has(blockerId)));
+    if (!cycle) return null;
+    selectableIndices = readyIndices;
+  }
 
   // Helper: compare two candidate indices, returning the better one
   function betterIndex(aIdx: number, bIdx: number, groupMode: boolean = false): number {
@@ -132,7 +185,7 @@ export function selectNextReadyIndex(queue: QueueItem[], { lastProcessedGroup = 
   }
 
   // Step 1: Check for Urgent items (priorityRank === 1) — always highest priority
-  const urgentIndices = readyIndices.filter(i => effectiveRank(queue[i]) === 1);
+  const urgentIndices = selectableIndices.filter(i => effectiveRank(queue[i]) === 1);
   if (urgentIndices.length > 0) {
     let bestUrgent = urgentIndices[0];
     for (const i of urgentIndices.slice(1)) {
@@ -143,7 +196,7 @@ export function selectNextReadyIndex(queue: QueueItem[], { lastProcessedGroup = 
 
   // Step 2: If lastProcessedGroup is set, check for items in that group
   if (lastProcessedGroup) {
-    const groupIndices = readyIndices.filter(i => queue[i].queueGroup === lastProcessedGroup);
+    const groupIndices = selectableIndices.filter(i => queue[i].queueGroup === lastProcessedGroup);
     if (groupIndices.length > 0) {
       let bestGroup = groupIndices[0];
       for (const i of groupIndices.slice(1)) {
@@ -154,8 +207,8 @@ export function selectNextReadyIndex(queue: QueueItem[], { lastProcessedGroup = 
   }
 
   // Step 3: Normal priority order (priorityRank → retryAt → enqueuedAt)
-  let bestIndex = readyIndices[0];
-  for (const i of readyIndices.slice(1)) {
+  let bestIndex = selectableIndices[0];
+  for (const i of selectableIndices.slice(1)) {
     bestIndex = betterIndex(bestIndex, i);
   }
 

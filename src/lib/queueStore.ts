@@ -155,7 +155,8 @@ export function normalizeQueue(queue: QueueItem[]): QueueItem[] {
       parentIssueId: item.parentIssueId || existing.parentIssueId || null,
       parentIssueIdentifier: item.parentIssueIdentifier || existing.parentIssueIdentifier || null,
       queueGroup: item.queueGroup || existing.queueGroup || null,
-      queueGroupOrder: item.queueGroupOrder || existing.queueGroupOrder || null
+      queueGroupOrder: item.queueGroupOrder || existing.queueGroupOrder || null,
+      blockedByIssueIds: item.blockedByIssueIds || existing.blockedByIssueIds || []
     });
   }
   return queueOrdering.sortQueueByPriority(Array.from(map.values()));
@@ -233,12 +234,13 @@ export async function refreshQueuePriorities(): Promise<void> {
 
     const active = await fetchActiveIssues();
     // Key by both identifier and id, since queue items store issueId as either.
-    const byKey = new Map<string, { priority: number | null; priorityLabel: string | null; issueUpdatedAt: string | null }>();
+    const byKey = new Map<string, { priority: number | null; priorityLabel: string | null; issueUpdatedAt: string | null; blockedByIssueIds: string[] }>();
     for (const issue of active) {
       const entry = {
         priority: issue.priority ?? null,
         priorityLabel: issue.priorityLabel ?? null,
-        issueUpdatedAt: issue.updatedAt ?? null
+        issueUpdatedAt: issue.updatedAt ?? null,
+        blockedByIssueIds: issue.blockedByIssueIds ?? []
       };
       if (issue.identifier) byKey.set(issue.identifier, entry);
       if (issue.id) byKey.set(issue.id, entry);
@@ -250,12 +252,14 @@ export async function refreshQueuePriorities(): Promise<void> {
       if (!fresh) continue;
       const newRank = getPriorityRank(fresh.priority);
       const oldRank = item.priorityRank ?? getPriorityRank(item.priority);
-      if (newRank !== oldRank || fresh.priority !== item.priority || fresh.issueUpdatedAt !== (item.issueUpdatedAt ?? null)) {
+      const blockersChanged = JSON.stringify(fresh.blockedByIssueIds) !== JSON.stringify(item.blockedByIssueIds || []);
+      if (newRank !== oldRank || fresh.priority !== item.priority || fresh.issueUpdatedAt !== (item.issueUpdatedAt ?? null) || blockersChanged) {
         changed.push(`${item.issueId}:${oldRank}->${newRank}`);
         item.priority = fresh.priority;
         item.priorityLabel = fresh.priorityLabel;
         item.priorityRank = newRank;
         item.issueUpdatedAt = fresh.issueUpdatedAt;
+        item.blockedByIssueIds = fresh.blockedByIssueIds;
       }
     }
 
@@ -429,7 +433,8 @@ export function enqueue(issueId: string, trigger: string | null, retryAt: string
       parentIssueId: parentIssueId ?? null,
       parentIssueIdentifier: parentIssueIdentifier ?? null,
       queueGroup: resolvedQueueGroup,
-      queueGroupOrder: queueGroupOrder ?? null
+      queueGroupOrder: queueGroupOrder ?? null,
+      blockedByIssueIds: []
     });
     saveQueue(queueOrdering.sortQueueByPriority(queue));
     log('QUEUE', 'enqueued', { issue: issueId, trigger });

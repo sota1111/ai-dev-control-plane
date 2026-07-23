@@ -280,6 +280,7 @@ export async function getIssueQueueMetadata(issueId: string): Promise<IssueQueue
           updatedAt
           state { type name }
           parent { id identifier }
+          inverseRelations { nodes { type relatedIssue { id identifier } } }
         }
       }
     `;
@@ -298,7 +299,8 @@ export async function getIssueQueueMetadata(issueId: string): Promise<IssueQueue
       stateName: issue.state?.name ?? null,
       archivedAt: issue.archivedAt ?? null,
       createdAt: issue.createdAt ?? null,
-      updatedAt: issue.updatedAt ?? null
+      updatedAt: issue.updatedAt ?? null,
+      blockedByIssueIds: blockingIssueIds(issue)
     };
   } catch (err: any) {
     log('RUNNER', `getIssueQueueMetadata failed: ${err.message}`, { issue: issueId });
@@ -351,6 +353,7 @@ export async function fetchActiveIssues(
           updatedAt
           state { type name }
           parent { id identifier }
+          inverseRelations { nodes { type relatedIssue { id identifier } } }
         }
       }
     }
@@ -373,8 +376,16 @@ export async function fetchActiveIssues(
       stateName: issue.state?.name ?? null,
       archivedAt: issue.archivedAt ?? null,
       createdAt: issue.createdAt ?? null,
-      updatedAt: issue.updatedAt ?? null
+      updatedAt: issue.updatedAt ?? null,
+      blockedByIssueIds: blockingIssueIds(issue)
     }));
+}
+
+function blockingIssueIds(issue: any): string[] {
+  return (issue.inverseRelations?.nodes || [])
+    .filter((relation: any) => relation.type === 'blocks')
+    .flatMap((relation: any) => [relation.relatedIssue?.id, relation.relatedIssue?.identifier])
+    .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
 }
 
 export async function setIssueInProgress(issueId: string): Promise<void> {

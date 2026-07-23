@@ -541,6 +541,7 @@ export interface IssueQueueMetadata {
   archivedAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  blockedByIssueIds?: string[];
 }
 
 // Usage-limit cooldown + Linear label/comment helpers live in ./lib/cooldown.ts.
@@ -573,6 +574,7 @@ export interface QueueItem {
   parentIssueIdentifier: string | null;
   queueGroup: string | null;
   queueGroupOrder: string | null;
+  blockedByIssueIds?: string[];
 }
 
 // A past-queue (history) entry: a QueueItem that has been dequeued/processed,

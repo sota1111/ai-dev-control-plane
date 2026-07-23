@@ -232,6 +232,18 @@ describe('Linear Integration', () => {
       // In Review dropped; the two actionable issues remain.
       expect(result.map((r) => r.identifier)).toEqual(['ENG-1', 'ENG-2']);
     });
+
+    it('maps incoming blocks relations to blockedBy identifiers', async () => {
+      linearMock.enqueue({ data: { issues: { nodes: [{
+        id: 'u2', identifier: 'ENG-2', state: { type: 'unstarted', name: 'Todo' },
+        inverseRelations: { nodes: [
+          { type: 'blocks', relatedIssue: { id: 'u1', identifier: 'ENG-1' } },
+          { type: 'related', relatedIssue: { id: 'u3', identifier: 'ENG-3' } }
+        ] }
+      }] } } });
+      const [issue] = await runner.fetchActiveIssues(50);
+      expect(issue.blockedByIssueIds).toEqual(['u1', 'ENG-1']);
+    });
   });
 
   // SOT-1440 / P7: transient-error backoff retry + labelIds sanitize.

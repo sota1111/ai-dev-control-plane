@@ -1184,6 +1184,23 @@ describe('runner', () => {
       expect(JSON.parse(saved).map((item: any) => item.issueId)).toEqual(['SOT-1', 'SOT-2']);
     });
 
+    it('refreshes blocking relations and persists dependency order', async () => {
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockReturnValue(JSON.stringify([
+        { issueId: 'SOT-2', issueIdentifier: 'SOT-2', priority: 1, priorityRank: 1 },
+        { issueId: 'SOT-1', issueIdentifier: 'SOT-1', priority: 4, priorityRank: 4 }
+      ]));
+      setupLinearMocks([{ issues: { nodes: [
+        { id: 'uuid-2', identifier: 'SOT-2', priority: 1, state: { type: 'unstarted', name: 'Todo' },
+          inverseRelations: { nodes: [{ type: 'blocks', relatedIssue: { id: 'uuid-1', identifier: 'SOT-1' } }] } },
+        { id: 'uuid-1', identifier: 'SOT-1', priority: 4, state: { type: 'unstarted', name: 'Todo' },
+          inverseRelations: { nodes: [] } }
+      ] } }]);
+      await runner.refreshQueuePriorities();
+      const saved = JSON.parse(queueWriteCalls().at(-1)?.[1]);
+      expect(saved.map((item: any) => item.issueId)).toEqual(['SOT-1', 'SOT-2']);
+    });
+
     it('fail-open: does not write or throw on API error', async () => {
       fs.existsSync.mockReturnValue(true);
       fs.readFileSync.mockReturnValue(JSON.stringify([{ issueId: 'SOT-1', priority: 3, priorityRank: 3 }]));

@@ -40,6 +40,21 @@ describe('queueOrdering', () => {
       expect(queueOrdering.selectNextReadyIndex(queue, { lastProcessedGroup: 'group1', now })).toBe(0);
     });
 
+    test('runs blockers first, waits for retrying blockers, and tolerates cycles', () => {
+      expect(queueOrdering.selectNextReadyIndex([
+        { issueId: 'dependent', priority: 1, blockedByIssueIds: ['blocker'] },
+        { issueId: 'blocker', priority: 3 }
+      ], { now })).toBe(1);
+      expect(queueOrdering.selectNextReadyIndex([
+        { issueId: 'dependent', priority: 1, blockedByIssueIds: ['blocker'] },
+        { issueId: 'blocker', priority: 3, retryAt: '2023-01-01T13:00:00Z' }
+      ], { now })).toBe(null);
+      expect(queueOrdering.selectNextReadyIndex([
+        { issueId: 'a', priority: 3, blockedByIssueIds: ['b'] },
+        { issueId: 'b', priority: 2, blockedByIssueIds: ['a'] }
+      ], { now })).toBe(1);
+    });
+
     test('normal priority order: rank -> retryAt -> enqueuedAt', () => {
       const queue = [
         { issueId: 'later-enqueued', priority: 3, enqueuedAt: '2023-01-01T11:00:00Z' },
@@ -140,6 +155,16 @@ describe('queueOrdering', () => {
       ];
       expect(queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId))
         .toEqual(['bumped', 'low-priority']);
+    });
+
+    test('topologically orders a blocker chain before priority', () => {
+      const queue = [
+        { issueId: 'deploy', priority: 1, blockedByIssueIds: ['test'] },
+        { issueId: 'implement', priority: 4 },
+        { issueId: 'test', priority: 2, blockedByIssueIds: ['implement'] }
+      ];
+      expect(queueOrdering.sortQueueByPriority(queue).map((i: any) => i.issueId))
+        .toEqual(['implement', 'test', 'deploy']);
     });
 
     test('no priority (0/null/undefined) sorts last', () => {
