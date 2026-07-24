@@ -1,0 +1,29 @@
+name: iOS Battle Viewer
+
+on:
+  pull_request:
+    paths:
+      - "ios/PTCGBattleViewer/**"
+      - ".github/workflows/ios-battle-viewer.yml"
+  push:
+    branches: [main]
+    paths:
+      - "ios/PTCGBattleViewer/**"
+      - ".github/workflows/ios-battle-viewer.yml"
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app and XCTest bundle
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project ios/PTCGBattleViewer/PTCGBattleViewer.xcodeproj \
+            -scheme PTCGBattleViewer \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Run replay and navigation tests
+        run: swift test --package-path ios/PTCGBattleViewer
