@@ -8,7 +8,7 @@
 
 - `numpy`（`ARG NUMPY_VERSION`、既定 `2.5.1`）
 - `torch`（`ARG TORCH_VERSION`、既定 `2.13.0`）— `ARG TORCH_INDEX_URL` の既定
-  `https://download.pytorch.org/whl/cu124` から **CUDA 12.4 ランタイム同梱の wheel** を導入。
+  `https://download.pytorch.org/whl/cu126` から **CUDA 12.6 ランタイム同梱の wheel** を導入。
   CUDA ライブラリは wheel に同梱されるため、ホストに CUDA Toolkit を別途入れる必要はなく、
   **NVIDIA ドライバ（GPU パススルー）だけ**あればよい。
 
