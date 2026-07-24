@@ -26,6 +26,14 @@ npx tsx src/ptcg-battle-viewer-cli.ts src/__tests__/fixtures/battle-log.valid.js
 各時点ではターン、現在のプレイヤー、発生イベント、勝者、およびプレイヤーごとのバトル場、
 ベンチ、手札枚数、山札枚数、サイド枚数、トラッシュを表示します。
 
+## 表示例
+
+![代表ログを時点16まで再生した盤面ビューア](screenshots/sot-1907-battle-timeline.png)
+
+この画像は匿名化した代表データ `battle-log.real-anonymized.json` を時点16まで再生した状態です。
+タイムライン操作、発生イベント、現在のプレイヤー、および両プレイヤーのバトル場・ベンチ・
+手札・山札・サイド・トラッシュを一画面で確認できます。
+
 ## 実対戦ログを観測する
 
 `src/__tests__/fixtures/battle-log.real-anonymized.json` は、実戦のイベント列を
