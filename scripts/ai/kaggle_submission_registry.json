@@ -1,0 +1,63 @@
+{
+  "__doc__": "SOT-1904 Kaggle 自動提出レジストリ（core=control-plane の『決められた場所』）。コンペ pokemon-tcg-ai-battle は最終評価に『直近2提出のみ』が反映される（+1日5提出上限）。最終2枠に載せたい agent をここに優先度付きで登録し、scripts/ai/kaggle_auto_submit.sh が AM0/4/8・PM4/8(JST) の5枠で起動して、前回の提出結果を確認・記録した上で『直近2提出＝enabled 中の優先度上位2』へ収束するよう1件ずつ提出する。選定ロジックは src/lib/kaggleSubmission.ts（単体テスト済）、実提出は --execute 時のみ。運用ゲート(収束判定/ノイズ幅/league KPI)は docs/ai/kaggle-final-submission-gate.md、契約は docs/kaggle-submission.md。keys starting with __ はドキュメントで無視される。config/ は harness 保護下のため scripts/ai/ に同居させている（kaggle_final_slots.sh と同じ場所）。",
+  "__fields__": {
+    "competition": "Kaggle コンペ slug。env KAGGLE_COMPETITION で上書き可。",
+    "daily_submission_cap": "Kaggle の1日提出上限。既定 5。当日提出数がこれに達したら自動提出はスキップ。",
+    "schedule_hours_jst": "自動提出を起動する JST の時刻(hour)。AM0/4/8・PM4/8 = [0,4,8,16,20]。cron 例は docs/kaggle-submission.md。",
+    "agents[].name": "agent 名（Kaggle 提出 description の ptcg-agent-<name> と一致させる）。",
+    "agents[].priority": "優先度(1=最上位)。最終2枠 = enabled 中の priority 上位2。",
+    "agents[].enabled": "自動提出ローテーションの対象か。false は計測目的で自動提出しない（優先度は保持）。",
+    "agents[].repo": "提出物のビルド元 GitHub repo（任意・参照用）。",
+    "agents[].submit.file": "kaggle competitions submit -f に渡す提出物パス。未設定なら --execute はその agent をスキップ（要ワイヤリング）。",
+    "agents[].submit.message": "提出メッセージ(-m)。未設定なら既定メッセージ。"
+  },
+  "competition": "pokemon-tcg-ai-battle",
+  "daily_submission_cap": 5,
+  "schedule_hours_jst": [0, 4, 8, 16, 20],
+  "agents": [
+    {
+      "name": "fable",
+      "priority": 1,
+      "enabled": true,
+      "repo": "ptcg-agent-fable",
+      "note": "MCTS champion（SOT-1866, ≈571.8収束）。最終2枠その1。",
+      "submit": { "file": "", "message": "SOT-1904 auto-submit: fable MCTS champion" }
+    },
+    {
+      "name": "take",
+      "priority": 2,
+      "enabled": true,
+      "repo": "ptcg-agent-take",
+      "note": "ルールベース champion（SOT-1812, 575.5）。最終2枠その2。",
+      "submit": { "file": "", "message": "SOT-1904 auto-submit: take rule-based champion" }
+    },
+    {
+      "name": "matsu",
+      "priority": 3,
+      "enabled": false,
+      "repo": "ptcg-agent-matsu",
+      "note": "MCTS champion（557.2）。現状は最終2枠外・計測のみ。昇格時に enabled=true / priority 昇格。"
+    },
+    {
+      "name": "debate",
+      "priority": 4,
+      "enabled": false,
+      "repo": "ptcg-agent-debate",
+      "note": "fable champion 移植（SOT-1902 で実効同一）。G2 で上回った場合のみ enabled=true に。"
+    },
+    {
+      "name": "ume",
+      "priority": 5,
+      "enabled": false,
+      "repo": "ptcg-agent-ume",
+      "note": "PPO+MCTS（計測目的）。自動提出しない。"
+    },
+    {
+      "name": "zero",
+      "priority": 6,
+      "enabled": false,
+      "repo": "ptcg-agent-ume",
+      "note": "neural root search（計測目的）。自動提出しない。"
+    }
+  ]
+}

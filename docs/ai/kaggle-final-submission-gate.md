@@ -71,6 +71,15 @@ Kaggle コンペ **`pokemon-tcg-ai-battle`** の最終評価には **直近2提�
 > 実 Kaggle への提出操作は**人手ゲート**（SOT-1902 方針: 選定は本Issue、再提出は人間が実行）。本手順書は
 > 選定・判定・復元手順の明文化までを担当し、提出そのものは自動実行しない。
 
+### 3.1 自動化（優先度レジストリ駆動, SOT-1904）
+
+上記の「復元/維持」は **優先度レジストリ駆動の自動提出**に載せられる（[`docs/kaggle-submission.md`](../kaggle-submission.md)）。
+`scripts/ai/kaggle_submission_registry.json` に最終2枠に載せたい agent を優先度付きで登録し、
+`scripts/ai/kaggle_auto_submit.sh` を **AM0/4/8・PM4/8(JST) の5枠**で起動すると、前回結果を確認・記録した上で
+「直近2提出＝enabled 中の優先度上位2」に収束するよう1件ずつ提出する（選定ロジックは
+`src/lib/kaggleSubmission.ts`）。既定は**ドライラン**で、実提出は `--execute` を付けたときのみ（人手ゲートの
+運用は cron の有効化として表現する）。§3 の手動復元手順の自動版に相当する。
+
 ---
 
 ## 4. 全 agent 現況表（Kaggle 実データ, 取得 2026-07-23）

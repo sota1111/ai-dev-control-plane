@@ -24,6 +24,7 @@ import { workerAuthUnhealthyTtlSeconds } from './config/env.js';
 import { loadWorkerRolesConfig, loadSoloWorker, type WorkerRoleConfig, type WorkerRole } from './lib/workerRoles.js';
 import { parseWorkerRoleDirectives, mergeWorkerRoleOverrides, parseGraphDirective } from './lib/workerRoleDirective.js';
 import { buildDelegationPreflight } from './lib/delegationPreflight.js';
+import { parseRegistry, planSubmission, type RecentSubmission } from './lib/kaggleSubmission.js';
 import { pipelineReviewComment, type PipelineReviewOutcome } from './lib/pipelineReviewComment.js';
 import {
   DEFAULT_GRAPH_PATH,
@@ -608,8 +609,43 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'kaggle-plan': {
+      // SOT-1904: decide which agent to auto-submit next, from the priority registry + the previous
+      // Kaggle results. Pure logic in src/lib/kaggleSubmission.ts; scripts/ai/kaggle_auto_submit.sh
+      // fetches the live submissions, records them, then calls this to get the pick. Usage:
+      //   runner-cli.js kaggle-plan [--registry <path>] [--recent <csv agents, most-recent-first>]
+      //                             [--today-count <n>]
+      // Prints the SubmissionPlan as JSON on stdout (exit 0). Fail-loud (exit 1) on a bad registry.
+      const flags: Record<string, string> = {};
+      for (let i = 0; i < args.length; i += 1) {
+        const a = args[i];
+        if (a && a.startsWith('--')) {
+          flags[a.slice(2)] = args[i + 1] ?? '';
+          i += 1;
+        }
+      }
+      const registryPath = flags.registry
+        || path.join(__dirname, '..', 'scripts', 'ai', 'kaggle_submission_registry.json');
+      let registry;
+      try {
+        registry = parseRegistry(JSON.parse(fs.readFileSync(registryPath, 'utf8')));
+      } catch (err: any) {
+        process.stderr.write(`kaggle-plan: invalid registry ${registryPath}: ${err?.message || err}\n`);
+        process.exit(1);
+      }
+      const recent: RecentSubmission[] = (flags.recent || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((agent) => ({ agent }));
+      const todayCount = Number.isFinite(Number(flags['today-count'])) ? Number(flags['today-count']) : 0;
+      const plan = planSubmission({ registry, recent, submittedToday: todayCount });
+      process.stdout.write(JSON.stringify(plan) + '\n');
+      process.exit(0);
+      break;
+    }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, pipeline-graph, ...\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, pipeline-graph, kaggle-plan, ...\n`);
       process.exit(1);
     }
   }

@@ -18,6 +18,9 @@ artifacts/ptcg-battle-lab/runs/report.*.md
 
 docs/ai/auto_logs/*
 
+# SOT-1904 Kaggle 自動提出の実行記録（runtime append-only log; kept out of git）
+docs/ai/kaggle/submission-history.jsonl
+
 # AI worker ephemeral artifacts (per-run pipeline reports — regenerated every run)
 docs/ai/10_plan.md
 docs/ai/20_design.md
