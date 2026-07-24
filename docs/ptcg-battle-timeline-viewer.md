@@ -25,3 +25,34 @@ npx tsx src/ptcg-battle-viewer-cli.ts src/__tests__/fixtures/battle-log.valid.js
 
 各時点ではターン、現在のプレイヤー、発生イベント、勝者、およびプレイヤーごとのバトル場、
 ベンチ、手札枚数、山札枚数、サイド枚数、トラッシュを表示します。
+
+## 実対戦ログを観測する
+
+`src/__tests__/fixtures/battle-log.real-anonymized.json` は、実戦のイベント列を
+`ptcg-battle-log/v1` に変換し、プレイヤー名・カード名・対戦 ID を匿名化した代表 fixture
+です。次のコマンドで対戦開始から勝者確定までを観測できます。
+
+```bash
+npx tsx src/ptcg-battle-viewer-cli.ts \
+  src/__tests__/fixtures/battle-log.real-anonymized.json
+```
+
+ログを変換するときは、エンジンが記録した順序を保ち、秘匿情報を削除したうえで、契約が対応する
+イベント名へ写像してください。変換後は次のコマンドで、全イベントが表示用スナップショットになる
+ことを確認できます。
+
+```bash
+npm test -- --runInBand src/__tests__/ptcgBattleReplayIntegration.test.ts
+```
+
+## 対応範囲と既知の制約
+
+- 対応イベントは `draw`, `play-active`, `play-bench`, `attach-energy`, `damage`, `knockout`,
+  `take-prize`, `end-turn`, `declare-winner` です。特性、進化、入れ替え、状態異常などは未対応で、
+  イベント番号を含む `unsupported event type` エラーとして明示されます。
+- JSON の破損、スキーマ不一致、存在しないプレイヤー/カード、成立しない盤面遷移は、ビューア起動前に
+  イベント番号付きの診断を表示して終了します。エラーを読み飛ばした部分再生は行いません。
+- ブラウザには全時点の HTML を一括生成します。統合テストでは 500 イベントを1秒以内で再構成し、
+  生成ページを 5 MB 未満に保つことを確認します。非常に大きいログは事前に分割してください。
+- fixture は実戦由来ですが、個人情報、元の対戦 ID、実カード名を保持しません。新しい fixture も
+  同じ匿名化方針に従ってください。
