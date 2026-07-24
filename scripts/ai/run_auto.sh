@@ -354,12 +354,11 @@ run_graph_role_loop() {
     rm -f "$cap"
 
     if [ "$rc" -ne 0 ] || [ -z "$report" ] || [ ! -f "$report" ]; then
-      if [ "$rc" -eq 75 ]; then
-        plog "PIPELINE_RETRY: role=$role dispatcher rc=75 (all workers transiently non-responsive) → leave issue active, retry when a worker recovers"
-        return "$WORKER_UNAVAILABLE"
-      fi
-      plog "PIPELINE_STOP: role=$role dispatcher rc=$rc (no report) → needs attention"
-      return "$COMPLETION_UNVERIFIED"
+      # No report means the role never produced a lifecycle verdict. This is an incomplete dispatch,
+      # not NEEDS_USER_INPUT: leave the issue active and let the runner retry it. In particular, a
+      # pipeline/filter SIGPIPE (rc=141) must not be converted into In Review by the loop-breaker.
+      plog "PIPELINE_RETRY: role=$role dispatcher rc=$rc (no report) → leave issue active and retry"
+      return "$WORKER_UNAVAILABLE"
     fi
 
     local na; na="$(awk '/[Nn]ext[[:space:]]*[Aa]ction/{cap=1; buf=""} cap{buf=buf"\n"$0} END{print buf}' "$report" 2>/dev/null | grep -oiE 'READY_FOR_REVIEW|NEEDS_DEBUG|NEEDS_USER_INPUT|BLOCKED' | head -n1 | tr '[:lower:]' '[:upper:]' || true)"
@@ -515,14 +514,11 @@ run_role_pipeline() {
     sreport="$(printf '%s' "$sdone" | sed 's/.*report=//' || true)"
     rm -f "$scap"
     if [ "$src" -ne 0 ] || [ -z "$sreport" ] || [ ! -f "$sreport" ]; then
-      # rc=75 = solo worker transiently non-responsive (usage limit / crash): leave active, retry later
-      # (mirrors the per-role dispatcher-exhaustion handling). Only reached after the solo handoff chain is exhausted.
-      if [ "$src" -eq 75 ]; then
-        plog "PIPELINE_RETRY: solo worker '$solo_worker' transiently non-responsive (rc=75) → leave active, retry when it recovers"
-        return "$WORKER_UNAVAILABLE"
-      fi
-      plog "PIPELINE_STOP: solo dispatch rc=$src (no report) → needs attention"
-      return "$COMPLETION_UNVERIFIED"
+      # Without a report the solo worker did not finish the lifecycle, regardless of its exit code.
+      # Treat this as retryable infrastructure/worker interruption (including SIGPIPE rc=141), not as
+      # a human-review stop; otherwise ensure-issue-reviewed strands unfinished work in In Review.
+      plog "PIPELINE_RETRY: solo dispatch rc=$src (no report) → leave issue active and retry"
+      return "$WORKER_UNAVAILABLE"
     fi
     # Solo verdict: acceptance FAIL or a human-stop Next Action → needs attention; else complete.
     local sacc sna
@@ -665,16 +661,10 @@ run_role_pipeline() {
     rm -f "$cap"
 
     if [ "$rc" -ne 0 ] || [ -z "$report" ] || [ ! -f "$report" ]; then
-      # SOT-1584: dispatcher exit 75 = WORKER_DISPATCH_EXHAUSTED — every worker in the chain was
-      # TRANSIENTLY non-responsive (usage cooldown / auth crash / disabled). This is not a genuine
-      # completion failure: retry later when a worker recovers instead of moving the issue to In Review.
-      # Any OTHER non-zero rc or a missing report is treated as the usual needs-attention stop.
-      if [ "$rc" -eq 75 ]; then
-        plog "PIPELINE_RETRY: role=$role dispatcher rc=75 (all workers transiently non-responsive) → leave issue active, retry when a worker recovers"
-        return "$WORKER_UNAVAILABLE"
-      fi
-      plog "PIPELINE_STOP: role=$role dispatcher rc=$rc (no report) → needs attention"
-      return "$COMPLETION_UNVERIFIED"
+      # A missing report has no worker verdict and therefore cannot be a genuine human-wait outcome.
+      # Keep the issue active for retry for every dispatcher interruption, including rc=141 SIGPIPE.
+      plog "PIPELINE_RETRY: role=$role dispatcher rc=$rc (no report) → leave issue active and retry"
+      return "$WORKER_UNAVAILABLE"
     fi
 
     # Parse the role's verdict token from the report. Workers emit it either INLINE
