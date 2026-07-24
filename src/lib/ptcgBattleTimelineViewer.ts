@@ -106,14 +106,15 @@ export function renderBattleTimelinePage(input: unknown): string {
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>対戦タイムライン — ${escapeHtml(model.battleId)}</title>
   <style>
     :root { color-scheme: dark; font-family: system-ui, sans-serif; background:#101827; color:#eef2ff; }
+    * { box-sizing:border-box; }
     body { margin:0; padding:24px; max-width:1200px; margin-inline:auto; }
     header { display:flex; gap:16px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
     .controls { display:flex; gap:8px; align-items:center; }
-    button { border:1px solid #64748b; border-radius:8px; padding:8px 14px; background:#1e293b; color:inherit; cursor:pointer; }
+    button { min-width:44px; min-height:44px; border:1px solid #64748b; border-radius:8px; padding:8px 14px; background:#1e293b; color:inherit; cursor:pointer; touch-action:manipulation; }
     button:disabled { opacity:.35; cursor:not-allowed; }
     input[type=range] { width:min(420px, 45vw); }
     .status,.counts { display:flex; gap:12px; flex-wrap:wrap; }
@@ -126,6 +127,24 @@ export function renderBattleTimelinePage(input: unknown): string {
     .card.empty { color:#94a3b8; border-style:dashed; }
     .bench { display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; }
     .muted { color:#94a3b8; } .winner { background:#14532d !important; }
+    @media (max-width:600px) {
+      body {
+        padding:12px;
+        padding-top:max(12px, env(safe-area-inset-top));
+        padding-right:max(12px, env(safe-area-inset-right));
+        padding-bottom:max(12px, env(safe-area-inset-bottom));
+        padding-left:max(12px, env(safe-area-inset-left));
+      }
+      h1 { font-size:1.5rem; margin-bottom:4px; }
+      header, .controls { width:100%; }
+      .controls { display:grid; grid-template-columns:44px 44px minmax(0,1fr) 44px 44px; position:sticky; top:0; z-index:1; padding:8px 0; background:#101827; }
+      .controls button { padding:8px 4px; }
+      input[type=range] { width:100%; min-width:0; }
+      .boards { grid-template-columns:minmax(0,1fr); }
+      .player-board { padding:12px; min-width:0; }
+      .event { font-size:1rem; }
+      .card { min-width:140px; }
+    }
   </style>
 </head>
 <body>

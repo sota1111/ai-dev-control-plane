@@ -17,6 +17,25 @@ npx tsx src/ptcg-battle-viewer-cli.ts src/__tests__/fixtures/battle-log.valid.js
 `--port 5173` のように指定できます。不正なログは起動時に再生契約の診断メッセージを表示して
 終了します。
 
+## iPhone のブラウザで表示する
+
+PC と iPhone を同じ Wi-Fi/LAN に接続し、外部端末からの接続を許可して起動します。
+
+```bash
+npx tsx src/ptcg-battle-viewer-cli.ts \
+  src/__tests__/fixtures/battle-log.real-anonymized.json \
+  --host 0.0.0.0
+```
+
+起動時に `Same-network device: http://192.168.x.x:4173` のようなURLが表示されます。そのURLを
+iPhone の Safari で開いてください。iPhone向けには、セーフエリア、44px以上の操作ボタン、
+1列の盤面配置、横幅に収まるタイムラインを適用します。
+
+接続できない場合は、PC側のファイアウォールで指定ポート（既定は4173）へのLAN内通信を許可し、
+両端末が同じネットワークにいることを確認してください。`--host 0.0.0.0` はLAN内の他端末から
+アクセス可能にするため、信頼できないネットワークでは使わず、確認後はプロセスを終了してください。
+この手順はローカルネットワーク内での閲覧用であり、インターネットへの公開・常設配信は行いません。
+
 ## 操作と表示
 
 - `|◀` / `▶|`: 初期盤面 / 最終時点へ移動
