@@ -23,5 +23,4 @@ jobs:
           xcodebuild test \
             -project ios/PTCGBattleViewer/PTCGBattleViewer.xcodeproj \
             -scheme PTCGBattleViewer \
-            -destination 'platform=macOS,arch=arm64' \
-            CODE_SIGNING_ALLOWED=NO
+            -destination 'platform=macOS,arch=arm64'
