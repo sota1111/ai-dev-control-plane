@@ -1,0 +1,136 @@
+{
+  "config": {
+    "agent_seed": 0,
+    "deck_a": {
+      "hash": "sha1:8c326ebadcf97c33",
+      "name": "champion",
+      "version": "v1"
+    },
+    "deck_b": {
+      "hash": "sha1:8c326ebadcf97c33",
+      "name": "zero_champion",
+      "version": "0"
+    },
+    "fixed_agent": {
+      "label": "RuleAgent",
+      "version": "3"
+    },
+    "label_a": "champion@v1",
+    "label_b": "zero_champion",
+    "n_matches": 100,
+    "run_label": "champion@v1_vs_zero_champion"
+  },
+  "reason_counts": {
+    "normal": 100
+  },
+  "safety": {
+    "a_fault_categories": {},
+    "a_fault_rate": 0.0,
+    "a_faults": 0,
+    "b_fault_categories": {},
+    "b_fault_rate": 0.0,
+    "b_faults": 0,
+    "undecided": 0,
+    "undecided_rate": 0.0
+  },
+  "seat_winrate": {
+    "A": {
+      "as_first": {
+        "n": 50,
+        "win_rate": 0.68,
+        "wins": 34
+      },
+      "as_second": {
+        "n": 50,
+        "win_rate": 0.34,
+        "wins": 17
+      }
+    },
+    "B": {
+      "as_first": {
+        "n": 50,
+        "win_rate": 0.66,
+        "wins": 33
+      },
+      "as_second": {
+        "n": 50,
+        "win_rate": 0.32,
+        "wins": 16
+      }
+    },
+    "first_player_win_rate": 0.67,
+    "n_decisive_known_first_player": 100,
+    "second_player_win_rate": 0.33
+  },
+  "static_metrics": {
+    "deck_a": {
+      "composition": {
+        "BASIC_ENERGY": 35,
+        "ITEM": 4,
+        "POKEMON": 10,
+        "SUPPORTER": 10,
+        "TOOL": 1
+      },
+      "deck_hash": "sha1:8c326ebadcf97c33",
+      "distinct_cards": 9,
+      "energy_by_type": {
+        "WATER": 35
+      },
+      "energy_ratio": 0.5833333333333334,
+      "legal": true,
+      "n_ace_spec": 1,
+      "n_basic_pokemon": 6,
+      "n_energy": 35,
+      "name": "champion",
+      "opening_stability": 0.5414360778413809,
+      "size": 60,
+      "version": "v1",
+      "violations": []
+    },
+    "deck_b": {
+      "composition": {
+        "BASIC_ENERGY": 35,
+        "ITEM": 4,
+        "POKEMON": 10,
+        "SUPPORTER": 10,
+        "TOOL": 1
+      },
+      "deck_hash": "sha1:8c326ebadcf97c33",
+      "distinct_cards": 9,
+      "energy_by_type": {
+        "WATER": 35
+      },
+      "energy_ratio": 0.5833333333333334,
+      "legal": true,
+      "n_ace_spec": 1,
+      "n_basic_pokemon": 6,
+      "n_energy": 35,
+      "name": "zero_champion",
+      "opening_stability": 0.5414360778413809,
+      "size": 60,
+      "version": "0",
+      "violations": []
+    }
+  },
+  "totals": {
+    "a_wins": 51,
+    "b_wins": 49,
+    "draws": 0,
+    "mean_steps": 35.47,
+    "n": 100,
+    "undecided": 0
+  },
+  "win_rates": {
+    "a_win_rate": 0.51,
+    "a_win_rate_ci95": [
+      0.4134801193402717,
+      0.6057800106955886
+    ],
+    "b_win_rate": 0.49,
+    "b_win_rate_ci95": [
+      0.3942199893044113,
+      0.5865198806597283
+    ],
+    "draw_rate": 0.0
+  }
+}
