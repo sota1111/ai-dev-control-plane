@@ -44,6 +44,16 @@ describe('battle timeline viewer', () => {
     expect(page).toContain('position===frames.length-1');
   });
 
+  test('provides an iPhone-safe responsive layout and touch-sized controls', () => {
+    const page = renderBattleTimelinePage(fixture);
+    expect(page).toContain('viewport-fit=cover');
+    expect(page).toContain('@media (max-width:600px)');
+    expect(page).toContain('env(safe-area-inset-bottom)');
+    expect(page).toContain('min-height:44px');
+    expect(page).toContain('touch-action:manipulation');
+    expect(page).toContain('grid-template-columns:minmax(0,1fr)');
+  });
+
   test('escapes log-provided display values before embedding HTML', () => {
     const unsafe = structuredClone(fixture);
     unsafe.battleId = '<img src=x onerror=alert(1)>';
