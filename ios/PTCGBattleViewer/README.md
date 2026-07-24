@@ -20,6 +20,8 @@ Filesアプリ経由でiPhoneへ渡してください。
 Xcodeで Product → Test（⌘U）、またはmacOSのターミナルで次を実行します。
 
 ```bash
+swift test --package-path ios/PTCGBattleViewer
+
 xcodebuild test \
   -project ios/PTCGBattleViewer/PTCGBattleViewer.xcodeproj \
   -scheme PTCGBattleViewer \

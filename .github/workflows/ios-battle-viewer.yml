@@ -17,10 +17,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Build app and run XCTest
+      - name: Build app and XCTest bundle
         run: |
           set -o pipefail
-          xcodebuild test \
+          xcodebuild build-for-testing \
             -project ios/PTCGBattleViewer/PTCGBattleViewer.xcodeproj \
             -scheme PTCGBattleViewer \
-            -destination 'platform=macOS,arch=arm64'
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Run replay and navigation tests
+        run: swift test --package-path ios/PTCGBattleViewer
