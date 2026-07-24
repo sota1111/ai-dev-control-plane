@@ -17,11 +17,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Build app and XCTest bundle
+      - name: Build app and run XCTest
         run: |
           set -o pipefail
-          xcodebuild build-for-testing \
+          xcodebuild test \
             -project ios/PTCGBattleViewer/PTCGBattleViewer.xcodeproj \
             -scheme PTCGBattleViewer \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
             CODE_SIGNING_ALLOWED=NO

@@ -23,7 +23,7 @@ Xcodeで Product → Test（⌘U）、またはmacOSのターミナルで次を�
 xcodebuild test \
   -project ios/PTCGBattleViewer/PTCGBattleViewer.xcodeproj \
   -scheme PTCGBattleViewer \
-  -destination 'platform=iOS Simulator,name=iPhone 16'
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
 ```
 
 ## TestFlight配信直前まで
