@@ -1,29 +1,28 @@
-# SOT-1867 Final Report
+# SOT-1910 Final Report
 
 ## Summary
 
-The common seven-agent league now launches each pinned repository's real `main.py` in an isolated
-process and drives all 21 unordered matchups through the cabt engine with a fixed agent seed and both
-seat orientations. Match-level checkpointing makes the run resumable without duplication, and the
-generated audit quantifies the real-runtime delta from the existing synthetic/profile league.
+The Dev Container now has a buildable, pinned PyTorch GPU training stack. The existing configuration
+requested `torch==2.13.0` from the CUDA 12.4 index, where that version does not exist; the wheel index
+is now aligned to CUDA 12.6 and the operator documentation matches it.
 
-## Acceptance evidence
+## Changed Files
 
-- Reproducible artifact: `artifacts/ptcg-league/sot-1867-runtime/` contains the pinned seven-repository
-  manifest, checkpoint, league report, and machine/human-readable runtime audit.
-- Fixed seed / seat reversal: seed `186700`; 21 matchups × 2 orientations = 42 recorded matches.
-- Checkpoint/resume: two resume executions retained identical checkpoint and audit SHA-256 hashes.
-- Safety: fault 0, unfinished 0, illegal action 0, timeout 0.
-- Budget: measured real-process runtime 568.310 seconds, below the 8-hour limit.
-- Synthetic/profile delta: largest absolute gap is 0.650 in `matsu vs sol` (tied with `sol vs ume`).
+- `.devcontainer/Dockerfile` — select the CUDA 12.6 PyTorch wheel index for `torch==2.13.0`.
+- `docs/gpu-devcontainer.md` — document the corrected CUDA runtime version.
 
 ## Verification
 
-- `npm run lint` — PASS
-- `npm run typecheck` — PASS
-- `npm test` — PASS (84 suites, 1,061 tests)
-- E2E — repository has no `npm run e2e`; the real cabt 42-match execution is the applicable E2E check.
-- `git diff --check` — PASS
+- Exact clean install: `numpy==2.5.1` and `torch==2.13.0+cu126` — PASS.
+- CUDA runtime: `torch.cuda.is_available()` — `True`.
+- GPU execution: 1024×1024 tensor matrix multiplication completed on `cuda:0`.
+- GPU: NVIDIA GeForce RTX 3080 Ti.
+- `npm run lint` — PASS.
+- `npm run typecheck` — PASS.
+- `npm test` — PASS (88 suites, 1,087 tests).
+- E2E — N/A (the repository has no `npm run e2e`; the real CUDA tensor operation is the applicable
+  environment acceptance check).
+- `git diff --check` — PASS.
 
 ## Acceptance: PASS
 ## Next Action: READY_FOR_REVIEW

@@ -12,7 +12,7 @@ ARG KAGGLE_VERSION=2.2.3
 # CPU 専用イメージにしたい場合は TORCH_INDEX_URL を https://download.pytorch.org/whl/cpu に。
 ARG NUMPY_VERSION=2.5.1
 ARG TORCH_VERSION=2.13.0
-ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126
 
 # ---------------------------------------------------------------------------
 # Base build / runtime dependencies
@@ -232,7 +232,7 @@ RUN apt-get update \
 # ---------------------------------------------------------------------------
 # GPU / ML スタック: numpy + torch (SOT-1865)
 #   本コンテナで value net（fable train_value.py --backend torch）などの GPU 学習を
-#   可能にする。torch は CUDA 同梱 wheel（TORCH_INDEX_URL=cu124）を導入するため、
+#   可能にする。torch は CUDA 同梱 wheel（TORCH_INDEX_URL=cu126）を導入するため、
 #   NVIDIA GPU + nvidia-container-toolkit を持つホストで起動すると GPU を使い、
 #   GPU 非搭載ホストでは同じ wheel が CPU で動作する（どちらでもビルドは成功する）。
 #   Ubuntu 24.04 の system Python は externally-managed のため --break-system-packages
