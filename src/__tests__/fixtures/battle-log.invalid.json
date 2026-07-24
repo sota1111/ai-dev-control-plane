@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "ptcg-battle-log/v1",
+  "battleId": "fixture-invalid",
+  "initialState": {
+    "turn": 1,
+    "currentPlayer": "matsu",
+    "players": {
+      "matsu": {
+        "active": null,
+        "bench": [],
+        "deckCount": 53,
+        "handCount": 7,
+        "discard": [],
+        "prizesRemaining": 6
+      },
+      "take": {
+        "active": null,
+        "bench": [],
+        "deckCount": 53,
+        "handCount": 7,
+        "discard": [],
+        "prizesRemaining": 6
+      }
+    },
+    "winner": null
+  },
+  "events": [{ "type": "teleport", "player": "matsu" }]
+}
