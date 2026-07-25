@@ -92,6 +92,18 @@ struct ReplaySnapshot: Equatable {
     let state: BoardState
 }
 
+struct BoardSeatLayout: Equatable {
+    let opponent: String
+    let viewer: String
+
+    init?(players: some Sequence<String>) {
+        let names = Array(Set(players)).sorted()
+        guard names.count >= 2 else { return nil }
+        opponent = names[1]
+        viewer = names[0]
+    }
+}
+
 enum BattleReplayError: LocalizedError {
     case unsupportedSchema
     case invalid(String)
