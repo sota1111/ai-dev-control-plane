@@ -25,6 +25,12 @@ import { loadWorkerRolesConfig, loadSoloWorker, type WorkerRoleConfig, type Work
 import { parseWorkerRoleDirectives, mergeWorkerRoleOverrides, parseGraphDirective } from './lib/workerRoleDirective.js';
 import { buildDelegationPreflight } from './lib/delegationPreflight.js';
 import { parseRegistry, planSubmission, type RecentSubmission } from './lib/kaggleSubmission.js';
+import {
+  parseTargetsRegistry,
+  planImprovementCycle,
+  type GuardSignals,
+  type ImprovementMaterial,
+} from './lib/kaggleImprovement.js';
 import { pipelineReviewComment, type PipelineReviewOutcome } from './lib/pipelineReviewComment.js';
 import {
   DEFAULT_GRAPH_PATH,
@@ -644,8 +650,63 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'kaggle-improve-plan': {
+      // SOT-1913/SOT-1932: decide which improvement issues to draft this cron slot, deterministically.
+      // Pure logic in src/lib/kaggleImprovement.ts; scripts/ai/kaggle_improvement_cycle.sh (SOT-1933)
+      // collects the material/guard signals, calls this to get the plan, then creates the issues.
+      // Usage:
+      //   runner-cli.js kaggle-improve-plan [--registry <path>] [--hour <0-23>]
+      //       [--issue-count <n>] [--cooldown 1|0] [--env-enabled 1|0]
+      //       [--signals <json>] [--material <json>]
+      // Prints the CyclePlan as JSON on stdout (exit 0). Fail-loud (exit 1) on a bad registry/JSON.
+      // Dry-run by design: this never creates issues — it only computes the plan.
+      const flags: Record<string, string> = {};
+      for (let i = 0; i < args.length; i += 1) {
+        const a = args[i];
+        if (a && a.startsWith('--')) {
+          flags[a.slice(2)] = args[i + 1] ?? '';
+          i += 1;
+        }
+      }
+      const registryPath = flags.registry
+        || path.join(__dirname, '..', 'scripts', 'ai', 'kaggle_targets_registry.json');
+      let registry;
+      try {
+        registry = parseTargetsRegistry(JSON.parse(fs.readFileSync(registryPath, 'utf8')));
+      } catch (err: any) {
+        process.stderr.write(`kaggle-improve-plan: invalid registry ${registryPath}: ${err?.message || err}\n`);
+        process.exit(1);
+      }
+      const parseJsonFlag = <T>(name: string): T | undefined => {
+        if (!flags[name]) return undefined;
+        try {
+          return JSON.parse(flags[name]) as T;
+        } catch (err: any) {
+          process.stderr.write(`kaggle-improve-plan: invalid --${name} JSON: ${err?.message || err}\n`);
+          process.exit(1);
+        }
+      };
+      const hourJst = Number.isFinite(Number(flags.hour)) ? Number(flags.hour) : new Date().getHours();
+      const issueCount = Number.isFinite(Number(flags['issue-count'])) ? Number(flags['issue-count']) : 0;
+      const truthy = (v: string | undefined) => v === '1' || v === 'true' || v === 'yes';
+      const plan = planImprovementCycle({
+        registry,
+        hourJst,
+        // env kill switch: explicit --env-enabled wins, else fall back to KAGGLE_IMPROVE_ENABLED.
+        envEnabled: flags['env-enabled'] !== undefined
+          ? truthy(flags['env-enabled'])
+          : truthy(process.env.KAGGLE_IMPROVE_ENABLED),
+        issueCount,
+        cooldownActive: truthy(flags.cooldown),
+        signals: parseJsonFlag<Record<string, GuardSignals>>('signals'),
+        material: parseJsonFlag<Record<string, ImprovementMaterial>>('material'),
+      });
+      process.stdout.write(JSON.stringify(plan) + '\n');
+      process.exit(0);
+      break;
+    }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, pipeline-graph, kaggle-plan, ...\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, pipeline-graph, kaggle-plan, kaggle-improve-plan, ...\n`);
       process.exit(1);
     }
   }
