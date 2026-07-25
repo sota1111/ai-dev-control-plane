@@ -1,0 +1,154 @@
+{
+  "schemaVersion": "ptcg-battle-log/v1",
+  "battleId": "take-vs-obo-seed190901",
+  "initialState": {
+    "turn": 1,
+    "currentPlayer": "take",
+    "players": {
+      "take": {
+        "active": null,
+        "bench": [],
+        "deckCount": 47,
+        "handCount": 6,
+        "discard": [],
+        "prizesRemaining": 6
+      },
+      "obo": {
+        "active": null,
+        "bench": [],
+        "deckCount": 47,
+        "handCount": 6,
+        "discard": [],
+        "prizesRemaining": 6
+      }
+    },
+    "winner": null
+  },
+  "events": [
+    {
+      "type": "draw",
+      "player": "take",
+      "count": 4
+    },
+    {
+      "type": "play-active",
+      "player": "take",
+      "card": {
+        "id": "take-s5",
+        "name": "card-721",
+        "maxHp": 150,
+        "damage": 0,
+        "energy": []
+      }
+    },
+    {
+      "type": "play-active",
+      "player": "obo",
+      "card": {
+        "id": "obo-s103",
+        "name": "card-722",
+        "maxHp": 90,
+        "damage": 0,
+        "energy": []
+      }
+    },
+    {
+      "type": "end-turn",
+      "nextPlayer": "obo"
+    },
+    {
+      "type": "draw",
+      "player": "take",
+      "count": 1
+    },
+    {
+      "type": "attach-energy",
+      "player": "take",
+      "targetId": "take-s5",
+      "energy": "energy"
+    },
+    {
+      "type": "draw",
+      "player": "obo",
+      "count": 1
+    },
+    {
+      "type": "end-turn",
+      "nextPlayer": "take"
+    },
+    {
+      "type": "attach-energy",
+      "player": "obo",
+      "targetId": "obo-s103",
+      "energy": "energy"
+    },
+    {
+      "type": "draw",
+      "player": "obo",
+      "count": 1
+    },
+    {
+      "type": "draw",
+      "player": "obo",
+      "count": 6
+    },
+    {
+      "type": "attach-energy",
+      "player": "obo",
+      "targetId": "obo-s103",
+      "energy": "energy"
+    },
+    {
+      "type": "draw",
+      "player": "take",
+      "count": 1
+    },
+    {
+      "type": "damage",
+      "player": "take",
+      "targetId": "take-s5",
+      "amount": 10
+    },
+    {
+      "type": "end-turn",
+      "nextPlayer": "obo"
+    },
+    {
+      "type": "draw",
+      "player": "take",
+      "count": 6
+    },
+    {
+      "type": "attach-energy",
+      "player": "take",
+      "targetId": "take-s5",
+      "energy": "energy"
+    },
+    {
+      "type": "attach-energy",
+      "player": "take",
+      "targetId": "take-s5",
+      "energy": "energy"
+    },
+    {
+      "type": "damage",
+      "player": "obo",
+      "targetId": "obo-s103",
+      "amount": 90
+    },
+    {
+      "type": "knockout",
+      "player": "obo",
+      "targetId": "obo-s103"
+    },
+    {
+      "type": "take-prize",
+      "player": "take",
+      "count": 1
+    },
+    {
+      "type": "declare-winner",
+      "player": "take"
+    }
+  ]
+}
