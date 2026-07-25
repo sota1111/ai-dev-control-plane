@@ -55,4 +55,15 @@
 
 ## エントリ（新しいものを上に追記）
 
-<!-- ここに上記テンプレートで1エントリずつ追記していく。最初の実エントリが入るまでは空。 -->
+### 2026-07-25 — 子Issueが依存順に自動実装されない（In Review パーク）
+- **issue**: SOT-1913（子 SOT-1932→{1933,1934}→1935）
+- **症状**: 「実装を開始してください」後、依存順の先頭 SOT-1932 だけ実装/マージされ、残りは自動実装
+  されず In Review に留まった。
+- **根本原因**: 子Issueを In Review にパークしていたため、`fetchActiveIssues`（`name:{nin:["In Review"]}`）
+  と `getIssueExecutionEligibility`（hold state）で自動対象外になり、そもそもキューに入らない。依存順
+  トポロジカルソート（`queueOrdering.ts`）は enqueue 済み Todo/In Progress にしか効かないため未発火。
+- **恒久対策**: 自動実装させたい子は **Todo + blockedBy** で登録する（In Review パーク禁止）。無効化は
+  個々の status ではなく **system 全体の kill switch（default OFF）** で行う。cron の `createDraftIssue`
+  は Todo で作成。運用ルールを docs に明記。
+- **昇格先**: memory:child-issue-initial-status-todo（拡張）/ docs/kaggle-improvement-cycle.md「子Issueは Todo + blockedBy」節
+- **関連**: docs/ai/investigations/SOT-1913-dependency-order.md / SOT-1933/1934/1935 実装
