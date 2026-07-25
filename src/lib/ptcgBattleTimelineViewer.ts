@@ -47,7 +47,18 @@ function cardMarkup(card: CardState | null, emptyLabel: string): string {
     <span>HP ${hp}/${card.maxHp}</span>
     <span>ダメージ ${card.damage}</span>
     <span>エネルギー ${card.energy.length ? card.energy.map(escapeHtml).join(', ') : 'なし'}</span>
-    <span>技 ${card.attacks?.length ? card.attacks.map(escapeHtml).join(' / ') : 'なし'}</span>
+    <span>技 ${
+      card.attacks?.length
+        ? card.attacks
+            .map((attack) => {
+              if (typeof attack === 'string') return escapeHtml(attack);
+              const damage = attack.damage ? ` ${escapeHtml(attack.damage)}` : '';
+              const cost = attack.cost.length ? attack.cost.map(escapeHtml).join('・') : 'なし';
+              return `${escapeHtml(attack.name)}${damage}（必要エネルギー ${cost}）`;
+            })
+            .join(' / ')
+        : 'なし'
+    }</span>
   </div>`;
 }
 

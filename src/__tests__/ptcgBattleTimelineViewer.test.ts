@@ -40,6 +40,8 @@ describe('battle timeline viewer', () => {
     expect(page).toContain('リザードンex');
     expect(page).toContain('エレキサークル 60');
     expect(page).toContain('バーニングダーク 180+');
+    expect(page).toContain('エレキサークル 60（必要エネルギー 雷）');
+    expect(page).toContain('サンダーボルト 200（必要エネルギー 雷・雷・無）');
   });
 
   test('provides bounded first, previous, next, last, and arbitrary navigation', () => {

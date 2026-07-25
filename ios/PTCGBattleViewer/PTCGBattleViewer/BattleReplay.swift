@@ -1,12 +1,49 @@
 import Foundation
 
+struct AttackState: Codable, Equatable {
+    let name: String
+    let damage: String?
+    let cost: [String]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let legacyName = try? container.decode(String.self) {
+            name = legacyName
+            damage = nil
+            cost = []
+            return
+        }
+        let value = try container.decode(StructuredAttack.self)
+        name = value.name
+        damage = value.damage
+        cost = value.cost
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(StructuredAttack(name: name, damage: damage, cost: cost))
+    }
+
+    var displayText: String {
+        let damageText = damage.map { " \($0)" } ?? ""
+        let costText = cost.isEmpty ? "なし" : cost.joined(separator: "・")
+        return "\(name)\(damageText)（必要エネルギー \(costText)）"
+    }
+
+    private struct StructuredAttack: Codable {
+        let name: String
+        let damage: String?
+        let cost: [String]
+    }
+}
+
 struct CardState: Codable, Equatable, Identifiable {
     let id: String
     let name: String
     let maxHp: Int
     var damage: Int
     var energy: [String]
-    var attacks: [String]?
+    var attacks: [AttackState]?
 }
 
 struct PlayerBoardState: Codable, Equatable {
