@@ -16,6 +16,18 @@
 /** 系統。claude = 旧 fable、gpt = 旧 sol(Codex)。 */
 export type Lineage = 'claude' | 'gpt';
 
+/**
+ * コンペの提出モード（SOT-1913 提出cap補正）。
+ *  - `both`     : claude/gpt を両方その日に提出（提出上限が2系統ぶんを許す＝cap≥2、例 ptcg/他=5/day）。
+ *  - `alternate`: 1日1提出のみ許すコンペ（ARC=1/day 共有）。claude/gpt を日替わりで交互に提出する。
+ */
+export type SubmissionMode = 'both' | 'alternate';
+
+/** alternate モードで「次に提出する系統」を決める（前回提出系統の逆。未提出なら claude 始まり）。 */
+export function nextAlternateLineage(lastSubmitted?: Lineage | null): Lineage {
+  return lastSubmitted === 'claude' ? 'gpt' : 'claude';
+}
+
 /** どうやって実際に提出するか（実提出は SOT-1934 側）。 */
 export interface TargetSubmitSpec {
   /** 提出物のパス（未設定なら実提出は skip+通知で安全側）。 */
@@ -42,6 +54,8 @@ export interface ImprovementCompetition {
   key: string;
   kaggleCompetition: string;
   dailySubmissionCap: number;
+  /** 提出モード。default `both`。ARC(1/day 共有)は `alternate`（claude/gpt を日替わり交互提出）。 */
+  submissionMode: SubmissionMode;
   targets: ImprovementTarget[];
 }
 
@@ -165,6 +179,14 @@ function parseCompetition(
     throw new Error(`registry.competitions[${i}].daily_submission_cap must be a positive integer`);
   }
 
+  const modeRaw = co.submission_mode ?? co.submissionMode ?? 'both';
+  if (modeRaw !== 'both' && modeRaw !== 'alternate') {
+    throw new Error(
+      `registry.competitions[${i}].submission_mode must be "both" or "alternate"`
+    );
+  }
+  const submissionMode = modeRaw as SubmissionMode;
+
   const targetsRaw = co.targets;
   if (!Array.isArray(targetsRaw) || targetsRaw.length === 0) {
     throw new Error(`registry.competitions[${i}].targets must be a non-empty array`);
@@ -174,7 +196,7 @@ function parseCompetition(
     parseTarget(t, i, j, linSeen)
   );
 
-  return { key, kaggleCompetition, dailySubmissionCap: cap, targets };
+  return { key, kaggleCompetition, dailySubmissionCap: cap, submissionMode, targets };
 }
 
 function parseTarget(
@@ -433,23 +455,77 @@ export function planChampionSubmission(
 export interface CompetitionSubmitPlan {
   competition: string;
   kaggleCompetition: string;
+  /** そのコンペの提出モード（both=両系統提出 / alternate=日替わり交互）。 */
+  mode: SubmissionMode;
+  /** alternate モードで「今日の番」の系統（both のときは undefined）。 */
+  chosenLineage?: Lineage;
   targets: ChampionSubmitPlan[];
+}
+
+/** planCompetitionSubmission の任意オプション。 */
+export interface CompetitionSubmitOptions {
+  /**
+   * alternate モードで前回このコンペを提出した系統（Kaggle 履歴の最新提出から SOT-1934 の
+   * スクリプトが決める）。未指定なら claude 始まりで交互する。both モードでは無視される。
+   */
+  lastSubmittedLineage?: Lineage | null;
 }
 
 /**
  * コンペ key（または hourJst→rotation）から、その当番コンペの claude/gpt 両ターゲットの提出プランを作る。
  * submittedByRepo は repo 名 → 当日提出数（未指定は 0）。純粋関数（Kaggle CLI は SOT-1934 のスクリプト側）。
+ *
+ * SOT-1913 提出cap補正:
+ *  - `both`（既定・cap≥2、例 ptcg/他=5/day）: claude/gpt を両方その日に提出（従来どおり repo 別に判定）。
+ *  - `alternate`（ARC=1/day 共有）: 1日1提出のみ。`lastSubmittedLineage` の逆の系統だけを提出候補にし、
+ *    もう一方は skip。当日すでにそのコンペで提出済み（両 repo 合計 >= 1）なら選ばれた系統も skip（冪等）。
  */
 export function planCompetitionSubmission(
   registry: TargetsRegistry,
   competitionKey: string,
-  submittedByRepo: Record<string, number> = {}
+  submittedByRepo: Record<string, number> = {},
+  opts: CompetitionSubmitOptions = {}
 ): CompetitionSubmitPlan | null {
   const competition = getCompetition(registry, competitionKey);
   if (!competition) return null;
+
+  if (competition.submissionMode === 'alternate') {
+    // ARC 系: コンペ1日1提出の共有 cap。系統を日替わりで交互に選ぶ。
+    const totalToday = competition.targets.reduce(
+      (sum, t) => sum + (submittedByRepo[t.repo] ?? 0),
+      0
+    );
+    const chosen = nextAlternateLineage(opts.lastSubmittedLineage ?? null);
+    const targets = competition.targets.map((t) => {
+      if (t.lineage !== chosen) {
+        const today = submittedByRepo[t.repo] ?? 0;
+        return {
+          competition: competition.key,
+          kaggleCompetition: competition.kaggleCompetition,
+          repo: t.repo,
+          lineage: t.lineage,
+          action: 'skip' as const,
+          cap: competition.dailySubmissionCap,
+          submittedToday: today > 0 ? Math.floor(today) : 0,
+          reason: `alternate mode: 今日は ${chosen} の番（${t.lineage} は次回）`,
+        };
+      }
+      // 選ばれた系統は「コンペ全体の当日提出数」で cap/冪等を判定する（共有 cap のため）。
+      return planChampionSubmission(competition, t, totalToday);
+    });
+    return {
+      competition: competition.key,
+      kaggleCompetition: competition.kaggleCompetition,
+      mode: 'alternate',
+      chosenLineage: chosen,
+      targets,
+    };
+  }
+
   return {
     competition: competition.key,
     kaggleCompetition: competition.kaggleCompetition,
+    mode: 'both',
     targets: competition.targets.map((t) =>
       planChampionSubmission(competition, t, submittedByRepo[t.repo] ?? 0)
     ),

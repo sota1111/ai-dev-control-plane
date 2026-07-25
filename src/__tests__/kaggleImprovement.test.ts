@@ -11,6 +11,7 @@ import {
   planImprovementCycle,
   planChampionSubmission,
   planCompetitionSubmission,
+  nextAlternateLineage,
   type TargetsRegistry,
   type CycleInput,
 } from '../lib/kaggleImprovement.js';
@@ -53,12 +54,14 @@ describe('kaggleImprovement', () => {
         key: 'arc-agi-2',
         kaggle_competition: 'arc-prize-2026',
         daily_submission_cap: 1,
+        submission_mode: 'alternate',
         targets: [
           {
             lineage: 'claude',
             repo: 'arc-agi-2-claude',
             project: 'arc-agi-2-claude',
             workers_directive: 'solo=claude:opus, handoff=off',
+            submit: { file: 'submission/claude.json', message: 'm' },
             next_cycle: 1,
           },
           {
@@ -66,6 +69,7 @@ describe('kaggleImprovement', () => {
             repo: 'arc-agi-2-gpt',
             project: 'arc-agi-2-gpt',
             workers_directive: 'solo=codex:gpt-5.6-sol, handoff=off',
+            submit: { file: 'submission/gpt.json', message: 'm' },
             next_cycle: 1,
           },
         ],
@@ -151,6 +155,18 @@ describe('kaggleImprovement', () => {
       const bad = JSON.parse(JSON.stringify(rawRegistry));
       bad.competitions[0].targets[1].lineage = 'claude';
       expect(() => parseTargetsRegistry(bad)).toThrow(/duplicated/);
+    });
+
+    test('submission_mode defaults to "both" and parses "alternate"', () => {
+      const r = reg();
+      expect(getCompetition(r, 'ptcg')!.submissionMode).toBe('both'); // 未指定 → both
+      expect(getCompetition(r, 'arc-agi-2')!.submissionMode).toBe('alternate');
+    });
+
+    test('rejects invalid submission_mode', () => {
+      const bad = JSON.parse(JSON.stringify(rawRegistry));
+      bad.competitions[0].submission_mode = 'solo';
+      expect(() => parseTargetsRegistry(bad)).toThrow(/submission_mode/);
     });
   });
 
@@ -328,6 +344,59 @@ describe('kaggleImprovement', () => {
     test('planCompetitionSubmission returns null for an unknown competition', () => {
       expect(planCompetitionSubmission(reg(), 'nope', {})).toBeNull();
     });
+
+    test('both-mode plan carries mode="both" and no chosenLineage', () => {
+      const plan = planCompetitionSubmission(reg(), 'ptcg', {})!;
+      expect(plan.mode).toBe('both');
+      expect(plan.chosenLineage).toBeUndefined();
+    });
+  });
+
+  // SOT-1913 提出cap補正 — ARC(1/day 共有)は claude/gpt を日替わり交互提出。
+  describe('alternate submission mode (ARC 1/day shared cap)', () => {
+    test('nextAlternateLineage flips lineage; defaults to claude when unknown', () => {
+      expect(nextAlternateLineage(undefined)).toBe('claude');
+      expect(nextAlternateLineage(null)).toBe('claude');
+      expect(nextAlternateLineage('claude')).toBe('gpt');
+      expect(nextAlternateLineage('gpt')).toBe('claude');
+    });
+
+    test('first time (no prior submission) submits claude, gpt waits its turn', () => {
+      const plan = planCompetitionSubmission(reg(), 'arc-agi-2', {})!;
+      expect(plan.mode).toBe('alternate');
+      expect(plan.chosenLineage).toBe('claude');
+      const claude = plan.targets.find((t) => t.lineage === 'claude')!;
+      const gpt = plan.targets.find((t) => t.lineage === 'gpt')!;
+      expect(claude.action).toBe('submit');
+      expect(claude.file).toBe('submission/claude.json');
+      expect(gpt.action).toBe('skip');
+      expect(gpt.reason).toMatch(/alternate mode/);
+    });
+
+    test('after claude submitted last, it is gpt turn next', () => {
+      const plan = planCompetitionSubmission(reg(), 'arc-agi-2', {}, {
+        lastSubmittedLineage: 'claude',
+      })!;
+      expect(plan.chosenLineage).toBe('gpt');
+      const gpt = plan.targets.find((t) => t.lineage === 'gpt')!;
+      const claude = plan.targets.find((t) => t.lineage === 'claude')!;
+      expect(gpt.action).toBe('submit');
+      expect(claude.action).toBe('skip');
+    });
+
+    test('shared cap: if either lineage already submitted today, the chosen one skips (idempotent)', () => {
+      // gpt is this turn (claude went last) but claude already used today\'s single slot.
+      const plan = planCompetitionSubmission(
+        reg(),
+        'arc-agi-2',
+        { 'arc-agi-2-claude': 1 },
+        { lastSubmittedLineage: 'claude' }
+      )!;
+      expect(plan.chosenLineage).toBe('gpt');
+      const gpt = plan.targets.find((t) => t.lineage === 'gpt')!;
+      expect(gpt.action).toBe('skip');
+      expect(gpt.reason).toMatch(/already submitted today/);
+    });
   });
 
   describe('shipped registry file', () => {
@@ -341,6 +410,17 @@ describe('kaggleImprovement', () => {
       // 各コンペは claude/gpt の2ターゲットを持つ。
       for (const c of r.competitions) {
         expect(c.targets.map((t) => t.lineage).sort()).toEqual(['claude', 'gpt']);
+      }
+      // SOT-1913 提出cap補正: ARC=1/day & alternate、他=5/day & both。
+      for (const c of r.competitions) {
+        const isArc = c.key === 'arc-agi-2' || c.key === 'arc-agi-3';
+        if (isArc) {
+          expect(c.dailySubmissionCap).toBe(1);
+          expect(c.submissionMode).toBe('alternate');
+        } else {
+          expect(c.dailySubmissionCap).toBe(5);
+          expect(c.submissionMode).toBe('both');
+        }
       }
     });
   });

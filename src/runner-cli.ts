@@ -817,7 +817,9 @@ async function main() {
       // scripts/ai/kaggle_targets_submit.sh fetches today's counts, calls this, then submits.
       // Usage:
       //   runner-cli.js kaggle-champion-plan [--registry <path>] [--competition <key>] [--hour <0-23>]
-      //       [--submitted <json {repo: todayCount}>]
+      //       [--submitted <json {repo: todayCount}>] [--last-lineage claude|gpt]
+      // --last-lineage is only used by alternate-mode competitions (ARC=1/day shared): the next
+      // submission goes to the OTHER lineage than the one that submitted last.
       // Prints the CompetitionSubmitPlan as JSON on stdout (exit 0). Fail-loud (exit 1) on bad input.
       const flags: Record<string, string> = {};
       for (let i = 0; i < args.length; i += 1) {
@@ -855,7 +857,17 @@ async function main() {
           process.exit(1);
         }
       }
-      const plan = planCompetitionSubmission(registry, competitionKey, submittedByRepo);
+      // SOT-1913: alternate モード（ARC=1/day 共有）用に前回提出系統を渡す（both では無視される）。
+      let lastSubmittedLineage: 'claude' | 'gpt' | null = null;
+      if (flags['last-lineage'] === 'claude' || flags['last-lineage'] === 'gpt') {
+        lastSubmittedLineage = flags['last-lineage'];
+      } else if (flags['last-lineage']) {
+        process.stderr.write('kaggle-champion-plan: --last-lineage must be "claude" or "gpt"\n');
+        process.exit(1);
+      }
+      const plan = planCompetitionSubmission(registry, competitionKey, submittedByRepo, {
+        lastSubmittedLineage,
+      });
       if (!plan) {
         process.stderr.write(`kaggle-champion-plan: competition "${competitionKey}" not in registry\n`);
         process.exit(1);
