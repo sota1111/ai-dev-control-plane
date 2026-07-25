@@ -73,7 +73,7 @@
           "repo": "arc-agi-2-gpt",
           "project": "arc-agi-2-gpt",
           "workers_directive": "solo=codex:gpt-5.6-sol, handoff=off",
-          "submit": { "file": "", "message": "auto-improve submit: arc-agi-2-gpt champion" },
+          "submit": { "file": "/workspaces/arc-agi-2-gpt/main.py", "message": "auto-improve submit: arc-agi-2-gpt champion" },
           "next_cycle": 1
         }
       ]
