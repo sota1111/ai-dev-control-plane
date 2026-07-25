@@ -32,10 +32,18 @@ CRON_CMD="${CRON_SCHEDULE} cd ${REPO_DIR} && bash scripts/ai/run_auto.sh >> ${CR
 # なので、登録しても2段 kill switch が ON になるまで実起案しない。
 KAGGLE_IMPROVE_LOG="${REPO_DIR}/docs/ai/auto_logs/kaggle_improve.log"
 IMPROVE_SCHEDULE="${KAGGLE_IMPROVE_CRON_SCHEDULE:-0 * * * *}"
-# 実起案するかは env KAGGLE_IMPROVE_EXECUTE（既定ドライラン）。
+# 実起案・実提出するかは env KAGGLE_IMPROVE_EXECUTE（既定ドライラン）。
+# 実行モードでは 2段 kill switch の env 側（KAGGLE_IMPROVE_ENABLED）も ON である必要がある。
+# 【重要】cron は登録時のシェル env を継承しない。旧実装 `KAGGLE_IMPROVE_ENABLED=${KAGGLE_IMPROVE_ENABLED:-}`
+# は cron 実行時に空へ展開され、登録しても永久に dry-run のままになるバグだった。ここでは実行モードの
+# ときだけ enable フラグを crontab 行へ **リテラルで焼き込む**（登録時に値を確定）。
 IMPROVE_FLAGS="--only-scheduled"
-if [ "${KAGGLE_IMPROVE_EXECUTE:-0}" = "1" ]; then IMPROVE_FLAGS="--only-scheduled --execute"; fi
-IMPROVE_CMD="${IMPROVE_SCHEDULE} cd ${REPO_DIR} && KAGGLE_IMPROVE_ENABLED=\${KAGGLE_IMPROVE_ENABLED:-} bash scripts/ai/kaggle_improvement_cycle.sh ${IMPROVE_FLAGS} >> ${KAGGLE_IMPROVE_LOG} 2>&1"
+IMPROVE_ENV=""
+if [ "${KAGGLE_IMPROVE_EXECUTE:-0}" = "1" ]; then
+  IMPROVE_FLAGS="--only-scheduled --execute"
+  IMPROVE_ENV="KAGGLE_IMPROVE_ENABLED=${KAGGLE_IMPROVE_ENABLED:-1} "
+fi
+IMPROVE_CMD="${IMPROVE_SCHEDULE} cd ${REPO_DIR} && ${IMPROVE_ENV}bash scripts/ai/kaggle_improvement_cycle.sh ${IMPROVE_FLAGS} >> ${KAGGLE_IMPROVE_LOG} 2>&1"
 (crontab -l 2>/dev/null | grep -v "kaggle_improvement_cycle.sh"; echo "$IMPROVE_CMD") | crontab -
 
 echo "Cron jobs registered:"
