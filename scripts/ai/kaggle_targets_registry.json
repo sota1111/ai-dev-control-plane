@@ -7,7 +7,8 @@
     "issue_cap_guard": "workspace 総 Issue 数がこれ以上なら起案せず archive を促す（既定 240）。",
     "competitions[].key": "コンペ識別子（rotation.competition と一致）。",
     "competitions[].kaggle_competition": "Kaggle コンペ slug（実 slug は各 repo の子Issueで確定）。",
-    "competitions[].daily_submission_cap": "そのコンペの1日提出上限。",
+    "competitions[].daily_submission_cap": "そのコンペの1日提出上限（Kaggle実制限。ARC=1 / 他=5）。",
+    "competitions[].submission_mode": "提出モード。both=claude/gptを両方提出し両結果を確認（cap≥2の他コンペ）/ alternate=1日1提出のみ許すARC(共有cap=1)でclaude・gptを日替わり交互に提出。既定 both。",
     "competitions[].targets[].lineage": "系統。claude(=旧fable) / gpt(=旧sol)。",
     "competitions[].targets[].repo": "対象 GitHub repo。",
     "competitions[].targets[].project": "対象 Linear プロジェクト名。",
@@ -33,6 +34,7 @@
       "key": "ptcg",
       "kaggle_competition": "pokemon-tcg-ai-battle",
       "daily_submission_cap": 5,
+      "submission_mode": "both",
       "targets": [
         {
           "lineage": "claude",
@@ -56,6 +58,7 @@
       "key": "arc-agi-2",
       "kaggle_competition": "arc-prize-2026",
       "daily_submission_cap": 1,
+      "submission_mode": "alternate",
       "targets": [
         {
           "lineage": "claude",
@@ -79,6 +82,7 @@
       "key": "arc-agi-3",
       "kaggle_competition": "arc-prize-2026-agi-3",
       "daily_submission_cap": 1,
+      "submission_mode": "alternate",
       "targets": [
         {
           "lineage": "claude",
@@ -101,7 +105,8 @@
     {
       "key": "agent-security",
       "kaggle_competition": "ai-agent-security",
-      "daily_submission_cap": 1,
+      "daily_submission_cap": 5,
+      "submission_mode": "both",
       "targets": [
         {
           "lineage": "claude",
@@ -124,7 +129,8 @@
     {
       "key": "rogii",
       "kaggle_competition": "rogii-wellbore-geology",
-      "daily_submission_cap": 1,
+      "daily_submission_cap": 5,
+      "submission_mode": "both",
       "targets": [
         {
           "lineage": "claude",
@@ -147,7 +153,8 @@
     {
       "key": "biohub",
       "kaggle_competition": "biohub-cell-tracking",
-      "daily_submission_cap": 1,
+      "daily_submission_cap": 5,
+      "submission_mode": "both",
       "targets": [
         {
           "lineage": "claude",
