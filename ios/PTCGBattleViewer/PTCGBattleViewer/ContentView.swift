@@ -213,7 +213,10 @@ private struct CardView: View {
                 )
                 .font(.caption)
                 .lineLimit(1)
-                Label(card.attacks?.joined(separator: "・").nilIfEmpty ?? "技なし", systemImage: "burst.fill")
+                Label(
+                    card.attacks?.map(\.displayText).joined(separator: "・").nilIfEmpty ?? "技なし",
+                    systemImage: "burst.fill"
+                )
                 .font(.caption.bold())
                 .lineLimit(2)
             }

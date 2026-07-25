@@ -50,7 +50,7 @@ iPhone の Safari で開いてください。iPhone向けには、セーフエ�
 ![具体的なポケモン名と技を含むレビュー用盤面](screenshots/sot-1907-concrete-cards.png)
 
 この画像は `battle-log.snapshot.json` を表示したレビュー用盤面です。ピカチュウex、
-リザードンexなどの具体的なポケモン名と、各カードの技を盤面上で確認できます。
+リザードンexなどの具体的なポケモン名と、各カードの技・ダメージ・必要エネルギーを盤面上で確認できます。
 
 ![代表ログを時点16まで再生した盤面ビューア](screenshots/sot-1907-battle-timeline.png)
 
