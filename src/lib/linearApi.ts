@@ -308,6 +308,113 @@ export async function getIssueQueueMetadata(issueId: string): Promise<IssueQueue
   }
 }
 
+/**
+ * SOT-1913/SOT-1933 — 改善サイクル cron が「改善方針の親Issue」を Linear に作成する（execute パス専用）。
+ *
+ * 決定的処理: プロジェクト名→ project/team を解決し、Todo(unstarted) state と（あれば）`auto-improve`
+ * ラベルを付けて issueCreate する。子Issueが依存順で自動実装されるよう **Todo で作成**する（In Review
+ * にパークしない — SOT-1913 の依存順失敗の根本対策）。非冪等な作成なので retries:0。呼び出し側で
+ * 事前に findOpenAutoImproveIssue の未終端ガードを掛けて重複起案を防ぐこと。
+ */
+export async function createDraftIssue(input: {
+  projectName: string;
+  title: string;
+  description: string;
+  labelName?: string;
+}): Promise<{ identifier: string; url: string } | null> {
+  const { log } = requireDeps();
+  // 1) project → id + team。
+  const projData: any = await linearQuery(
+    'query($name: String!) { projects(filter: { name: { eq: $name } }, first: 1) { nodes { id name teams { nodes { id } } } } }',
+    { name: input.projectName }
+  );
+  const project = projData?.projects?.nodes?.[0];
+  if (!project?.id) {
+    log('RUNNER', `createDraftIssue: project not found: ${input.projectName}`);
+    return null;
+  }
+  const teamId = project?.teams?.nodes?.[0]?.id;
+  if (!teamId) {
+    log('RUNNER', `createDraftIssue: no team for project ${input.projectName}`);
+    return null;
+  }
+  // 2) Todo(unstarted) state を解決（name==='Todo' 優先、無ければ最初の unstarted）。
+  let stateId: string | undefined;
+  try {
+    const stData: any = await linearQuery(
+      'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "unstarted" } }) { nodes { id name } } }',
+      { teamId }
+    );
+    const states: any[] = stData?.workflowStates?.nodes ?? [];
+    stateId = (states.find((s) => s?.name === 'Todo') ?? states[0])?.id;
+  } catch (err: any) {
+    log('RUNNER', `createDraftIssue: workflowStates lookup failed: ${err.message}`);
+  }
+  // 3) label（任意・あれば付ける）。
+  const labelIds: string[] = [];
+  if (input.labelName) {
+    try {
+      const lbData: any = await linearQuery(
+        'query($name: String!) { issueLabels(filter: { name: { eq: $name } }, first: 1) { nodes { id } } }',
+        { name: input.labelName }
+      );
+      const labelId = lbData?.issueLabels?.nodes?.[0]?.id;
+      if (labelId) labelIds.push(labelId);
+    } catch (err: any) {
+      log('RUNNER', `createDraftIssue: label lookup failed: ${err.message}`);
+    }
+  }
+  // 4) issueCreate（非冪等 → retries:0）。
+  const createInput: Record<string, any> = {
+    teamId,
+    projectId: project.id,
+    title: input.title,
+    description: input.description,
+  };
+  if (stateId) createInput.stateId = stateId;
+  if (labelIds.length) createInput.labelIds = labelIds;
+  const res: any = await linearQuery(
+    'mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { identifier url } } }',
+    { input: createInput },
+    { retries: 0 }
+  );
+  const issue = res?.issueCreate?.issue;
+  if (!res?.issueCreate?.success || !issue?.identifier) {
+    log('RUNNER', `createDraftIssue: issueCreate returned no issue for ${input.projectName}`);
+    return null;
+  }
+  log('RUNNER', `createDraftIssue: created ${issue.identifier} in ${input.projectName}`);
+  return { identifier: issue.identifier, url: issue.url };
+}
+
+/**
+ * SOT-1933 前サイクル未完了ガード（execute 時の再確認）: プロジェクトに未終端(completed/canceled 以外)の
+ * `auto-improve` ラベル付き Issue が残っていれば、その identifier を返す（無ければ null・never throws）。
+ */
+export async function findOpenAutoImproveIssue(
+  projectName: string,
+  labelName = 'auto-improve'
+): Promise<string | null> {
+  const { log } = requireDeps();
+  try {
+    const data: any = await linearQuery(
+      `query($name: String!, $label: String!) {
+        issues(filter: {
+          project: { name: { eq: $name } },
+          labels: { name: { eq: $label } },
+          state: { type: { nin: ["completed", "canceled"] } }
+        }, first: 1) { nodes { identifier } }
+      }`,
+      { name: projectName, label: labelName }
+    );
+    const id = data?.issues?.nodes?.[0]?.identifier;
+    return typeof id === 'string' && id ? id : null;
+  } catch (err: any) {
+    log('RUNNER', `findOpenAutoImproveIssue failed: ${err.message}`, { issue: projectName });
+    return null;
+  }
+}
+
 export async function hasPendingIssues(): Promise<boolean> {
   try {
     const query = '{ issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: 1) { nodes { id } } }';

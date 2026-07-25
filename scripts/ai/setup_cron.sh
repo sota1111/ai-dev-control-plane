@@ -26,9 +26,21 @@ fi
 CRON_CMD="${CRON_SCHEDULE} cd ${REPO_DIR} && bash scripts/ai/run_auto.sh >> ${CRON_LOG} 2>&1"
 (crontab -l 2>/dev/null | grep -v "run_auto.sh"; echo "$CRON_CMD") | crontab -
 
-echo "Cron job registered:"
-crontab -l | grep run_auto
+# SOT-1913/SOT-1933: Kaggle 改善サイクル cron（単一スケジュール JST [0,4,8,12,16,20]・1枠=1コンペ）。
+# cron は UTC 基準なので毎時起動し、スクリプト側で --only-scheduled により当番 JST 枠だけを処理する
+# （registry.schedule_hours_jst で枠を判定）。default OFF（env KAGGLE_IMPROVE_ENABLED + registry.enabled）
+# なので、登録しても2段 kill switch が ON になるまで実起案しない。
+KAGGLE_IMPROVE_LOG="${REPO_DIR}/docs/ai/auto_logs/kaggle_improve.log"
+IMPROVE_SCHEDULE="${KAGGLE_IMPROVE_CRON_SCHEDULE:-0 * * * *}"
+# 実起案するかは env KAGGLE_IMPROVE_EXECUTE（既定ドライラン）。
+IMPROVE_FLAGS="--only-scheduled"
+if [ "${KAGGLE_IMPROVE_EXECUTE:-0}" = "1" ]; then IMPROVE_FLAGS="--only-scheduled --execute"; fi
+IMPROVE_CMD="${IMPROVE_SCHEDULE} cd ${REPO_DIR} && KAGGLE_IMPROVE_ENABLED=\${KAGGLE_IMPROVE_ENABLED:-} bash scripts/ai/kaggle_improvement_cycle.sh ${IMPROVE_FLAGS} >> ${KAGGLE_IMPROVE_LOG} 2>&1"
+(crontab -l 2>/dev/null | grep -v "kaggle_improvement_cycle.sh"; echo "$IMPROVE_CMD") | crontab -
+
+echo "Cron jobs registered:"
+crontab -l | grep -E "run_auto|kaggle_improvement_cycle"
 echo ""
-echo "Log: ${CRON_LOG}"
+echo "Logs: ${CRON_LOG} / ${KAGGLE_IMPROVE_LOG}"
 echo ""
-echo "To remove: crontab -l | grep -v run_auto.sh | crontab -"
+echo "To remove: crontab -l | grep -vE 'run_auto.sh|kaggle_improvement_cycle.sh' | crontab -"
