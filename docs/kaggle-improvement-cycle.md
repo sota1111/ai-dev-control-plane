@@ -45,8 +45,10 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
 - 提出対象は常にそのターゲットの **現 champion**（registry の `submit.file`）。SOT-1904 の
   「直近2提出収束ロジック／2枠選定ゲート」は **この経路では使わない**（コンペ内で提出内容を検討する
   機構は廃止）。
-- 別スケジュールの提出ローテ cron・日次フロア cron は持たない。当番コンペの取り組み完了時に
-  `scripts/ai/kaggle_targets_submit.sh --competition <key> --execute` を呼ぶ。
+- 別スケジュールの提出ローテ cron・日次フロア cron は持たない。**改善サイクル cron が同じ当番枠で**
+  当該コンペの現 champion 提出（`scripts/ai/kaggle_targets_submit.sh --competition <key>`）も行う
+  （SOT-1913「日々提出できる状態」）。起案が guard で skip されても提出は独立に試みるので、有効化すれば
+  各コンペ1日1回は提出しようとする。実提出は active(2段kill switch) かつ `--execute` のときだけ。
 - **翌日の同じコンペ枠**では、起案材料の先頭に「前回提出結果（順位/スコア）」を含めてから次の改善
   方針を決める（材料収集は SOT-1932 側）。
 - 冪等: 当日すでに提出済みなら二重提出しない。`submit.file` 未設定（提出物未整備）のコンペは
@@ -127,13 +129,22 @@ blockedBy にすれば、既存の topological ソートがブロッカー完了
 ### cron 登録（devcontainer 再起動毎に要再実行）
 
 ```bash
+# ドライランで cron 登録（既定・何も起案/提出しない）:
 bash scripts/ai/setup_cron.sh
-# 実起案まで有効化するなら（既定はドライラン）:
-KAGGLE_IMPROVE_EXECUTE=1 bash scripts/ai/setup_cron.sh
+
+# 実起案・実提出まで有効化する（＝「起動」ワンコマンド）:
+#   1) registry.enabled を true にする（scripts/ai/kaggle_targets_registry.json）
+#   2) 下記コマンドで cron を実行モードで登録する
+KAGGLE_IMPROVE_EXECUTE=1 KAGGLE_IMPROVE_ENABLED=1 bash scripts/ai/setup_cron.sh
 ```
 
-改善サイクルは毎時起動され、`--only-scheduled` により当番 JST 枠だけを処理する。実起案は
+改善サイクルは毎時起動され、`--only-scheduled` により当番 JST 枠だけを処理する。実起案・実提出は
 `KAGGLE_IMPROVE_ENABLED=1`（env）+ `registry.enabled=true` の両方が ON かつ `--execute` のときだけ。
+
+> **cron の env について**: cron は登録時のシェル env を継承しない。`KAGGLE_IMPROVE_EXECUTE=1` で
+> 登録すると、`setup_cron.sh` が enable フラグ（`KAGGLE_IMPROVE_ENABLED=1`。上書きしたい場合は登録時に
+> `KAGGLE_IMPROVE_ENABLED=<値>` を渡す）を crontab 行へ **リテラルで焼き込む**ので、cron 実行時にも
+> 実行モードが効く。ドライラン登録（`KAGGLE_IMPROVE_EXECUTE` 未設定）では env を焼き込まないので安全側。
 
 ### 手動実行（テスト/運用）
 
@@ -165,8 +176,8 @@ bash scripts/ai/kaggle_targets_submit.sh --competition ptcg
 | 起案プラン CLI（dry-run） | `runner-cli kaggle-improve-plan` |
 | 起案 実行 CLI（--execute で Linear 作成） | `runner-cli kaggle-improve-run` |
 | 提出プラン CLI（champion・収束なし） | `runner-cli kaggle-champion-plan` |
-| 改善サイクル cron | `scripts/ai/kaggle_improvement_cycle.sh` |
-| 完了トリガ提出 | `scripts/ai/kaggle_targets_submit.sh` |
+| 改善サイクル cron（起案＋当番枠 champion 提出） | `scripts/ai/kaggle_improvement_cycle.sh` |
+| champion 提出（当番枠から呼ばれる／手動可） | `scripts/ai/kaggle_targets_submit.sh` |
 | レジストリ（6コンペ×2系統） | `scripts/ai/kaggle_targets_registry.json` |
 | cron 登録 | `scripts/ai/setup_cron.sh` |
 </content>
