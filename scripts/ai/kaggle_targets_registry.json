@@ -65,7 +65,7 @@
           "repo": "arc-agi-2-claude",
           "project": "arc-agi-2-claude",
           "workers_directive": "solo=claude:opus, handoff=off",
-          "submit": { "file": "", "message": "auto-improve submit: arc-agi-2-claude champion" },
+          "submit": { "file": "/workspaces/arc-agi-2-claude/main.py", "message": "auto-improve submit: arc-agi-2-claude champion" },
           "next_cycle": 1
         },
         {
