@@ -26,6 +26,17 @@ final class BattleReplayTests: XCTestCase {
         XCTAssertNil(BoardSeatLayout(players: ["matsu"]))
     }
 
+    func testDecodesConcretePokemonNamesAndAttacks() throws {
+        let data = """
+        {"schemaVersion":"ptcg-battle-log/v1","battleId":"card-details","initialState":{"turn":1,"currentPlayer":"あなた","players":{"あなた":{"active":{"id":"pikachu","name":"ピカチュウex","maxHp":200,"damage":30,"energy":["雷"],"attacks":["エレキサークル 60","サンダーボルト 200"]},"bench":[],"deckCount":40,"handCount":5,"discard":[],"prizesRemaining":6},"対戦相手":{"active":null,"bench":[],"deckCount":42,"handCount":6,"discard":[],"prizesRemaining":6}},"winner":null},"events":[]}
+        """.data(using: .utf8)!
+
+        let (_, snapshots) = try BattleReplay.decode(data)
+        let card = snapshots[0].state.players["あなた"]?.active
+        XCTAssertEqual(card?.name, "ピカチュウex")
+        XCTAssertEqual(card?.attacks, ["エレキサークル 60", "サンダーボルト 200"])
+    }
+
     @MainActor
     func testNavigationIsBoundedAndSupportsArbitraryPosition() {
         let model = BattleViewerModel()

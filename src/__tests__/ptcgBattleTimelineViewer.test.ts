@@ -9,6 +9,9 @@ import {
 const fixture = JSON.parse(
   readFileSync(join(process.cwd(), 'src/__tests__/fixtures/battle-log.valid.json'), 'utf8')
 );
+const snapshotFixture = JSON.parse(
+  readFileSync(join(process.cwd(), 'src/__tests__/fixtures/battle-log.snapshot.json'), 'utf8')
+);
 
 describe('battle timeline viewer', () => {
   test('exposes the initial board and every replay point', () => {
@@ -29,6 +32,14 @@ describe('battle timeline viewer', () => {
     expect(frame).toContain('サイド');
     expect(frame).toContain('トラッシュ');
     expect(frame).toContain('fire エネルギー');
+  });
+
+  test('renders concrete Pokemon names and attacks for human review', () => {
+    const page = renderBattleTimelinePage(snapshotFixture);
+    expect(page).toContain('ピカチュウex');
+    expect(page).toContain('リザードンex');
+    expect(page).toContain('エレキサークル 60');
+    expect(page).toContain('バーニングダーク 180+');
   });
 
   test('provides bounded first, previous, next, last, and arbitrary navigation', () => {
