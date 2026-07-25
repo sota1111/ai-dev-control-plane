@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "ptcg-battle-log/v1",
+  "battleId": "ピカチュウex vs リザードンex",
+  "initialState": {
+    "turn": 4,
+    "currentPlayer": "あなた",
+    "players": {
+      "あなた": {
+        "active": {
+          "id": "pikachu-ex",
+          "name": "ピカチュウex",
+          "maxHp": 200,
+          "damage": 30,
+          "energy": ["雷", "雷"],
+          "attacks": ["エレキサークル 60", "サンダーボルト 200"]
+        },
+        "bench": [
+          {
+            "id": "miraidon-ex",
+            "name": "ミライドンex",
+            "maxHp": 220,
+            "damage": 0,
+            "energy": ["雷"],
+            "attacks": ["フォトンブラスター 220"]
+          }
+        ],
+        "deckCount": 36,
+        "handCount": 5,
+        "discard": ["ネストボール", "基本雷エネルギー"],
+        "prizesRemaining": 4
+      },
+      "対戦相手": {
+        "active": {
+          "id": "charizard-ex",
+          "name": "リザードンex",
+          "maxHp": 330,
+          "damage": 120,
+          "energy": ["炎", "炎"],
+          "attacks": ["バーニングダーク 180+"]
+        },
+        "bench": [
+          {
+            "id": "pidgeot-ex",
+            "name": "ピジョットex",
+            "maxHp": 280,
+            "damage": 0,
+            "energy": [],
+            "attacks": ["ふきすさぶ 120"]
+          }
+        ],
+        "deckCount": 34,
+        "handCount": 6,
+        "discard": ["ふしぎなアメ", "ハイパーボール"],
+        "prizesRemaining": 3
+      }
+    },
+    "winner": null
+  },
+  "events": [
+    {
+      "type": "damage",
+      "player": "対戦相手",
+      "targetId": "charizard-ex",
+      "amount": 60
+    }
+  ]
+}

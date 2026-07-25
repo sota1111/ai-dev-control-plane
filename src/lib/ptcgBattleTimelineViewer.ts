@@ -47,6 +47,7 @@ function cardMarkup(card: CardState | null, emptyLabel: string): string {
     <span>HP ${hp}/${card.maxHp}</span>
     <span>ダメージ ${card.damage}</span>
     <span>エネルギー ${card.energy.length ? card.energy.map(escapeHtml).join(', ') : 'なし'}</span>
+    <span>技 ${card.attacks?.length ? card.attacks.map(escapeHtml).join(' / ') : 'なし'}</span>
   </div>`;
 }
 

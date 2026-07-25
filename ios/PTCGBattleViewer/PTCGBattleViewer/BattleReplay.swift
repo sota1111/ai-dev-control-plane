@@ -6,6 +6,7 @@ struct CardState: Codable, Equatable, Identifiable {
     let maxHp: Int
     var damage: Int
     var energy: [String]
+    var attacks: [String]?
 }
 
 struct PlayerBoardState: Codable, Equatable {

@@ -213,6 +213,9 @@ private struct CardView: View {
                 )
                 .font(.caption)
                 .lineLimit(1)
+                Label(card.attacks?.joined(separator: "・").nilIfEmpty ?? "技なし", systemImage: "burst.fill")
+                .font(.caption.bold())
+                .lineLimit(2)
             }
         }
         .padding(10)
@@ -224,6 +227,10 @@ private struct CardView: View {
         )
         .shadow(color: emphasized ? .cyan.opacity(0.25) : .clear, radius: 8)
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 private struct CardBackFan: View {

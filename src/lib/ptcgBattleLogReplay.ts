@@ -6,6 +6,7 @@ export interface CardState {
   maxHp: number;
   damage: number;
   energy: string[];
+  attacks?: string[];
 }
 
 export interface PlayerBoardState {
@@ -96,6 +97,12 @@ function validateCard(
   assertNonNegativeInteger(card.damage, `${field}.damage`, eventIndex);
   if (!Array.isArray(card.energy) || !card.energy.every((energy) => typeof energy === 'string')) {
     throw new BattleLogReplayError(`${field}.energy must be a string array`, eventIndex);
+  }
+  if (
+    card.attacks !== undefined &&
+    (!Array.isArray(card.attacks) || !card.attacks.every((attack) => typeof attack === 'string'))
+  ) {
+    throw new BattleLogReplayError(`${field}.attacks must be a string array`, eventIndex);
   }
 }
 
