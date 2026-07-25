@@ -9,6 +9,8 @@ import {
   buildIssueTitle,
   buildIssueBody,
   planImprovementCycle,
+  planChampionSubmission,
+  planCompetitionSubmission,
   type TargetsRegistry,
   type CycleInput,
 } from '../lib/kaggleImprovement.js';
@@ -284,6 +286,47 @@ describe('kaggleImprovement', () => {
       const claude = plan.targets.find((t) => t.project === 'ptcg-agent-claude')!;
       expect(claude.action).toBe('skip');
       expect(claude.reason).toMatch(/no new material/);
+    });
+  });
+
+  // SOT-1934 — 完了トリガの champion 提出（コンペ内収束/選定なし）。
+  describe('planChampionSubmission', () => {
+    const ptcg = () => getCompetition(reg(), 'ptcg')!;
+    const claudeTarget = () => ptcg().targets.find((t) => t.lineage === 'claude')!; // submit.file = ''
+    const gptTarget = () => {
+      const t = ptcg().targets.find((t) => t.lineage === 'gpt')!;
+      return { ...t, submit: { file: 'submission/main.py', message: 'm' } };
+    };
+
+    test('submits the current champion when a submit.file exists and none submitted today', () => {
+      const p = planChampionSubmission(ptcg(), gptTarget(), 0);
+      expect(p.action).toBe('submit');
+      expect(p.file).toBe('submission/main.py');
+      expect(p.reason).toMatch(/no in-competition selection gate/);
+    });
+
+    test('is idempotent per day — skips when already submitted today (no double submit)', () => {
+      const p = planChampionSubmission(ptcg(), gptTarget(), 1);
+      expect(p.action).toBe('skip');
+      expect(p.reason).toMatch(/already submitted today/);
+    });
+
+    test('skips + (caller notifies) when submit.file is not configured', () => {
+      const p = planChampionSubmission(ptcg(), claudeTarget(), 0);
+      expect(p.action).toBe('skip');
+      expect(p.reason).toMatch(/no submit\.file/);
+    });
+
+    test('planCompetitionSubmission covers both lineages of the on-duty competition', () => {
+      const plan = planCompetitionSubmission(reg(), 'ptcg', {});
+      expect(plan).not.toBeNull();
+      expect(plan!.targets.map((t) => t.lineage).sort()).toEqual(['claude', 'gpt']);
+      // both default to 0 submitted today; claude has no file → skip, gpt (registry file empty) → skip too.
+      expect(plan!.targets.every((t) => t.action === 'skip')).toBe(true);
+    });
+
+    test('planCompetitionSubmission returns null for an unknown competition', () => {
+      expect(planCompetitionSubmission(reg(), 'nope', {})).toBeNull();
     });
   });
 

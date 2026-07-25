@@ -25,9 +25,12 @@ import { loadWorkerRolesConfig, loadSoloWorker, type WorkerRoleConfig, type Work
 import { parseWorkerRoleDirectives, mergeWorkerRoleOverrides, parseGraphDirective } from './lib/workerRoleDirective.js';
 import { buildDelegationPreflight } from './lib/delegationPreflight.js';
 import { parseRegistry, planSubmission, type RecentSubmission } from './lib/kaggleSubmission.js';
+import { createDraftIssue, findOpenAutoImproveIssue } from './lib/linearApi.js';
 import {
   parseTargetsRegistry,
   planImprovementCycle,
+  planCompetitionSubmission,
+  resolveCompetitionForHour,
   type GuardSignals,
   type ImprovementMaterial,
 } from './lib/kaggleImprovement.js';
@@ -705,8 +708,164 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'kaggle-improve-run': {
+      // SOT-1913/SOT-1933: the cron's execute path. Computes the same CyclePlan as kaggle-improve-plan,
+      // then (only with --execute && active) creates the drafted "improvement parent" issues in Linear
+      // — in Todo (NOT In Review) so the pipeline's dependency-order queue can auto-implement them —
+      // re-checking the unfinished-cycle guard live, and bumps each drafted target's next_cycle in the
+      // registry file. Without --execute it is identical to kaggle-improve-plan (dry-run, no writes).
+      // Usage: same flags as kaggle-improve-plan, plus [--execute] [--label <name>].
+      const flags: Record<string, string> = {};
+      const bare = new Set<string>();
+      for (let i = 0; i < args.length; i += 1) {
+        const a = args[i];
+        if (a === '--execute') { bare.add('execute'); continue; }
+        if (a && a.startsWith('--')) {
+          flags[a.slice(2)] = args[i + 1] ?? '';
+          i += 1;
+        }
+      }
+      const registryPath = flags.registry
+        || path.join(__dirname, '..', 'scripts', 'ai', 'kaggle_targets_registry.json');
+      let raw: any;
+      let registry;
+      try {
+        raw = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+        registry = parseTargetsRegistry(raw);
+      } catch (err: any) {
+        process.stderr.write(`kaggle-improve-run: invalid registry ${registryPath}: ${err?.message || err}\n`);
+        process.exit(1);
+      }
+      const parseJsonFlag = <T>(name: string): T | undefined => {
+        if (!flags[name]) return undefined;
+        try { return JSON.parse(flags[name]) as T; } catch (err: any) {
+          process.stderr.write(`kaggle-improve-run: invalid --${name} JSON: ${err?.message || err}\n`);
+          process.exit(1);
+        }
+      };
+      const truthy = (v: string | undefined) => v === '1' || v === 'true' || v === 'yes';
+      const hourJst = Number.isFinite(Number(flags.hour)) ? Number(flags.hour) : new Date().getHours();
+      const plan = planImprovementCycle({
+        registry,
+        hourJst,
+        envEnabled: flags['env-enabled'] !== undefined
+          ? truthy(flags['env-enabled'])
+          : truthy(process.env.KAGGLE_IMPROVE_ENABLED),
+        issueCount: Number.isFinite(Number(flags['issue-count'])) ? Number(flags['issue-count']) : 0,
+        cooldownActive: truthy(flags.cooldown),
+        signals: parseJsonFlag<Record<string, GuardSignals>>('signals'),
+        material: parseJsonFlag<Record<string, ImprovementMaterial>>('material'),
+      });
+
+      const execute = bare.has('execute');
+      const label = flags.label || 'auto-improve';
+      const created: Array<{ project: string; identifier: string; url: string }> = [];
+      const skipped: Array<{ project: string; reason: string }> = [];
+      if (execute && plan.active) {
+        for (const t of plan.targets) {
+          if (t.action !== 'draft' || !t.issueTitle || !t.issueBody) {
+            skipped.push({ project: t.project, reason: t.reason });
+            continue;
+          }
+          // Live re-check of the unfinished-cycle guard (guard 4) to avoid duplicate drafts.
+          const open = await findOpenAutoImproveIssue(t.project, label);
+          if (open) {
+            skipped.push({ project: t.project, reason: `open auto-improve issue already exists (${open})` });
+            continue;
+          }
+          try {
+            const res = await createDraftIssue({
+              projectName: t.project,
+              title: t.issueTitle,
+              description: t.issueBody,
+              labelName: label,
+            });
+            if (res) {
+              created.push({ project: t.project, identifier: res.identifier, url: res.url });
+              // Bump next_cycle for this target in the raw registry so the next cycle is 第(N+1)次.
+              for (const comp of raw.competitions ?? []) {
+                if (comp.key !== t.competition) continue;
+                for (const tgt of comp.targets ?? []) {
+                  if (tgt.repo === t.repo) tgt.next_cycle = (Number(tgt.next_cycle) || 1) + 1;
+                }
+              }
+            } else {
+              skipped.push({ project: t.project, reason: 'createDraftIssue returned null' });
+            }
+          } catch (err: any) {
+            skipped.push({ project: t.project, reason: `create failed: ${err?.message || err}` });
+          }
+        }
+        // Persist next_cycle bumps + last_run_at (best-effort; keeps doc keys intact).
+        try {
+          raw.state = raw.state && typeof raw.state === 'object' ? raw.state : {};
+          raw.state.created_today = (Number(raw.state.created_today) || 0) + created.length;
+          fs.writeFileSync(registryPath, JSON.stringify(raw, null, 2) + '\n');
+        } catch (err: any) {
+          process.stderr.write(`kaggle-improve-run: failed to persist registry: ${err?.message || err}\n`);
+        }
+      }
+
+      process.stdout.write(JSON.stringify({ plan, executed: execute, created, skipped }) + '\n');
+      process.exit(0);
+      break;
+    }
+    case 'kaggle-champion-plan': {
+      // SOT-1913/SOT-1934: decide the completion-triggered champion submission for a competition's
+      // targets (claude/gpt). No in-competition convergence/selection gate — always the current
+      // champion (registry submit.file), idempotent per day. Pure logic in kaggleImprovement.ts;
+      // scripts/ai/kaggle_targets_submit.sh fetches today's counts, calls this, then submits.
+      // Usage:
+      //   runner-cli.js kaggle-champion-plan [--registry <path>] [--competition <key>] [--hour <0-23>]
+      //       [--submitted <json {repo: todayCount}>]
+      // Prints the CompetitionSubmitPlan as JSON on stdout (exit 0). Fail-loud (exit 1) on bad input.
+      const flags: Record<string, string> = {};
+      for (let i = 0; i < args.length; i += 1) {
+        const a = args[i];
+        if (a && a.startsWith('--')) {
+          flags[a.slice(2)] = args[i + 1] ?? '';
+          i += 1;
+        }
+      }
+      const registryPath = flags.registry
+        || path.join(__dirname, '..', 'scripts', 'ai', 'kaggle_targets_registry.json');
+      let registry;
+      try {
+        registry = parseTargetsRegistry(JSON.parse(fs.readFileSync(registryPath, 'utf8')));
+      } catch (err: any) {
+        process.stderr.write(`kaggle-champion-plan: invalid registry ${registryPath}: ${err?.message || err}\n`);
+        process.exit(1);
+      }
+      // competition: explicit --competition wins, else resolve from --hour via the rotation table.
+      let competitionKey = flags.competition || '';
+      if (!competitionKey) {
+        const hourJst = Number.isFinite(Number(flags.hour)) ? Number(flags.hour) : new Date().getHours();
+        competitionKey = resolveCompetitionForHour(registry, hourJst) || '';
+      }
+      if (!competitionKey) {
+        process.stderr.write('kaggle-champion-plan: no competition (pass --competition or a scheduled --hour)\n');
+        process.exit(1);
+      }
+      let submittedByRepo: Record<string, number> = {};
+      if (flags.submitted) {
+        try {
+          submittedByRepo = JSON.parse(flags.submitted) as Record<string, number>;
+        } catch (err: any) {
+          process.stderr.write(`kaggle-champion-plan: invalid --submitted JSON: ${err?.message || err}\n`);
+          process.exit(1);
+        }
+      }
+      const plan = planCompetitionSubmission(registry, competitionKey, submittedByRepo);
+      if (!plan) {
+        process.stderr.write(`kaggle-champion-plan: competition "${competitionKey}" not in registry\n`);
+        process.exit(1);
+      }
+      process.stdout.write(JSON.stringify(plan) + '\n');
+      process.exit(0);
+      break;
+    }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, pipeline-graph, kaggle-plan, kaggle-improve-plan, ...\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, pipeline-graph, kaggle-plan, kaggle-improve-plan, kaggle-champion-plan, ...\n`);
       process.exit(1);
     }
   }

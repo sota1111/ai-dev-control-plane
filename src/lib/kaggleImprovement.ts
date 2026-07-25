@@ -369,6 +369,94 @@ ${failure}
 }
 
 /**
+ * SOT-1934 — 「取り組み完了時に提出」の champion 提出プラン（コンペ内収束/選定なし・純粋関数）。
+ *
+ * SOT-1904 の「直近2提出収束ロジック／2枠選定ゲート」は **この経路では使わない**。提出対象は常に
+ * そのターゲットの現 champion（registry の submit.file）。別スケジュールの提出 cron は持たず、当番
+ * コンペの取り組み完了時にこのプランで提出する。1枠=1コンペ一巡で各コンペ1日1提出が自然に成立する。
+ */
+export interface ChampionSubmitPlan {
+  competition: string;
+  kaggleCompetition: string;
+  repo: string;
+  lineage: Lineage;
+  /** submit = 現 champion を提出 / skip = 提出しない（理由付き）。 */
+  action: 'submit' | 'skip';
+  /** action=submit のときの提出物パス。 */
+  file?: string;
+  /** action=submit のときの提出メッセージ。 */
+  message?: string;
+  cap: number;
+  submittedToday: number;
+  reason: string;
+}
+
+/**
+ * 1ターゲットの完了トリガ提出を決める。コンペ内の収束/選定は行わず、常に現 champion を提出する。
+ *  - 当日すでに提出済み（submittedToday >= 1）なら skip（同日二重提出しない・冪等）。
+ *  - submit.file 未設定（提出物未整備）なら skip（呼び出し側が Discord 通知して安全側に倒す）。
+ *  - コンペの daily_submission_cap に達していれば skip。
+ *  - それ以外は submit（現 champion）。
+ */
+export function planChampionSubmission(
+  competition: ImprovementCompetition,
+  target: ImprovementTarget,
+  submittedToday: number
+): ChampionSubmitPlan {
+  const cap = competition.dailySubmissionCap;
+  const today = Number.isFinite(submittedToday) && submittedToday > 0 ? Math.floor(submittedToday) : 0;
+  const base = {
+    competition: competition.key,
+    kaggleCompetition: competition.kaggleCompetition,
+    repo: target.repo,
+    lineage: target.lineage,
+    cap,
+    submittedToday: today,
+  };
+  const file = target.submit?.file?.trim() || '';
+  const message = target.submit?.message?.trim()
+    || `auto-improve submit: ${target.repo} champion`;
+
+  if (today >= 1) {
+    return { ...base, action: 'skip', reason: `already submitted today (idempotent, no double submit): ${today}` };
+  }
+  if (today >= cap) {
+    return { ...base, action: 'skip', reason: `daily cap reached (${today}/${cap})` };
+  }
+  if (!file) {
+    return { ...base, action: 'skip', reason: 'no submit.file (提出物未整備) — skip + notify (safe side)' };
+  }
+  return { ...base, action: 'submit', file, message, reason: 'submit current champion (no in-competition selection gate)' };
+}
+
+/** SOT-1934 — 当番コンペの全ターゲット（claude/gpt）ぶんの提出プラン。 */
+export interface CompetitionSubmitPlan {
+  competition: string;
+  kaggleCompetition: string;
+  targets: ChampionSubmitPlan[];
+}
+
+/**
+ * コンペ key（または hourJst→rotation）から、その当番コンペの claude/gpt 両ターゲットの提出プランを作る。
+ * submittedByRepo は repo 名 → 当日提出数（未指定は 0）。純粋関数（Kaggle CLI は SOT-1934 のスクリプト側）。
+ */
+export function planCompetitionSubmission(
+  registry: TargetsRegistry,
+  competitionKey: string,
+  submittedByRepo: Record<string, number> = {}
+): CompetitionSubmitPlan | null {
+  const competition = getCompetition(registry, competitionKey);
+  if (!competition) return null;
+  return {
+    competition: competition.key,
+    kaggleCompetition: competition.kaggleCompetition,
+    targets: competition.targets.map((t) =>
+      planChampionSubmission(competition, t, submittedByRepo[t.repo] ?? 0)
+    ),
+  };
+}
+
+/**
  * その枠の当番コンペの2ターゲットについて「起案するか（draft）／ガードで抑制するか（skip）」を決め、
  * draft のものは起案Issueのタイトル/本文まで生成する。cron はこの結果をそのまま Issue 作成に使う。
  *
