@@ -16,6 +16,16 @@ final class BattleReplayTests: XCTestCase {
         XCTAssertEqual(snapshots[3].state.winner, "take")
     }
 
+    func testBoardSeatLayoutIsStableAcrossTurnChanges() {
+        let first = BoardSeatLayout(players: ["take", "matsu"])
+        let reversed = BoardSeatLayout(players: ["matsu", "take"])
+
+        XCTAssertEqual(first, reversed)
+        XCTAssertEqual(first?.viewer, "matsu")
+        XCTAssertEqual(first?.opponent, "take")
+        XCTAssertNil(BoardSeatLayout(players: ["matsu"]))
+    }
+
     @MainActor
     func testNavigationIsBoundedAndSupportsArbitraryPosition() {
         let model = BattleViewerModel()
