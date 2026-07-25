@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "arc-agi-3-evaluation/v1",
+  "runId": "sot-1958-initial-baselines",
+  "candidate": {
+    "id": "random-control-v1",
+    "artifactId": "git:01d8177"
+  },
+  "environment": {
+    "id": "arc-agi-3-baseline-contract",
+    "version": "1.0.0"
+  },
+  "maxSteps": 4,
+  "stages": [
+    {
+      "name": "screen",
+      "seeds": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106
+      ],
+      "episodes": [
+        {
+          "seed": 101,
+          "score": 0,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "69db39504065e07bff65e99e1b9f197ba15c0f9e764c6df95e3ac34a6059a21e"
+        },
+        {
+          "seed": 102,
+          "score": 0,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "bf43d1be8ce149da97d59fd0c3ec430b76fd73c4252e06dc84fb64ba519890c6"
+        },
+        {
+          "seed": 103,
+          "score": 1,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "e826b0610d4e8c86d540157af03c1c6ee2bbab81972fa2181734b583f4fee1ac"
+        },
+        {
+          "seed": 104,
+          "score": 2,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "3685a2ca4fb881f3f1a57b203dc2322139bb25e93eb7bd95d48b62d3595c0a78"
+        },
+        {
+          "seed": 105,
+          "score": 0,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "0ea5101ef76202c75efc05d783b65baaee53b16d30e163dbf255e8c713b4a27b"
+        },
+        {
+          "seed": 106,
+          "score": 0,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "305fa33cc6306074edddecf4f78f063dfccf4440ba87af1f1f6fc6c02835776e"
+        }
+      ],
+      "meanScore": 0.5
+    }
+  ],
+  "gate": {
+    "screenMinimumMean": 3,
+    "screenPassed": false,
+    "confirmExecuted": false
+  },
+  "fingerprint": "8224bea8d892bad326f65a4b84684b6342d79ccfd34e1c7be141c1ef680a3eb7"
+}
