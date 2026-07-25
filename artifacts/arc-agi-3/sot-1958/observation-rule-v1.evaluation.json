@@ -1,0 +1,165 @@
+{
+  "schemaVersion": "arc-agi-3-evaluation/v1",
+  "runId": "sot-1958-initial-baselines",
+  "candidate": {
+    "id": "observation-rule-v1",
+    "artifactId": "git:01d8177"
+  },
+  "environment": {
+    "id": "arc-agi-3-baseline-contract",
+    "version": "1.0.0"
+  },
+  "maxSteps": 4,
+  "stages": [
+    {
+      "name": "screen",
+      "seeds": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106
+      ],
+      "episodes": [
+        {
+          "seed": 101,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "61f3c9736772a1a5ffde96f6fa54afdf80250dde3e4f8730c5b23a647a61637a"
+        },
+        {
+          "seed": 102,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "7ae1bb34b670fdd375fef86444da65b5a122a48b082cfaad663fa48ae1a2515b"
+        },
+        {
+          "seed": 103,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "2938b8ae6d41f9f075aba880853337ff625f45f46533dcd8b0b753fe4ba1dfe9"
+        },
+        {
+          "seed": 104,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "61f3c9736772a1a5ffde96f6fa54afdf80250dde3e4f8730c5b23a647a61637a"
+        },
+        {
+          "seed": 105,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "7ae1bb34b670fdd375fef86444da65b5a122a48b082cfaad663fa48ae1a2515b"
+        },
+        {
+          "seed": 106,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "2938b8ae6d41f9f075aba880853337ff625f45f46533dcd8b0b753fe4ba1dfe9"
+        }
+      ],
+      "meanScore": 4
+    },
+    {
+      "name": "confirm",
+      "seeds": [
+        201,
+        202,
+        203,
+        204,
+        205,
+        206,
+        207,
+        208,
+        209,
+        210
+      ],
+      "episodes": [
+        {
+          "seed": 201,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "7ae1bb34b670fdd375fef86444da65b5a122a48b082cfaad663fa48ae1a2515b"
+        },
+        {
+          "seed": 202,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "2938b8ae6d41f9f075aba880853337ff625f45f46533dcd8b0b753fe4ba1dfe9"
+        },
+        {
+          "seed": 203,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "61f3c9736772a1a5ffde96f6fa54afdf80250dde3e4f8730c5b23a647a61637a"
+        },
+        {
+          "seed": 204,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "7ae1bb34b670fdd375fef86444da65b5a122a48b082cfaad663fa48ae1a2515b"
+        },
+        {
+          "seed": 205,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "2938b8ae6d41f9f075aba880853337ff625f45f46533dcd8b0b753fe4ba1dfe9"
+        },
+        {
+          "seed": 206,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "61f3c9736772a1a5ffde96f6fa54afdf80250dde3e4f8730c5b23a647a61637a"
+        },
+        {
+          "seed": 207,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "7ae1bb34b670fdd375fef86444da65b5a122a48b082cfaad663fa48ae1a2515b"
+        },
+        {
+          "seed": 208,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "2938b8ae6d41f9f075aba880853337ff625f45f46533dcd8b0b753fe4ba1dfe9"
+        },
+        {
+          "seed": 209,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "61f3c9736772a1a5ffde96f6fa54afdf80250dde3e4f8730c5b23a647a61637a"
+        },
+        {
+          "seed": 210,
+          "score": 4,
+          "steps": 4,
+          "end": "terminated",
+          "trajectoryHash": "7ae1bb34b670fdd375fef86444da65b5a122a48b082cfaad663fa48ae1a2515b"
+        }
+      ],
+      "meanScore": 4
+    }
+  ],
+  "gate": {
+    "screenMinimumMean": 3,
+    "screenPassed": true,
+    "confirmExecuted": true
+  },
+  "fingerprint": "339695bade7dba7fd964558e407984d0842168544a0cbf4d8825414b96042218"
+}
