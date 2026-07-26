@@ -7,6 +7,20 @@
 - `maxSteps` is mandatory and every episode ends as `terminated` or `step_limit`;
 - scores are the sum of finite rewards and each stage records its seeds, episodes, mean, and hashes.
 
+## Production FrameData / GameAction boundary
+
+`src/lib/arcAgi3Gateway.ts` is the production-contract adapter. It validates the gateway's `FrameData`
+shape (`game_id`, `guid`, 3D 0–15 colour grid, lifecycle state, level counts, echoed action, and legal
+actions, plus optional `full_reset`) and the selected `GameAction`. Actions 1–5 are parameterless; action 6 requires integer
+`x`/`y` coordinates in the 0–63 gateway range. An unavailable action is rejected before a step.
+
+`GatewayReplayEnvironment` feeds recorded production-shaped frames into the existing episode runner.
+Each replay pins its expected legal action and next frame; level-count changes become the episode
+reward, and `WIN`/`GAME_OVER` are terminal. `createGatewayAgent` converts a function from `FrameData`
+to `GameAction` into the existing evaluation agent interface. The committed replay fixture at
+`src/__fixtures__/arcAgi3GatewayReplay.json` exercises a two-step win and can run both screen and
+confirm without network access.
+
 ## Screen → confirm
 
 The two stages use explicit, non-empty, unique, disjoint seed sets. A candidate runs the larger
@@ -78,6 +92,16 @@ npx tsx src/arc-agi-3-baseline-cli.ts \
   --output artifacts/arc-agi-3/sot-1958
 ```
 
-Promotion here authorizes only the next gate: SOT-1959 must package the registered artifact behind
-the target exec interface and demonstrate it on Kaggle before it can be treated as a competition
-champion.
+Promotion here authorizes only the next gate. The SOT-1958 champion used a synthetic signal fixture;
+it is not a production champion. In `kaggle_targets_registry.json`, both ARC-AGI-3 lineages therefore
+remain `champion_status: "unproven"` under `evaluation_contract: "production-gateway"` until a
+production-contract confirm passes.
+
+For every candidate:
+
+1. Run a short production-contract screen. Only a passing candidate proceeds to an independently
+   configured confirm replay/run.
+2. On non-promotion, revert candidate code while retaining evaluation JSON, hypothesis, and rejection
+   reason in docs.
+3. On promotion, update the champion registry to the exact confirm fingerprint, verify the packaged
+   agent against the competition exec interface, and only then run the Kaggle proof.

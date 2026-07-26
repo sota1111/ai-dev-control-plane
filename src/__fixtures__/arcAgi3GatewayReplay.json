@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "arc-agi-3-gateway-replay/v1",
+  "environment": { "id": "ls20-recorded-contract", "version": "gateway-2026-06" },
+  "initial": {
+    "game_id": "ls20-fixture",
+    "guid": "fixture-guid",
+    "frame": [
+      [
+        [0, 1],
+        [0, 0]
+      ]
+    ],
+    "state": "NOT_FINISHED",
+    "levels_completed": 0,
+    "win_levels": 2,
+    "action_input": { "id": 1 },
+    "available_actions": [1, 4, 6]
+  },
+  "transitions": [
+    {
+      "action": { "action": 1 },
+      "frame": {
+        "game_id": "ls20-fixture",
+        "guid": "fixture-guid",
+        "frame": [
+          [
+            [0, 0],
+            [1, 0]
+          ]
+        ],
+        "state": "NOT_FINISHED",
+        "levels_completed": 1,
+        "win_levels": 2,
+        "action_input": { "id": 1 },
+        "available_actions": [4, 6]
+      }
+    },
+    {
+      "action": { "action": 4 },
+      "frame": {
+        "game_id": "ls20-fixture",
+        "guid": "fixture-guid",
+        "frame": [
+          [
+            [0, 0],
+            [0, 1]
+          ]
+        ],
+        "state": "WIN",
+        "levels_completed": 2,
+        "win_levels": 2,
+        "action_input": { "id": 4 },
+        "available_actions": [1]
+      }
+    }
+  ]
+}
