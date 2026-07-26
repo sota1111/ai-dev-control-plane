@@ -9,11 +9,14 @@ struct ContentView: View {
         NavigationStack {
             Group {
                 if let snapshot = model.current {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
+                    GeometryReader { proxy in
+                        VStack(alignment: .leading, spacing: CompactLayoutMetrics.sectionSpacing) {
                             timeline(snapshot)
                             BattleArenaView(state: snapshot.state)
-                        }.padding()
+                        }
+                        .padding(.horizontal, CompactLayoutMetrics.horizontalPadding)
+                        .padding(.vertical, CompactLayoutMetrics.verticalPadding)
+                        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
                     }
                 } else {
                     ContentUnavailableView("対戦ログを選択", systemImage: "doc.badge.plus", description: Text("ptcg-battle-log/v1 のJSONファイルを読み込みます"))
@@ -36,29 +39,61 @@ struct ContentView: View {
     }
 
     private func timeline(_ snapshot: ReplaySnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(model.battleId).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Label("時点 \(model.position) / \(model.snapshots.count - 1)", systemImage: "clock")
+                Text(model.battleId).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
-                Text("ターン \(snapshot.state.turn)")
+                Label("\(model.position)/\(model.snapshots.count - 1)", systemImage: "clock")
+                Text("T\(snapshot.state.turn)")
             }
-            Text(model.eventDescription).font(.headline).padding().frame(maxWidth: .infinity, alignment: .leading).background(.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            .font(.caption.bold())
+            Text(model.eventDescription)
+                .font(.caption.bold())
+                .lineLimit(2)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
             Slider(value: Binding(get: { Double(model.position) }, set: { model.position = Int($0) }), in: 0...Double(max(1, model.snapshots.count - 1)), step: 1)
                 .disabled(model.snapshots.count <= 1)
             HStack {
-                Button("先頭", systemImage: "backward.end.fill", action: model.first).disabled(!model.canGoBack)
-                Button("前", systemImage: "backward.fill", action: model.previous).disabled(!model.canGoBack)
+                timelineButton("先頭", systemImage: "backward.end.fill", action: model.first).disabled(!model.canGoBack)
+                timelineButton("前", systemImage: "backward.fill", action: model.previous).disabled(!model.canGoBack)
                 Spacer()
-                Button("次", systemImage: "forward.fill", action: model.next).disabled(!model.canGoForward)
-                Button("末尾", systemImage: "forward.end.fill", action: model.last).disabled(!model.canGoForward)
-            }.buttonStyle(.bordered)
-            if let winner = snapshot.state.winner { Label("勝者: \(winner)", systemImage: "trophy.fill").foregroundStyle(.green) }
+                if let winner = snapshot.state.winner {
+                    Label(winner, systemImage: "trophy.fill").font(.caption2.bold()).foregroundStyle(.green)
+                }
+                Spacer()
+                timelineButton("次", systemImage: "forward.fill", action: model.next).disabled(!model.canGoForward)
+                timelineButton("末尾", systemImage: "forward.end.fill", action: model.last).disabled(!model.canGoForward)
+            }
         }
+        .frame(height: CompactLayoutMetrics.timelineHeight)
+        .accessibilityIdentifier("compact-timeline")
+    }
+
+    private func timelineButton(_ label: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .frame(width: 32, height: 28)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel(label)
     }
 }
 
-private struct BattleArenaView: View {
+enum CompactLayoutMetrics {
+    static let horizontalPadding: CGFloat = 8
+    static let verticalPadding: CGFloat = 4
+    static let sectionSpacing: CGFloat = 4
+    static let timelineHeight: CGFloat = 124
+    static let playerBoardHeight: CGFloat = 250
+    static let iPhone14MinimumContentHeight: CGFloat = 640
+    static let totalContentHeight =
+        verticalPadding * 2 + timelineHeight + sectionSpacing + playerBoardHeight * 2
+}
+
+struct BattleArenaView: View {
     let state: BoardState
 
     var body: some View {
@@ -83,6 +118,7 @@ private struct BattleArenaView: View {
                         isOpponent: false
                     )
                 }
+                .frame(height: CompactLayoutMetrics.playerBoardHeight * 2)
                 .background(
                     LinearGradient(
                         colors: [.indigo.opacity(0.2), .cyan.opacity(0.12), .blue.opacity(0.24)],
@@ -100,7 +136,7 @@ private struct BattleArenaView: View {
     }
 }
 
-private struct PlayerBoardView: View {
+struct PlayerBoardView: View {
     let name: String
     let role: String
     let board: PlayerBoardState
@@ -108,80 +144,65 @@ private struct PlayerBoardView: View {
     let isOpponent: Bool
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 5) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(role).font(.caption).foregroundStyle(.secondary)
-                    Text(name).font(.title2.bold())
-                }
+                Text(role).font(.caption2).foregroundStyle(.secondary)
+                Text(name).font(.caption.bold()).lineLimit(1)
                 if isCurrent {
                     Label("行動中", systemImage: "bolt.fill")
-                        .font(.caption.bold())
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
                         .background(.yellow, in: Capsule())
                         .foregroundStyle(.black)
                 }
                 Spacer()
+                count("手札", board.handCount, icon: "rectangle.stack")
                 count("サイド", board.prizesRemaining, icon: "seal.fill")
             }
 
-            HStack(alignment: .center, spacing: 10) {
+            HStack(alignment: .center, spacing: 5) {
                 pile("山札", value: board.deckCount, icon: "rectangle.stack.fill")
                 CardView(card: board.active, zone: "バトル場", emphasized: true)
                 pile("トラッシュ", value: board.discard.count, icon: "trash.fill")
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("ベンチ").font(.caption.bold()).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("ベンチ").font(.caption2.bold()).foregroundStyle(.secondary)
                 if board.bench.isEmpty {
                     Text("ポケモンなし")
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 72)
-                        .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack { ForEach(board.bench) { CardView(card: $0, zone: nil, emphasized: false) } }
+                        HStack(spacing: 4) { ForEach(board.bench) { CardView(card: $0, zone: nil, emphasized: false) } }
                     }
                 }
             }
-
-            HStack {
-                Label("手札", systemImage: "rectangle.stack")
-                    .font(.caption.bold())
-                CardBackFan(count: board.handCount, isOpponent: isOpponent)
-                Spacer()
-                Text("\(board.handCount)枚").font(.headline.monospacedDigit())
-            }
-
-            DisclosureGroup("トラッシュの内容") {
-                Text(board.discard.isEmpty ? "なし" : board.discard.joined(separator: ", "))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .font(.caption)
         }
-        .padding()
+        .padding(7)
+        .frame(height: CompactLayoutMetrics.playerBoardHeight)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(role) \(name) の盤面")
     }
 
     private func count(_ label: String, _ value: Int, icon: String) -> some View {
         Label("\(label) \(value)", systemImage: icon)
-            .font(.caption.bold())
-            .padding(7)
+            .font(.caption2.bold())
+            .padding(4)
             .background(.background.opacity(0.8), in: Capsule())
     }
 
     private func pile(_ label: String, value: Int, icon: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon).font(.title2)
-            Text("\(value)").font(.headline.monospacedDigit())
+        VStack(spacing: 2) {
+            Image(systemName: icon).font(.caption)
+            Text("\(value)").font(.caption.bold().monospacedDigit())
             Text(label).font(.caption2)
         }
-        .frame(width: 58)
-        .frame(minHeight: 88)
-        .background(.background.opacity(0.82), in: RoundedRectangle(cornerRadius: 12))
+        .frame(width: 42, height: 72)
+        .background(.background.opacity(0.82), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -191,11 +212,11 @@ private struct CardView: View {
     let emphasized: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 2) {
             if let zone { Text(zone).font(.caption2.bold()).foregroundStyle(.secondary) }
             HStack {
                 Image(systemName: card == nil ? "plus" : "bolt.shield.fill")
-                Text(card?.name ?? "ポケモンなし").font(.headline).lineLimit(1)
+                Text(card?.name ?? "ポケモンなし").font(.caption.bold()).lineLimit(1)
             }
             if let card {
                 let remainingHp = max(0, card.maxHp - card.damage)
@@ -206,29 +227,29 @@ private struct CardView: View {
                     Spacer()
                     Text("ダメージ \(card.damage)")
                 }
-                .font(.caption.monospacedDigit())
+                .font(.caption2.monospacedDigit())
                 Label(
                     card.energy.isEmpty ? "エネルギーなし" : card.energy.joined(separator: "・"),
                     systemImage: "bolt.circle.fill"
                 )
-                .font(.caption)
+                .font(.caption2)
                 .lineLimit(1)
                 Label(
                     card.attacks?.map(\.displayText).joined(separator: "・").nilIfEmpty ?? "技なし",
                     systemImage: "burst.fill"
                 )
-                .font(.caption.bold())
-                .lineLimit(2)
+                .font(.caption2.bold())
+                .lineLimit(1)
             }
         }
-        .padding(10)
-        .frame(minWidth: emphasized ? 176 : 132, minHeight: emphasized ? 132 : 94, alignment: .leading)
-        .background(.background.opacity(0.94), in: RoundedRectangle(cornerRadius: 14))
+        .padding(6)
+        .frame(minWidth: emphasized ? 180 : 112, minHeight: emphasized ? 104 : 48, alignment: .leading)
+        .background(.background.opacity(0.94), in: RoundedRectangle(cornerRadius: 9))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: 9)
                 .stroke(emphasized ? Color.cyan : Color.secondary.opacity(0.45), lineWidth: emphasized ? 3 : 1)
         )
-        .shadow(color: emphasized ? .cyan.opacity(0.25) : .clear, radius: 8)
+        .shadow(color: emphasized ? .cyan.opacity(0.2) : .clear, radius: 4)
     }
 }
 
