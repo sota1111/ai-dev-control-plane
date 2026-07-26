@@ -1,6 +1,17 @@
 import Foundation
 import Combine
 
+enum CompactLayoutMetrics {
+    static let horizontalPadding: CGFloat = 8
+    static let verticalPadding: CGFloat = 4
+    static let sectionSpacing: CGFloat = 4
+    static let timelineHeight: CGFloat = 124
+    static let playerBoardHeight: CGFloat = 250
+    static let iPhone14MinimumContentHeight: CGFloat = 640
+    static let totalContentHeight =
+        verticalPadding * 2 + timelineHeight + sectionSpacing + playerBoardHeight * 2
+}
+
 @MainActor
 final class BattleViewerModel: ObservableObject {
     @Published private(set) var battleId = ""

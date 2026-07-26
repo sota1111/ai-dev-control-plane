@@ -2,6 +2,14 @@ import XCTest
 @testable import PTCGBattleViewer
 
 final class BattleReplayTests: XCTestCase {
+    func testCompactLayoutFitsIPhone14ContentHeightWithoutVerticalScrolling() {
+        XCTAssertLessThanOrEqual(
+            CompactLayoutMetrics.totalContentHeight,
+            CompactLayoutMetrics.iPhone14MinimumContentHeight
+        )
+        XCTAssertEqual(CompactLayoutMetrics.totalContentHeight, 636)
+    }
+
     private let log = """
     {"schemaVersion":"ptcg-battle-log/v1","battleId":"ios-test","initialState":{"turn":1,"currentPlayer":"matsu","players":{"matsu":{"active":null,"bench":[],"deckCount":2,"handCount":1,"discard":[],"prizesRemaining":6},"take":{"active":null,"bench":[],"deckCount":2,"handCount":1,"discard":[],"prizesRemaining":6}},"winner":null},"events":[{"type":"draw","player":"matsu","count":1},{"type":"end-turn","nextPlayer":"take"},{"type":"declare-winner","player":"take"}]}
     """.data(using: .utf8)!
