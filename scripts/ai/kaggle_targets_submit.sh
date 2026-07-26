@@ -173,6 +173,22 @@ for ((i=0; i<n_targets; i++)); do
   fi
   file="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].file)||"")' "$plan_json" "$i")"
   msg="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].message)||"")' "$plan_json" "$i")"
+  kernel="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);const t=(c?c.targets:[]).find(x=>x.repo===process.argv[3]);process.stdout.write((t&&t.submit&&t.submit.kernel)||"")' "$REGISTRY" "$COMP_KEY" "$repo")"
+  version="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);const t=(c?c.targets:[]).find(x=>x.repo===process.argv[3]);process.stdout.write(String((t&&t.submit&&t.submit.version)||""))' "$REGISTRY" "$COMP_KEY" "$repo")"
+  output="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);const t=(c?c.targets:[]).find(x=>x.repo===process.argv[3]);process.stdout.write((t&&t.submit&&t.submit.output)||"")' "$REGISTRY" "$COMP_KEY" "$repo")"
+  if [[ -n "$kernel" && -n "$version" && -n "$output" ]]; then
+    kernel_status="$(kaggle kernels status "$kernel" 2>&1 || true)"
+    if [[ "$kernel_status" != *COMPLETE* ]]; then
+      echo "  → ERROR: Notebook kernel is not COMPLETE: $kernel ($kernel_status)" >&2
+      rc_all=2
+      continue
+    fi
+    echo "  → Notebook提出: $repo kernel=$kernel version=$version output=$output"
+    kaggle competitions submit -c "$COMP_SLUG" -k "$kernel" -v "$version" -f "$output" -m "$msg"; rc=$?
+    echo "    exit=$rc"
+    [[ $rc -ne 0 ]] && rc_all=$rc
+    continue
+  fi
   if [[ ! -f "$file" ]]; then
     echo "  → NOTICE: 提出物が見つかりません: $file （$repo）。ビルド後に再実行してください。" >&2
     bash "$SCRIPT_DIR/notify_discord.sh" "kaggle提出 skip $repo: 提出物なし $file" >/dev/null 2>&1 || true

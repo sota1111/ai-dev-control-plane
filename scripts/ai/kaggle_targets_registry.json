@@ -128,7 +128,7 @@
     },
     {
       "key": "rogii",
-      "kaggle_competition": "rogii-wellbore-geology",
+      "kaggle_competition": "rogii-wellbore-geology-prediction",
       "daily_submission_cap": 5,
       "submission_mode": "both",
       "targets": [
@@ -137,7 +137,13 @@
           "repo": "rogii-claude",
           "project": "rogii-claude",
           "workers_directive": "solo=claude:opus, handoff=off",
-          "submit": { "file": "", "message": "auto-improve submit: rogii-claude champion" },
+          "submit": {
+            "file": ".targets/rogii-claude/submission.csv",
+            "kernel": "sota1111/rogii-claude-baseline",
+            "version": 1,
+            "output": "submission.csv",
+            "message": "auto-improve submit: rogii-claude champion"
+          },
           "next_cycle": 1
         },
         {
