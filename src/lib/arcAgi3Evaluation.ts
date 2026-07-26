@@ -13,12 +13,12 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-export interface ArcAgi3Reset<Observation extends JsonValue> {
+export interface ArcAgi3Reset<Observation> {
   observation: Observation;
   info?: Record<string, JsonValue>;
 }
 
-export interface ArcAgi3Step<Observation extends JsonValue> {
+export interface ArcAgi3Step<Observation> {
   observation: Observation;
   reward: number;
   terminated: boolean;
@@ -26,14 +26,14 @@ export interface ArcAgi3Step<Observation extends JsonValue> {
 }
 
 /** Minimal adapter boundary. Implementations must derive all randomness from reset(seed). */
-export interface ArcAgi3Environment<Action extends JsonValue, Observation extends JsonValue> {
+export interface ArcAgi3Environment<Action, Observation> {
   readonly environmentId: string;
   readonly environmentVersion: string;
   reset(seed: number): Promise<ArcAgi3Reset<Observation>> | ArcAgi3Reset<Observation>;
   step(action: Action): Promise<ArcAgi3Step<Observation>> | ArcAgi3Step<Observation>;
 }
 
-export interface ArcAgi3Agent<Action extends JsonValue, Observation extends JsonValue> {
+export interface ArcAgi3Agent<Action, Observation> {
   readonly candidateId: string;
   readonly artifactId: string;
   act(
@@ -128,7 +128,7 @@ function assertJson(value: unknown, label: string): asserts value is JsonValue {
   }
 }
 
-export async function runArcAgi3Episode<Action extends JsonValue, Observation extends JsonValue>(
+export async function runArcAgi3Episode<Action, Observation>(
   environment: ArcAgi3Environment<Action, Observation>,
   agent: ArcAgi3Agent<Action, Observation>,
   seed: number,
@@ -164,7 +164,7 @@ export async function runArcAgi3Episode<Action extends JsonValue, Observation ex
   return { seed, score, steps: maxSteps, end: 'step_limit', trajectoryHash: sha256(trajectory) };
 }
 
-async function runStage<Action extends JsonValue, Observation extends JsonValue>(
+async function runStage<Action, Observation>(
   name: EvaluationStage['name'],
   seeds: number[],
   createEnvironment: () => ArcAgi3Environment<Action, Observation>,
@@ -183,10 +183,7 @@ async function runStage<Action extends JsonValue, Observation extends JsonValue>
 }
 
 /** Screen and confirm use disjoint seeds and preserve one candidate identity across both stages. */
-export async function evaluateArcAgi3Candidate<
-  Action extends JsonValue,
-  Observation extends JsonValue,
->(
+export async function evaluateArcAgi3Candidate<Action, Observation>(
   plan: ArcAgi3EvaluationPlan,
   createEnvironment: () => ArcAgi3Environment<Action, Observation>,
   agent: ArcAgi3Agent<Action, Observation>
