@@ -209,6 +209,7 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('pokemon-tcg-ai-battle');
       expect(body).toContain('rank 42 / score 571.8');
       expect(body).toContain('SOT-1866 champion 収束');
+      expect(body).toContain('改善の実装・学習・検証では GPU の使用を許可する。');
       // 未指定の材料は安全側のプレースホルダになる。
       expect(body).toContain('(該当なし)');
     });
