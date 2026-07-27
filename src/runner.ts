@@ -1056,6 +1056,24 @@ function classifyRunResult({ code, output, completion }: ClassifyRunArgs): Class
 interface RunItemOutcome {
   lockConflict: boolean;
   detached: boolean;
+  dependencyBlocked?: boolean;
+}
+
+function requeueDependencyBlocked(item: QueueItem, blockers: string[]): void {
+  const retryAt = new Date(Date.now() + LOCK_CONFLICT_BACKOFF_MS).toISOString();
+  enqueue(item.issueId, item.trigger || 'queue', retryAt, {
+    issueIdentifier: item.issueIdentifier || null,
+    reason: 'dependency_blocked',
+    priority: item.priority ?? null,
+    priorityLabel: item.priorityLabel ?? null,
+    parentIssueId: item.parentIssueId ?? null,
+    parentIssueIdentifier: item.parentIssueIdentifier ?? null,
+    queueGroup: item.queueGroup ?? null,
+    queueGroupOrder: item.queueGroupOrder ?? null,
+  });
+  log('QUEUE', `dependency blocked — keeping Todo issue for a later round (retryAt=${retryAt}, blockers=${blockers.join(', ')})`, {
+    issue: item.issueId,
+  });
 }
 
 async function runItem(item: QueueItem, options: TriggerOptions = {}): Promise<RunItemOutcome> {
@@ -1069,6 +1087,10 @@ async function runItem(item: QueueItem, options: TriggerOptions = {}): Promise<R
   const eligibility = await getIssueExecutionEligibility(issueId);
   if (!eligibility.eligible) {
     log('RUN', `skipped: ${eligibility.reason}`, { trigger: item.trigger || 'queue', issue: issueId });
+    if (eligibility.waitingOnBlockers?.length) {
+      requeueDependencyBlocked(item, eligibility.waitingOnBlockers);
+      return { lockConflict: false, detached: false, dependencyBlocked: true };
+    }
     return { lockConflict: false, detached: false };
   }
 
@@ -1396,6 +1418,9 @@ async function drainQueuePooled(maxParallel: number): Promise<void> {
     const eligibility = await getIssueExecutionEligibility(item.issueId);
     if (!eligibility.eligible) {
       log('QUEUE', `drain(pool): skipped issueId=${item.issueId} reason=${eligibility.reason}`, { issue: item.issueId });
+      if (eligibility.waitingOnBlockers?.length) {
+        requeueDependencyBlocked(item, eligibility.waitingOnBlockers);
+      }
       continue;
     }
     const lane = await resolveConcurrencyLane(item);
@@ -1520,6 +1545,10 @@ async function drainQueue(): Promise<void> {
     const eligibility = await getIssueExecutionEligibility(item.issueId);
     if (!eligibility.eligible) {
       log('QUEUE', `drain: skipped issueId=${item.issueId} reason=${eligibility.reason}`, { issue: item.issueId });
+      if (eligibility.waitingOnBlockers?.length) {
+        requeueDependencyBlocked(item, eligibility.waitingOnBlockers);
+        break;
+      }
       // Reset group tracking if skipped
       lastProcessedGroup = null;
       continue;
@@ -1548,9 +1577,13 @@ async function drainQueue(): Promise<void> {
       addInflight(item.issueId);
       setCurrentIssue(item);
       outcome = await runItem(item);
-      processedCount++;
-      // Track this item's issueId as the last processed group anchor for child issues
-      lastProcessedGroup = item.issueId || item.issueIdentifier || null;
+      if (!outcome.dependencyBlocked) {
+        processedCount++;
+        // Track this item's issueId as the last processed group anchor for child issues
+        lastProcessedGroup = item.issueId || item.issueIdentifier || null;
+      } else {
+        lastProcessedGroup = null;
+      }
     } catch (err: any) {
       log('QUEUE', `drain error: ${err.message}`, { issue: item.issueId });
       lastProcessedGroup = null;

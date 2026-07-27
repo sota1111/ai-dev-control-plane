@@ -1498,6 +1498,45 @@ describe('runner', () => {
       expect(logs.some(l => l.includes('task completion not verified: state is "In Progress"'))).toBe(true);
     });
 
+    it('keeps a dependency-blocked Todo issue queued for a later round without starting a worker', async () => {
+      const item: any = queueItem('SOT-2020-B', 1);
+      item.issueIdentifier = 'SOT-2020-B';
+      fs.readFileSync.mockReturnValue('[]');
+      setupLinearMocks([
+        { issue: {
+          id: 'dependent',
+          identifier: 'SOT-2020-B',
+          archivedAt: null,
+          state: { type: 'unstarted', name: 'Todo' },
+          labels: { nodes: [] },
+          inverseRelations: { nodes: [{
+            type: 'blocks',
+            relatedIssue: {
+              id: 'blocker',
+              identifier: 'SOT-2020-A',
+              archivedAt: null,
+              state: { type: 'started', name: 'In Progress' },
+            },
+          }] },
+        } },
+      ]);
+
+      const outcome = await runner.runItem(item);
+      const queueWrite = [...fs.writeFileSync.mock.calls]
+        .reverse()
+        .find((call: any[]) => String(call[0]).includes('runner.queue.json.tmp'));
+      const queued = JSON.parse(queueWrite?.[1] as string);
+
+      expect(outcome.dependencyBlocked).toBe(true);
+      expect(spawn).not.toHaveBeenCalled();
+      expect(queued).toHaveLength(1);
+      expect(queued[0]).toEqual(expect.objectContaining({
+        issueId: 'SOT-2020-B',
+        reason: 'dependency_blocked',
+      }));
+      expect(new Date(queued[0].retryAt).getTime()).toBeGreaterThan(Date.now());
+    });
+
     it('exits 0 and output contains COMPLETION_CONTRACT: INCOMPLETE: skips success cleanup', async () => {
       const item: any = queueItem('SOT-101', 1);
       mockRunAutoExit(0, '... COMPLETION_CONTRACT: INCOMPLETE reason=test-reason ...');
