@@ -1,50 +1,44 @@
-# Final Report — SOT-2001
+# Final Report — SOT-1965
 
 ## Summary
 
-Packaged the registered `observation-rule-v1` ARC-AGI-3 champion as a
-dependency-free JSONL exec entrypoint and an official Kaggle framework kernel.
-The kernel reached `COMPLETE`; the authenticated submission attempt was refused
-before reference creation because Kaggle reported `0 submissions remaining
-today`, and that external-cap skip is recorded without attributing another
-lineage's score to this champion.
+Added `multi-step-state-guard-v1`, a session-local risk-state detector that preserves the existing
+single-tool defense and blocks a later external transition after sensitive context has been staged for
+deferred use. Added reproducible screen/confirm scenarios, comparison evidence, regression tests, and
+the promotion decision.
 
 ## Changed Files
 
-- `scripts/ai/arc_agi3_champion_exec.py` — deterministic stdin/stdout contract.
-- `src/__tests__/arcAgi3ChampionExec.test.ts` — subprocess, schema,
-  determinism, invalid-input, and fingerprint tests.
-- `kaggle/arc-agi-3-gpt-champion/` — official framework adapter and kernel.
-- `scripts/ai/kaggle_targets_registry.json` — exact competition, kernel,
-  candidate, and evaluation fingerprint wiring.
-- `docs/ai/kaggle/SOT-2001-champion-submission.md` — gate and submission
-  evidence.
+- `src/lib/agentSecurityMultiStepDefense.ts` — stateful detector and multi-step evaluator.
+- `src/__fixtures__/agentSecurityMultiStep.v1.json` — four attack and four normal sequences.
+- `src/agent-security-multi-step-cli.ts` — reproducible champion/candidate comparison CLI.
+- `src/__tests__/agentSecurityEvaluation.test.ts` — state transitions and regression coverage.
+- `artifacts/agent-security/sot-1965/` — screen/confirm comparison evidence.
+- `docs/agent-security-evaluation.md` — metrics, reproduction command, and non-promotion rationale.
 
 ## Verification
 
 - `npm run lint` — pass.
 - `npm run typecheck` — pass.
-- `npm test -- --runInBand` — 96 suites / 1165 tests pass.
-- Python entrypoint and kernel sources compile — pass.
-- `git diff --check` — pass.
-- E2E — N/A; this repository defines no `e2e` script.
-- Kernel `sota1111/arc-agi-3-gpt-registered-champion`, version 3 — `COMPLETE`.
+- `npm test -- --runInBand` — 97 suites / 1,177 tests pass.
+- `npm run lint:eslint -- --quiet` — pass.
+- Prettier check and `git diff --check` — pass.
+- E2E — N/A; this repository defines no `e2e` script and no UI changed.
 
 ## Acceptance Criteria
 
-- [x] Exec manifest exactly matches the current champion registry and confirmed
-  evaluation fingerprint.
-- [x] Champion passes subprocess exec, output schema, determinism, malformed
-  input, and production replay equivalence tests.
-- [x] Kaggle submission was attempted with a complete artifact; the exact daily
-  quota skip is preserved with no fabricated ref/status/score.
-- [x] Existing screen→confirm promotion evidence is resolved and no new rejected
-  candidate exists to revert.
+- [x] Multi-step attack success rate was compared with the champion: `1.00 → 0.00`.
+- [x] Normal multi-step success stayed `1.00`; existing single-step attack/normal metrics stayed
+      `0.00` / `0.625`.
+- [x] Screen passed before confirm executed, and both stages are recorded independently.
+- [x] The local candidate strictly dominated the champion, but production promotion was withheld
+      because target exec packaging and a candidate-bound Kaggle artifact are unavailable.
 
 ## Risks
 
-Version 3 still needs a submission after the shared ARC-AGI-3 daily quota
-resets. Until then it has no submission-specific score.
+The detector remains a control-plane candidate. The `agent-security-gpt` registry has an empty
+`submit.file`, so production promotion still requires packaging into the target agent, exec
+compatibility verification, and then Kaggle proof in that order.
 
 ## Acceptance: PASS
 ## Next Action: READY_FOR_REVIEW
