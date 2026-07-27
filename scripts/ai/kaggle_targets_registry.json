@@ -56,7 +56,7 @@
     },
     {
       "key": "arc-agi-2",
-      "kaggle_competition": "arc-prize-2026",
+      "kaggle_competition": "arc-prize-2026-arc-agi-2",
       "daily_submission_cap": 1,
       "submission_mode": "alternate",
       "targets": [
@@ -65,7 +65,10 @@
           "repo": "arc-agi-2-claude",
           "project": "arc-agi-2-claude",
           "workers_directive": "solo=claude:opus, handoff=off",
-          "submit": { "file": "/workspaces/arc-agi-2-claude/main.py", "message": "auto-improve submit: arc-agi-2-claude champion" },
+          "submit": {
+            "file": "/workspaces/arc-agi-2-claude/main.py",
+            "message": "auto-improve submit: arc-agi-2-claude champion"
+          },
           "next_cycle": 1
         },
         {
@@ -73,7 +76,16 @@
           "repo": "arc-agi-2-gpt",
           "project": "arc-agi-2-gpt",
           "workers_directive": "solo=codex:gpt-5.6-sol, handoff=off",
-          "submit": { "file": "/workspaces/arc-agi-2-gpt/main.py", "message": "auto-improve submit: arc-agi-2-gpt champion" },
+          "champion_status": "exec-verified",
+          "submit": {
+            "file": "submission.json",
+            "kernel": "sota1111/arc-agi-2-gpt-identity-champion",
+            "version": 3,
+            "output": "submission.json",
+            "candidate_id": "identity",
+            "artifact_fingerprint": "sha256:94dc28395abe6c5046d1bf9af8376913e5a83aaa8fe11164656f54195f1f1a8b",
+            "message": "auto-improve submit: arc-agi-2-gpt identity champion"
+          },
           "next_cycle": 1
         }
       ]
@@ -125,7 +137,10 @@
           "repo": "agent-security-claude",
           "project": "agent-security-claude",
           "workers_directive": "solo=claude:opus, handoff=off",
-          "submit": { "file": "", "message": "auto-improve submit: agent-security-claude champion" },
+          "submit": {
+            "file": "",
+            "message": "auto-improve submit: agent-security-claude champion"
+          },
           "next_cycle": 1
         },
         {
