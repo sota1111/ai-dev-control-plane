@@ -1,0 +1,929 @@
+{
+  "issue": "SOT-2005",
+  "inputs": {
+    "dataset_commit": "f3283f727488ad98fe575ea6a5ac981e4a188e49",
+    "dataset_cohort": "data/evaluation",
+    "solver_commit": "34dc2403bdc69e09c940df76fe729064cbe7ebcb",
+    "kaggle_submission_ref": "55009090"
+  },
+  "baseline": {
+    "tasks": 120,
+    "test_cases": 167,
+    "submission_exact_tasks": 0,
+    "train_supported_tasks": 0,
+    "fallback_tasks": 120,
+    "identity_attempt_1_test_cases": 167,
+    "duplicate_attempt_test_cases": 167
+  },
+  "transform_metrics": {
+    "anti-transpose": {
+      "train_consistent": 0,
+      "test_exact": 0
+    },
+    "constant-output": {
+      "train_consistent": 0,
+      "test_exact": 0
+    },
+    "crop-nonzero": {
+      "train_consistent": 0,
+      "test_exact": 0
+    },
+    "flip-horizontal": {
+      "train_consistent": 0,
+      "test_exact": 0
+    },
+    "flip-vertical": {
+      "train_consistent": 0,
+      "test_exact": 0
+    },
+    "global-colour-map": {
+      "train_consistent": 0,
+      "test_exact": 0
+    },
+    "identity": {
+      "train_consistent": 0,
+      "test_exact": 0
+    },
+    "rotate-180": {
+      "train_consistent": 0,
+      "test_exact": 0
+    },
+    "rotate-270": {
+      "train_consistent": 0,
+      "test_exact": 0
+    },
+    "rotate-90": {
+      "train_consistent": 0,
+      "test_exact": 0
+    },
+    "scale": {
+      "train_consistent": 0,
+      "test_exact": 0
+    },
+    "tile": {
+      "train_consistent": 0,
+      "test_exact": 0
+    },
+    "transpose": {
+      "train_consistent": 0,
+      "test_exact": 0
+    }
+  },
+  "unsupported_categories": {
+    "context-dependent-recolour-or-content-transform": 81,
+    "object-selection-or-extraction": 27,
+    "mixed-dimension-structural-transform": 9,
+    "conditional-expansion-or-composition": 3
+  },
+  "submission_contract": {
+    "local_evaluation_failures": [],
+    "deployed_output_failures": [],
+    "sample_task_count": 240,
+    "deployed_task_count": 240,
+    "solver_sha256": "03db77b53e16bba84d6283d75b91826f75a0cb0f9735b23a40b2d2ee1bd727ad",
+    "deployed_source_sha256": "03db77b53e16bba84d6283d75b91826f75a0cb0f9735b23a40b2d2ee1bd727ad",
+    "source_matches_deployed": true
+  },
+  "tasks": [
+    {
+      "task": "0934a4d8",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "135a2760",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "136b0064",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "13e47133",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "142ca369",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "16b78196",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "16de56c4",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "1818057f",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "195c6913",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "1ae2feb7",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "20270e3b",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "mixed-dimension-structural-transform"
+    },
+    {
+      "task": "20a9e565",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "21897d95",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "mixed-dimension-structural-transform"
+    },
+    {
+      "task": "221dfab4",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "247ef758",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "269e22fb",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "conditional-expansion-or-composition"
+    },
+    {
+      "task": "271d71e2",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "28a6681f",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "291dc1e1",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "mixed-dimension-structural-transform"
+    },
+    {
+      "task": "2b83f449",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "2ba387bc",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "2c181942",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "2d0172a1",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "31f7f899",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "332f06d7",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "35ab12c3",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "36a08778",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "38007db0",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "3a25b0d8",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "3dc255db",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "3e6067c3",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "409aa875",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "446ef5d2",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "45a5af55",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "conditional-expansion-or-composition"
+    },
+    {
+      "task": "4a21e3da",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "4c3d4a41",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "4c416de3",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "4c7dc4dd",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "4e34c42c",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "mixed-dimension-structural-transform"
+    },
+    {
+      "task": "53fb4810",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "5545f144",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "581f7754",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "58490d8a",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "58f5dbd5",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "5961cc34",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "5dbc8537",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "62593bfd",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "64efde09",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "65b59efc",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "mixed-dimension-structural-transform"
+    },
+    {
+      "task": "67e490f4",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "6e453dd6",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "6e4f6532",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "6ffbe589",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "71e489b6",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "7491f3cf",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "7666fa5d",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "78332cb0",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "mixed-dimension-structural-transform"
+    },
+    {
+      "task": "7b0280bc",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "7b3084d4",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "7b5033c1",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "mixed-dimension-structural-transform"
+    },
+    {
+      "task": "7b80bb43",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "7c66cb00",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "7ed72f31",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "800d221b",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "80a900e0",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "8698868d",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "88bcf3b4",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "88e364bc",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "89565ca0",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "898e7135",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "mixed-dimension-structural-transform"
+    },
+    {
+      "task": "8b7bacbf",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "8b9c3697",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "8e5c0c38",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "8f215267",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "8f3a5a89",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "9385bd28",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "97d7923e",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "981571dc",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "9aaea919",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "9bbf930d",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "a251c730",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "a25697e4",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "a32d8b75",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "a395ee82",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "a47bf94d",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "a6f40cea",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "aa4ec2a5",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "abc82100",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "b0039139",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "b10624e5",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "b5ca7ac4",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "b6f77b65",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "b99e7126",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "b9e38dc0",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "bf45cf4b",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "c4d067a0",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "c7f57c3e",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "cb2d8a2c",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "cbebaa4b",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "d35bdbdc",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "d59b0160",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "d8e07eb2",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "da515329",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "db0c5428",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "db695cfb",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "dbff022c",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "dd6b8c4b",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "de809cff",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "dfadab01",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "e12f9a14",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "e3721c99",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "e376de54",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "e8686506",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "e87109e9",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "edb79dae",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "eee78d87",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "conditional-expansion-or-composition"
+    },
+    {
+      "task": "f560132c",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    },
+    {
+      "task": "f931b4a8",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "mixed-dimension-structural-transform"
+    },
+    {
+      "task": "faa9f03d",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "context-dependent-recolour-or-content-transform"
+    },
+    {
+      "task": "fc7cae8d",
+      "train_consistent_programs": [],
+      "test_exact_programs": [],
+      "submission_exact": false,
+      "unsupported_category": "object-selection-or-extraction"
+    }
+  ]
+}
