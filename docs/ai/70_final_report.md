@@ -1,47 +1,49 @@
-# Final Report — SOT-2012
+# Final Report — SOT-1966
 
 ## Summary
 
-SOT-2009 did not promote its candidate, so the `identity` incumbent was packaged
-into the dedicated ARC-AGI-2 GPT kernel. Target `main.py`, packaged
-`submission.py`, and the registry fingerprint all match SHA-256
-`94dc28395abe6c5046d1bf9af8376913e5a83aaa8fe11164656f54195f1f1a8b`.
+The screen audit confirmed that the production champion remains SOT-1963
+`keyword-guard-v1`; neither SOT-1964 nor SOT-1965 was promoted. Confirm then
+checked the downloaded official competition runtime and found a hard contract
+mismatch: Kaggle loads a red-team `AttackAlgorithm` from `attack.py`, while the
+champion is a defense detector returning `block`/`allow`.
 
-Kernel version 3 reached `COMPLETE`. The last submission was Claude lineage, so
-the alternate planner selected GPT. The GPT attempt was rejected before ref
-allocation because the competition's one-per-day slot was already consumed by
-ref `55016869`; the exact evidence is recorded in
-`docs/ai/kaggle/SOT-2012-champion-submission.md`.
+No misleading submission was made. The exact skip reason and the existing
+unrelated red-team baseline submission are recorded in machine-readable and
+human-readable evidence. Automatic submission remains disabled for this target.
 
 ## Changed Files
 
-- `kaggle/arc-agi-2-gpt-champion/` — offline kernel source and metadata.
-- `scripts/ai/kaggle_targets_registry.json` — champion identity, fingerprint, kernel version.
-- `src/__tests__/arcAgi2GptChampionExec.test.ts` — exec, schema, and fingerprint gates.
-- `docs/ai/kaggle/SOT-2012-champion-submission.md` — publication/submission evidence.
+- `artifacts/agent-security/sot-1966/submission-audit.json` — champion binding,
+  screen/confirm results, Kaggle observation, and terminal skip decision.
+- `docs/ai/kaggle/SOT-1966-champion-submission.md` — compatibility analysis and
+  concrete skip reason.
+- `src/__tests__/agentSecuritySubmissionAudit.test.ts` — regression gates for
+  champion identity, track mismatch, and disabled automatic submission.
 
 ## Verification
 
 - Lint: pass.
 - Typecheck: pass.
-- Unit tests: 98 suites / 1,180 tests pass.
-- Focused exec/schema/fingerprint tests: pass (3/3).
-- Kaggle planner tests: pass (33/33).
-- E2E: N/A; this repository defines no e2e script and no UI changed.
-- Kernel: version 3, `COMPLETE`.
-- Diff review: pass.
+- Unit tests: 99 suites / 1,183 tests pass.
+- E2E: N/A; the repository has no e2e script and no UI changed.
+- Kaggle CLI 2.2.4: official bundle downloaded; competition submissions and
+  `sota1111/agent-security-gpt-cli-baseline` inspected.
+- Diff review: pass; only SOT-1966 evidence, test, and this report changed.
 
 ## Acceptance Criteria
 
-- [x] GPT dedicated kernel reached `COMPLETE`.
-- [x] Champion and packaged artifact fingerprints match.
-- [x] Offline exec and submission schema are verified.
-- [x] Alternate GPT attempt and concrete daily-cap skip evidence are recorded.
+- [x] The audited artifact identity matches the unchanged champion.
+- [x] Exec compatibility and Kaggle contract confirmation are recorded.
+- [x] The concrete submission skip reason is recorded.
+- [x] Screen preceded confirm; no non-promoted behavior was included.
 
 ## Risks
 
-The daily cap prevented a new submission ref. Version 3 remains reusable in the
-next GPT slot without rebuilding.
+The existing ref `55016915` is a successful red-team baseline run but is not
+proof of `keyword-guard-v1`. A future submission requires an intentional
+champion/competition track alignment; renaming or wrapping the current detector
+would not preserve its identity.
 
 ## Acceptance: PASS
 ## Next Action: READY_FOR_REVIEW
