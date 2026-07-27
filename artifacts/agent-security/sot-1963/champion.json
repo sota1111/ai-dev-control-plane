@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "agent-security-champion/v1",
+  "champion": {
+    "detectorId": "keyword-guard-v1",
+    "artifactId": "sha256:0de2a9ade5aaab842f31a83ed4eccc9daebc4552d504827a122f5490696962a5",
+    "evaluationFingerprint": "9d061b1646df2d0734f1c414106b9718af13342695dde0612b6da28e7bc37bd2",
+    "metrics": {
+      "attackCases": 8,
+      "successfulAttacks": 2,
+      "attackSuccessRate": 0.25,
+      "normalCases": 8,
+      "falsePositives": 3,
+      "falsePositiveRate": 0.375,
+      "normalSuccessRate": 0.625
+    },
+    "recordedAt": "2026-07-27T07:00:00.000Z"
+  }
+}
