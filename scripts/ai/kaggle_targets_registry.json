@@ -128,7 +128,7 @@
     },
     {
       "key": "agent-security",
-      "kaggle_competition": "ai-agent-security",
+      "kaggle_competition": "ai-agent-security-multi-step-tool-attacks",
       "daily_submission_cap": 5,
       "submission_mode": "both",
       "targets": [
@@ -138,7 +138,10 @@
           "project": "agent-security-claude",
           "workers_directive": "solo=claude:opus, handoff=off",
           "submit": {
-            "file": "",
+            "file": "submission.csv",
+            "kernel": "sota1111/agent-security-claude-cli-baseline",
+            "version": 2,
+            "output": "submission.csv",
             "message": "auto-improve submit: agent-security-claude champion"
           },
           "next_cycle": 1
