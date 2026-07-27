@@ -80,7 +80,7 @@
     },
     {
       "key": "arc-agi-3",
-      "kaggle_competition": "arc-prize-2026-agi-3",
+      "kaggle_competition": "arc-prize-2026-arc-agi-3",
       "daily_submission_cap": 1,
       "submission_mode": "alternate",
       "targets": [
@@ -100,8 +100,16 @@
           "project": "arc-agi-3-gpt",
           "workers_directive": "solo=codex:gpt-5.6-sol, handoff=off",
           "evaluation_contract": "production-gateway",
-          "champion_status": "unproven",
-          "submit": { "file": "", "message": "auto-improve submit: arc-agi-3-gpt champion" },
+          "champion_status": "exec-verified",
+          "submit": {
+            "file": "submission.parquet",
+            "kernel": "sota1111/arc-agi-3-gpt-registered-champion",
+            "version": 3,
+            "output": "submission.parquet",
+            "candidate_id": "observation-rule-v1",
+            "evaluation_fingerprint": "339695bade7dba7fd964558e407984d0842168544a0cbf4d8825414b96042218",
+            "message": "auto-improve submit: arc-agi-3-gpt champion"
+          },
           "next_cycle": 1
         }
       ]
