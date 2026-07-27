@@ -489,8 +489,10 @@ Choose the child state from the work it represents:
 
 - **Implementation children:** always create them in `Todo`. When order matters, connect later children
   with Linear `blockedBy` relations to the prerequisite child. A waiting child remains `Todo` and Linear
-  displays its blocked state from the relation; never park it in `In Review`. This keeps every child in
-  the automatic queue while `queueOrdering` holds it until its prerequisite completes.
+  displays its blocked state from the relation; never park it in `In Review`. Dependency-waiting work
+  must not move to `On Hold` either. This keeps every child in the automatic queue: the runner preserves
+  blocked children with backoff and checks them again across later drain/reaper rounds until each
+  prerequisite completes.
 - **Planning-only children:** use `In Review` only when the child itself is a completed planning
   deliverable awaiting a human decision and is not intended for automatic implementation. A `PLAN`
   parent does not by itself make its implementation children planning-only.

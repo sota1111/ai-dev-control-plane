@@ -43,6 +43,7 @@ export interface EligibilityResult {
   eligible: boolean;
   reason?: string;
   isLongRun?: boolean;
+  waitingOnBlockers?: string[];
 }
 
 // Marker embedded in the auto-finalization comment so we never finalize a parent twice.
@@ -791,6 +792,17 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
           archivedAt
           state { name type }
           labels { nodes { name } }
+          inverseRelations {
+            nodes {
+              type
+              relatedIssue {
+                id
+                identifier
+                archivedAt
+                state { name type }
+              }
+            }
+          }
         }
       }
     `;
@@ -821,6 +833,32 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
     if (isHoldState(state)) {
       removeFromQueue(issueId);
       return { eligible: false, reason: 'hold state (In Review) before run' };
+    }
+
+    // A dependency-waiting issue stays Todo in Linear. Do not execute it until every incoming
+    // `blocks` relation points at a completed/archived issue, and do not remove it from the queue:
+    // the runner re-enqueues it with backoff so later drain/reaper rounds pick it up after the
+    // prerequisite finishes. This also covers blockers that are not present in the local queue.
+    const waitingOnBlockers = (data.issue.inverseRelations?.nodes || [])
+      .filter((relation: any) => relation?.type === 'blocks')
+      .map((relation: any) => relation.relatedIssue)
+      .filter((blocker: any) => {
+        if (!blocker || blocker.archivedAt) return false;
+        const stateName = (blocker.state?.name || '').toLowerCase();
+        // In Review is this harness's verified/merged completion state. On Hold is not completion:
+        // retain the dependent in Todo until the blocker is actually resolved.
+        if (stateName === 'in review') return false;
+        if (stateName === 'on hold') return true;
+        return !isTerminalState(blocker.state);
+      })
+      .map((blocker: any) => blocker.identifier || blocker.id)
+      .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
+    if (waitingOnBlockers.length > 0) {
+      return {
+        eligible: false,
+        reason: `waiting on blockers: ${waitingOnBlockers.join(', ')}`,
+        waitingOnBlockers,
+      };
     }
 
     return { eligible: true, isLongRun };

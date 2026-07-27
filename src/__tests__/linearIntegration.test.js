@@ -401,4 +401,78 @@ describe('Linear Integration', () => {
       expect(linearMock.calls).toHaveLength(1);
     });
   });
+
+  describe('getIssueExecutionEligibility dependency waiting (SOT-2020)', () => {
+    it('keeps a Todo issue ineligible while a blocking issue is active', async () => {
+      linearMock.enqueue({ data: { issue: {
+        id: 'dependent',
+        identifier: 'SOT-2020-B',
+        archivedAt: null,
+        state: { name: 'Todo', type: 'unstarted' },
+        labels: { nodes: [] },
+        inverseRelations: { nodes: [{
+          type: 'blocks',
+          relatedIssue: {
+            id: 'blocker',
+            identifier: 'SOT-2020-A',
+            archivedAt: null,
+            state: { name: 'In Progress', type: 'started' },
+          },
+        }] },
+      } } });
+
+      await expect(runner.getIssueExecutionEligibility('SOT-2020-B')).resolves.toEqual({
+        eligible: false,
+        reason: 'waiting on blockers: SOT-2020-A',
+        waitingOnBlockers: ['SOT-2020-A'],
+      });
+    });
+
+    it('allows the next round after the blocker reaches In Review', async () => {
+      linearMock.enqueue({ data: { issue: {
+        id: 'dependent',
+        identifier: 'SOT-2020-B',
+        archivedAt: null,
+        state: { name: 'Todo', type: 'unstarted' },
+        labels: { nodes: [] },
+        inverseRelations: { nodes: [{
+          type: 'blocks',
+          relatedIssue: {
+            id: 'blocker',
+            identifier: 'SOT-2020-A',
+            archivedAt: null,
+            state: { name: 'In Review', type: 'started' },
+          },
+        }] },
+      } } });
+
+      await expect(runner.getIssueExecutionEligibility('SOT-2020-B')).resolves.toEqual({
+        eligible: true,
+        isLongRun: false,
+      });
+    });
+
+    it('does not mistake On Hold for completed even when Linear gives it a completed type', async () => {
+      linearMock.enqueue({ data: { issue: {
+        id: 'dependent',
+        identifier: 'SOT-2020-B',
+        archivedAt: null,
+        state: { name: 'Todo', type: 'unstarted' },
+        labels: { nodes: [] },
+        inverseRelations: { nodes: [{
+          type: 'blocks',
+          relatedIssue: {
+            id: 'blocker',
+            identifier: 'SOT-2020-A',
+            archivedAt: null,
+            state: { name: 'On Hold', type: 'completed' },
+          },
+        }] },
+      } } });
+
+      const result = await runner.getIssueExecutionEligibility('SOT-2020-B');
+      expect(result.eligible).toBe(false);
+      expect(result.waitingOnBlockers).toEqual(['SOT-2020-A']);
+    });
+  });
 });
