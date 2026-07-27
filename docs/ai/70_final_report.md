@@ -1,54 +1,50 @@
-# Final Report — SOT-2005
+# Final Report — SOT-2001
 
 ## Summary
 
-Reproduced the ARC-AGI-2 Claude champion's Kaggle 0.00 result and separated
-submission-contract behavior from solver capability. The deployed source is
-byte-identical to the repository champion, the completed kernel emitted a valid
-240-task submission, and the pinned public evaluation cohort reproduces 0/120
-exact tasks because the current DSL is train-consistent on 0/120 tasks and
-falls back to duplicate identity attempts for all 167 test cases.
+Packaged the registered `observation-rule-v1` ARC-AGI-3 champion as a
+dependency-free JSONL exec entrypoint and an official Kaggle framework kernel.
+The kernel reached `COMPLETE`; the authenticated submission attempt was refused
+before reference creation because Kaggle reported `0 submissions remaining
+today`, and that external-cap skip is recorded without attributing another
+lineage's score to this champion.
 
 ## Changed Files
 
-- `scripts/ai/analyze_arc_claude_champion.py` — deterministic solver coverage,
-  exact-score, failure-class, and submission-contract analyzer.
-- `docs/ai/kaggle/SOT-2005-arc-claude-defeat-analysis.json` — machine-readable
-  metrics and per-task evidence.
-- `docs/ai/kaggle/SOT-2005-arc-claude-defeat-analysis.md` — reproducible
-  baseline, contract/capability conclusion, and evidence-backed improvement
-  order.
+- `scripts/ai/arc_agi3_champion_exec.py` — deterministic stdin/stdout contract.
+- `src/__tests__/arcAgi3ChampionExec.test.ts` — subprocess, schema,
+  determinism, invalid-input, and fingerprint tests.
+- `kaggle/arc-agi-3-gpt-champion/` — official framework adapter and kernel.
+- `scripts/ai/kaggle_targets_registry.json` — exact competition, kernel,
+  candidate, and evaluation fingerprint wiring.
+- `docs/ai/kaggle/SOT-2001-champion-submission.md` — gate and submission
+  evidence.
 
 ## Verification
 
-- Control plane: `npm run lint` — pass.
-- Control plane: `npm run typecheck` — pass.
-- Control plane: `npm test` — 95 suites / 1162 tests pass.
-- Analyzer: `python3 -m py_compile ...` — pass.
-- Analyzer reproducibility: regenerated JSON equals the committed artifact.
-- Claude solver: lint, typecheck, 11 unit tests, and e2e all pass.
-- Kaggle: submission `55009090` complete at public score 0.00; kernel complete;
-  downloaded output validates against the official 240-task sample contract.
-- E2E for the control plane is not defined in `package.json`; the directly
-  relevant Claude solver e2e passed.
+- `npm run lint` — pass.
+- `npm run typecheck` — pass.
+- `npm test -- --runInBand` — 96 suites / 1165 tests pass.
+- Python entrypoint and kernel sources compile — pass.
+- `git diff --check` — pass.
+- E2E — N/A; this repository defines no `e2e` script.
+- Kernel `sota1111/arc-agi-3-gpt-registered-champion`, version 3 — `COMPLETE`.
 
 ## Acceptance Criteria
 
-- [x] Failure classes and baseline recorded: 0/120 exact, 0/120 train-supported,
-  120/120 fallback; per-transform and per-task metrics are in JSON.
-- [x] Improvement candidates selected with evidence: context-dependent
-  recolouring/content transformation first (81/120), component
-  selection/extraction second (27/120), then distinct train-scored attempt
-  diversity.
-- [x] Submission contract separated from solver performance: source, kernel,
-  input/output task counts, schema, attempts, grids, and serialization pass;
-  missing transformation coverage is the supported cause.
+- [x] Exec manifest exactly matches the current champion registry and confirmed
+  evaluation fingerprint.
+- [x] Champion passes subprocess exec, output schema, determinism, malformed
+  input, and production replay equivalence tests.
+- [x] Kaggle submission was attempted with a complete artifact; the exact daily
+  quota skip is preserved with no fabricated ref/status/score.
+- [x] Existing screen→confirm promotion evidence is resolved and no new rejected
+  candidate exists to revert.
 
 ## Risks
 
-The public evaluation cohort is a proxy for diagnosing the hidden Kaggle test
-score; hidden task solutions are unavailable. Failure-class labels are
-deterministic prioritisation categories, not official ARC semantic labels.
+Version 3 still needs a submission after the shared ARC-AGI-3 daily quota
+resets. Until then it has no submission-specific score.
 
 ## Acceptance: PASS
 ## Next Action: READY_FOR_REVIEW

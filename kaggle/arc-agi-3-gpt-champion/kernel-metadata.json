@@ -1,0 +1,14 @@
+{
+  "id": "sota1111/arc-agi-3-gpt-registered-champion",
+  "title": "ARC-AGI-3 GPT registered champion",
+  "code_file": "submit.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": false,
+  "competition_sources": ["arc-prize-2026-arc-agi-3"],
+  "dataset_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}
