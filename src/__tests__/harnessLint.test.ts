@@ -1,6 +1,7 @@
 import {
   chainWorkers,
   checkConfigEnvKnobs,
+  checkChildIssueDependencyPolicy,
   checkRemovedKnobResidue,
   checkRolesInReadme,
   checkRolesVsTable,
@@ -28,6 +29,11 @@ Some prose describing the chains.
 | \`linear-report\` (state sync/progress) | \`["claude","codex","antigravity"]\` |
 
 Trailing prose after the table.
+
+## Child Issue Registration Policy
+
+**Implementation children:** create them in \`Todo\`, connect dependencies with \`blockedBy\`, and
+never park it in \`In Review\`.
 `;
 
 /** A fully consistent, drift-free set of inputs. */
@@ -120,7 +126,9 @@ describe('abnormal case — drift is detected (fail)', () => {
       // table still lists linear-report → drift
     });
     const findings = checkRolesVsTable(inputs);
-    expect(findings.some((f) => f.severity === 'fail' && f.message.includes('linear-report'))).toBe(true);
+    expect(findings.some((f) => f.severity === 'fail' && f.message.includes('linear-report'))).toBe(
+      true
+    );
   });
 
   it('fails when the priority-chain table cannot be found', () => {
@@ -130,10 +138,24 @@ describe('abnormal case — drift is detected (fail)', () => {
 
   it('fails on an unknown worker name in a chain', () => {
     const findings = checkWorkerNames(
-      consistentInputs({ workerRoles: { 'task-check': ['claude', 'gpt'] } }),
+      consistentInputs({ workerRoles: { 'task-check': ['claude', 'gpt'] } })
     );
     expect(hasFailures(findings)).toBe(true);
     expect(findings[0].message).toContain('gpt');
+  });
+
+  it('fails when the child-registration policy can strand dependency-ordered work in In Review', () => {
+    const claudeMd = CLAUDE_TABLE.replace(
+      /## Child Issue Registration Policy[\s\S]*$/,
+      '## Child Issue Registration Policy\n\nPLAN children use `In Review`.'
+    );
+    const findings = checkChildIssueDependencyPolicy(consistentInputs({ claudeMd }));
+    expect(hasFailures(findings)).toBe(true);
+    expect(findings[0].check).toBe('child-issue-dependency-policy');
+  });
+
+  it('accepts Todo + blockedBy as the implementation-child dependency policy', () => {
+    expect(checkChildIssueDependencyPolicy(consistentInputs())).toEqual([]);
   });
 });
 
@@ -141,7 +163,10 @@ describe('warn-level checks (do not fail the build)', () => {
   it('warns — but does not fail — when a config env knob is missing from .env.example', () => {
     const inputs = consistentInputs({
       configTexts: [
-        { name: 'incident_response.json', text: '{"__doc__":"gated by INCIDENT_RESPONSE_ENABLED"}' },
+        {
+          name: 'incident_response.json',
+          text: '{"__doc__":"gated by INCIDENT_RESPONSE_ENABLED"}',
+        },
       ],
       envExample: 'PORT=3000\n',
     });
@@ -169,19 +194,21 @@ describe('warn-level checks (do not fail the build)', () => {
 
   it('warns on a removed knob mentioned without a removal note, but tolerates documented removal', () => {
     const residue = checkRemovedKnobResidue(
-      consistentInputs({ claudeMd: 'set ALL_CLAUDE_MODE=1 to force claude' }),
+      consistentInputs({ claudeMd: 'set ALL_CLAUDE_MODE=1 to force claude' })
     );
     expect(residue.some((f) => f.message.includes('ALL_CLAUDE_MODE'))).toBe(true);
 
     const documented = checkRemovedKnobResidue(
-      consistentInputs({ claudeMd: 'ALL_CLAUDE_MODE and WORKER_MODE were removed' }),
+      consistentInputs({ claudeMd: 'ALL_CLAUDE_MODE and WORKER_MODE were removed' })
     );
     expect(documented).toEqual([]);
   });
 
   it('warns on an undocumented control-toggle shell knob, and stays quiet for documented ones', () => {
     const undocumented = checkShellEnvDocumented(
-      consistentInputs({ shellScripts: [{ name: 'run_auto.sh', text: 'v=${MYSTERY_FEATURE_ENABLED:-0}' }] }),
+      consistentInputs({
+        shellScripts: [{ name: 'run_auto.sh', text: 'v=${MYSTERY_FEATURE_ENABLED:-0}' }],
+      })
     );
     expect(undocumented.some((f) => f.message.includes('MYSTERY_FEATURE_ENABLED'))).toBe(true);
     expect(undocumented.every((f) => f.severity === 'warn')).toBe(true);
@@ -190,13 +217,15 @@ describe('warn-level checks (do not fail the build)', () => {
       consistentInputs({
         shellScripts: [{ name: 'run_auto.sh', text: 'v=${KNOWN_FEATURE_ENABLED:-0}' }],
         envExample: 'KNOWN_FEATURE_ENABLED=1\n',
-      }),
+      })
     );
     expect(documented).toEqual([]);
 
     // Internal plumbing vars that are not enable/disable/mode toggles are NOT flagged (no over-detection).
     const plumbing = checkShellEnvDocumented(
-      consistentInputs({ shellScripts: [{ name: 'run_worker.sh', text: 'v=${WORKER_PROMPT_FILE:-x}' }] }),
+      consistentInputs({
+        shellScripts: [{ name: 'run_worker.sh', text: 'v=${WORKER_PROMPT_FILE:-x}' }],
+      })
     );
     expect(plumbing).toEqual([]);
   });
