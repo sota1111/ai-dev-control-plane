@@ -1,44 +1,47 @@
-# Final Report — SOT-1965
+# Final Report — SOT-2012
 
 ## Summary
 
-Added `multi-step-state-guard-v1`, a session-local risk-state detector that preserves the existing
-single-tool defense and blocks a later external transition after sensitive context has been staged for
-deferred use. Added reproducible screen/confirm scenarios, comparison evidence, regression tests, and
-the promotion decision.
+SOT-2009 did not promote its candidate, so the `identity` incumbent was packaged
+into the dedicated ARC-AGI-2 GPT kernel. Target `main.py`, packaged
+`submission.py`, and the registry fingerprint all match SHA-256
+`94dc28395abe6c5046d1bf9af8376913e5a83aaa8fe11164656f54195f1f1a8b`.
+
+Kernel version 3 reached `COMPLETE`. The last submission was Claude lineage, so
+the alternate planner selected GPT. The GPT attempt was rejected before ref
+allocation because the competition's one-per-day slot was already consumed by
+ref `55016869`; the exact evidence is recorded in
+`docs/ai/kaggle/SOT-2012-champion-submission.md`.
 
 ## Changed Files
 
-- `src/lib/agentSecurityMultiStepDefense.ts` — stateful detector and multi-step evaluator.
-- `src/__fixtures__/agentSecurityMultiStep.v1.json` — four attack and four normal sequences.
-- `src/agent-security-multi-step-cli.ts` — reproducible champion/candidate comparison CLI.
-- `src/__tests__/agentSecurityEvaluation.test.ts` — state transitions and regression coverage.
-- `artifacts/agent-security/sot-1965/` — screen/confirm comparison evidence.
-- `docs/agent-security-evaluation.md` — metrics, reproduction command, and non-promotion rationale.
+- `kaggle/arc-agi-2-gpt-champion/` — offline kernel source and metadata.
+- `scripts/ai/kaggle_targets_registry.json` — champion identity, fingerprint, kernel version.
+- `src/__tests__/arcAgi2GptChampionExec.test.ts` — exec, schema, and fingerprint gates.
+- `docs/ai/kaggle/SOT-2012-champion-submission.md` — publication/submission evidence.
 
 ## Verification
 
-- `npm run lint` — pass.
-- `npm run typecheck` — pass.
-- `npm test -- --runInBand` — 97 suites / 1,177 tests pass.
-- `npm run lint:eslint -- --quiet` — pass.
-- Prettier check and `git diff --check` — pass.
-- E2E — N/A; this repository defines no `e2e` script and no UI changed.
+- Lint: pass.
+- Typecheck: pass.
+- Unit tests: 98 suites / 1,180 tests pass.
+- Focused exec/schema/fingerprint tests: pass (3/3).
+- Kaggle planner tests: pass (33/33).
+- E2E: N/A; this repository defines no e2e script and no UI changed.
+- Kernel: version 3, `COMPLETE`.
+- Diff review: pass.
 
 ## Acceptance Criteria
 
-- [x] Multi-step attack success rate was compared with the champion: `1.00 → 0.00`.
-- [x] Normal multi-step success stayed `1.00`; existing single-step attack/normal metrics stayed
-      `0.00` / `0.625`.
-- [x] Screen passed before confirm executed, and both stages are recorded independently.
-- [x] The local candidate strictly dominated the champion, but production promotion was withheld
-      because target exec packaging and a candidate-bound Kaggle artifact are unavailable.
+- [x] GPT dedicated kernel reached `COMPLETE`.
+- [x] Champion and packaged artifact fingerprints match.
+- [x] Offline exec and submission schema are verified.
+- [x] Alternate GPT attempt and concrete daily-cap skip evidence are recorded.
 
 ## Risks
 
-The detector remains a control-plane candidate. The `agent-security-gpt` registry has an empty
-`submit.file`, so production promotion still requires packaging into the target agent, exec
-compatibility verification, and then Kaggle proof in that order.
+The daily cap prevented a new submission ref. Version 3 remains reusable in the
+next GPT slot without rebuilding.
 
 ## Acceptance: PASS
 ## Next Action: READY_FOR_REVIEW
