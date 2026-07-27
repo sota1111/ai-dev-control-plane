@@ -481,11 +481,22 @@ Start the title with the feature/outcome, NOT a process name (avoid Implement/De
 
 ### Registration Procedure
 
-Use `mcp__linear-server__create_issue`: (1) create child, (2) link via `parentId`, (3) set Status to
-`In Review` when the parent is a `PLAN` task, otherwise `Todo`, (4) inherit Priority from parent,
-(5) inherit Project (`project`/`projectId`), (6) comment the decomposition result on the parent.
-PLAN children are planning deliverables awaiting human review; they must not enter the automatic
-implementation queue merely because they were created.
+Use `mcp__linear-server__create_issue`: (1) create child, (2) link via `parentId`, (3) inherit Priority
+from parent, (4) inherit Project (`project`/`projectId`), (5) comment the decomposition result on the
+parent.
+
+Choose the child state from the work it represents:
+
+- **Implementation children:** always create them in `Todo`. When order matters, connect later children
+  with Linear `blockedBy` relations to the prerequisite child. A waiting child remains `Todo` and Linear
+  displays its blocked state from the relation; never park it in `In Review`. This keeps every child in
+  the automatic queue while `queueOrdering` holds it until its prerequisite completes.
+- **Planning-only children:** use `In Review` only when the child itself is a completed planning
+  deliverable awaiting a human decision and is not intended for automatic implementation. A `PLAN`
+  parent does not by itself make its implementation children planning-only.
+
+This distinction is mandatory: `In Review` is excluded from automatic issue selection, so using it for
+dependency waiting strands the implementation instead of enforcing execution order.
 
 **Issue-cap recovery ("cannot add issue").** If `create_issue` fails because the workspace hit its
 Issue cap (free plan = 250): (1) `bash scripts/ai/archive_linear_issues.sh --execute` to archive old

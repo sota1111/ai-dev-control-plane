@@ -63,7 +63,10 @@ const REMOVAL_QUALIFIER = /(removed|former|no longer|deprecated|廃止|撤廃|�
 
 function uniqueMatches(text: string, pattern: RegExp): string[] {
   const found = new Set<string>();
-  const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g');
+  const re = new RegExp(
+    pattern.source,
+    pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g'
+  );
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     found.add(m[1] ?? m[0]);
@@ -77,7 +80,9 @@ export function configRoleNames(workerRoles: Record<string, unknown>): string[] 
 }
 
 /** Flatten worker_roles into (role, worker) pairs; a bare string is a single-element chain. */
-export function chainWorkers(workerRoles: Record<string, unknown>): Array<{ role: string; worker: string }> {
+export function chainWorkers(
+  workerRoles: Record<string, unknown>
+): Array<{ role: string; worker: string }> {
   const out: Array<{ role: string; worker: string }> = [];
   for (const role of configRoleNames(workerRoles)) {
     const value = workerRoles[role];
@@ -141,17 +146,29 @@ export function checkRolesVsTable(inputs: HarnessLintInputs): Finding[] {
   const configRoles = new Set(configRoleNames(inputs.workerRoles));
   const tableRoles = new Set(parsePriorityChainTableRoles(inputs.claudeMd));
   if (tableRoles.size === 0) {
-    findings.push({ severity: 'fail', check, message: 'CLAUDE.md "Per-role priority chains" table not found or empty' });
+    findings.push({
+      severity: 'fail',
+      check,
+      message: 'CLAUDE.md "Per-role priority chains" table not found or empty',
+    });
     return findings;
   }
   for (const r of configRoles) {
     if (!tableRoles.has(r)) {
-      findings.push({ severity: 'fail', check, message: `role "${r}" in config/worker_roles.json is missing from the CLAUDE.md Per-role priority chains table` });
+      findings.push({
+        severity: 'fail',
+        check,
+        message: `role "${r}" in config/worker_roles.json is missing from the CLAUDE.md Per-role priority chains table`,
+      });
     }
   }
   for (const r of tableRoles) {
     if (!configRoles.has(r)) {
-      findings.push({ severity: 'fail', check, message: `role "${r}" in the CLAUDE.md Per-role priority chains table is not defined in config/worker_roles.json` });
+      findings.push({
+        severity: 'fail',
+        check,
+        message: `role "${r}" in the CLAUDE.md Per-role priority chains table is not defined in config/worker_roles.json`,
+      });
     }
   }
   return findings;
@@ -163,7 +180,11 @@ export function checkWorkerNames(inputs: HarnessLintInputs): Finding[] {
   const findings: Finding[] = [];
   for (const { role, worker } of chainWorkers(inputs.workerRoles)) {
     if (!valid.has(worker)) {
-      findings.push({ severity: 'fail', check: 'worker-names', message: `unknown worker "${worker}" in chain for role "${role}" (valid: ${VALID_WORKERS.join(', ')})` });
+      findings.push({
+        severity: 'fail',
+        check: 'worker-names',
+        message: `unknown worker "${worker}" in chain for role "${role}" (valid: ${VALID_WORKERS.join(', ')})`,
+      });
     }
   }
   return findings;
@@ -179,7 +200,11 @@ export function checkConfigEnvKnobs(inputs: HarnessLintInputs): Finding[] {
   for (const { name, text } of inputs.configTexts) {
     for (const knob of uniqueMatches(text, ENV_TOKEN)) {
       if (isControlKnob(knob) && !declared.has(knob)) {
-        findings.push({ severity: 'warn', check: 'config-env-in-envexample', message: `config/${name} references env knob ${knob} which is not declared in .env.example` });
+        findings.push({
+          severity: 'warn',
+          check: 'config-env-in-envexample',
+          message: `config/${name} references env knob ${knob} which is not declared in .env.example`,
+        });
       }
     }
   }
@@ -191,7 +216,11 @@ export function checkRolesInReadme(inputs: HarnessLintInputs): Finding[] {
   const findings: Finding[] = [];
   for (const role of configRoleNames(inputs.workerRoles)) {
     if (!inputs.readme.includes(role)) {
-      findings.push({ severity: 'warn', check: 'roles-in-readme', message: `role "${role}" is not mentioned in README.md` });
+      findings.push({
+        severity: 'warn',
+        check: 'roles-in-readme',
+        message: `role "${role}" is not mentioned in README.md`,
+      });
     }
   }
   return findings;
@@ -210,12 +239,54 @@ export function checkRemovedKnobResidue(inputs: HarnessLintInputs): Finding[] {
       if (REMOVAL_QUALIFIER.test(line)) return;
       for (const knob of REMOVED_KNOBS) {
         if (line.includes(knob)) {
-          findings.push({ severity: 'warn', check: 'removed-knob-residue', message: `${name}:${idx + 1} references removed knob ${knob} without a removal note` });
+          findings.push({
+            severity: 'warn',
+            check: 'removed-knob-residue',
+            message: `${name}:${idx + 1} references removed knob ${knob} without a removal note`,
+          });
         }
       }
     });
   }
   return findings;
+}
+
+/**
+ * FAIL: the child-registration policy must keep dependency-ordered implementation work actionable.
+ * This protects the SOT-1913/SOT-2020 invariant: In Review is a human-review hold, not a substitute
+ * for Linear's Todo + blockedBy dependency state.
+ */
+export function checkChildIssueDependencyPolicy(inputs: HarnessLintInputs): Finding[] {
+  const check = 'child-issue-dependency-policy';
+  const policyStart = inputs.claudeMd.indexOf('## Child Issue Registration Policy');
+  if (policyStart < 0) {
+    return [
+      {
+        severity: 'fail',
+        check,
+        message: 'CLAUDE.md Child Issue Registration Policy section is missing',
+      },
+    ];
+  }
+  const remainder = inputs.claudeMd.slice(policyStart);
+  const sectionBreak = remainder.indexOf('\n---\n');
+  const policy = sectionBreak < 0 ? remainder : remainder.slice(0, sectionBreak);
+  const required = [
+    'Implementation children',
+    '`Todo`',
+    '`blockedBy`',
+    'never park it in `In Review`',
+  ];
+  const missing = required.filter((marker) => !policy.includes(marker));
+  return missing.length === 0
+    ? []
+    : [
+        {
+          severity: 'fail',
+          check,
+          message: `CLAUDE.md child registration policy must require implementation children to use Todo + blockedBy, not In Review (missing: ${missing.join(', ')})`,
+        },
+      ];
 }
 
 /**
@@ -232,7 +303,11 @@ export function checkShellEnvDocumented(inputs: HarnessLintInputs): Finding[] {
     for (const knob of extractShellKnobs(text)) {
       if (isControlKnob(knob) && !mentioned(knob) && !seen.has(knob)) {
         seen.add(knob);
-        findings.push({ severity: 'warn', check: 'shell-env-doc', message: `env knob ${knob} (read in scripts/ai/${name}) is not mentioned in CLAUDE.md, README.md, or .env.example` });
+        findings.push({
+          severity: 'warn',
+          check: 'shell-env-doc',
+          message: `env knob ${knob} (read in scripts/ai/${name}) is not mentioned in CLAUDE.md, README.md, or .env.example`,
+        });
       }
     }
   }
@@ -247,6 +322,7 @@ export function lintHarness(inputs: HarnessLintInputs): Finding[] {
     ...checkConfigEnvKnobs(inputs),
     ...checkRolesInReadme(inputs),
     ...checkRemovedKnobResidue(inputs),
+    ...checkChildIssueDependencyPolicy(inputs),
     ...checkShellEnvDocumented(inputs),
   ];
 }
