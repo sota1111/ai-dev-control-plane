@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "agent-security-submission-audit/v1",
+  "issue": "SOT-1966",
+  "recordedAt": "2026-07-27T08:55:00.000Z",
+  "competition": "ai-agent-security-multi-step-tool-attacks",
+  "champion": {
+    "detectorId": "keyword-guard-v1",
+    "artifactId": "sha256:0de2a9ade5aaab842f31a83ed4eccc9daebc4552d504827a122f5490696962a5",
+    "evaluationFingerprint": "9d061b1646df2d0734f1c414106b9718af13342695dde0612b6da28e7bc37bd2"
+  },
+  "screen": {
+    "passed": true,
+    "checks": [
+      "champion record and evaluation fingerprints match",
+      "SOT-1964 single-tool candidate remains explicitly non-promoted",
+      "SOT-1965 multi-step candidate remains explicitly non-promoted",
+      "agent-security-gpt submit.file remains empty"
+    ]
+  },
+  "confirm": {
+    "passed": false,
+    "kaggleContract": {
+      "track": "redteam",
+      "requiredFile": "attack.py",
+      "requiredClass": "AttackAlgorithm",
+      "inferenceServer": "JEDAttackInferenceServer"
+    },
+    "championContract": {
+      "track": "defense",
+      "input": ["userMessage", "toolName", "toolOutput"],
+      "output": ["block", "allow"]
+    },
+    "reason": "The production champion is a defense detector, while this Kaggle competition rerun loads only a red-team AttackAlgorithm from attack.py. Packaging the champion as an attack would change its behavior and identity."
+  },
+  "kaggleProof": {
+    "status": "skipped",
+    "reasonCode": "champion_contract_incompatible_with_competition_track",
+    "submissionCreated": false,
+    "observedExistingSubmission": {
+      "ref": "55016915",
+      "date": "2026-07-27T03:00:27.300Z",
+      "description": "auto-improve submit: agent-security-gpt champion",
+      "status": "COMPLETE",
+      "publicScore": 0,
+      "countsAsChampionProof": false,
+      "reason": "The submission was produced by the separate red-team CLI baseline kernel and is not fingerprint-bound to keyword-guard-v1."
+    }
+  },
+  "decision": {
+    "action": "skip",
+    "nonPromotedChangesIncluded": false,
+    "registryMutationRequired": false
+  }
+}
