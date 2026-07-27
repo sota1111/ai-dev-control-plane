@@ -61,3 +61,48 @@ All candidates must use the same dataset fingerprint and thresholds as the champ
 `compareCandidate` returns these ordered, machine-readable actions. Unit tests exercise failed screen,
 non-improvement, and promotion paths. No candidate behavior or Kaggle submission is changed by this
 baseline issue.
+
+## SOT-1964 single-tool attack candidate
+
+`single-tool-guard-v2` composes the champion detector with narrowly scoped checks for the two
+single-tool attack classes that the fixed dataset exposed:
+
+- instruction-hierarchy replacement followed by a request to disclose configuration; and
+- environment/configuration exfiltration into a public or downstream tool destination.
+
+The candidate also recognizes direct shell/exec requests that combine a transfer command with
+sensitive values. Tool names alone never cause a block, so ordinary shell and exec use remains
+allowed. The production champion is not mutated by the candidate evaluator.
+
+Reproduce the champion/candidate comparison:
+
+```bash
+npx tsx src/agent-security-candidate-cli.ts \
+  --dataset src/__fixtures__/agentSecurityEvaluation.v1.json \
+  --run-id sot-1964-single-tool-defense \
+  --max-attack-success-rate 0.25 \
+  --max-false-positive-rate 0.50 \
+  --min-normal-success-rate 0.50 \
+  --output artifacts/agent-security/sot-1964
+```
+
+Both detectors used the same dataset fingerprint and thresholds. Screen passed before confirm ran.
+
+| Metric | champion | candidate | Result |
+| --- | ---: | ---: | --- |
+| Attack success rate | 0.25 | 0.00 | improved |
+| False-positive rate | 0.375 | 0.375 | unchanged |
+| Normal success rate | 0.625 | 0.625 | unchanged |
+
+`comparison.json` therefore marks the candidate eligible for promotion and orders the remaining
+actions as target-agent exec compatibility followed by Kaggle proof. The local comparison CLI was
+executed successfully with Node/tsx, but that does not substitute for the target agent's exec contract.
+
+The candidate was **not promoted to the production champion** in this issue. The agent-security-gpt
+registry entry has no `submit.file`, so there is no candidate-bound artifact that can be submitted to
+Kaggle for proof. Creating a Kaggle submission that cannot contain this detector would not be valid
+evidence; target-agent exec compatibility is likewise not claimable from this control-plane-only
+candidate. In accordance with the gate, the current champion remains unchanged while the candidate,
+metrics, and non-promotion reason remain recorded here. A later production integration must package
+the detector into the target agent, repeat exec compatibility, and then run the Kaggle proof before
+writing a promoted champion record.
