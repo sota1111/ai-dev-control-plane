@@ -12,6 +12,21 @@ const load = (name: string): unknown =>
   JSON.parse(fs.readFileSync(path.join(fixtures, name), 'utf8'));
 
 describe('replayBattleLog', () => {
+  it('preserves optional retreat energy costs for board summaries', () => {
+    const log = load('battle-log.snapshot.json') as {
+      initialState: {
+        players: Record<string, { active: Record<string, unknown> | null }>;
+      };
+    };
+    const player = Object.values(log.initialState.players).find((value) => value.active !== null);
+    if (!player?.active) throw new Error('fixture must contain an active Pokemon');
+    player.active.retreatCost = ['無', '無'];
+
+    const snapshot = replayBattleLog(log).at(0);
+    const active = Object.values(snapshot!.state.players).find((board) => board.active)?.active;
+    expect(active?.retreatCost).toEqual(['無', '無']);
+  });
+
   it('reconstructs the board after every event in order', () => {
     const snapshots = replayBattleLog(load('battle-log.valid.json'));
     expect(snapshots).toHaveLength(8);

@@ -13,6 +13,7 @@ export interface CardState {
   damage: number;
   energy: string[];
   attacks?: Array<string | AttackState>;
+  retreatCost?: string[];
 }
 
 export interface PlayerBoardState {
@@ -103,6 +104,13 @@ function validateCard(
   assertNonNegativeInteger(card.damage, `${field}.damage`, eventIndex);
   if (!Array.isArray(card.energy) || !card.energy.every((energy) => typeof energy === 'string')) {
     throw new BattleLogReplayError(`${field}.energy must be a string array`, eventIndex);
+  }
+  if (
+    card.retreatCost !== undefined &&
+    (!Array.isArray(card.retreatCost) ||
+      !card.retreatCost.every((energy) => typeof energy === 'string'))
+  ) {
+    throw new BattleLogReplayError(`${field}.retreatCost must be a string array`, eventIndex);
   }
   if (card.attacks !== undefined) {
     if (!Array.isArray(card.attacks)) {

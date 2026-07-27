@@ -157,7 +157,11 @@ struct PlayerBoardView: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("ベンチ").font(.caption2.bold()).foregroundStyle(.secondary)
+                HStack {
+                    Text("ベンチ").font(.caption2.bold()).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("カードを長押しで詳細").font(.system(size: 8)).foregroundStyle(.secondary)
+                }
                 if board.bench.isEmpty {
                     Text("ポケモンなし")
                         .font(.caption2)
@@ -165,8 +169,11 @@ struct PlayerBoardView: View {
                         .frame(maxWidth: .infinity, minHeight: 48)
                         .background(.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
                 } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 4) { ForEach(board.bench) { CardView(card: $0, zone: nil, emphasized: false) } }
+                    HStack(spacing: 3) {
+                        ForEach(board.bench.prefix(5)) {
+                            CardView(card: $0, zone: nil, emphasized: false)
+                                .frame(maxWidth: .infinity)
+                        }
                     }
                 }
             }
@@ -199,6 +206,7 @@ private struct CardView: View {
     let card: CardState?
     let zone: String?
     let emphasized: Bool
+    @State private var isShowingDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -208,38 +216,91 @@ private struct CardView: View {
                 Text(card?.name ?? "ポケモンなし").font(.caption.bold()).lineLimit(1)
             }
             if let card {
-                let remainingHp = max(0, card.maxHp - card.damage)
-                ProgressView(value: Double(remainingHp), total: Double(max(1, card.maxHp)))
-                    .tint(remainingHp * 3 > card.maxHp ? .green : .red)
-                HStack {
-                    Text("HP \(remainingHp)/\(card.maxHp)")
-                    Spacer()
-                    Text("ダメージ \(card.damage)")
+                ProgressView(value: Double(card.remainingHp), total: Double(max(1, card.maxHp)))
+                    .tint(card.remainingHp * 3 > card.maxHp ? .green : .red)
+                if emphasized {
+                    HStack {
+                        Text("HP \(card.remainingHp)/\(card.maxHp)")
+                        Spacer()
+                        Text("逃げる \(card.retreatCostText)")
+                    }
+                    .font(.caption2.monospacedDigit())
+                } else {
+                    Text("HP \(card.remainingHp)｜逃 \(card.retreatCostText)")
+                        .font(.system(size: 8, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
                 }
-                .font(.caption2.monospacedDigit())
-                Label(
-                    card.energy.isEmpty ? "エネルギーなし" : card.energy.joined(separator: "・"),
-                    systemImage: "bolt.circle.fill"
-                )
-                .font(.caption2)
-                .lineLimit(1)
-                Label(
-                    card.attacks?.map(\.displayText).joined(separator: "・").nilIfEmpty ?? "技なし",
-                    systemImage: "burst.fill"
-                )
-                .font(.caption2.bold())
-                .lineLimit(1)
+                Text(card.attacks?.map(\.displayText).joined(separator: "・").nilIfEmpty ?? "技なし")
+                .font(emphasized ? .caption2.bold() : .system(size: 8, weight: .bold))
+                .lineLimit(emphasized ? 1 : 2)
+                .minimumScaleFactor(0.75)
             }
         }
         .padding(6)
-        .frame(minWidth: emphasized ? 180 : 112, minHeight: emphasized ? 104 : 48, alignment: .leading)
+        .frame(minWidth: emphasized ? 180 : 0, minHeight: emphasized ? 104 : 62, alignment: .leading)
         .background(.background.opacity(0.94), in: RoundedRectangle(cornerRadius: 9))
         .overlay(
             RoundedRectangle(cornerRadius: 9)
                 .stroke(emphasized ? Color.cyan : Color.secondary.opacity(0.45), lineWidth: emphasized ? 3 : 1)
         )
         .shadow(color: emphasized ? .cyan.opacity(0.2) : .clear, radius: 4)
+        .contentShape(RoundedRectangle(cornerRadius: 9))
+        .onLongPressGesture(minimumDuration: 0.45) {
+            if card != nil { isShowingDetails = true }
+        }
+        .sensoryFeedback(.impact(weight: .medium), trigger: isShowingDetails)
+        .sheet(isPresented: $isShowingDetails) {
+            if let card { CardDetailSheet(card: card) }
+        }
+        .accessibilityHint(card == nil ? "" : "長押しするとカード詳細を表示します")
     }
+}
+
+private struct CardDetailSheet: View {
+    let card: CardState
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("現在の状態") {
+                    LabeledContent("HP", value: "\(card.remainingHp) / \(card.maxHp)")
+                    LabeledContent("ダメージ", value: "\(card.damage)")
+                    LabeledContent("付与エネルギー", value: card.energy.nilIfEmptyText)
+                    LabeledContent("逃げるためのエネルギー", value: card.retreatCostText)
+                }
+                Section("技") {
+                    if let attacks = card.attacks, !attacks.isEmpty {
+                        ForEach(Array(attacks.enumerated()), id: \.offset) { _, attack in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(attack.name).font(.headline)
+                                    Spacer()
+                                    if let damage = attack.damage { Text(damage).font(.headline.monospacedDigit()) }
+                                }
+                                Label(
+                                    attack.cost.isEmpty ? "必要エネルギーなし" : attack.cost.joined(separator: "・"),
+                                    systemImage: "bolt.circle.fill"
+                                )
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        Text("技なし").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle(card.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("閉じる") { dismiss() } }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+private extension Array where Element == String {
+    var nilIfEmptyText: String { isEmpty ? "なし" : joined(separator: "・") }
 }
 
 private extension String {

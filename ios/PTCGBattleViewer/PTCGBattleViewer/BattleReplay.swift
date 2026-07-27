@@ -44,6 +44,13 @@ struct CardState: Codable, Equatable, Identifiable {
     var damage: Int
     var energy: [String]
     var attacks: [AttackState]?
+    var retreatCost: [String]?
+
+    var remainingHp: Int { max(0, maxHp - damage) }
+    var retreatCostText: String {
+        guard let retreatCost, !retreatCost.isEmpty else { return "なし" }
+        return retreatCost.joined(separator: "・")
+    }
 }
 
 struct PlayerBoardState: Codable, Equatable {

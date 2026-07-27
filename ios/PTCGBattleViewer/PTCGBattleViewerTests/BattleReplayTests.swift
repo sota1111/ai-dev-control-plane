@@ -43,6 +43,7 @@ final class BattleReplayTests: XCTestCase {
         let card = snapshots[0].state.players["あなた"]?.active
         XCTAssertEqual(card?.name, "ピカチュウex")
         XCTAssertEqual(card?.attacks?.map(\.name), ["エレキサークル 60", "サンダーボルト 200"])
+        XCTAssertEqual(card?.retreatCostText, "なし")
     }
 
     func testDecodesAndDisplaysAttackEnergyCosts() throws {
@@ -53,6 +54,17 @@ final class BattleReplayTests: XCTestCase {
         let (_, snapshots) = try BattleReplay.decode(data)
         let attack = snapshots[0].state.players["あなた"]?.active?.attacks?.first
         XCTAssertEqual(attack?.displayText, "サンダーボルト 200（必要エネルギー 雷・雷・無）")
+    }
+
+    func testCardSummaryIncludesCurrentHpAndRetreatCost() throws {
+        let data = """
+        {"schemaVersion":"ptcg-battle-log/v1","battleId":"card-summary","initialState":{"turn":1,"currentPlayer":"あなた","players":{"あなた":{"active":{"id":"pikachu","name":"ピカチュウex","maxHp":200,"damage":30,"energy":["雷"],"retreatCost":["無","無"],"attacks":[{"name":"サンダーボルト","damage":"200","cost":["雷","雷","無"]}]},"bench":[],"deckCount":40,"handCount":5,"discard":[],"prizesRemaining":6},"対戦相手":{"active":null,"bench":[],"deckCount":42,"handCount":6,"discard":[],"prizesRemaining":6}},"winner":null},"events":[]}
+        """.data(using: .utf8)!
+
+        let (_, snapshots) = try BattleReplay.decode(data)
+        let card = try XCTUnwrap(snapshots[0].state.players["あなた"]?.active)
+        XCTAssertEqual(card.remainingHp, 170)
+        XCTAssertEqual(card.retreatCostText, "無・無")
     }
 
     @MainActor
