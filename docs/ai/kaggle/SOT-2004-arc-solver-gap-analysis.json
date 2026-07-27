@@ -1,0 +1,1042 @@
+{
+  "issue": "SOT-2004",
+  "dataset": {
+    "repository": "https://github.com/arcprize/ARC-AGI-2",
+    "commit": "f3283f727488ad98fe575ea6a5ac981e4a188e49",
+    "cohort": "data/evaluation",
+    "tasks": 120
+  },
+  "solver": {
+    "repository": "https://github.com/sota1111/arc-agi-2-gpt",
+    "commit": "bbec2bfa03f87a711c2f3687b178aa5565956947",
+    "champion": "identity",
+    "candidate": "rule-based-v1"
+  },
+  "baseline": {
+    "identity_exact": 0,
+    "rule_based_exact": 0,
+    "rule_based_fallback": 120,
+    "rule_based_train_consistent": 0
+  },
+  "categories": {
+    "contextual-recolor": {
+      "tasks": 63,
+      "identity_exact": 0,
+      "rule_based_exact": 0,
+      "fallback": 63,
+      "train_consistent": 0
+    },
+    "object-selection-or-extraction": {
+      "tasks": 27,
+      "identity_exact": 0,
+      "rule_based_exact": 0,
+      "fallback": 27,
+      "train_consistent": 0
+    },
+    "pattern-completion": {
+      "tasks": 11,
+      "identity_exact": 0,
+      "rule_based_exact": 0,
+      "fallback": 11,
+      "train_consistent": 0
+    },
+    "mixed-dimension-structural-transform": {
+      "tasks": 9,
+      "identity_exact": 0,
+      "rule_based_exact": 0,
+      "fallback": 9,
+      "train_consistent": 0
+    },
+    "spatial-rearrangement": {
+      "tasks": 7,
+      "identity_exact": 0,
+      "rule_based_exact": 0,
+      "fallback": 7,
+      "train_consistent": 0
+    },
+    "conditional-expansion-or-composition": {
+      "tasks": 3,
+      "identity_exact": 0,
+      "rule_based_exact": 0,
+      "fallback": 3,
+      "train_consistent": 0
+    }
+  },
+  "tasks": [
+    {
+      "task": "0934a4d8",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "135a2760",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "136b0064",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "13e47133",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "142ca369",
+      "category": "pattern-completion",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "16b78196",
+      "category": "spatial-rearrangement",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "16de56c4",
+      "category": "pattern-completion",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "1818057f",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "195c6913",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "1ae2feb7",
+      "category": "pattern-completion",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "20270e3b",
+      "category": "mixed-dimension-structural-transform",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "20a9e565",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "21897d95",
+      "category": "mixed-dimension-structural-transform",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "221dfab4",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "247ef758",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "269e22fb",
+      "category": "conditional-expansion-or-composition",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "271d71e2",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "28a6681f",
+      "category": "spatial-rearrangement",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "291dc1e1",
+      "category": "mixed-dimension-structural-transform",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "2b83f449",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "2ba387bc",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "2c181942",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "2d0172a1",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "31f7f899",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "332f06d7",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "35ab12c3",
+      "category": "pattern-completion",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "36a08778",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "38007db0",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "3a25b0d8",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "3dc255db",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "3e6067c3",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "409aa875",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "446ef5d2",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "45a5af55",
+      "category": "conditional-expansion-or-composition",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "4a21e3da",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "4c3d4a41",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "4c416de3",
+      "category": "pattern-completion",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "4c7dc4dd",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "4e34c42c",
+      "category": "mixed-dimension-structural-transform",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "53fb4810",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "5545f144",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "581f7754",
+      "category": "spatial-rearrangement",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "58490d8a",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "58f5dbd5",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "5961cc34",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "5dbc8537",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "62593bfd",
+      "category": "spatial-rearrangement",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "64efde09",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "65b59efc",
+      "category": "mixed-dimension-structural-transform",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "67e490f4",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "6e453dd6",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "6e4f6532",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "6ffbe589",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "71e489b6",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "7491f3cf",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "7666fa5d",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "78332cb0",
+      "category": "mixed-dimension-structural-transform",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "7b0280bc",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "7b3084d4",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "7b5033c1",
+      "category": "mixed-dimension-structural-transform",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "7b80bb43",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "7c66cb00",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "7ed72f31",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "800d221b",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "80a900e0",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "8698868d",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "88bcf3b4",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "88e364bc",
+      "category": "spatial-rearrangement",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "89565ca0",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "898e7135",
+      "category": "mixed-dimension-structural-transform",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "8b7bacbf",
+      "category": "pattern-completion",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "8b9c3697",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "8e5c0c38",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "8f215267",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "8f3a5a89",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "9385bd28",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "97d7923e",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "981571dc",
+      "category": "pattern-completion",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "9aaea919",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "9bbf930d",
+      "category": "spatial-rearrangement",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "a251c730",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "a25697e4",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "a32d8b75",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "a395ee82",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "a47bf94d",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "a6f40cea",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "aa4ec2a5",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "abc82100",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "b0039139",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "b10624e5",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "b5ca7ac4",
+      "category": "spatial-rearrangement",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "b6f77b65",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "b99e7126",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "b9e38dc0",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "bf45cf4b",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "c4d067a0",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "c7f57c3e",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "cb2d8a2c",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "cbebaa4b",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "d35bdbdc",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "d59b0160",
+      "category": "pattern-completion",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "d8e07eb2",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "da515329",
+      "category": "pattern-completion",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "db0c5428",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "db695cfb",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "dbff022c",
+      "category": "pattern-completion",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "dd6b8c4b",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "de809cff",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "dfadab01",
+      "category": "pattern-completion",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "e12f9a14",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "e3721c99",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "e376de54",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "e8686506",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "e87109e9",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "edb79dae",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "eee78d87",
+      "category": "conditional-expansion-or-composition",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "f560132c",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "f931b4a8",
+      "category": "mixed-dimension-structural-transform",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "faa9f03d",
+      "category": "contextual-recolor",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    },
+    {
+      "task": "fc7cae8d",
+      "category": "object-selection-or-extraction",
+      "identity_exact": false,
+      "rule_based_exact": false,
+      "fallback": true,
+      "train_consistent": false
+    }
+  ],
+  "next_gate": {
+    "candidate": "contextual-recolor",
+    "screen": {
+      "cohort": "first 20 lexicographically sorted evaluation tasks",
+      "minimum_exact_matches": 1,
+      "must_strictly_beat_identity": true,
+      "faults": 0
+    },
+    "confirm": {
+      "cohort": "all 120 evaluation tasks",
+      "minimum_exact_matches": 1,
+      "must_strictly_beat_identity": true,
+      "faults": 0
+    }
+  }
+}
