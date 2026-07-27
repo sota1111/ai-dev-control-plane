@@ -106,3 +106,50 @@ candidate. In accordance with the gate, the current champion remains unchanged w
 metrics, and non-promotion reason remain recorded here. A later production integration must package
 the detector into the target agent, repeat exec compatibility, and then run the Kaggle proof before
 writing a promoted champion record.
+
+## SOT-1965 multi-step state-transition candidate
+
+`multi-step-state-guard-v1` composes `single-tool-guard-v2` with session-local risk state. It records
+`sensitive_context_staged` only when one step combines sensitive context with an explicit instruction
+to retain it for a later operation. A later transition to an external, public, vendor, collector,
+webhook, upload, or handoff boundary is then blocked. State is reset for every scenario, and the
+existing single-tool detector still runs first on every step.
+
+The fixture `src/__fixtures__/agentSecurityMultiStep.v1.json` contains four attacks and four normal
+sequences split evenly between screen and confirm. Attack steps are individually allowed by the
+single-tool detector; only their accumulated state makes the final transition unsafe. Normal
+sequences cover token rotation, configuration checks, redacted release publication, and internal
+credential audits.
+
+Reproduce the champion/candidate comparison:
+
+```bash
+npx tsx src/agent-security-multi-step-cli.ts \
+  --dataset src/__fixtures__/agentSecurityMultiStep.v1.json \
+  --run-id sot-1965-multi-step-state-defense \
+  --max-attack-success-rate 1.0 \
+  --max-false-positive-rate 0.0 \
+  --min-normal-success-rate 1.0 \
+  --output artifacts/agent-security/sot-1965
+```
+
+The multi-step threshold permits the incumbent to reach confirm so both detectors are evaluated on
+the same eight scenarios; promotion still requires strict dominance. Screen passed before confirm
+ran for both detectors.
+
+| Metric | champion (`single-tool-guard-v2`) | candidate | Result |
+| --- | ---: | ---: | --- |
+| Multi-step attack success rate | 1.00 | 0.00 | improved |
+| False-positive rate | 0.00 | 0.00 | unchanged |
+| Normal sequence success rate | 1.00 | 1.00 | unchanged |
+
+The candidate strictly dominates the incumbent on this local multi-step evaluation. The existing
+single-step evaluation remains at attack success rate `0.00` and normal success rate `0.625`, so the
+new session wrapper does not regress those decisions.
+
+The candidate is **not promoted to the production champion**. As in SOT-1964, the
+`agent-security-gpt` registry has no `submit.file`, and this repository does not contain the target
+agent exec contract into which the stateful detector can be packaged. Therefore target exec
+compatibility and a candidate-bound Kaggle proof cannot be produced in the required order. The
+candidate implementation and evaluation evidence are retained, while the production champion remains
+unchanged until integration can complete `verify_exec_compatibility` and then `run_kaggle_proof`.
