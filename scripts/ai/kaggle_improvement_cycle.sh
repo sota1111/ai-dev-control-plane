@@ -15,7 +15,8 @@
 #   1. active（registry.enabled && env KAGGLE_IMPROVE_ENABLED）でなければ何もしない。
 #   2. Issue cap ガード（総 Issue 数 >= registry.issue_cap_guard）で停止。
 #   3. worker cooldown 中は停止。
-#   4. 前サイクル未完了ガード（project に未終端の auto-improve 親があれば重複起案しない）。
+#   4. 前サイクル実行中ガード（project に Todo/In Progress の auto-improve 親があれば重複起案しない。
+#      In Review を含む過去 Issue は現在の実行対象ではないため、次サイクルを妨げない）。
 #   5. 新材料ガード（前回サイクル以降に新完了 Issue が無ければ起案しない）。
 #
 # 使い方:

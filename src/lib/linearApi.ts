@@ -389,8 +389,13 @@ export async function createDraftIssue(input: {
 }
 
 /**
- * SOT-1933 前サイクル未完了ガード（execute 時の再確認）: プロジェクトに未終端(completed/canceled 以外)の
- * `auto-improve` ラベル付き Issue が残っていれば、その identifier を返す（無ければ null・never throws）。
+ * SOT-1933 / SOT-2070 前サイクル実行中ガード（execute 時の再確認）:
+ * プロジェクトに現在 actionable（Todo / In Progress）の `auto-improve` Issue があれば、その
+ * identifier を返す（無ければ null・never throws）。
+ *
+ * In Review は Linear 上の state.type が In Progress と同じ "started" だが、完了済みの成果を人間が
+ * 確認する保留状態であり、次の定期サイクルを止めてはならない。状態 type の否定条件ではなく、
+ * 現在の workflow state 名を allowlist して過去 Issue の残存に引きずられないようにする。
  */
 export async function findOpenAutoImproveIssue(
   projectName: string,
@@ -403,7 +408,7 @@ export async function findOpenAutoImproveIssue(
         issues(filter: {
           project: { name: { eq: $name } },
           labels: { name: { eq: $label } },
-          state: { type: { nin: ["completed", "canceled"] } }
+          state: { name: { in: ["Todo", "In Progress"] } }
         }, first: 1) { nodes { identifier } }
       }`,
       { name: projectName, label: labelName }

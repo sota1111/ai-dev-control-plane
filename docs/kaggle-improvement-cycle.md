@@ -78,8 +78,9 @@ NG は黙って skip（+ Discord 通知）。
 1. **active**: `registry.enabled && env KAGGLE_IMPROVE_ENABLED`（2段 kill switch）でなければ何もしない。
 2. **Issue cap ガード**: workspace 総 Issue 数 ≥ `issue_cap_guard`（既定 240）なら起案せず archive を促す。
 3. **cooldown ガード**: worker usage-limit cooldown 中は起案しない。
-4. **前サイクル未完了ガード**: 対象プロジェクトに未終端の `auto-improve` 親 Issue が残っていれば
-   重複起案しない（プロジェクト毎に常に高々1本）。execute 時は Linear で再確認する。
+4. **前サイクル実行中ガード**: 対象プロジェクトに現在 actionable（`Todo` / `In Progress`）な
+   `auto-improve` 親 Issue があれば重複起案しない（プロジェクト毎に実行中は高々1本）。
+   `In Review` を含む過去 Issue は次サイクルを妨げず、execute 時は Linear の現在状態で再確認する。
 5. **新材料ガード**: 前回サイクル以降にそのプロジェクトで新しい完了 Issue が無ければ起案しない。
 
 （撤廃済み: 全体日次上限ハードキャップ／「SOT-1904 提出ガード通過分だけ起案」制約。順位向上を阻害しない。）
