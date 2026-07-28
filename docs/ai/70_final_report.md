@@ -1,47 +1,50 @@
-# Final Report — SOT-2085
+# Final Report — SOT-2086
 
 ## Summary
 
-`stateful-frame-difference-v1` was implemented and evaluated against
-`observation-rule-v1` on SOT-2084's fixed, disjoint screen/confirm cohorts. It
-passed screen without regression, then improved confirm level progress from 2
-to 3 while reducing faults from 1 to 0.
-
-The corpus is explicitly synthetic production-shaped evidence, not authenticated
-production evidence. The candidate therefore was not promoted, its behavior code
-was reverted, and the champion registry remains unchanged.
+- Confirmed SOT-2085 was a non-promotion and kept
+  `observation-rule-v1` as the registered ARC-AGI-3 GPT champion.
+- Made the Kaggle kernel source self-contained and published version 4.
+- Pinned exec, package source, pulled artifact, candidate, and evaluation
+  fingerprints in the target registry.
+- Verified the dependency-free exec contract, output schema, determinism,
+  invalid-input termination, and zero valid-fixture faults.
+- Attempted the current champion submission. Kaggle allocated no ref because
+  the one-per-UTC-day ARC-AGI-3 quota had already been consumed; the exact
+  attempt and existing ref/status/score are recorded.
 
 ## Changed Files
 
-- `artifacts/arc-agi-3/sot-2085/stateful-frame-difference-comparison.json` —
-  immutable candidate/corpus fingerprints, incumbent comparison, diagnostics,
-  and non-promotion decision.
-- `docs/ai/kaggle/SOT-2085-stateful-frame-difference-decision.md` — hypothesis,
-  screen→confirm result, and reason for reverting the candidate.
-- `docs/ai/70_final_report.md` — final lifecycle report.
+- `kaggle/arc-agi-3-gpt-champion/submit.py`
+- `scripts/ai/kaggle_targets_registry.json`
+- `src/__tests__/arcAgi3ChampionExec.test.ts`
+- `docs/ai/kaggle/SOT-2086-champion-submission.md`
+- `docs/ai/70_final_report.md`
 
 ## Verification
 
-- Candidate focused tests before revert: 6/6 pass.
-- Lint and typecheck before revert: pass.
-- Final repository lint and typecheck: pass.
-- Final unit suite: 99/99 suites, 1,193/1,193 tests pass in-band.
-- E2E: N/A; no e2e script and no UI change.
-- Final diff review: pass; only SOT-2085 evidence, decision record, and this report remain.
+- Focused ARC-AGI-3 exec tests: 4/4 passed
+- Lint: passed
+- Typecheck: passed
+- Unit tests: 99/99 suites, 1,194/1,194 tests passed
+- E2E: N/A (no E2E script and no UI change)
+- Kaggle kernel version 4: `COMPLETE`
+- Committed/pulled Kaggle source byte comparison: passed
+- Submission: concrete daily-quota skip; no ref allocated
 
 ## Acceptance Criteria
 
-- [x] Deterministic frame-difference/action-history/no-op candidate was implemented and tested.
-- [x] Only a screen-passing candidate ran on the disjoint confirm cohort.
-- [x] Level progress, no-op rate, faults, termination, and fingerprints are reproducible.
-- [x] Non-promotion, candidate revert, and unchanged champion registry agree.
-- [x] Exec/Kaggle gates were skipped because authenticated production confirm is unavailable.
+- [x] SOT-2085 non-promotion, candidate revert, and unchanged champion registry agree.
+- [x] Submission target candidate/evaluation and exec/source/artifact fingerprints agree.
+- [x] Current champion passes exec, schema, determinism, termination, and fault gates.
+- [x] Kaggle attempt evidence records the exact quota skip and the current external status.
+- [x] The complete screen→confirm→non-promotion/revert→incumbent exec→Kaggle-attempt gate is documented.
 
 ## Risks
 
-The favorable confirm result is a hypothesis signal only. A future run needs
-authenticated production screen/confirm data before restoring this candidate,
-checking exec compatibility, changing the registry, or running Kaggle proof.
+- Version 4 has not received a new competition submission ref because the
+  shared daily slot was already used. It is published and `COMPLETE`, ready for
+  the next eligible GPT slot.
 
 ## Acceptance: PASS
 ## Next Action: READY_FOR_REVIEW

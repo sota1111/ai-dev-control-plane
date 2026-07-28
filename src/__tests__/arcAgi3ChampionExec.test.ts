@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -12,6 +13,10 @@ const registry = JSON.parse(
 const decision = JSON.parse(
   fs.readFileSync(path.resolve('artifacts/arc-agi-3/sot-1958/decision.json'), 'utf8')
 );
+const targetRegistry = JSON.parse(
+  fs.readFileSync(path.resolve('scripts/ai/kaggle_targets_registry.json'), 'utf8')
+);
+const kernelSource = path.resolve('kaggle/arc-agi-3-gpt-champion/submit.py');
 
 function run(input: string, ...args: string[]) {
   return spawnSync('python3', [executable, ...args], { encoding: 'utf8', input });
@@ -38,6 +43,23 @@ describe('ARC-AGI-3 champion exec contract', () => {
       'screen',
       'confirm',
     ]);
+  });
+
+  it('pins the dependency-free exec and self-contained Kaggle source fingerprints', () => {
+    const target = targetRegistry.competitions
+      .find((competition: { key: string }) => competition.key === 'arc-agi-3')
+      .targets.find((item: { repo: string }) => item.repo === 'arc-agi-3-gpt');
+    const digest = (file: string) =>
+      `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+
+    expect(target.submit).toMatchObject({
+      candidate_id: registry.champion.candidateId,
+      evaluation_fingerprint: registry.champion.evaluationFingerprint,
+      exec_fingerprint: digest(executable),
+      source_fingerprint: digest(kernelSource),
+      artifact_fingerprint: digest(kernelSource),
+    });
+    expect(fs.readFileSync(kernelSource, 'utf8')).not.toContain('champion_agent.py');
   });
 
   it('runs as a deterministic JSONL subprocess with legal output schema', () => {
