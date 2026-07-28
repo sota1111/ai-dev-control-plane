@@ -541,8 +541,18 @@ run_role_pipeline() {
       *) plog "PIPELINE_STOP: solo '${sna:-<none>}' → stop (needs human)"; return "$COMPLETION_UNVERIFIED" ;;
     esac
     # PR detection (reuse the github-role heuristic): no PR reference in the solo report → no-PR terminal
-    # (PLAN/REVIEW/decomposition/no-op) → In Review; a PR reference → normal COMPLETED.
-    if grep -qiE 'pull/[0-9]+|PR[ :*]*#[0-9]+' "$sreport" 2>/dev/null; then PIPELINE_NO_PR=0; else PIPELINE_NO_PR=1; fi
+    # (PLAN/REVIEW/decomposition/no-op) → In Review; a PR reference → normal COMPLETED. A PR-producing
+    # lifecycle must also carry explicit acceptance evidence; READY_FOR_REVIEW or a PR URL alone must
+    # never turn an unverified implementation into a completed run (SOT-2127).
+    if grep -qiE 'pull/[0-9]+|PR[ :*]*#[0-9]+' "$sreport" 2>/dev/null; then
+      if [ "$sacc" != "PASS" ]; then
+        plog "PIPELINE_STOP: solo PR result lacks explicit Acceptance PASS → unverified"
+        return "$COMPLETION_UNVERIFIED"
+      fi
+      PIPELINE_NO_PR=0
+    else
+      PIPELINE_NO_PR=1
+    fi
     plog "PIPELINE_DONE: solo lifecycle completed for $issue (no_pr=$PIPELINE_NO_PR)"
     return 0
   fi

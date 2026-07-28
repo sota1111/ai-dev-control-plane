@@ -27,4 +27,10 @@ describe('run_auto incomplete-dispatch retry policy (SOT-1928)', () => {
       /if \[ "\$EXIT_CODE" -eq "\$WORKER_UNAVAILABLE" \]; then[\s\S]*?skip ensure-issue-reviewed[\s\S]*?else[\s\S]*?run_cli ensure-issue-reviewed/,
     );
   });
+
+  test('solo PR results cannot complete without explicit acceptance PASS', () => {
+    expect(script).toMatch(
+      /grep -qiE 'pull\/\[0-9\]\+\|PR\[ :\*\]\*#\[0-9\]\+' "\$sreport"[\s\S]*?if \[ "\$sacc" != "PASS" \]; then[\s\S]*?return "\$COMPLETION_UNVERIFIED"/,
+    );
+  });
 });
