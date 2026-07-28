@@ -852,7 +852,9 @@ if [ "$PIPELINE_ENABLED" -eq 1 ] && [ -n "$TARGET_ISSUE" ]; then
     # A clean completion can still leave the issue active when the worker's best-effort Linear sync
     # did not run. Preserve the loop-breaker transition, but do not misreport that successful run as
     # "completion not reached" (SOT-1732).
-    if [ "$EXIT_CODE" -eq 0 ]; then
+    if [ "$EXIT_CODE" -eq 0 ] && [ "${PIPELINE_NO_PR:-0}" -eq 1 ]; then
+      run_cli ensure-issue-reviewed "$TARGET_ISSUE" completed-no-pr >/dev/null 2>&1 || true
+    elif [ "$EXIT_CODE" -eq 0 ]; then
       run_cli ensure-issue-reviewed "$TARGET_ISSUE" completed >/dev/null 2>&1 || true
     else
       run_cli ensure-issue-reviewed "$TARGET_ISSUE" incomplete >/dev/null 2>&1 || true

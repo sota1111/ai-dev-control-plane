@@ -266,10 +266,11 @@ async function main() {
       // is still active. Idempotent / fail-open (does nothing if already In Review / terminal / missing).
       const issueId = args[0];
       if (!issueId) {
-        process.stderr.write('Usage: runner-cli.js ensure-issue-reviewed <issueIdentifier> [completed|incomplete]\n');
+        process.stderr.write('Usage: runner-cli.js ensure-issue-reviewed <issueIdentifier> [completed|completed-no-pr|incomplete]\n');
         process.exit(1);
       }
-      const outcome: PipelineReviewOutcome = args[1] === 'completed' ? 'completed' : 'incomplete';
+      const outcome: PipelineReviewOutcome =
+        args[1] === 'completed' || args[1] === 'completed-no-pr' ? args[1] : 'incomplete';
       const comment = pipelineReviewComment(outcome);
       const moved = await runner.setIssueInReview(issueId, comment).catch(() => false);
       runner.log('WORKER_ROLES', `ensure-issue-reviewed ${issueId}: ${moved ? 'moved to In Review' : 'no change (already reviewed/terminal)'}`, { issue: issueId });

@@ -16,4 +16,13 @@ describe('pipelineReviewComment', () => {
     expect(comment).toContain('完了状態に到達しなかった');
     expect(comment).toContain('無限再処理の防止');
   });
+
+  test('does not claim implementation completion for a no-PR terminal', () => {
+    const comment = pipelineReviewComment('completed-no-pr');
+
+    expect(comment).toContain('PR を作成しない終端');
+    expect(comment).toContain('実装・検証の完了を意味する通知ではありません');
+    expect(comment).toContain('子 Issue の完了後');
+    expect(comment).not.toContain('処理と検証が完了したため');
+  });
 });
