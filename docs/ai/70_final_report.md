@@ -1,49 +1,47 @@
-# Final Report — SOT-1966
+# Final Report — SOT-2085
 
 ## Summary
 
-The screen audit confirmed that the production champion remains SOT-1963
-`keyword-guard-v1`; neither SOT-1964 nor SOT-1965 was promoted. Confirm then
-checked the downloaded official competition runtime and found a hard contract
-mismatch: Kaggle loads a red-team `AttackAlgorithm` from `attack.py`, while the
-champion is a defense detector returning `block`/`allow`.
+`stateful-frame-difference-v1` was implemented and evaluated against
+`observation-rule-v1` on SOT-2084's fixed, disjoint screen/confirm cohorts. It
+passed screen without regression, then improved confirm level progress from 2
+to 3 while reducing faults from 1 to 0.
 
-No misleading submission was made. The exact skip reason and the existing
-unrelated red-team baseline submission are recorded in machine-readable and
-human-readable evidence. Automatic submission remains disabled for this target.
+The corpus is explicitly synthetic production-shaped evidence, not authenticated
+production evidence. The candidate therefore was not promoted, its behavior code
+was reverted, and the champion registry remains unchanged.
 
 ## Changed Files
 
-- `artifacts/agent-security/sot-1966/submission-audit.json` — champion binding,
-  screen/confirm results, Kaggle observation, and terminal skip decision.
-- `docs/ai/kaggle/SOT-1966-champion-submission.md` — compatibility analysis and
-  concrete skip reason.
-- `src/__tests__/agentSecuritySubmissionAudit.test.ts` — regression gates for
-  champion identity, track mismatch, and disabled automatic submission.
+- `artifacts/arc-agi-3/sot-2085/stateful-frame-difference-comparison.json` —
+  immutable candidate/corpus fingerprints, incumbent comparison, diagnostics,
+  and non-promotion decision.
+- `docs/ai/kaggle/SOT-2085-stateful-frame-difference-decision.md` — hypothesis,
+  screen→confirm result, and reason for reverting the candidate.
+- `docs/ai/70_final_report.md` — final lifecycle report.
 
 ## Verification
 
-- Lint: pass.
-- Typecheck: pass.
-- Unit tests: 99 suites / 1,183 tests pass.
-- E2E: N/A; the repository has no e2e script and no UI changed.
-- Kaggle CLI 2.2.4: official bundle downloaded; competition submissions and
-  `sota1111/agent-security-gpt-cli-baseline` inspected.
-- Diff review: pass; only SOT-1966 evidence, test, and this report changed.
+- Candidate focused tests before revert: 6/6 pass.
+- Lint and typecheck before revert: pass.
+- Final repository lint and typecheck: pass.
+- Final unit suite: 99/99 suites, 1,193/1,193 tests pass in-band.
+- E2E: N/A; no e2e script and no UI change.
+- Final diff review: pass; only SOT-2085 evidence, decision record, and this report remain.
 
 ## Acceptance Criteria
 
-- [x] The audited artifact identity matches the unchanged champion.
-- [x] Exec compatibility and Kaggle contract confirmation are recorded.
-- [x] The concrete submission skip reason is recorded.
-- [x] Screen preceded confirm; no non-promoted behavior was included.
+- [x] Deterministic frame-difference/action-history/no-op candidate was implemented and tested.
+- [x] Only a screen-passing candidate ran on the disjoint confirm cohort.
+- [x] Level progress, no-op rate, faults, termination, and fingerprints are reproducible.
+- [x] Non-promotion, candidate revert, and unchanged champion registry agree.
+- [x] Exec/Kaggle gates were skipped because authenticated production confirm is unavailable.
 
 ## Risks
 
-The existing ref `55016915` is a successful red-team baseline run but is not
-proof of `keyword-guard-v1`. A future submission requires an intentional
-champion/competition track alignment; renaming or wrapping the current detector
-would not preserve its identity.
+The favorable confirm result is a hypothesis signal only. A future run needs
+authenticated production screen/confirm data before restoring this candidate,
+checking exec compatibility, changing the registry, or running Kaggle proof.
 
 ## Acceptance: PASS
 ## Next Action: READY_FOR_REVIEW
