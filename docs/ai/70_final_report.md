@@ -1,50 +1,61 @@
-# Final Report — SOT-2086
+# Final Report — SOT-2124
 
 ## Summary
 
-- Confirmed SOT-2085 was a non-promotion and kept
-  `observation-rule-v1` as the registered ARC-AGI-3 GPT champion.
-- Made the Kaggle kernel source self-contained and published version 4.
-- Pinned exec, package source, pulled artifact, candidate, and evaluation
-  fingerprints in the target registry.
-- Verified the dependency-free exec contract, output schema, determinism,
-  invalid-input termination, and zero valid-fixture faults.
-- Attempted the current champion submission. Kaggle allocated no ref because
-  the one-per-UTC-day ARC-AGI-3 quota had already been consumed; the exact
-  attempt and existing ref/status/score are recorded.
+- Audited the 11 pinned ARC-AGI-2 evaluation tasks in the SOT-2004
+  `pattern-completion` bucket and split them into seven reproducible
+  subcategories.
+- Selected two minimal, non-overlapping candidates for SOT-2125:
+  `periodic-line-extrapolation-v1` and `reference-symmetry-repair-v1`.
+- Fixed task-disjoint screen (6) and confirm (5) cohorts, candidate-specific
+  positive tasks, negative tasks, activation guards, rejection conditions, and
+  promotion thresholds.
+- Preserved the current champion and registry. Passing the future local gate
+  only advances a candidate to stdin-`exec` compatibility and Kaggle proof.
 
 ## Changed Files
 
-- `kaggle/arc-agi-3-gpt-champion/submit.py`
-- `scripts/ai/kaggle_targets_registry.json`
-- `src/__tests__/arcAgi3ChampionExec.test.ts`
-- `docs/ai/kaggle/SOT-2086-champion-submission.md`
-- `docs/ai/70_final_report.md`
+- `docs/ai/kaggle/SOT-2124-pattern-completion-spec.json` — pinned,
+  machine-readable task taxonomy, candidate contract, cohorts, and gate.
+- `docs/ai/kaggle/SOT-2124-pattern-completion-spec.md` — rationale,
+  non-overlap analysis, and next-stage decision contract.
+- `scripts/ai/verify_arc_pattern_completion_spec.py` — verifies fixture hashes,
+  source membership, same-dimension/non-zero-growth invariants, category
+  counts, cohort independence, and candidate coverage.
+- `docs/ai/70_final_report.md` — solo lifecycle result.
 
 ## Verification
 
-- Focused ARC-AGI-3 exec tests: 4/4 passed
-- Lint: passed
-- Typecheck: passed
-- Unit tests: 99/99 suites, 1,194/1,194 tests passed
-- E2E: N/A (no E2E script and no UI change)
-- Kaggle kernel version 4: `COMPLETE`
-- Committed/pulled Kaggle source byte comparison: passed
-- Submission: concrete daily-quota skip; no ref allocated
+- Specification verifier: passed (11 tasks, 7 subcategories, 6 screen, 5
+  confirm).
+- Fixture integrity: all 11 SHA-256 values match dataset commit
+  `f3283f727488ad98fe575ea6a5ac981e4a188e49`.
+- Screen/confirm overlap: zero; union equals all 11 tasks.
+- Lint: passed.
+- Typecheck: passed.
+- Unit tests: 99/99 suites, 1,196/1,196 tests passed.
+- E2E: N/A (the repository has no `e2e` script and this PLAN changes no
+  runtime/UI behaviour).
+- Diff review: no champion or registry change.
 
 ## Acceptance Criteria
 
-- [x] SOT-2085 non-promotion, candidate revert, and unchanged champion registry agree.
-- [x] Submission target candidate/evaluation and exec/source/artifact fingerprints agree.
-- [x] Current champion passes exec, schema, determinism, termination, and fault gates.
-- [x] Kaggle attempt evidence records the exact quota skip and the current external status.
-- [x] The complete screen→confirm→non-promotion/revert→incumbent exec→Kaggle-attempt gate is documented.
+- [x] The 11 pattern-completion tasks have a reproducible seven-subcategory
+  breakdown with pinned task hashes.
+- [x] Two minimal candidates distinct from contextual recolour and object
+  selection/extraction are fixed with false-activation guards.
+- [x] Task-disjoint screen and confirm cohorts and per-candidate promotion
+  thresholds are explicit and machine-checked.
+- [x] Rejection requires behaviour revert plus docs; promotion requires
+  stdin-`exec` compatibility then Kaggle proof before registry/champion change.
 
 ## Risks
 
-- Version 4 has not received a new competition submission ref because the
-  shared daily slot was already used. It is published and `COMPLETE`, ready for
-  the next eligible GPT slot.
+- This is a train-derived specification, not solver evidence. SOT-2125 must
+  implement both guarded operators and demonstrate exact screen/confirm
+  results before either can advance.
+- `reference-symmetry-repair-v1` deliberately rejects ambiguous mappings; it
+  may under-activate, but must not be broadened merely to increase training fit.
 
 ## Acceptance: PASS
 ## Next Action: READY_FOR_REVIEW

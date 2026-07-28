@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "issue": "SOT-2124",
+  "dataset": {
+    "repository": "https://github.com/arcprize/ARC-AGI-2",
+    "commit": "f3283f727488ad98fe575ea6a5ac981e4a188e49",
+    "cohort": "data/evaluation",
+    "source_analysis": "docs/ai/kaggle/SOT-2004-arc-solver-gap-analysis.json",
+    "coarse_category": "pattern-completion",
+    "task_count": 11
+  },
+  "tasks": [
+    {
+      "task": "142ca369",
+      "sha256": "32fcd07e5a5f43a8dcf06cfb88f53d811e3f226bce6d32f4ba76b6283bfc6ec2",
+      "subcategory": "multi-ray-continuation",
+      "screen_or_confirm": "screen",
+      "candidate": null,
+      "reason": "Sparse coloured seeds extend along several independently inferred rays."
+    },
+    {
+      "task": "16de56c4",
+      "sha256": "dc3d03bf8ba0032dd3da1aaf869fc88ccf04b154bf3416f6fe7a843f9e5ba3ae",
+      "subcategory": "periodic-line-extrapolation",
+      "screen_or_confirm": "screen",
+      "candidate": "periodic-line-extrapolation-v1",
+      "reason": "A sparse row or column supplies a period that is repeated across its full axis."
+    },
+    {
+      "task": "1ae2feb7",
+      "sha256": "2e1d9c2ffed3b8b16a31640c8f1515b23fca1897f12ec6dd2b9d307f81455354",
+      "subcategory": "periodic-line-extrapolation",
+      "screen_or_confirm": "confirm",
+      "candidate": "periodic-line-extrapolation-v1",
+      "reason": "A divider separates a finite prefix from the periodic continuation to be emitted."
+    },
+    {
+      "task": "35ab12c3",
+      "sha256": "99165b5d5c6af6a571727a752e6bf4a53a9863042bf8a323d5aab85667acf247",
+      "subcategory": "implied-path-or-shape-completion",
+      "screen_or_confirm": "screen",
+      "candidate": null,
+      "reason": "Several partial paths or outlines are completed from geometry-specific endpoints."
+    },
+    {
+      "task": "4c416de3",
+      "sha256": "b8f827c7ee4d91e99d2ac57a9c9de524f30bacb0fb2c4276a49ed8ffad20c892",
+      "subcategory": "implied-path-or-shape-completion",
+      "screen_or_confirm": "confirm",
+      "candidate": null,
+      "reason": "Nested shapes exchange boundary fragments according to local geometry."
+    },
+    {
+      "task": "8b7bacbf",
+      "sha256": "6052e670d8d44ba6198558bc493e4094a741834e5a7471bc3fedfd65f00320ef",
+      "subcategory": "implied-path-or-shape-completion",
+      "screen_or_confirm": "screen",
+      "candidate": null,
+      "reason": "A marker colour fills the enclosed interior of matching partial outlines."
+    },
+    {
+      "task": "981571dc",
+      "sha256": "b68e8bacdcbc78b1193985727eb991c82d62228a08a4c2130d367c93a63a6959",
+      "subcategory": "reference-symmetry-repair",
+      "screen_or_confirm": "screen",
+      "candidate": "reference-symmetry-repair-v1",
+      "reason": "Zeroed damage is restored from a unique reflected counterpart in a dense symmetric grid."
+    },
+    {
+      "task": "d59b0160",
+      "sha256": "a63eebe863083ec58d718b566cb4cdf00a8a5b7e5c498faab33615f690d1a900",
+      "subcategory": "reference-symmetry-repair",
+      "screen_or_confirm": "confirm",
+      "candidate": "reference-symmetry-repair-v1",
+      "reason": "Corrupted cells are repaired from repeated reference regions around the dominant background."
+    },
+    {
+      "task": "da515329",
+      "sha256": "6f3690ddd95abbb3f76d69c6294b1572687032763f70c3be418c162e6c476b08",
+      "subcategory": "recursive-spiral-completion",
+      "screen_or_confirm": "confirm",
+      "candidate": null,
+      "reason": "A small seed determines a full alternating rectangular spiral."
+    },
+    {
+      "task": "dbff022c",
+      "sha256": "170dd7bf7575b4c8baa142c5cd6760b31656a268a0a47d1e0680f285c6d5894d",
+      "subcategory": "template-hole-fill",
+      "screen_or_confirm": "screen",
+      "candidate": null,
+      "reason": "A legend colour fills missing cells inside repeated outlined templates."
+    },
+    {
+      "task": "dfadab01",
+      "sha256": "f518663f6e8dc7aa48c85bf638bcc6e97a0d9803e1db57473d74a3dc734c75e8",
+      "subcategory": "symbolic-stamp-expansion",
+      "screen_or_confirm": "confirm",
+      "candidate": null,
+      "reason": "Sparse symbols are replaced by learned multi-cell stamps."
+    }
+  ],
+  "subcategory_counts": {
+    "multi-ray-continuation": 1,
+    "periodic-line-extrapolation": 2,
+    "implied-path-or-shape-completion": 3,
+    "reference-symmetry-repair": 2,
+    "recursive-spiral-completion": 1,
+    "template-hole-fill": 1,
+    "symbolic-stamp-expansion": 1
+  },
+  "candidates": [
+    {
+      "id": "periodic-line-extrapolation-v1",
+      "positive_tasks": ["16de56c4", "1ae2feb7"],
+      "operator": "Infer the shortest unique one-dimensional period from non-background training prefixes on one axis, then repeat it only into the continuation region.",
+      "activation_guards": [
+        "Every training pair has unchanged dimensions.",
+        "Exactly one axis and one shortest period explain every changed cell in every training pair.",
+        "The inferred continuation preserves all pre-existing non-background cells.",
+        "Applying the operator reproduces every training output exactly.",
+        "No rotation, reflection, crop, scale, tile, global colour map, contextual selection/recolour, or component extraction program already explains the task."
+      ],
+      "reject_when": [
+        "Two periods or two axes remain train-consistent.",
+        "A required output cell is not generated by the repeated one-dimensional motif.",
+        "The continuation would overwrite a contradictory non-background cell.",
+        "The period or continuation boundary depends on a test output."
+      ]
+    },
+    {
+      "id": "reference-symmetry-repair-v1",
+      "positive_tasks": ["981571dc", "d59b0160"],
+      "operator": "Find a unique repeated or reflected intact reference region and copy only its uniquely determined cells into the corresponding damaged region.",
+      "activation_guards": [
+        "Every training pair has unchanged dimensions.",
+        "One reference mapping uniquely identifies every changed cell across all training pairs.",
+        "All unchanged target cells are preserved.",
+        "Applying the repair reproduces every training output exactly.",
+        "The mapping performs structural copy/repair, not colour-conditioned selection, recolouring, or object extraction."
+      ],
+      "reject_when": [
+        "More than one reference mapping is train-consistent.",
+        "Any changed cell lacks a mapped intact counterpart.",
+        "The mapping modifies a cell outside the uniquely identified damage region.",
+        "The reference or damage mask depends on a test output."
+      ]
+    }
+  ],
+  "cohorts": {
+    "screen": [
+      "142ca369",
+      "16de56c4",
+      "35ab12c3",
+      "8b7bacbf",
+      "981571dc",
+      "dbff022c"
+    ],
+    "confirm": [
+      "1ae2feb7",
+      "4c416de3",
+      "d59b0160",
+      "da515329",
+      "dfadab01"
+    ]
+  },
+  "promotion_gate": {
+    "screen": {
+      "faults": 0,
+      "train_consistent_on_every_activation": true,
+      "minimum_exact_positive_tasks_per_candidate": 1,
+      "false_activations_on_negative_tasks": 0,
+      "must_strictly_beat_identity": true
+    },
+    "confirm": {
+      "faults": 0,
+      "train_consistent_on_every_activation": true,
+      "minimum_exact_positive_tasks_per_candidate": 1,
+      "false_activations_on_negative_tasks": 0,
+      "must_strictly_beat_identity": true,
+      "regressions_against_prior_portfolio": 0
+    },
+    "decision": "A candidate advances only if it independently passes both screen and confirm. Passing this gate does not update the registry or champion."
+  },
+  "next_stage_policy": {
+    "rejected": "Revert all solver behaviour changes and retain only the analysis and rejection reason in docs.",
+    "accepted": "Verify stdin-exec compatibility, then run Kaggle proof before any registry or champion promotion.",
+    "registry_changed_by_this_issue": false,
+    "champion_changed_by_this_issue": false
+  }
+}
