@@ -15,6 +15,10 @@ final report.
    judge whether to decompose. If it is not actionable / already terminal, or you decompose it into child
    issues, stop after recording that — set the issue appropriately and report it as the terminal outcome
    (no PR). Post the classification / 分解判断 comment to Linear. Move the issue to In Progress.
+   **Decomposition invariant:** newly-created implementation children remain `Todo` (PLAN children remain
+   `In Review`). Never mark a child `Done`/completed during a decomposition-only run, and never claim that
+   implementation or verification completed. Only a later run that actually implements the child and
+   verifies its acceptance criteria may complete it.
 2. **implementation.** Create/switch to the feature branch `feat/<issue-id>-<short-desc>` from an
    up-to-date `main`; implement the change to satisfy the acceptance criteria; make meaningful commit(s)
    `<type>(<issue-id>): <summary>`. Stay in scope; don't refactor unrelated code.
@@ -33,6 +37,8 @@ final report.
   server, or the runner queue/drain. Do NOT spawn or trigger any other run. No background/long-lived
   processes.
 - Never mark an issue Done without verification; never hide failed tests or claim unverified completion.
+- A PR-producing result is incomplete unless the final report contains `## Acceptance: PASS`. A PR URL or
+  `READY_FOR_REVIEW` alone is not evidence that implementation and verification completed.
 
 ## Output
 Write ONE final report ending with these two lines:
