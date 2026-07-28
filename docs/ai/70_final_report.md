@@ -1,60 +1,55 @@
-# SOT-2125 Final Report
+# SOT-2126 Final Report
 
 ## Summary
 
-Implemented the two SOT-2124 pattern-completion candidates as narrow,
-training-gated evaluation solvers and ran the fixed screen before any confirm
-evaluation. Both candidates rejected ambiguous/unsupported tasks and safely
-fell back to identity on all six screen tasks.
+Confirmed that SOT-2125's non-promotion decision is reflected end-to-end. The
+target repository still selects `identity`, and its source is byte-identical to
+the committed and published Kaggle kernel. The existing kernel version 4 is
+COMPLETE and its real output passes the ARC submission schema.
 
-Neither candidate achieved its required exact positive-task match or strict
-identity win. Under the pre-registered threshold, confirm was not run and all
-production behavior changes remain reverted. Registry, champion, and Kaggle
-runtime are unchanged at `identity`.
+The current champion was already submitted successfully today. The execute-mode
+planner preserved the alternate order and daily cap by recording an idempotent
+skip instead of allocating a duplicate submission.
 
 ## Changed Files
 
-- `scripts/ai/evaluate_arc_pattern_completion.py` — minimal candidates and
-  ordered screen/confirm evaluator
-- `scripts/ai/test_evaluate_arc_pattern_completion.py` — fixed operator,
-  ambiguity, and fallback-safety tests
-- `docs/ai/kaggle/SOT-2124-pattern-completion-spec.{json,md}` — reviewed
-  fixed candidate/cohort specification imported from SOT-2124
-- `scripts/ai/verify_arc_pattern_completion_spec.py` — pinned fixture/spec
-  verifier imported from SOT-2124
-- `docs/ai/kaggle/SOT-2125-pattern-completion-evaluation.json` —
-  machine-readable fixture hashes and per-task results
-- `docs/ai/kaggle/SOT-2125-pattern-completion-decision.md` — promotion decision
+- `docs/ai/kaggle/SOT-2126-champion-submission.md` — champion fingerprint,
+  kernel/output status, submission ref/score, and skip evidence
+- `docs/ai/70_final_report.md` — lifecycle result and quality-gate summary
 
 ## Acceptance Criteria
 
-- [x] Both SOT-2124 candidates have minimal implementations with fixed unit
-  tests and training-only activation.
-- [x] The fixed small screen result and identity comparison are saved; the
-  independent confirm cohort is recorded as `not_run` because no candidate
-  passed screen.
-- [x] The non-promotion decision agrees with the unchanged `identity` champion.
-- [x] No production solver behavior remains; only evaluator/tests/evidence are
-  retained.
-- [x] Exec/submission-schema verification is not applicable because promotion
-  did not occur.
+- [x] SOT-2125 concluded non-promotion, while the target registry,
+  control-plane registry, committed runtime, and published runtime consistently
+  identify the `identity` champion at SHA-256
+  `94dc28395abe6c5046d1bf9af8376913e5a83aaa8fe11164656f54195f1f1a8b`.
+- [x] The runtime executes from an unrelated cwd without `__file__` or network
+  dependencies; the downloaded real artifact contains all 240 task IDs and 259
+  test cases with exactly two attempts per case.
+- [x] The non-promoted incumbent, not either rejected pattern candidate, is the
+  packaged COMPLETE kernel.
+- [x] Alternate order, daily cap 1, and idempotency were honored: ref `55050349`
+  already consumed today's slot, so the execute plan created no duplicate.
+- [x] Submission ref `55050349`, COMPLETE status, public score `0.00`, kernel
+  version 4, and the explicit skip reason are saved.
 
 ## Verification
 
-- Candidate unit tests: PASS
-- Pinned fixture/spec verifier: PASS
-- Screen evaluator replay: PASS (`decision=reject`, zero faults/regressions)
+- Published kernel status and source pull: PASS
+- Target/committed/published fingerprint comparison: PASS
+- Downloaded 240-task / 259-test output schema replay: PASS
+- Focused champion and planner tests: PASS (2 suites / 36 tests)
 - `npm run lint`: PASS
 - `npm run typecheck`: PASS
 - `npm test`: PASS (99 suites / 1,196 tests)
-- E2E: N/A (no `e2e` script; no UI/runtime behavior change)
-- Diff review: PASS; registry, champion, and Kaggle runtime are unchanged
+- E2E: N/A (no `e2e` script and no UI behavior)
+- Diff review: PASS; evidence-only change, no solver/runtime/registry drift
 
 ## Risks
 
-The rejected v1 operators intentionally favor safe fallback. Any broader
-pattern language must be specified and screened as a new candidate rather than
-retrofitted after observing this cohort.
+The current identity champion scores `0.00`; this issue confirms publication
+integrity rather than solver quality. A future solver candidate requires a new
+pre-specified screen/confirm cycle before changing the champion.
 
 ## Acceptance: PASS
 ## Next Action: READY_FOR_REVIEW
