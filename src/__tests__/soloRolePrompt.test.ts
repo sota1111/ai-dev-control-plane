@@ -15,4 +15,11 @@ describe('solo role lifecycle safeguards (SOT-2127)', () => {
     expect(prompt).toContain('A PR URL or');
     expect(prompt).toContain('alone is not evidence');
   });
+
+  test('implemented work requires a Linear completion comment', () => {
+    expect(prompt).toContain('ALWAYS post a');
+    expect(prompt).toContain('`## Completion Report` comment');
+    expect(prompt).toContain('Only after the Linear comment succeeds');
+    expect(prompt).toContain('`## Linear Report: POSTED`');
+  });
 });

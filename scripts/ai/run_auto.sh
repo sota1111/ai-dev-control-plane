@@ -529,10 +529,11 @@ run_role_pipeline() {
       return "$WORKER_UNAVAILABLE"
     fi
     # Solo verdict: acceptance FAIL or a human-stop Next Action → needs attention; else complete.
-    local sacc sna
+    local sacc sna slinear
     sacc="$(grep -ioE '^##[[:space:]]*Acceptance:[[:space:]]*(PASS|FAIL)' "$sreport" 2>/dev/null | grep -ioE '(PASS|FAIL)' | tail -1 | tr '[:lower:]' '[:upper:]' || true)"
+    slinear="$(grep -ioE '^##[[:space:]]*Linear[[:space:]]+Report:[[:space:]]*POSTED' "$sreport" 2>/dev/null | tail -1 || true)"
     sna="$(awk '/[Nn]ext[[:space:]]*[Aa]ction/{cap=1; buf=""} cap{buf=buf"\n"$0} END{print buf}' "$sreport" 2>/dev/null | grep -oiE 'READY_FOR_REVIEW|NEEDS_DEBUG|NEEDS_USER_INPUT|BLOCKED' | head -n1 | tr '[:lower:]' '[:upper:]' || true)"
-    plog "SOLO result: acceptance='${sacc:-<none>}' next_action='${sna:-<none>}' report=$sreport"
+    plog "SOLO result: acceptance='${sacc:-<none>}' linear_report='${slinear:-<none>}' next_action='${sna:-<none>}' report=$sreport"
     if [ "$sacc" = "FAIL" ]; then
       plog "PIPELINE_STOP: solo acceptance FAIL → needs attention"; return "$COMPLETION_UNVERIFIED"
     fi
@@ -547,6 +548,10 @@ run_role_pipeline() {
     if grep -qiE 'pull/[0-9]+|PR[ :*]*#[0-9]+' "$sreport" 2>/dev/null; then
       if [ "$sacc" != "PASS" ]; then
         plog "PIPELINE_STOP: solo PR result lacks explicit Acceptance PASS → unverified"
+        return "$COMPLETION_UNVERIFIED"
+      fi
+      if [ -z "$slinear" ]; then
+        plog "PIPELINE_STOP: solo PR result lacks Linear Report POSTED → completion was not reported"
         return "$COMPLETION_UNVERIFIED"
       fi
       PIPELINE_NO_PR=0

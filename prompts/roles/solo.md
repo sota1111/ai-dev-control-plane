@@ -30,7 +30,11 @@ final report.
 5. **github.** Only when all gates pass and acceptance is met: push the branch, create the PR (body per
    CLAUDE.md), and — if mergeable and no conflict — merge it (`--merge --delete-branch`) and pull `main`.
    PLAN/REVIEW tasks skip the PR and stop at In Review.
-6. **linear-report.** Sync Linear state (PR link / In Progress → In Review / Completion Report comment).
+6. **linear-report.** Sync Linear state (PR link / In Progress → In Review), then ALWAYS post a
+   `## Completion Report` comment on the target Linear issue for implemented work. The comment must
+   summarize the implementation, changed files, verification results, remaining issues, and human check.
+   Only after the Linear comment succeeds, emit `## Linear Report: POSTED` in the final worker report.
+   If posting fails, do not claim completion; use `BLOCKED`.
 
 ## Constraints
 - Do NOT run `scripts/ai/run_auto.sh`, `scripts/ai/run_worker.sh`, `scripts/ai/scheduler.sh`, the webhook
@@ -39,9 +43,12 @@ final report.
 - Never mark an issue Done without verification; never hide failed tests or claim unverified completion.
 - A PR-producing result is incomplete unless the final report contains `## Acceptance: PASS`. A PR URL or
   `READY_FOR_REVIEW` alone is not evidence that implementation and verification completed.
+- A PR-producing result is incomplete unless its Linear Completion Report was posted and the final report
+  contains `## Linear Report: POSTED`.
 
 ## Output
-Write ONE final report ending with these two lines:
+Write ONE final report ending with these lines:
+- `## Linear Report: POSTED` (required when a code change was implemented)
 - `## Acceptance: PASS | FAIL` (when a code change was implemented; omit for a pure no-op/decomposition)
 - `## Next Action: READY_FOR_REVIEW | NEEDS_DEBUG | NEEDS_USER_INPUT | BLOCKED`
 
