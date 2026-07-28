@@ -21,6 +21,34 @@ to `GameAction` into the existing evaluation agent interface. The committed repl
 `src/__fixtures__/arcAgi3GatewayReplay.json` exercises a two-step win and can run both screen and
 confirm without network access.
 
+### Replay corpus and action-effect diagnostics (SOT-2084)
+
+`arcAgi3GatewayReplayCorpus.json` fixes four production-shaped episodes across three game contracts.
+The two `screen` episode IDs and two `confirm` episode IDs are non-empty and disjoint. The corpus
+validator also rejects reuse of the same `game_id` + `guid` across cohorts, duplicate episode IDs,
+invalid replays, and provenance that presents synthetic data as production evidence.
+
+Every episode carries provenance. This committed corpus is deliberately marked
+`source: "synthetic"` and `productionEvidence: false`: the repository contains neither an
+authenticated ARC-AGI-3 production capture nor credentials to obtain one. A concrete `blockReason` is
+required for synthetic entries; production entries instead require `capturedAt` and positive evidence.
+Thus these fixtures verify the production contract but do not claim production performance.
+
+`diagnoseGatewayReplayCorpus` deterministically emits
+`arc-agi-3-replay-diagnostics/v1`. For every transition it records the selected action, whether it was
+legal in the preceding frame, changed cell count, level delta, no-op status, and resulting game state.
+Episode and corpus aggregates include steps, frame changes, level progress, no-ops, faults, and
+`WIN` / `GAME_OVER` / `EXHAUSTED` termination counts. The canonical SHA-256 corpus fingerprint makes
+the exact evidence set reproducible.
+
+The checked baseline is
+`artifacts/arc-agi-3/sot-2084/production-contract-baseline.json`. It binds the current
+`observation-rule-v1` registry and evaluation fingerprints to the corpus fingerprint. No behavior was
+promoted: authenticated production confirm remains unavailable, so exec compatibility and Kaggle proof
+are intentionally gated. When real captures become available, anonymize identifiers, mark their
+provenance as production with capture time, run the short screen cohort first, and only run the
+disjoint confirm cohort after screen passes.
+
 ## Screen → confirm
 
 The two stages use explicit, non-empty, unique, disjoint seed sets. A candidate runs the larger

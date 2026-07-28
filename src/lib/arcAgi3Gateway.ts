@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import {
   type ArcAgi3Agent,
   type ArcAgi3Environment,
@@ -42,6 +43,68 @@ export interface GatewayReplay {
   environment: { id: string; version: string };
   initial: FrameData;
   transitions: Array<{ action: GameAction; frame: FrameData }>;
+}
+
+export type ReplayCohort = 'screen' | 'confirm';
+
+export interface ReplayProvenance {
+  source: 'production' | 'synthetic';
+  capturedAt?: string;
+  anonymization: string;
+  productionEvidence: boolean;
+  blockReason?: string;
+}
+
+export interface GatewayReplayEpisode {
+  id: string;
+  cohort: ReplayCohort;
+  provenance: ReplayProvenance;
+  replay: GatewayReplay;
+}
+
+export interface GatewayReplayCorpus {
+  schemaVersion: 'arc-agi-3-gateway-replay-corpus/v1';
+  corpusId: string;
+  episodes: GatewayReplayEpisode[];
+}
+
+export interface ReplayTransitionDiagnostic {
+  index: number;
+  action: GameAction;
+  legalAction: boolean;
+  changedCells: number;
+  levelDelta: number;
+  noOp: boolean;
+  state: GameState;
+}
+
+export interface ReplayEpisodeDiagnostic {
+  episodeId: string;
+  cohort: ReplayCohort;
+  steps: number;
+  changedCells: number;
+  levelProgress: number;
+  noOps: number;
+  faults: number;
+  termination: 'WIN' | 'GAME_OVER' | 'EXHAUSTED';
+  transitions: ReplayTransitionDiagnostic[];
+}
+
+export interface ReplayCorpusDiagnostic {
+  schemaVersion: 'arc-agi-3-replay-diagnostics/v1';
+  corpusId: string;
+  corpusFingerprint: string;
+  cohorts: { screen: string[]; confirm: string[] };
+  totals: {
+    episodes: number;
+    steps: number;
+    changedCells: number;
+    levelProgress: number;
+    noOps: number;
+    faults: number;
+    termination: Record<'WIN' | 'GAME_OVER' | 'EXHAUSTED', number>;
+  };
+  episodes: ReplayEpisodeDiagnostic[];
 }
 
 const STATES = new Set<GameState>(['NOT_STARTED', 'NOT_FINISHED', 'WIN', 'GAME_OVER']);
@@ -126,6 +189,149 @@ function sameAction(left: GameAction, right: GameAction): boolean {
     left.action === right.action &&
     JSON.stringify(left.data ?? null) === JSON.stringify(right.data ?? null)
   );
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function fingerprintGatewayArtifact(value: unknown): string {
+  return crypto.createHash('sha256').update(canonicalJson(value)).digest('hex');
+}
+
+function changedCellCount(before: number[][][], after: number[][][]): number {
+  const cells = (frames: number[][][]) =>
+    new Map(
+      frames.flatMap((grid, z) =>
+        grid.flatMap((row, y) => row.map((cell, x) => [`${z}:${y}:${x}`, cell] as const))
+      )
+    );
+  const left = cells(before);
+  const right = cells(after);
+  const coordinates = new Set([...left.keys(), ...right.keys()]);
+  let changed = 0;
+  coordinates.forEach((coordinate) => {
+    if (left.get(coordinate) !== right.get(coordinate)) changed += 1;
+  });
+  return changed;
+}
+
+export function validateGatewayReplayCorpus(value: unknown): GatewayReplayCorpus {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('gateway replay corpus must be an object');
+  const corpus = value as GatewayReplayCorpus;
+  if (corpus.schemaVersion !== 'arc-agi-3-gateway-replay-corpus/v1')
+    throw new Error('unsupported gateway replay corpus schema');
+  if (!corpus.corpusId || !Array.isArray(corpus.episodes) || corpus.episodes.length < 2)
+    throw new Error('gateway replay corpus requires an id and multiple episodes');
+  const ids = new Set<string>();
+  const gameGuids = new Map<string, ReplayCohort>();
+  const cohortCounts = { screen: 0, confirm: 0 };
+  corpus.episodes.forEach((episode, index) => {
+    const label = `episodes[${index}]`;
+    if (!episode.id || ids.has(episode.id)) throw new Error(`${label}: id must be unique`);
+    ids.add(episode.id);
+    if (episode.cohort !== 'screen' && episode.cohort !== 'confirm')
+      throw new Error(`${label}: cohort must be screen or confirm`);
+    cohortCounts[episode.cohort] += 1;
+    if (!episode.provenance?.anonymization)
+      throw new Error(`${label}: provenance.anonymization is required`);
+    if (episode.provenance.source === 'production') {
+      if (!episode.provenance.productionEvidence || !episode.provenance.capturedAt)
+        throw new Error(`${label}: production provenance requires evidence and capturedAt`);
+    } else if (episode.provenance.source === 'synthetic') {
+      if (episode.provenance.productionEvidence || !episode.provenance.blockReason)
+        throw new Error(
+          `${label}: synthetic provenance requires a blockReason and no production evidence`
+        );
+    } else {
+      throw new Error(`${label}: provenance.source is invalid`);
+    }
+    new GatewayReplayEnvironment(episode.replay);
+    const key = `${episode.replay.initial.game_id}:${episode.replay.initial.guid}`;
+    const existing = gameGuids.get(key);
+    if (existing && existing !== episode.cohort)
+      throw new Error(`${label}: screen and confirm cohorts overlap at ${key}`);
+    gameGuids.set(key, episode.cohort);
+  });
+  if (!cohortCounts.screen || !cohortCounts.confirm)
+    throw new Error('gateway replay corpus requires non-empty screen and confirm cohorts');
+  return corpus;
+}
+
+export function readGatewayReplayCorpus(file: string): GatewayReplayCorpus {
+  return validateGatewayReplayCorpus(JSON.parse(fs.readFileSync(file, 'utf8')));
+}
+
+export function diagnoseGatewayReplayCorpus(corpus: GatewayReplayCorpus): ReplayCorpusDiagnostic {
+  validateGatewayReplayCorpus(corpus);
+  const episodes = corpus.episodes.map((episode): ReplayEpisodeDiagnostic => {
+    let previous = episode.replay.initial;
+    let faults = 0;
+    const transitions = episode.replay.transitions.map((transition, index) => {
+      let legalAction = true;
+      try {
+        parseGameAction(transition.action, previous);
+      } catch {
+        legalAction = false;
+        faults += 1;
+      }
+      const changedCells = changedCellCount(previous.frame, transition.frame.frame);
+      const levelDelta = transition.frame.levels_completed - previous.levels_completed;
+      previous = transition.frame;
+      return {
+        index,
+        action: transition.action,
+        legalAction,
+        changedCells,
+        levelDelta,
+        noOp: changedCells === 0 && levelDelta === 0,
+        state: transition.frame.state,
+      };
+    });
+    const finalState = previous.state;
+    return {
+      episodeId: episode.id,
+      cohort: episode.cohort,
+      steps: transitions.length,
+      changedCells: transitions.reduce((sum, item) => sum + item.changedCells, 0),
+      levelProgress: transitions.reduce((sum, item) => sum + item.levelDelta, 0),
+      noOps: transitions.filter((item) => item.noOp).length,
+      faults,
+      termination: finalState === 'WIN' || finalState === 'GAME_OVER' ? finalState : 'EXHAUSTED',
+      transitions,
+    };
+  });
+  const termination = { WIN: 0, GAME_OVER: 0, EXHAUSTED: 0 };
+  episodes.forEach((episode) => {
+    termination[episode.termination] += 1;
+  });
+  return {
+    schemaVersion: 'arc-agi-3-replay-diagnostics/v1',
+    corpusId: corpus.corpusId,
+    corpusFingerprint: fingerprintGatewayArtifact(corpus),
+    cohorts: {
+      screen: corpus.episodes.filter((item) => item.cohort === 'screen').map((item) => item.id),
+      confirm: corpus.episodes.filter((item) => item.cohort === 'confirm').map((item) => item.id),
+    },
+    totals: {
+      episodes: episodes.length,
+      steps: episodes.reduce((sum, item) => sum + item.steps, 0),
+      changedCells: episodes.reduce((sum, item) => sum + item.changedCells, 0),
+      levelProgress: episodes.reduce((sum, item) => sum + item.levelProgress, 0),
+      noOps: episodes.reduce((sum, item) => sum + item.noOps, 0),
+      faults: episodes.reduce((sum, item) => sum + item.faults, 0),
+      termination,
+    },
+    episodes,
+  };
 }
 
 /** Replays recorded production-shaped frames through the generic episode runner. */

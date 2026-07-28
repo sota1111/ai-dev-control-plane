@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "arc-agi-3-production-contract-baseline/v1",
+  "candidate": {
+    "id": "observation-rule-v1",
+    "artifactId": "git:01d8177",
+    "championRegistryFingerprint": "edd7cff6e0880084ac94e030dde31baf0824629467dd24df65abe78e6c0d7e0d",
+    "evaluationFingerprint": "339695bade7dba7fd964558e407984d0842168544a0cbf4d8825414b96042218"
+  },
+  "corpus": {
+    "id": "sot-2084-production-shaped-v1",
+    "fingerprint": "54f757be526c8c61d51c3afd2de62d22c5724acd8bcac87a123f26c558bc6bc1",
+    "evidence": "synthetic-production-shaped",
+    "productionProof": false,
+    "blockReason": "No authenticated ARC-AGI-3 production capture or capture credential is available in this repository.",
+    "screen": ["screen-ls20-episode-a", "screen-ft09-episode-b"],
+    "confirm": ["confirm-ls20-episode-c", "confirm-vc33-episode-d"]
+  },
+  "diagnostics": {
+    "episodes": 4,
+    "steps": 6,
+    "changedCells": 10,
+    "levelProgress": 4,
+    "noOps": 1,
+    "faults": 0,
+    "termination": { "WIN": 3, "GAME_OVER": 1, "EXHAUSTED": 0 }
+  },
+  "gate": {
+    "screenBeforeConfirm": true,
+    "promotionDecision": "not-run",
+    "reason": "This corpus establishes the production-shaped contract but is explicitly not production evidence; no candidate behavior change is promoted.",
+    "execCompatibility": "not-applicable",
+    "kaggleProof": "blocked-until-authenticated-production-confirm"
+  }
+}
