@@ -6,6 +6,56 @@ import shutil
 import subprocess
 
 
+CHAMPION_SOURCE = '''"""Registered observation-rule-v1 ARC-AGI-3 champion."""
+
+from .agent import Agent
+from arcengine import FrameData, GameAction, GameState
+
+
+class Champion(Agent):
+    MAX_ACTIONS = 80
+
+    @property
+    def name(self):
+        return "observation-rule-v1.git-01d8177"
+
+    def is_done(self, frames, latest_frame):
+        return latest_frame.state is GameState.WIN
+
+    def choose_action(self, frames, latest_frame):
+        if latest_frame.state in [GameState.NOT_PLAYED, GameState.GAME_OVER]:
+            action = GameAction.RESET
+        else:
+            preferred = (
+                GameAction.ACTION1
+                if latest_frame.levels_completed == 0
+                else GameAction.ACTION4
+            )
+            available = getattr(latest_frame, "available_actions", None)
+            simple = (
+                sorted(
+                    (
+                        candidate
+                        for candidate in available
+                        if candidate is not GameAction.ACTION6
+                    ),
+                    key=lambda candidate: candidate.value,
+                )
+                if available
+                else []
+            )
+            action = (
+                preferred
+                if not available or preferred in available
+                else (simple[0] if simple else GameAction.ACTION6)
+            )
+            if action is GameAction.ACTION6:
+                action.set_data({"x": 0, "y": 0})
+        action.reasoning = "registered observation-rule-v1"
+        return action
+'''
+
+
 if os.getenv("KAGGLE_IS_COMPETITION_RERUN"):
     competition = Path(
         "/kaggle/input/competitions/arc-prize-2026-arc-agi-3"
@@ -28,7 +78,7 @@ if os.getenv("KAGGLE_IS_COMPETITION_RERUN"):
     source = competition / "ARC-AGI-3-Agents"
     work = Path("/kaggle/working/ARC-AGI-3-Agents")
     shutil.copytree(source, work, dirs_exist_ok=True)
-    shutil.copy(Path(__file__).with_name("champion_agent.py"), work / "agents" / "champion.py")
+    (work / "agents" / "champion.py").write_text(CHAMPION_SOURCE)
     (work / "agents" / "__init__.py").write_text(
         "from typing import Type\n"
         "from dotenv import load_dotenv\n"
