@@ -1,50 +1,60 @@
-# Final Report — SOT-2086
+# SOT-2125 Final Report
 
 ## Summary
 
-- Confirmed SOT-2085 was a non-promotion and kept
-  `observation-rule-v1` as the registered ARC-AGI-3 GPT champion.
-- Made the Kaggle kernel source self-contained and published version 4.
-- Pinned exec, package source, pulled artifact, candidate, and evaluation
-  fingerprints in the target registry.
-- Verified the dependency-free exec contract, output schema, determinism,
-  invalid-input termination, and zero valid-fixture faults.
-- Attempted the current champion submission. Kaggle allocated no ref because
-  the one-per-UTC-day ARC-AGI-3 quota had already been consumed; the exact
-  attempt and existing ref/status/score are recorded.
+Implemented the two SOT-2124 pattern-completion candidates as narrow,
+training-gated evaluation solvers and ran the fixed screen before any confirm
+evaluation. Both candidates rejected ambiguous/unsupported tasks and safely
+fell back to identity on all six screen tasks.
+
+Neither candidate achieved its required exact positive-task match or strict
+identity win. Under the pre-registered threshold, confirm was not run and all
+production behavior changes remain reverted. Registry, champion, and Kaggle
+runtime are unchanged at `identity`.
 
 ## Changed Files
 
-- `kaggle/arc-agi-3-gpt-champion/submit.py`
-- `scripts/ai/kaggle_targets_registry.json`
-- `src/__tests__/arcAgi3ChampionExec.test.ts`
-- `docs/ai/kaggle/SOT-2086-champion-submission.md`
-- `docs/ai/70_final_report.md`
-
-## Verification
-
-- Focused ARC-AGI-3 exec tests: 4/4 passed
-- Lint: passed
-- Typecheck: passed
-- Unit tests: 99/99 suites, 1,194/1,194 tests passed
-- E2E: N/A (no E2E script and no UI change)
-- Kaggle kernel version 4: `COMPLETE`
-- Committed/pulled Kaggle source byte comparison: passed
-- Submission: concrete daily-quota skip; no ref allocated
+- `scripts/ai/evaluate_arc_pattern_completion.py` — minimal candidates and
+  ordered screen/confirm evaluator
+- `scripts/ai/test_evaluate_arc_pattern_completion.py` — fixed operator,
+  ambiguity, and fallback-safety tests
+- `docs/ai/kaggle/SOT-2124-pattern-completion-spec.{json,md}` — reviewed
+  fixed candidate/cohort specification imported from SOT-2124
+- `scripts/ai/verify_arc_pattern_completion_spec.py` — pinned fixture/spec
+  verifier imported from SOT-2124
+- `docs/ai/kaggle/SOT-2125-pattern-completion-evaluation.json` —
+  machine-readable fixture hashes and per-task results
+- `docs/ai/kaggle/SOT-2125-pattern-completion-decision.md` — promotion decision
 
 ## Acceptance Criteria
 
-- [x] SOT-2085 non-promotion, candidate revert, and unchanged champion registry agree.
-- [x] Submission target candidate/evaluation and exec/source/artifact fingerprints agree.
-- [x] Current champion passes exec, schema, determinism, termination, and fault gates.
-- [x] Kaggle attempt evidence records the exact quota skip and the current external status.
-- [x] The complete screen→confirm→non-promotion/revert→incumbent exec→Kaggle-attempt gate is documented.
+- [x] Both SOT-2124 candidates have minimal implementations with fixed unit
+  tests and training-only activation.
+- [x] The fixed small screen result and identity comparison are saved; the
+  independent confirm cohort is recorded as `not_run` because no candidate
+  passed screen.
+- [x] The non-promotion decision agrees with the unchanged `identity` champion.
+- [x] No production solver behavior remains; only evaluator/tests/evidence are
+  retained.
+- [x] Exec/submission-schema verification is not applicable because promotion
+  did not occur.
+
+## Verification
+
+- Candidate unit tests: PASS
+- Pinned fixture/spec verifier: PASS
+- Screen evaluator replay: PASS (`decision=reject`, zero faults/regressions)
+- `npm run lint`: PASS
+- `npm run typecheck`: PASS
+- `npm test`: PASS (99 suites / 1,196 tests)
+- E2E: N/A (no `e2e` script; no UI/runtime behavior change)
+- Diff review: PASS; registry, champion, and Kaggle runtime are unchanged
 
 ## Risks
 
-- Version 4 has not received a new competition submission ref because the
-  shared daily slot was already used. It is published and `COMPLETE`, ready for
-  the next eligible GPT slot.
+The rejected v1 operators intentionally favor safe fallback. Any broader
+pattern language must be specified and screened as a new candidate rather than
+retrofitted after observing this cohort.
 
 ## Acceptance: PASS
 ## Next Action: READY_FOR_REVIEW

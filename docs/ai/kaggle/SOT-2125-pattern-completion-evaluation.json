@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "issue": "SOT-2125",
+  "spec_issue": "SOT-2124",
+  "dataset": {
+    "repository": "https://github.com/arcprize/ARC-AGI-2",
+    "commit": "f3283f727488ad98fe575ea6a5ac981e4a188e49",
+    "cohort": "data/evaluation",
+    "source_analysis": "docs/ai/kaggle/SOT-2004-arc-solver-gap-analysis.json",
+    "coarse_category": "pattern-completion",
+    "task_count": 11
+  },
+  "fixture_hashes": {
+    "142ca369": "32fcd07e5a5f43a8dcf06cfb88f53d811e3f226bce6d32f4ba76b6283bfc6ec2",
+    "16de56c4": "dc3d03bf8ba0032dd3da1aaf869fc88ccf04b154bf3416f6fe7a843f9e5ba3ae",
+    "1ae2feb7": "2e1d9c2ffed3b8b16a31640c8f1515b23fca1897f12ec6dd2b9d307f81455354",
+    "35ab12c3": "99165b5d5c6af6a571727a752e6bf4a53a9863042bf8a323d5aab85667acf247",
+    "4c416de3": "b8f827c7ee4d91e99d2ac57a9c9de524f30bacb0fb2c4276a49ed8ffad20c892",
+    "8b7bacbf": "6052e670d8d44ba6198558bc493e4094a741834e5a7471bc3fedfd65f00320ef",
+    "981571dc": "b68e8bacdcbc78b1193985727eb991c82d62228a08a4c2130d367c93a63a6959",
+    "d59b0160": "a63eebe863083ec58d718b566cb4cdf00a8a5b7e5c498faab33615f690d1a900",
+    "da515329": "6f3690ddd95abbb3f76d69c6294b1572687032763f70c3be418c162e6c476b08",
+    "dbff022c": "170dd7bf7575b4c8baa142c5cd6760b31656a268a0a47d1e0680f285c6d5894d",
+    "dfadab01": "f518663f6e8dc7aa48c85bf638bcc6e97a0d9803e1db57473d74a3dc734c75e8"
+  },
+  "incumbent": "identity",
+  "protocol": "screen-then-independent-confirm",
+  "candidates": [
+    {
+      "id": "periodic-line-extrapolation-v1",
+      "screen": {
+        "candidate": "periodic-line-extrapolation-v1",
+        "task_ids": [
+          "142ca369",
+          "16de56c4",
+          "35ab12c3",
+          "8b7bacbf",
+          "981571dc",
+          "dbff022c"
+        ],
+        "identity_exact_matches": 0,
+        "candidate_exact_matches": 0,
+        "positive_exact_matches": 0,
+        "false_activations": 0,
+        "fallbacks": 6,
+        "regressions": 0,
+        "faults": 0,
+        "passed": false,
+        "results": [
+          {
+            "task": "142ca369",
+            "expected_positive": false,
+            "status": "fallback",
+            "train_consistent": true,
+            "identity_exact": false,
+            "candidate_exact": false
+          },
+          {
+            "task": "16de56c4",
+            "expected_positive": true,
+            "status": "fallback",
+            "train_consistent": true,
+            "identity_exact": false,
+            "candidate_exact": false
+          },
+          {
+            "task": "35ab12c3",
+            "expected_positive": false,
+            "status": "fallback",
+            "train_consistent": true,
+            "identity_exact": false,
+            "candidate_exact": false
+          },
+          {
+            "task": "8b7bacbf",
+            "expected_positive": false,
+            "status": "fallback",
+            "train_consistent": true,
+            "identity_exact": false,
+            "candidate_exact": false
+          },
+          {
+            "task": "981571dc",
+            "expected_positive": false,
+            "status": "fallback",
+            "train_consistent": true,
+            "identity_exact": false,
+            "candidate_exact": false
+          },
+          {
+            "task": "dbff022c",
+            "expected_positive": false,
+            "status": "fallback",
+            "train_consistent": true,
+            "identity_exact": false,
+            "candidate_exact": false
+          }
+        ]
+      },
+      "confirm": {
+        "status": "not_run",
+        "reason": "Candidate did not pass the pre-registered screen gate."
+      },
+      "decision": "reject"
+    },
+    {
+      "id": "reference-symmetry-repair-v1",
+      "screen": {
+        "candidate": "reference-symmetry-repair-v1",
+        "task_ids": [
+          "142ca369",
+          "16de56c4",
+          "35ab12c3",
+          "8b7bacbf",
+          "981571dc",
+          "dbff022c"
+        ],
+        "identity_exact_matches": 0,
+        "candidate_exact_matches": 0,
+        "positive_exact_matches": 0,
+        "false_activations": 0,
+        "fallbacks": 6,
+        "regressions": 0,
+        "faults": 0,
+        "passed": false,
+        "results": [
+          {
+            "task": "142ca369",
+            "expected_positive": false,
+            "status": "fallback",
+            "train_consistent": true,
+            "identity_exact": false,
+            "candidate_exact": false
+          },
+          {
+            "task": "16de56c4",
+            "expected_positive": false,
+            "status": "fallback",
+            "train_consistent": true,
+            "identity_exact": false,
+            "candidate_exact": false
+          },
+          {
+            "task": "35ab12c3",
+            "expected_positive": false,
+            "status": "fallback",
+            "train_consistent": true,
+            "identity_exact": false,
+            "candidate_exact": false
+          },
+          {
+            "task": "8b7bacbf",
+            "expected_positive": false,
+            "status": "fallback",
+            "train_consistent": true,
+            "identity_exact": false,
+            "candidate_exact": false
+          },
+          {
+            "task": "981571dc",
+            "expected_positive": true,
+            "status": "fallback",
+            "train_consistent": true,
+            "identity_exact": false,
+            "candidate_exact": false
+          },
+          {
+            "task": "dbff022c",
+            "expected_positive": false,
+            "status": "fallback",
+            "train_consistent": true,
+            "identity_exact": false,
+            "candidate_exact": false
+          }
+        ]
+      },
+      "confirm": {
+        "status": "not_run",
+        "reason": "Candidate did not pass the pre-registered screen gate."
+      },
+      "decision": "reject"
+    }
+  ],
+  "decision": "reject",
+  "accepted_candidates": [],
+  "behavior_changes_reverted": true,
+  "registry_champion_after": "identity"
+}
