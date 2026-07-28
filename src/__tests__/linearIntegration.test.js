@@ -26,7 +26,7 @@ const https = await import('node:https');
 const fs = await import('node:fs');
 const runner = await import('../runner.js');
 const { installLinearHttpMock } = await import('../__test_helpers__/linearMock.js');
-const { sanitizeLabelIds } = await import('../lib/linearApi.js');
+const { findOpenAutoImproveIssue, sanitizeLabelIds } = await import('../lib/linearApi.js');
 
 describe('Linear Integration', () => {
   let linearMock;
@@ -91,6 +91,24 @@ describe('Linear Integration', () => {
   });
 
   describe('High-level runner functions', () => {
+    it('treats only current Todo/In Progress auto-improve issues as an open cycle', async () => {
+      linearMock.enqueue({ data: { issues: { nodes: [{ identifier: 'SOT-ACTIVE' }] } } });
+
+      await expect(findOpenAutoImproveIssue('ptcg-agent-gpt')).resolves.toBe('SOT-ACTIVE');
+
+      expect(linearMock.calls).toHaveLength(1);
+      expect(linearMock.calls[0].query).toContain(
+        'state: { name: { in: ["Todo", "In Progress"] } }'
+      );
+      expect(linearMock.calls[0].query).not.toContain(
+        'type: { nin: ["completed", "canceled"] }'
+      );
+      expect(linearMock.calls[0].variables).toEqual({
+        name: 'ptcg-agent-gpt',
+        label: 'auto-improve',
+      });
+    });
+
     it('postUsageLimitComment checks for duplicates and posts comment', async () => {
       const issueId = 'ISS-1';
       const uuid = 'uuid-123';

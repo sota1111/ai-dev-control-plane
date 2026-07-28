@@ -767,7 +767,8 @@ async function main() {
             skipped.push({ project: t.project, reason: t.reason });
             continue;
           }
-          // Live re-check of the unfinished-cycle guard (guard 4) to avoid duplicate drafts.
+          // Live re-check of the active-cycle guard (guard 4) to avoid duplicate actionable drafts.
+          // In Review is intentionally ignored: it is historical review state, not current work.
           const open = await findOpenAutoImproveIssue(t.project, label);
           if (open) {
             skipped.push({ project: t.project, reason: `open auto-improve issue already exists (${open})` });
