@@ -3,8 +3,10 @@
 Run: python3 scripts/ai/test_archive_linear_issues.py
 """
 import importlib.util
+import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # Load the module by path (filename is fine as a module for import).
 _spec = importlib.util.spec_from_file_location(
@@ -149,6 +151,35 @@ class SelectArchiveCandidatesTest(unittest.TestCase):
         ]
         _, archive_children = select(children, child_target_count=50, exclude_ids={"", "  "})
         self.assertEqual(ids(archive_children), ["C01", "C02", "C03"])
+
+
+class LinearApiTimeoutTest(unittest.TestCase):
+    def test_urlopen_uses_default_connect_and_read_timeout(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"data":{"ok":true}}'
+        with (
+            mock.patch.dict(os.environ, {"LINEAR_API_KEY": "test-key"}, clear=False),
+            mock.patch.dict(os.environ, {}, clear=False),
+            mock.patch.object(archive.urllib.request, "urlopen", return_value=response) as urlopen,
+        ):
+            os.environ.pop("LINEAR_API_TIMEOUT_SECONDS", None)
+            self.assertEqual(archive.call_linear_api("query { ok }"), {"ok": True})
+
+        self.assertEqual(
+            urlopen.call_args.kwargs["timeout"],
+            archive.DEFAULT_LINEAR_API_TIMEOUT_SECONDS,
+        )
+
+    def test_timeout_can_be_overridden(self):
+        with mock.patch.dict(os.environ, {"LINEAR_API_TIMEOUT_SECONDS": "12.5"}):
+            self.assertEqual(archive.get_linear_api_timeout(), 12.5)
+
+    def test_invalid_timeout_falls_back_to_default(self):
+        with mock.patch.dict(os.environ, {"LINEAR_API_TIMEOUT_SECONDS": "invalid"}):
+            self.assertEqual(
+                archive.get_linear_api_timeout(),
+                archive.DEFAULT_LINEAR_API_TIMEOUT_SECONDS,
+            )
 
 
 if __name__ == "__main__":

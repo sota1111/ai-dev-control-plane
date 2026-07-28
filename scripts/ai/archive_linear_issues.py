@@ -7,6 +7,33 @@ import urllib.error
 from datetime import datetime
 from pathlib import Path
 
+DEFAULT_LINEAR_API_TIMEOUT_SECONDS = 30.0
+
+
+def get_linear_api_timeout():
+    """Return the socket timeout used for both connect and response reads."""
+    raw = os.environ.get("LINEAR_API_TIMEOUT_SECONDS", "")
+    if not raw:
+        return DEFAULT_LINEAR_API_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw)
+    except ValueError:
+        print(
+            f"WARN: invalid LINEAR_API_TIMEOUT_SECONDS={raw!r}; "
+            f"using {DEFAULT_LINEAR_API_TIMEOUT_SECONDS:g}s",
+            file=sys.stderr,
+        )
+        return DEFAULT_LINEAR_API_TIMEOUT_SECONDS
+    if timeout <= 0:
+        print(
+            f"WARN: LINEAR_API_TIMEOUT_SECONDS must be positive; "
+            f"using {DEFAULT_LINEAR_API_TIMEOUT_SECONDS:g}s",
+            file=sys.stderr,
+        )
+        return DEFAULT_LINEAR_API_TIMEOUT_SECONDS
+    return timeout
+
+
 def get_linear_api_key():
     key = os.environ.get("LINEAR_API_KEY")
     if not key:
@@ -27,7 +54,10 @@ def call_linear_api(query, variables=None):
     
     req = urllib.request.Request(url, data=json.dumps(data).encode("utf-8"), headers=headers)
     try:
-        with urllib.request.urlopen(req) as response:
+        # urllib applies this socket timeout to connection establishment and
+        # subsequent blocking reads, preventing a half-open API connection from
+        # holding the autonomous-runner lock indefinitely.
+        with urllib.request.urlopen(req, timeout=get_linear_api_timeout()) as response:
             res_data = json.loads(response.read().decode("utf-8"))
             if "errors" in res_data:
                 print(f"API Error: {json.dumps(res_data['errors'], indent=2)}")
