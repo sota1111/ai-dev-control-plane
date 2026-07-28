@@ -421,12 +421,13 @@ describe('Linear Integration', () => {
   });
 
   describe('getIssueExecutionEligibility dependency waiting (SOT-2020)', () => {
-    it('keeps a Todo issue ineligible while a blocking issue is active', async () => {
+    it('keeps a Blocked issue ineligible while a blocking issue is active', async () => {
       linearMock.enqueue({ data: { issue: {
         id: 'dependent',
         identifier: 'SOT-2020-B',
         archivedAt: null,
-        state: { name: 'Todo', type: 'unstarted' },
+        state: { name: 'Blocked', type: 'unstarted' },
+        team: { id: 'team-1' },
         labels: { nodes: [] },
         inverseRelations: { nodes: [{
           type: 'blocks',
@@ -446,12 +447,47 @@ describe('Linear Integration', () => {
       });
     });
 
+    it('moves a dependency-waiting Todo issue to Blocked without removing it from retries', async () => {
+      linearMock.enqueue({ data: { issue: {
+        id: 'dependent',
+        identifier: 'SOT-2098',
+        archivedAt: null,
+        state: { name: 'Todo', type: 'unstarted' },
+        team: { id: 'team-1' },
+        labels: { nodes: [] },
+        inverseRelations: { nodes: [{
+          type: 'blocks',
+          relatedIssue: {
+            id: 'blocker',
+            identifier: 'SOT-2097',
+            archivedAt: null,
+            state: { name: 'In Progress', type: 'started' },
+          },
+        }] },
+      } } });
+      linearMock.enqueue({ data: { workflowStates: { nodes: [
+        { id: 'todo-state', name: 'Todo', type: 'unstarted' },
+        { id: 'blocked-state', name: 'Blocked', type: 'unstarted' },
+      ] } } });
+      linearMock.enqueue({ data: { issueUpdate: { success: true } } });
+
+      await expect(runner.getIssueExecutionEligibility('SOT-2098')).resolves.toEqual({
+        eligible: false,
+        reason: 'waiting on blockers: SOT-2097',
+        waitingOnBlockers: ['SOT-2097'],
+      });
+
+      const update = linearMock.calls.find((call) => call.query.includes('issueUpdate'));
+      expect(update.variables).toEqual({ id: 'dependent', stateId: 'blocked-state' });
+    });
+
     it('allows the next round after the blocker reaches In Review', async () => {
       linearMock.enqueue({ data: { issue: {
         id: 'dependent',
         identifier: 'SOT-2020-B',
         archivedAt: null,
         state: { name: 'Todo', type: 'unstarted' },
+        team: { id: 'team-1' },
         labels: { nodes: [] },
         inverseRelations: { nodes: [{
           type: 'blocks',
@@ -476,6 +512,7 @@ describe('Linear Integration', () => {
         identifier: 'SOT-2020-B',
         archivedAt: null,
         state: { name: 'Todo', type: 'unstarted' },
+        team: { id: 'team-1' },
         labels: { nodes: [] },
         inverseRelations: { nodes: [{
           type: 'blocks',

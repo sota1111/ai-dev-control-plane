@@ -796,6 +796,7 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
           identifier
           archivedAt
           state { name type }
+          team { id }
           labels { nodes { name } }
           inverseRelations {
             nodes {
@@ -840,7 +841,7 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
       return { eligible: false, reason: 'hold state (In Review) before run' };
     }
 
-    // A dependency-waiting issue stays Todo in Linear. Do not execute it until every incoming
+    // A dependency-waiting issue is shown as Blocked in Linear. Do not execute it until every incoming
     // `blocks` relation points at a completed/archived issue, and do not remove it from the queue:
     // the runner re-enqueues it with backoff so later drain/reaper rounds pick it up after the
     // prerequisite finishes. This also covers blockers that are not present in the local queue.
@@ -859,6 +860,39 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
       .map((blocker: any) => blocker.identifier || blocker.id)
       .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
     if (waitingOnBlockers.length > 0) {
+      // SOT-2098: make the wait visible without turning it into a hold/terminal state. Blocked is an
+      // unstarted state, so fetchActiveIssues keeps discovering it; once all blockers finish this
+      // method returns eligible and the normal pipeline-start transition moves it to In Progress.
+      if ((state?.name || '').toLowerCase() !== 'blocked') {
+        try {
+          const statesData: any = await linearQuery(
+            'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
+            { teamId: data.issue.team.id }
+          );
+          const blockedState = (statesData.workflowStates?.nodes || []).find(
+            (candidate: any) => (candidate.name || '').toLowerCase() === 'blocked'
+          );
+          if (blockedState?.id) {
+            await linearQuery(
+              'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
+              { id: data.issue.id, stateId: blockedState.id }
+            );
+            log('WEBHOOK', `getIssueExecutionEligibility: ${data.issue.identifier || issueId} updated to Blocked`, {
+              issue: data.issue.identifier || issueId,
+            });
+          } else {
+            log('ERROR', `getIssueExecutionEligibility: no Blocked state for team ${data.issue.team.id}`, {
+              issue: data.issue.identifier || issueId,
+            });
+          }
+        } catch (err: any) {
+          // Status visibility is best-effort; never strand the dependency retry if Linear rejects
+          // the transition or a team has not configured a Blocked workflow state.
+          log('ERROR', `getIssueExecutionEligibility: failed to set Blocked: ${err.message}`, {
+            issue: data.issue.identifier || issueId,
+          });
+        }
+      }
       return {
         eligible: false,
         reason: `waiting on blockers: ${waitingOnBlockers.join(', ')}`,

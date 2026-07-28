@@ -107,7 +107,7 @@ workers: <claude系: solo=claude:opus | gpt系: solo=codex:gpt-5.6-sol>, handoff
 このテンプレートは分解トリガー条件（複数独立軸・複数PR・逐次依存）を満たすので、task-check が
 2〜5子Issueへ分解する（＝「plan が起案Issueを読んで順位向上子Issueを作る」要件）。
 
-## 子Issueは Todo + blockedBy で作る（依存順自動実装の担保・SOT-1913 の依存順失敗の恒久対策）
+## 子Issueは Todo + blockedBy で作る（待機中は Blocked へ自動遷移）
 
 **重要**: 起案親から分解した実装子Issue、および cron が作る親Issueは **Todo で登録し、依存は
 `blockedBy` で連結する**。In Review にパークしてはならない。
@@ -117,7 +117,9 @@ workers: <claude系: solo=claude:opus | gpt系: solo=codex:gpt-5.6-sol>, handoff
 キューから外す）。依存順ソート（`src/lib/queueOrdering.ts` の `sortQueueByPriority` /
 `selectNextReadyIndex`）は **enqueue された Todo/In Progress の Issue にしか効かない**。よって
 子Issueを In Review にパークすると、そもそもキューに入らず依存順に自動実装されない。Todo +
-blockedBy にすれば、既存の topological ソートがブロッカー完了まで依存側を保留し、依存順に処理する。
+blockedBy にすれば、既存の topological ソートが依存側を保留する。待機が確認されたIssueは Linear 上で
+**Blocked** へ自動遷移するが、Blocked は自動スキャン対象に残るため、ブロッカー完了後は In Progress
+へ進んで依存順に最後まで処理される。
 （詳細: `docs/ai/investigations/SOT-1913-dependency-order.md`）
 
 ## 有効化 / kill switch
