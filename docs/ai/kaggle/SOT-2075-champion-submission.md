@@ -47,10 +47,9 @@ The shared daily cap is one.
 - Created: `2026-07-28T08:59:17.633000Z`
 - Description: `auto-improve submit: arc-agi-2-gpt identity champion`
 - Kernel version: 4
-- Status at evidence capture: `SubmissionStatus.PENDING`
-- Public/private score at evidence capture: not yet available
+- Status: `SubmissionStatus.COMPLETE`
+- Public score: `0.00`
+- Private score: not reported
 - Remaining daily submissions reported by Kaggle: 0
 
-The submission was accepted by Kaggle and allocated a ref. Scoring is
-asynchronous; the recorded status and empty score are the live values returned
-immediately after submission.
+The submission completed successfully and consumed the single daily slot.
