@@ -1,0 +1,94 @@
+{
+  "schemaVersion": "arc-agi-3-stateful-comparison/v1",
+  "issue": "SOT-2085",
+  "candidate": {
+    "id": "stateful-frame-difference-v1",
+    "artifactId": "git:1797998b238ffcd3604996a9aa7b0298ce23ed83",
+    "sourceFingerprint": "7e993789adabc01b02db48ef367f72b12bf70d4aa7d4b9999de18e4b321bccd7"
+  },
+  "incumbent": {
+    "id": "observation-rule-v1",
+    "registryFingerprint": "edd7cff6e0880084ac94e030dde31baf0824629467dd24df65abe78e6c0d7e0d",
+    "evaluationFingerprint": "339695bade7dba7fd964558e407984d0842168544a0cbf4d8825414b96042218"
+  },
+  "corpus": {
+    "id": "sot-2084-production-shaped-v1",
+    "fingerprint": "54f757be526c8c61d51c3afd2de62d22c5724acd8bcac87a123f26c558bc6bc1",
+    "productionEvidence": false,
+    "screenEpisodeIds": [
+      "screen-ls20-episode-a",
+      "screen-ft09-episode-b"
+    ],
+    "confirmEpisodeIds": [
+      "confirm-ls20-episode-c",
+      "confirm-vc33-episode-d"
+    ]
+  },
+  "gate": {
+    "screenPassed": true,
+    "confirmExecuted": true,
+    "screenCriterion": "candidate levelProgress >= incumbent, noOpRate <= incumbent, fewer replay action mismatches, and faults = 0",
+    "promotionCriterion": "authenticated production confirm, candidate levelProgress > incumbent, faults = 0, then exec compatibility"
+  },
+  "screen": {
+    "incumbent": {
+      "levelProgress": 1,
+      "noOps": 1,
+      "steps": 3,
+      "noOpRate": 0.3333333333333333,
+      "faults": 0,
+      "actionMismatches": 1,
+      "termination": ["WIN", "ACTION_MISMATCH"]
+    },
+    "candidate": {
+      "levelProgress": 1,
+      "noOps": 1,
+      "steps": 3,
+      "noOpRate": 0.3333333333333333,
+      "faults": 0,
+      "actionMismatches": 0,
+      "termination": ["WIN", "GAME_OVER"],
+      "actions": [[{"action": 1}], [{"action": 2}, {"action": 3}]]
+    }
+  },
+  "confirm": {
+    "incumbent": {
+      "levelProgress": 2,
+      "noOps": 0,
+      "steps": 2,
+      "noOpRate": 0,
+      "faults": 1,
+      "actionMismatches": 1,
+      "termination": ["WIN", "ACTION_MISMATCH"]
+    },
+    "candidate": {
+      "levelProgress": 3,
+      "noOps": 0,
+      "steps": 3,
+      "noOpRate": 0,
+      "faults": 0,
+      "actionMismatches": 0,
+      "termination": ["WIN", "WIN"],
+      "actions": [
+        [{"action": 4}],
+        [{"action": 6, "data": {"x": 1, "y": 1}}, {"action": 5}]
+      ]
+    }
+  },
+  "verification": {
+    "focusedTests": "6/6 passed",
+    "legalActions": "passed",
+    "determinism": "passed",
+    "stateReset": "passed",
+    "coordinateBounds": "passed",
+    "stepLimit": "passed",
+    "fallback": "passed",
+    "candidateFaults": 0
+  },
+  "decision": "not-promoted",
+  "reason": "The candidate improved confirm level progress from 2 to 3 with zero faults on the synthetic production-shaped corpus, but the corpus is explicitly not authenticated production evidence.",
+  "candidateCode": "reverted by git:17ffe57deaff5a6081c30dace5ad72852a26e088",
+  "championRegistry": "unchanged",
+  "execCompatibility": "not-run; promotion gate not met",
+  "kaggleProof": "not-run; promotion gate not met"
+}
