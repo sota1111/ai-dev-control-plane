@@ -80,7 +80,7 @@
           "submit": {
             "file": "submission.json",
             "kernel": "sota1111/arc-agi-2-gpt-identity-champion",
-            "version": 3,
+            "version": 4,
             "output": "submission.json",
             "candidate_id": "identity",
             "artifact_fingerprint": "sha256:94dc28395abe6c5046d1bf9af8376913e5a83aaa8fe11164656f54195f1f1a8b",
