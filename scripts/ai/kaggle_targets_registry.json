@@ -173,7 +173,7 @@
           "submit": {
             "file": ".targets/rogii-claude/submission.csv",
             "kernel": "sota1111/rogii-claude-baseline",
-            "version": 1,
+            "version": 3,
             "output": "submission.csv",
             "message": "auto-improve submit: rogii-claude champion"
           },
