@@ -1498,7 +1498,7 @@ describe('runner', () => {
       expect(logs.some(l => l.includes('task completion not verified: state is "In Progress"'))).toBe(true);
     });
 
-    it('keeps a dependency-blocked Todo issue queued for a later round without starting a worker', async () => {
+    it('keeps a dependency-blocked Blocked issue queued for a later round without starting a worker', async () => {
       const item: any = queueItem('SOT-2020-B', 1);
       item.issueIdentifier = 'SOT-2020-B';
       fs.readFileSync.mockReturnValue('[]');
@@ -1507,7 +1507,8 @@ describe('runner', () => {
           id: 'dependent',
           identifier: 'SOT-2020-B',
           archivedAt: null,
-          state: { type: 'unstarted', name: 'Todo' },
+          state: { type: 'unstarted', name: 'Blocked' },
+          team: { id: 'team-1' },
           labels: { nodes: [] },
           inverseRelations: { nodes: [{
             type: 'blocks',

@@ -1071,7 +1071,7 @@ function requeueDependencyBlocked(item: QueueItem, blockers: string[]): void {
     queueGroup: item.queueGroup ?? null,
     queueGroupOrder: item.queueGroupOrder ?? null,
   });
-  log('QUEUE', `dependency blocked — keeping Todo issue for a later round (retryAt=${retryAt}, blockers=${blockers.join(', ')})`, {
+  log('QUEUE', `dependency blocked — keeping Blocked issue for a later round (retryAt=${retryAt}, blockers=${blockers.join(', ')})`, {
     issue: item.issueId,
   });
 }
