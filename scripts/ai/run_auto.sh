@@ -94,6 +94,7 @@ fi
 # 自動でアーカイブを実行して容量を確保する。
 #   ISSUE_CAP_TRIGGER: この件数以上で「追加不可」とみなしアーカイブを実行（既定 245）
 #   ISSUE_CAP_PREFLIGHT: 0/false/no/off でプリフライト全体を無効化（既定 有効）
+#   ISSUE_CAP_PREFLIGHT_TIMEOUT: 容量スキャン全体の上限秒数（既定 90）
 #   ISSUE_CAP_PREFLIGHT_TTL: 直近スキャン結果のキャッシュ秒数（既定 3600=1h, SOT-1514 / P3）。
 #     TTL 内かつ前回件数が trigger 未満なら Linear への全Issue件数スキャン（毎run のネットワーク
 #     往復）をスキップする。閾値近傍（>= trigger）や TTL 切れ時のみ再スキャンし、アーカイブ実行後は
@@ -101,8 +102,13 @@ fi
 # アーカイブは親150/子50を維持する archive_linear_issues.sh に委譲する（各カテゴリ古い順・作業中除外）。
 # 失敗（APIキー未設定・取得失敗・アーカイブ失敗）は警告のみで run は継続する。
 ISSUE_CAP_TRIGGER="${ISSUE_CAP_TRIGGER:-245}"
+ISSUE_CAP_PREFLIGHT_TIMEOUT="${ISSUE_CAP_PREFLIGHT_TIMEOUT:-90}"
 ISSUE_CAP_PREFLIGHT_TTL="${ISSUE_CAP_PREFLIGHT_TTL:-3600}"
 ISSUE_CAP_CACHE_FILE="${LOG_DIR}/issue_count_cache.json"
+if ! [[ "$ISSUE_CAP_PREFLIGHT_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[CAPACITY] WARN invalid ISSUE_CAP_PREFLIGHT_TIMEOUT='${ISSUE_CAP_PREFLIGHT_TIMEOUT}'; using 90s"
+  ISSUE_CAP_PREFLIGHT_TIMEOUT=90
+fi
 _preflight_enabled=1
 case "$(printf '%s' "${ISSUE_CAP_PREFLIGHT:-1}" | tr '[:upper:]' '[:lower:]')" in
   0|false|no|off) _preflight_enabled=0 ;;
@@ -126,7 +132,8 @@ else
     echo "[CAPACITY] cached issues=${CACHED_TOTAL} < trigger=${ISSUE_CAP_TRIGGER} (age ${CACHE_AGE}s < ttl ${ISSUE_CAP_PREFLIGHT_TTL}s); skipping scan"
   else
     set +e
-    ISSUE_TOTAL="$(bash scripts/ai/archive_linear_issues.sh --print-total 2>/dev/null)"
+    ISSUE_TOTAL="$(timeout --signal=TERM --kill-after=5s "${ISSUE_CAP_PREFLIGHT_TIMEOUT}s" \
+      bash scripts/ai/archive_linear_issues.sh --print-total 2>/dev/null)"
     PRINT_TOTAL_RC=$?
     set -e
     if [ "$PRINT_TOTAL_RC" -ne 0 ] || ! [[ "$ISSUE_TOTAL" =~ ^[0-9]+$ ]]; then
@@ -150,7 +157,8 @@ else
           fi
         fi
         set +e
-        bash scripts/ai/archive_linear_issues.sh --execute "${ARCHIVE_EXCLUDE_ARGS[@]}"
+        timeout --signal=TERM --kill-after=5s "${ISSUE_CAP_PREFLIGHT_TIMEOUT}s" \
+          bash scripts/ai/archive_linear_issues.sh --execute "${ARCHIVE_EXCLUDE_ARGS[@]}"
         ARCHIVE_RC=$?
         set -e
         if [ "$ARCHIVE_RC" -ne 0 ]; then
