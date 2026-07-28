@@ -33,4 +33,10 @@ describe('run_auto incomplete-dispatch retry policy (SOT-1928)', () => {
       /grep -qiE 'pull\/\[0-9\]\+\|PR\[ :\*\]\*#\[0-9\]\+' "\$sreport"[\s\S]*?if \[ "\$sacc" != "PASS" \]; then[\s\S]*?return "\$COMPLETION_UNVERIFIED"/,
     );
   });
+
+  test('solo PR results cannot complete without a posted Linear report', () => {
+    expect(script).toMatch(
+      /slin(?:ear)?=.*Linear\[\[:space:\]\]\+Report:[\s\S]*?if \[ -z "\$slinear" \]; then[\s\S]*?lacks Linear Report POSTED[\s\S]*?return "\$COMPLETION_UNVERIFIED"/,
+    );
+  });
 });
