@@ -869,6 +869,7 @@ async function main() {
       }
       const plan = planCompetitionSubmission(registry, competitionKey, submittedByRepo, {
         lastSubmittedLineage,
+        dateUtc: flags['date-utc'],
       });
       if (!plan) {
         process.stderr.write(`kaggle-champion-plan: competition "${competitionKey}" not in registry\n`);

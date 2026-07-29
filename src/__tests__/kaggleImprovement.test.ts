@@ -12,6 +12,7 @@ import {
   planChampionSubmission,
   planCompetitionSubmission,
   nextAlternateLineage,
+  alternateLineageForUtcDate,
   type TargetsRegistry,
   type CycleInput,
 } from '../lib/kaggleImprovement.js';
@@ -55,6 +56,8 @@ describe('kaggleImprovement', () => {
         kaggle_competition: 'arc-prize-2026',
         daily_submission_cap: 1,
         submission_mode: 'alternate',
+        alternate_anchor_date: '2026-07-29',
+        alternate_anchor_lineage: 'claude',
         targets: [
           {
             lineage: 'claude',
@@ -363,8 +366,24 @@ describe('kaggleImprovement', () => {
       expect(nextAlternateLineage('gpt')).toBe('claude');
     });
 
+    test('calendar anchor flips lineage on each UTC date', () => {
+      expect(alternateLineageForUtcDate('2026-07-29', '2026-07-29', 'gpt')).toBe('gpt');
+      expect(alternateLineageForUtcDate('2026-07-30', '2026-07-29', 'gpt')).toBe('claude');
+      expect(alternateLineageForUtcDate('2026-07-31', '2026-07-29', 'gpt')).toBe('gpt');
+      expect(() => alternateLineageForUtcDate('2026-02-30', '2026-07-29', 'gpt')).toThrow(
+        /invalid/
+      );
+    });
+
     test('first time (no prior submission) submits claude, gpt waits its turn', () => {
-      const plan = planCompetitionSubmission(reg(), 'arc-agi-2', {})!;
+      const plan = planCompetitionSubmission(
+        reg(),
+        'arc-agi-2',
+        {},
+        {
+          dateUtc: '2026-07-29',
+        }
+      )!;
       expect(plan.mode).toBe('alternate');
       expect(plan.chosenLineage).toBe('claude');
       const claude = plan.targets.find((t) => t.lineage === 'claude')!;
@@ -375,10 +394,16 @@ describe('kaggleImprovement', () => {
       expect(gpt.reason).toMatch(/alternate mode/);
     });
 
-    test('after claude submitted last, it is gpt turn next', () => {
-      const plan = planCompetitionSubmission(reg(), 'arc-agi-2', {}, {
-        lastSubmittedLineage: 'claude',
-      })!;
+    test('the next UTC date switches from claude to gpt regardless of submission history', () => {
+      const plan = planCompetitionSubmission(
+        reg(),
+        'arc-agi-2',
+        {},
+        {
+          lastSubmittedLineage: 'gpt',
+          dateUtc: '2026-07-30',
+        }
+      )!;
       expect(plan.chosenLineage).toBe('gpt');
       const gpt = plan.targets.find((t) => t.lineage === 'gpt')!;
       const claude = plan.targets.find((t) => t.lineage === 'claude')!;
@@ -392,7 +417,7 @@ describe('kaggleImprovement', () => {
         reg(),
         'arc-agi-2',
         { 'arc-agi-2-claude': 1 },
-        { lastSubmittedLineage: 'claude' }
+        { dateUtc: '2026-07-30' }
       )!;
       expect(plan.chosenLineage).toBe('gpt');
       const gpt = plan.targets.find((t) => t.lineage === 'gpt')!;
