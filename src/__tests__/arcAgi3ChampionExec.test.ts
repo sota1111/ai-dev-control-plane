@@ -1,5 +1,4 @@
 import { spawnSync } from 'node:child_process';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -45,20 +44,26 @@ describe('ARC-AGI-3 champion exec contract', () => {
     ]);
   });
 
-  it('pins the dependency-free exec and self-contained Kaggle source fingerprints', () => {
+  it('pins the completed external GPT champion and submission provenance', () => {
     const target = targetRegistry.competitions
       .find((competition: { key: string }) => competition.key === 'arc-agi-3')
       .targets.find((item: { repo: string }) => item.repo === 'arc-agi-3-gpt');
-    const digest = (file: string) =>
-      `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
 
     expect(target.submit).toMatchObject({
-      candidate_id: registry.champion.candidateId,
-      evaluation_fingerprint: registry.champion.evaluationFingerprint,
-      exec_fingerprint: digest(executable),
-      source_fingerprint: digest(kernelSource),
-      artifact_fingerprint: digest(kernelSource),
+      kernel: 'sota1111/arc-agi-3-gpt-registered-champion',
+      version: 5,
+      candidate_id: 'deterministic-legal-v1',
+      evaluation_fingerprint:
+        'sha256:6f68d6305ae64de7686cbcd81ddeb300b2861080f4ed3436740169ea868c1aa2',
+      exec_fingerprint: 'kaggle:kernel-v5/submission-55067146',
+      source_fingerprint: 'git:7a145f8d68a93c09a51c69a2bce96388f7cba632',
+      artifact_fingerprint:
+        'sha256:d734c42fd993c667af50724868096884f941b751855669db6298e6107d4a5520',
+      submission_ref: 55067146,
+      submission_status: 'COMPLETE',
+      public_score: 0.08,
     });
+    expect(target.champion_status).toBe('exec-verified');
     expect(fs.readFileSync(kernelSource, 'utf8')).not.toContain('champion_agent.py');
   });
 
