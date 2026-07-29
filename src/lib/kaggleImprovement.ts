@@ -28,6 +28,26 @@ export function nextAlternateLineage(lastSubmitted?: Lineage | null): Lineage {
   return lastSubmitted === 'claude' ? 'gpt' : 'claude';
 }
 
+/** UTC calendar date and a registry anchor determine the lineage scheduled for that date. */
+export function alternateLineageForUtcDate(
+  dateUtc: string,
+  anchorDateUtc: string,
+  anchorLineage: Lineage
+): Lineage {
+  const parseDay = (value: string): number => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw new Error(`alternate date must be YYYY-MM-DD: "${value}"`);
+    }
+    const millis = Date.parse(`${value}T00:00:00Z`);
+    if (!Number.isFinite(millis) || new Date(millis).toISOString().slice(0, 10) !== value) {
+      throw new Error(`alternate date is invalid: "${value}"`);
+    }
+    return Math.floor(millis / 86_400_000);
+  };
+  const days = Math.abs(parseDay(dateUtc) - parseDay(anchorDateUtc));
+  return days % 2 === 0 ? anchorLineage : nextAlternateLineage(anchorLineage);
+}
+
 /** どうやって実際に提出するか（実提出は SOT-1934 側）。 */
 export interface TargetSubmitSpec {
   /** 提出物のパス（未設定なら実提出は skip+通知で安全側）。 */
@@ -56,6 +76,8 @@ export interface ImprovementCompetition {
   dailySubmissionCap: number;
   /** 提出モード。default `both`。ARC(1/day 共有)は `alternate`（claude/gpt を日替わり交互提出）。 */
   submissionMode: SubmissionMode;
+  alternateAnchorDate?: string;
+  alternateAnchorLineage?: Lineage;
   targets: ImprovementTarget[];
 }
 
@@ -186,6 +208,19 @@ function parseCompetition(
     );
   }
   const submissionMode = modeRaw as SubmissionMode;
+  const alternateAnchorDate = co.alternate_anchor_date ?? co.alternateAnchorDate;
+  const alternateAnchorLineage = co.alternate_anchor_lineage ?? co.alternateAnchorLineage;
+  if (submissionMode === 'alternate') {
+    if (typeof alternateAnchorDate !== 'string') {
+      throw new Error(`registry.competitions[${i}].alternate_anchor_date is required for alternate mode`);
+    }
+    alternateLineageForUtcDate(alternateAnchorDate, alternateAnchorDate, 'claude');
+    if (alternateAnchorLineage !== 'claude' && alternateAnchorLineage !== 'gpt') {
+      throw new Error(
+        `registry.competitions[${i}].alternate_anchor_lineage must be "claude" or "gpt"`
+      );
+    }
+  }
 
   const targetsRaw = co.targets;
   if (!Array.isArray(targetsRaw) || targetsRaw.length === 0) {
@@ -196,7 +231,15 @@ function parseCompetition(
     parseTarget(t, i, j, linSeen)
   );
 
-  return { key, kaggleCompetition, dailySubmissionCap: cap, submissionMode, targets };
+  return {
+    key,
+    kaggleCompetition,
+    dailySubmissionCap: cap,
+    submissionMode,
+    alternateAnchorDate: alternateAnchorDate as string | undefined,
+    alternateAnchorLineage: alternateAnchorLineage as Lineage | undefined,
+    targets,
+  };
 }
 
 function parseTarget(
@@ -473,6 +516,8 @@ export interface CompetitionSubmitOptions {
    * スクリプトが決める）。未指定なら claude 始まりで交互する。both モードでは無視される。
    */
   lastSubmittedLineage?: Lineage | null;
+  /** UTC calendar date used by alternate mode. Defaults to the current UTC date. */
+  dateUtc?: string;
 }
 
 /**
@@ -499,7 +544,15 @@ export function planCompetitionSubmission(
       (sum, t) => sum + (submittedByRepo[t.repo] ?? 0),
       0
     );
-    const chosen = nextAlternateLineage(opts.lastSubmittedLineage ?? null);
+    const dateUtc = opts.dateUtc ?? new Date().toISOString().slice(0, 10);
+    const chosen =
+      competition.alternateAnchorDate && competition.alternateAnchorLineage
+        ? alternateLineageForUtcDate(
+            dateUtc,
+            competition.alternateAnchorDate,
+            competition.alternateAnchorLineage
+          )
+        : nextAlternateLineage(opts.lastSubmittedLineage ?? null);
     const targets = competition.targets.map((t) => {
       if (t.lineage !== chosen) {
         const today = submittedByRepo[t.repo] ?? 0;

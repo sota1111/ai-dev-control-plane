@@ -120,10 +120,12 @@ fi
 
 # 提出プランを得る（収束なし・常に champion）。
 plan_json="$(cd "$REPO_ROOT" && npx --no-install tsx src/runner-cli.ts kaggle-champion-plan \
-  --registry "$REGISTRY" --competition "$COMP_KEY" --submitted "$submitted_json" "${LINEAGE_ARGS[@]}" 2>/dev/null)"
+  --registry "$REGISTRY" --competition "$COMP_KEY" --submitted "$submitted_json" \
+  --date-utc "$today_utc" "${LINEAGE_ARGS[@]}" 2>/dev/null)"
 if [[ -z "$plan_json" ]]; then
   plan_json="$(cd "$REPO_ROOT" && npx tsx src/runner-cli.ts kaggle-champion-plan \
-    --registry "$REGISTRY" --competition "$COMP_KEY" --submitted "$submitted_json" "${LINEAGE_ARGS[@]}" 2>/dev/null)"
+    --registry "$REGISTRY" --competition "$COMP_KEY" --submitted "$submitted_json" \
+    --date-utc "$today_utc" "${LINEAGE_ARGS[@]}" 2>/dev/null)"
 fi
 if [[ -z "$plan_json" ]]; then
   echo "ERROR: kaggle-champion-plan の実行に失敗しました（tsx/runner-cli を確認）。" >&2
