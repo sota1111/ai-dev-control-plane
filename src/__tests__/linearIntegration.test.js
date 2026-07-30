@@ -420,6 +420,26 @@ describe('Linear Integration', () => {
     });
   });
 
+  describe('setIssueBlocked (human intervention)', () => {
+    it('moves an auth-stopped issue to Blocked and explains how to resume', async () => {
+      linearMock.enqueue({ data: { issue: {
+        id: 'u1', state: { name: 'In Progress', type: 'started' }, team: { id: 't1' },
+      } } });
+      linearMock.enqueue({ data: { workflowStates: { nodes: [
+        { id: 'blocked', name: 'Blocked', type: 'unstarted' },
+      ] } } });
+      linearMock.enqueue({ data: { issueUpdate: { success: true } } });
+      linearMock.enqueue({ data: { commentCreate: { success: true } } });
+
+      const moved = await runner.setIssueBlocked('SOT-1', '再認証後に再開してください');
+      expect(moved).toBe(true);
+      expect(linearMock.calls.find((call) => call.query.includes('issueUpdate')).variables.stateId)
+        .toBe('blocked');
+      expect(linearMock.calls.find((call) => call.query.includes('commentCreate')).variables.body)
+        .toContain('再認証');
+    });
+  });
+
   describe('getIssueExecutionEligibility dependency waiting (SOT-2020)', () => {
     it('keeps a Blocked issue ineligible while a blocking issue is active', async () => {
       linearMock.enqueue({ data: { issue: {
@@ -444,15 +464,16 @@ describe('Linear Integration', () => {
         eligible: false,
         reason: 'waiting on blockers: SOT-2020-A',
         waitingOnBlockers: ['SOT-2020-A'],
+        meaningState: 'dependency_wait',
       });
     });
 
-    it('moves a dependency-waiting Todo issue to Blocked without removing it from retries', async () => {
+    it('keeps a dependency-waiting issue in Todo without removing it from retries', async () => {
       linearMock.enqueue({ data: { issue: {
         id: 'dependent',
         identifier: 'SOT-2098',
         archivedAt: null,
-        state: { name: 'Todo', type: 'unstarted' },
+        state: { name: 'Blocked', type: 'unstarted' },
         team: { id: 'team-1' },
         labels: { nodes: [] },
         inverseRelations: { nodes: [{
@@ -475,10 +496,11 @@ describe('Linear Integration', () => {
         eligible: false,
         reason: 'waiting on blockers: SOT-2097',
         waitingOnBlockers: ['SOT-2097'],
+        meaningState: 'dependency_wait',
       });
 
       const update = linearMock.calls.find((call) => call.query.includes('issueUpdate'));
-      expect(update.variables).toEqual({ id: 'dependent', stateId: 'blocked-state' });
+      expect(update.variables).toEqual({ id: 'dependent', stateId: 'todo-state' });
     });
 
     it('allows the next round after the blocker reaches In Review', async () => {
@@ -503,6 +525,7 @@ describe('Linear Integration', () => {
       await expect(runner.getIssueExecutionEligibility('SOT-2020-B')).resolves.toEqual({
         eligible: true,
         isLongRun: false,
+        meaningState: 'actionable',
       });
     });
 

@@ -1,4 +1,14 @@
-import { isTerminalState, isHoldState } from '../lib/issueState.js';
+import { isTerminalState, isHoldState, classifyIssueMeaningState } from '../lib/issueState.js';
+
+describe('classifyIssueMeaningState', () => {
+  test('maps every execution condition to one semantic state', () => {
+    expect(classifyIssueMeaningState({ name: 'Todo', type: 'unstarted' })).toBe('actionable');
+    expect(classifyIssueMeaningState({ name: 'Todo' }, { hasUnresolvedBlockers: true })).toBe('dependency_wait');
+    expect(classifyIssueMeaningState({ name: 'Blocked' })).toBe('human_wait');
+    expect(classifyIssueMeaningState({ name: 'Todo' }, { authUnhealthy: true })).toBe('auth_unhealthy');
+    expect(classifyIssueMeaningState({ name: 'Done', type: 'completed' })).toBe('terminal');
+  });
+});
 
 describe('isTerminalState', () => {
   test('returns true for terminal types', () => {

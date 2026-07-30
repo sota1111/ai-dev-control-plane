@@ -1,7 +1,7 @@
 import https from 'node:https';
 import { getSecret } from '../config/secrets.js';
 import { getPriorityRank } from './queueOrdering.js';
-import { isTerminalState, isHoldState, isChildComplete } from './issueState.js';
+import { isTerminalState, isHoldState, isChildComplete, classifyIssueMeaningState } from './issueState.js';
 import * as appEnv from '../config/env.js';
 import type { IssueQueueMetadata } from '../runner.js';
 
@@ -44,6 +44,7 @@ export interface EligibilityResult {
   reason?: string;
   isLongRun?: boolean;
   waitingOnBlockers?: string[];
+  meaningState?: import('./issueState.js').IssueMeaningState;
 }
 
 // Marker embedded in the auto-finalization comment so we never finalize a parent twice.
@@ -564,6 +565,7 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
           id
           state { name type }
           team { id }
+          children(first: 100) { nodes { identifier state { name type } } }
           relations { nodes { id type } }
           inverseRelations { nodes { id type } }
         }
@@ -581,6 +583,11 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
     // On Hold; the post-run ensure-issue-reviewed step must NOT drag it back to In Review, or the halt
     // would be undone and the re-run loop would resume.
     if (isHoldState(issue.state)) return false;
+    const pendingChildren = (issue.children?.nodes || []).filter((child: any) => !isChildComplete(child.state));
+    if (pendingChildren.length > 0) {
+      log('WEBHOOK', `setIssueInReview: ${issueId} still has active children: ${pendingChildren.map((child: any) => child.identifier).join(', ')}`, { issue: issueId });
+      return false;
+    }
 
     // In Progress と In Review はどちらも type "started" のため、name で In Review を解決する。
     const statesData: any = await linearQuery(
@@ -660,6 +667,43 @@ export async function setIssueOnHold(issueId: string, commentBody?: string): Pro
     return true;
   } catch (err: any) {
     log('ERROR', `setIssueOnHold failed: ${err.message}`, { issue: issueId });
+    return false;
+  }
+}
+
+/** Park an issue that genuinely requires human intervention (for example expired worker auth). */
+export async function setIssueBlocked(issueId: string, commentBody?: string): Promise<boolean> {
+  const { log } = requireDeps();
+  try {
+    const data: any = await linearQuery(
+      'query($id: String!) { issue(id: $id) { id state { name type } team { id } } }',
+      { id: issueId }
+    );
+    const issue = data.issue;
+    if (!issue || isTerminalState(issue.state)) return false;
+    if ((issue.state?.name || '').toLowerCase() === 'blocked') return false;
+    const statesData: any = await linearQuery(
+      'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
+      { teamId: issue.team.id }
+    );
+    const blockedState = (statesData.workflowStates?.nodes || []).find(
+      (state: any) => (state.name || '').toLowerCase() === 'blocked'
+    );
+    if (!blockedState) return false;
+    await linearQuery(
+      'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
+      { id: issue.id, stateId: blockedState.id }
+    );
+    if (commentBody) {
+      await linearQuery(
+        'mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }',
+        { issueId: issue.id, body: commentBody }
+      );
+    }
+    log('WEBHOOK', `setIssueBlocked: ${issueId} -> Blocked`, { issue: issueId });
+    return true;
+  } catch (err: any) {
+    log('ERROR', `setIssueBlocked failed: ${err.message}`, { issue: issueId });
     return false;
   }
 }
@@ -824,21 +868,21 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
 
     if (archivedAt) {
       removeFromQueue(issueId);
-      return { eligible: false, reason: 'archived issue before run' };
+      return { eligible: false, reason: 'archived issue before run', meaningState: 'terminal' };
     }
 
     const isTerminal = isTerminalState(state);
 
     if (isTerminal) {
       removeFromQueue(issueId);
-      return { eligible: false, reason: 'terminal state before run' };
+      return { eligible: false, reason: 'terminal state before run', meaningState: 'terminal' };
     }
 
     // In Review は人間のレビュー待ちの保留状態。自動実行の対象外とし、キューからも除去する
     // （reaper が "started" 扱いで再投入し続けるのを防ぐ）。
     if (isHoldState(state)) {
       removeFromQueue(issueId);
-      return { eligible: false, reason: 'hold state (In Review) before run' };
+      return { eligible: false, reason: `human wait state (${state?.name}) before run`, meaningState: 'human_wait' };
     }
 
     // A dependency-waiting issue is shown as Blocked in Linear. Do not execute it until every incoming
@@ -863,25 +907,25 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
       // SOT-2098: make the wait visible without turning it into a hold/terminal state. Blocked is an
       // unstarted state, so fetchActiveIssues keeps discovering it; once all blockers finish this
       // method returns eligible and the normal pipeline-start transition moves it to In Progress.
-      if ((state?.name || '').toLowerCase() !== 'blocked') {
+      if ((state?.name || '').toLowerCase() !== 'todo') {
         try {
           const statesData: any = await linearQuery(
             'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
             { teamId: data.issue.team.id }
           );
-          const blockedState = (statesData.workflowStates?.nodes || []).find(
-            (candidate: any) => (candidate.name || '').toLowerCase() === 'blocked'
+          const todoState = (statesData.workflowStates?.nodes || []).find(
+            (candidate: any) => (candidate.name || '').toLowerCase() === 'todo'
           );
-          if (blockedState?.id) {
+          if (todoState?.id) {
             await linearQuery(
               'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
-              { id: data.issue.id, stateId: blockedState.id }
+              { id: data.issue.id, stateId: todoState.id }
             );
-            log('WEBHOOK', `getIssueExecutionEligibility: ${data.issue.identifier || issueId} updated to Blocked`, {
+            log('WEBHOOK', `getIssueExecutionEligibility: ${data.issue.identifier || issueId} waiting in Todo`, {
               issue: data.issue.identifier || issueId,
             });
           } else {
-            log('ERROR', `getIssueExecutionEligibility: no Blocked state for team ${data.issue.team.id}`, {
+            log('ERROR', `getIssueExecutionEligibility: no Todo state for team ${data.issue.team.id}`, {
               issue: data.issue.identifier || issueId,
             });
           }
@@ -897,10 +941,11 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
         eligible: false,
         reason: `waiting on blockers: ${waitingOnBlockers.join(', ')}`,
         waitingOnBlockers,
+        meaningState: classifyIssueMeaningState(state, { hasUnresolvedBlockers: true }),
       };
     }
 
-    return { eligible: true, isLongRun };
+    return { eligible: true, isLongRun, meaningState: classifyIssueMeaningState(state) };
   } catch (err: any) {
     // Fail open for execution, fail closed for long-run: if Linear API is unavailable, allow
     // execution to proceed but on the normal synchronous path (isLongRun stays undefined/false).

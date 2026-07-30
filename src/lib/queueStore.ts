@@ -450,7 +450,13 @@ export function dequeue(lastProcessedGroup: string | null = null): QueueItem | n
     const now = new Date();
 
     const bestIndex = queueOrdering.selectNextReadyIndex(queue, { lastProcessedGroup, now });
-    if (bestIndex === null) return null;
+    if (bestIndex === null) {
+      const cycle = queueOrdering.findDependencyCycle(queue);
+      if (cycle.length > 0) {
+        log('QUEUE', `dependency cycle detected; execution halted: ${cycle.join(' -> ')}`);
+      }
+      return null;
+    }
 
     const item = queue[bestIndex];
     const rank = queueOrdering.effectiveRank(item);
