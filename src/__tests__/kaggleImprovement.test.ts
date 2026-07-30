@@ -171,6 +171,26 @@ describe('kaggleImprovement', () => {
       bad.competitions[0].submission_mode = 'solo';
       expect(() => parseTargetsRegistry(bad)).toThrow(/submission_mode/);
     });
+
+    test('parses a fixed four-condition evaluation contract', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].ab_evaluation = {
+        game_ids: ['ls20', 'ft09'],
+        action_budget: 100,
+        trials_per_game: 3,
+        seed: 2191,
+        guardrails: {
+          max_total_tokens_ratio: 1.1,
+          max_api_cost_ratio: 1.1,
+          max_latency_ratio: 1.2,
+        },
+      };
+      expect(parseTargetsRegistry(raw).competitions[0].abEvaluation).toMatchObject({
+        gameIds: ['ls20', 'ft09'],
+        actionBudget: 100,
+        trialsPerGame: 3,
+      });
+    });
   });
 
   describe('rotation resolution', () => {
@@ -216,6 +236,27 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('改善方針の検討では Kaggle の公開ノートブック等を参考にしてよい。');
       // 未指定の材料は安全側のプレースホルダになる。
       expect(body).toContain('(該当なし)');
+    });
+
+    test('embeds A/B telemetry, chain isolation and automatic continuation', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].ab_evaluation = {
+        game_ids: ['ls20'],
+        action_budget: 100,
+        trials_per_game: 3,
+        seed: 2191,
+        guardrails: {
+          max_total_tokens_ratio: 1.1,
+          max_api_cost_ratio: 1.1,
+          max_latency_ratio: 1.2,
+        },
+      };
+      const competition = parseTargetsRegistry(raw).competitions[0];
+      const body = buildIssueBody(competition.targets[0], competition, 3, {});
+      expect(body).toContain('baseline / retained reasoningのみ / compactionのみ / 両方');
+      expect(body).toContain('input・output・reasoning tokens');
+      expect(body).toContain('日次・Issue間へ持ち越さない');
+      expect(body).toContain('次回改善Issueは自動処理が冪等キー付きで登録');
     });
   });
 

@@ -9,6 +9,7 @@
     "competitions[].kaggle_competition": "Kaggle コンペ slug（実 slug は各 repo の子Issueで確定）。",
     "competitions[].daily_submission_cap": "そのコンペの1日提出上限（Kaggle実制限。ARC=1 / 他=5）。",
     "competitions[].submission_mode": "提出モード。both=claude/gptを両方提出し両結果を確認（cap≥2の他コンペ）/ alternate=1日1提出のみ許すARC(共有cap=1)でclaude・gptを日替わり交互に提出。既定 both。",
+    "competitions[].ab_evaluation": "任意。4条件A/B評価の固定game・action budget・試行数・seedとchampion昇格guardrail。ARC-AGI-3 harnessへ渡す。",
     "competitions[].alternate_anchor_date": "alternateモードの基準UTC日 (YYYY-MM-DD)。",
     "competitions[].alternate_anchor_lineage": "基準日に提出する系統。以後UTC日付ごとに交互化。",
     "competitions[].targets[].lineage": "系統。claude(=旧fable) / gpt(=旧sol)。",
@@ -99,6 +100,17 @@
       "kaggle_competition": "arc-prize-2026-arc-agi-3",
       "daily_submission_cap": 1,
       "submission_mode": "alternate",
+      "ab_evaluation": {
+        "game_ids": ["ls20", "ft09", "sp80"],
+        "action_budget": 100,
+        "trials_per_game": 3,
+        "seed": 2191,
+        "guardrails": {
+          "max_total_tokens_ratio": 1.1,
+          "max_api_cost_ratio": 1.1,
+          "max_latency_ratio": 1.2
+        }
+      },
       "alternate_anchor_date": "2026-07-29",
       "alternate_anchor_lineage": "gpt",
       "targets": [

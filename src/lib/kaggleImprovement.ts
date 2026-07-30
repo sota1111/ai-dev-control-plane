@@ -78,6 +78,17 @@ export interface ImprovementCompetition {
   submissionMode: SubmissionMode;
   alternateAnchorDate?: string;
   alternateAnchorLineage?: Lineage;
+  abEvaluation?: {
+    gameIds: string[];
+    actionBudget: number;
+    trialsPerGame: number;
+    seed: number;
+    guardrails: {
+      maxTotalTokensRatio: number;
+      maxApiCostRatio: number;
+      maxLatencyRatio: number;
+    };
+  };
   targets: ImprovementTarget[];
 }
 
@@ -231,6 +242,63 @@ function parseCompetition(
     parseTarget(t, i, j, linSeen)
   );
 
+  let abEvaluation: ImprovementCompetition['abEvaluation'];
+  const abRaw = co.ab_evaluation ?? co.abEvaluation;
+  if (abRaw !== undefined) {
+    if (!abRaw || typeof abRaw !== 'object') {
+      throw new Error(`registry.competitions[${i}].ab_evaluation must be an object`);
+    }
+    const ab = abRaw as Record<string, unknown>;
+    const games = ab.game_ids ?? ab.gameIds;
+    const actionBudget = ab.action_budget ?? ab.actionBudget;
+    const trialsPerGame = ab.trials_per_game ?? ab.trialsPerGame;
+    const seed = ab.seed;
+    const guardRaw = ab.guardrails;
+    if (
+      !Array.isArray(games) ||
+      games.length === 0 ||
+      !games.every((game) => typeof game === 'string' && game.length > 0)
+    ) {
+      throw new Error(
+        `registry.competitions[${i}].ab_evaluation.game_ids must be non-empty strings`
+      );
+    }
+    if (
+      !Number.isInteger(actionBudget) ||
+      Number(actionBudget) <= 0 ||
+      !Number.isInteger(trialsPerGame) ||
+      Number(trialsPerGame) <= 0 ||
+      !Number.isInteger(seed)
+    ) {
+      throw new Error(`registry.competitions[${i}].ab_evaluation numeric fields are invalid`);
+    }
+    if (!guardRaw || typeof guardRaw !== 'object') {
+      throw new Error(`registry.competitions[${i}].ab_evaluation.guardrails must be an object`);
+    }
+    const guard = guardRaw as Record<string, unknown>;
+    const maxTotalTokensRatio = guard.max_total_tokens_ratio ?? guard.maxTotalTokensRatio;
+    const maxApiCostRatio = guard.max_api_cost_ratio ?? guard.maxApiCostRatio;
+    const maxLatencyRatio = guard.max_latency_ratio ?? guard.maxLatencyRatio;
+    if (
+      ![maxTotalTokensRatio, maxApiCostRatio, maxLatencyRatio].every(
+        (value) => typeof value === 'number' && Number.isFinite(value) && value > 0
+      )
+    ) {
+      throw new Error(`registry.competitions[${i}].ab_evaluation guardrail ratios are invalid`);
+    }
+    abEvaluation = {
+      gameIds: games as string[],
+      actionBudget: actionBudget as number,
+      trialsPerGame: trialsPerGame as number,
+      seed: seed as number,
+      guardrails: {
+        maxTotalTokensRatio: maxTotalTokensRatio as number,
+        maxApiCostRatio: maxApiCostRatio as number,
+        maxLatencyRatio: maxLatencyRatio as number,
+      },
+    };
+  }
+
   return {
     key,
     kaggleCompetition,
@@ -238,6 +306,7 @@ function parseCompetition(
     submissionMode,
     alternateAnchorDate: alternateAnchorDate as string | undefined,
     alternateAnchorLineage: alternateAnchorLineage as Lineage | undefined,
+    abEvaluation,
     targets,
   };
 }
@@ -404,6 +473,19 @@ export function buildIssueBody(
   const prev = material.previousSubmission?.trim() || '(前回提出の記録なし — 初回サイクル、または取得できず)';
   const recent = material.recentIssuesDigest?.trim() || '(新規の完了Issueなし)';
   const failure = material.failureKpiExcerpt?.trim() || '(該当なし)';
+  const abEvaluation = competition.abEvaluation
+    ? `
+
+## 4条件A/B評価（固定契約）
+- 条件: baseline / retained reasoningのみ / compactionのみ / 両方
+- game: ${competition.abEvaluation.gameIds.join(', ')}
+- action budget: ${competition.abEvaluation.actionBudget}
+- 試行数: gameごとに${competition.abEvaluation.trialsPerGame}回（seed: ${competition.abEvaluation.seed}起点）
+- 必須artifact KPI: score / level completion / actions / input・output・reasoning tokens / 実行時間 / API cost
+- 昇格: scoreがbaselineを上回り、level completionが非劣化で、total tokens ≤ ${competition.abEvaluation.guardrails.maxTotalTokensRatio}x・API cost ≤ ${competition.abEvaluation.guardrails.maxApiCostRatio}x・latency ≤ ${competition.abEvaluation.guardrails.maxLatencyRatio}xを全て満たす候補だけ
+- response chainは各game・試行・条件で新規作成し、日次・Issue間へ持ち越さない。継続情報はartifactとLinear Issueだけに保存する。
+- 完了後の次回改善Issueは自動処理が冪等キー付きで登録する。人にIssue登録を依頼する完了文は出さない。`
+    : '';
   return `workers: ${target.workersDirective}
 
 ## 目的
@@ -419,6 +501,7 @@ ${recent}
 
 ### 失敗ログ・KPI抜粋
 ${failure}
+${abEvaluation}
 
 ## 実施内容
 1. 上記材料から未着手の改善軸を選定（非昇格済み軸の再試行は根拠を明示）。
@@ -436,6 +519,11 @@ ${failure}
 - [ ] 子Issueが登録され、全て終端状態に達している
 - [ ] 昇格/非昇格の結論が champion 状態と整合している
 - [ ] 取り組み完了時に提出が行われた（提出物未整備なら skip 理由を明記）
+${
+  competition.abEvaluation
+    ? '- [ ] 固定4条件の必須KPI artifactと昇格判定が保存され、次回改善Issueが重複なく自動登録されている'
+    : ''
+}
 
 ## 関連
 - 親（改善サイクル設計）: SOT-1913 / このサイクル自動起案の起点`;
