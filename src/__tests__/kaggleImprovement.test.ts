@@ -309,6 +309,25 @@ describe('kaggleImprovement', () => {
       expect(claude.reason).toMatch(/no new material/);
     });
 
+    test('measurement health guard suppresses blind drafting before plateau/material guards', () => {
+      const plan = planImprovementCycle(baseInput({
+        registry: enabledReg(),
+        hourJst: 0,
+        signals: {
+          'ptcg-agent-claude': {
+            hasUnfinishedCycle: false,
+            hasNewMaterial: true,
+            plateauReason: 'plateau escalation: stale method',
+            measurementFailureReason:
+              'measurement unavailable: Kaggle CLI authentication failed; verify cron credentials/API token',
+          },
+        },
+      }));
+      const target = plan.targets.find((t) => t.project === 'ptcg-agent-claude');
+      expect(target?.action).toBe('skip');
+      expect(target?.reason).toContain('authentication failed');
+    });
+
     test('plateau escalation stops drafting with an actionable reason', () => {
       const plan = planImprovementCycle(
         baseInput({

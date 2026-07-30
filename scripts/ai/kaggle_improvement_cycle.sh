@@ -135,15 +135,19 @@ summary="$(node -e '
   const escalations=((o.plan&&o.plan.targets)||[])
     .filter(t=>String(t.reason||"").startsWith("plateau escalation:"))
     .map(t=>`${t.repo}: ${t.reason}`);
+  const healthFailures=((o.plan&&o.plan.targets)||[])
+    .filter(t=>String(t.reason||"").startsWith("measurement unavailable:"))
+    .map(t=>`${t.repo}: ${t.reason}`);
+  const alerts=[...new Set([...healthFailures,...escalations])];
   if(o.executed){
     const c=(o.created||[]).map(x=>x.identifier).join(",")||"none";
-    process.stdout.write(escalations.length
-      ? `kaggle改善サイクル 要人間確認 comp=${comp}: ${escalations.join(" / ")}`
+    process.stdout.write(alerts.length
+      ? `kaggle改善サイクル 要人間確認 comp=${comp}: ${alerts.join(" / ")}`
       : `kaggle改善サイクル JST${process.argv[2]} comp=${comp} 起案=${c}`);
   } else {
     const d=((o.plan&&o.plan.targets)||[]).filter(t=>t.action==="draft").length;
-    process.stdout.write(escalations.length
-      ? `kaggle改善サイクル(dry-run) plateau検知 comp=${comp}: ${escalations.join(" / ")}`
+    process.stdout.write(alerts.length
+      ? `kaggle改善サイクル(dry-run) 要人間確認 comp=${comp}: ${alerts.join(" / ")}`
       : `kaggle改善サイクル(dry-run) JST${process.argv[2]} comp=${comp} draft対象=${d}`);
   }
 ' "$out_json" "$HOUR")"

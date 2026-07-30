@@ -3,6 +3,7 @@ import {
   formatPreviousSubmission,
   filterFailureLog,
   buildRecentIssuesDigest,
+  classifyKaggleCliFailure,
   type CompletedIssue,
 } from '../lib/kaggleImproveMaterial.js';
 
@@ -51,6 +52,24 @@ describe('kaggleImproveMaterial', () => {
 
     test('returns undefined when there are no rows', () => {
       expect(formatPreviousSubmission([])).toBeUndefined();
+    });
+  });
+
+  describe('classifyKaggleCliFailure', () => {
+    test('distinguishes missing CLI, authentication failures, and transient API failures', () => {
+      expect(classifyKaggleCliFailure({ code: 'ENOENT', message: 'spawnSync kaggle ENOENT' }))
+        .toContain('not installed');
+      expect(classifyKaggleCliFailure({ stderr: '401 Unauthorized: check kaggle.json' }))
+        .toContain('authentication failed');
+      expect(classifyKaggleCliFailure({ stderr: '503 Service Unavailable' }))
+        .toContain('submissions API failed');
+    });
+
+    test('does not echo raw stderr that could contain credential details', () => {
+      const reason = classifyKaggleCliFailure({
+        stderr: '403 credential secret-value-was-here',
+      });
+      expect(reason).not.toContain('secret-value-was-here');
     });
   });
 

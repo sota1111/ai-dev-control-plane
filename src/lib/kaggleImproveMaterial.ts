@@ -201,18 +201,45 @@ export function buildRecentIssuesDigest(
  * 収集本体（Linear / Kaggle CLI / ファイル I/O を純関数ヘルパーに橋渡し）
  * ========================================================================== */
 
-function collectSubmissionRows(slug: string, log: (m: string) => void): KaggleSubmissionRow[] {
-  if (!slug) return [];
+export interface KaggleSubmissionCollection {
+  rows: KaggleSubmissionRow[];
+  failureReason?: string;
+}
+
+/** CLIエラーをcredentialを漏らさない短いhealth signalへ正規化する。 */
+export function classifyKaggleCliFailure(error: unknown): string {
+  const e = error as { message?: string; stderr?: string | Buffer; code?: string };
+  const detail = `${e?.stderr?.toString?.() || ''} ${e?.message || ''}`.trim();
+  const lower = detail.toLowerCase();
+  if (e?.code === 'ENOENT' || lower.includes('not found') || lower.includes('enoent')) {
+    return 'measurement unavailable: kaggle CLI is not installed or not on PATH';
+  }
+  if (
+    lower.includes('401')
+    || lower.includes('403')
+    || lower.includes('unauthorized')
+    || lower.includes('authentication')
+    || lower.includes('credential')
+    || lower.includes('kaggle.json')
+    || lower.includes('api token')
+  ) {
+    return 'measurement unavailable: Kaggle CLI authentication failed; verify cron credentials/API token';
+  }
+  return 'measurement unavailable: Kaggle submissions API failed; inspect cron log before the next cycle';
+}
+
+function collectSubmissionRows(slug: string, log: (m: string) => void): KaggleSubmissionCollection {
+  if (!slug) return { rows: [] };
   try {
     const out = execFileSync('kaggle', ['competitions', 'submissions', slug, '--csv'], {
       encoding: 'utf8',
       timeout: 25000,
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    return parseKaggleSubmissionsCsv(out);
+    return { rows: parseKaggleSubmissionsCsv(out) };
   } catch (err: any) {
     log(`kaggle submissions failed for ${slug}: ${err?.message || err}`);
-    return [];
+    return { rows: [], failureReason: classifyKaggleCliFailure(err) };
   }
 }
 
@@ -308,9 +335,10 @@ export async function collectImproveContext(
   if (!comp) return { signals, material };
 
   // 前回提出はコンペ単位（同一 kaggle slug）なので1回だけ収集して両ターゲットで共有する。
-  const submissionRows = opts.kaggle === false
-    ? []
+  const submissionCollection = opts.kaggle === false
+    ? { rows: [] }
     : collectSubmissionRows(comp.kaggleCompetition, log);
+  const submissionRows = submissionCollection.rows;
   const previousSubmission = formatPreviousSubmission(submissionRows);
   const scoreProgressionPath = opts.scoreProgressionPath
     || path.join(__dirname, '..', '..', 'docs', 'ai', 'kaggle', 'score-progression.jsonl');
@@ -356,6 +384,9 @@ export async function collectImproveContext(
     signals[t.project] = {
       hasUnfinishedCycle,
       hasNewMaterial,
+      ...(submissionCollection.failureReason
+        ? { measurementFailureReason: submissionCollection.failureReason }
+        : {}),
       ...(plateau.plateau && plateau.reason ? { plateauReason: plateau.reason } : {}),
     };
     material[t.project] = { previousSubmission, recentIssuesDigest: digest, failureKpiExcerpt };
