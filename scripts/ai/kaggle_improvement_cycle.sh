@@ -132,12 +132,19 @@ node -e '
 summary="$(node -e '
   const o=JSON.parse(process.argv[1]||"{}");
   const comp=(o.plan&&o.plan.competition)||"(none)";
+  const escalations=((o.plan&&o.plan.targets)||[])
+    .filter(t=>String(t.reason||"").startsWith("plateau escalation:"))
+    .map(t=>`${t.repo}: ${t.reason}`);
   if(o.executed){
     const c=(o.created||[]).map(x=>x.identifier).join(",")||"none";
-    process.stdout.write(`kaggle改善サイクル JST${process.argv[2]} comp=${comp} 起案=${c}`);
+    process.stdout.write(escalations.length
+      ? `kaggle改善サイクル 要人間確認 comp=${comp}: ${escalations.join(" / ")}`
+      : `kaggle改善サイクル JST${process.argv[2]} comp=${comp} 起案=${c}`);
   } else {
     const d=((o.plan&&o.plan.targets)||[]).filter(t=>t.action==="draft").length;
-    process.stdout.write(`kaggle改善サイクル(dry-run) JST${process.argv[2]} comp=${comp} draft対象=${d}`);
+    process.stdout.write(escalations.length
+      ? `kaggle改善サイクル(dry-run) plateau検知 comp=${comp}: ${escalations.join(" / ")}`
+      : `kaggle改善サイクル(dry-run) JST${process.argv[2]} comp=${comp} draft対象=${d}`);
   }
 ' "$out_json" "$HOUR")"
 bash "$SCRIPT_DIR/notify_discord.sh" "$summary" >/dev/null 2>&1 || true

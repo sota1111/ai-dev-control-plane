@@ -35,6 +35,11 @@ import {
   type ImprovementMaterial,
 } from './lib/kaggleImprovement.js';
 import { collectImproveContext } from './lib/kaggleImproveMaterial.js';
+import { parseKaggleSubmissionsCsv } from './lib/kaggleImproveMaterial.js';
+import {
+  appendNewScoreProgression,
+  progressionEntriesFromRows,
+} from './lib/kaggleScoreProgression.js';
 import { pipelineReviewComment, type PipelineReviewOutcome } from './lib/pipelineReviewComment.js';
 import {
   DEFAULT_GRAPH_PATH,
@@ -79,6 +84,39 @@ async function maybeCollectImproveContext(o: {
 
 async function main() {
   switch (command) {
+    case 'kaggle-score-sync': {
+      // SOT-2187: completed public scores are reconciled into append-only progression JSONL.
+      // CSV is read from stdin so credentials/output never need to be placed in argv.
+      const flags: Record<string, string> = {};
+      for (let i = 0; i < args.length; i += 1) {
+        const a = args[i];
+        if (a && a.startsWith('--')) {
+          flags[a.slice(2)] = args[i + 1] ?? '';
+          i += 1;
+        }
+      }
+      const registryPath = flags.registry
+        || path.join(__dirname, '..', 'scripts', 'ai', 'kaggle_targets_registry.json');
+      const progressionPath = flags.output
+        || path.join(__dirname, '..', 'docs', 'ai', 'kaggle', 'score-progression.jsonl');
+      try {
+        const registry = parseTargetsRegistry(JSON.parse(fs.readFileSync(registryPath, 'utf8')));
+        const competition = registry.competitions.find((c) => c.key === flags.competition);
+        if (!competition) throw new Error(`competition "${flags.competition || ''}" not found`);
+        const csv = fs.readFileSync(0, 'utf8');
+        const entries = progressionEntriesFromRows(
+          competition,
+          parseKaggleSubmissionsCsv(csv)
+        );
+        const appended = appendNewScoreProgression(progressionPath, entries);
+        process.stdout.write(JSON.stringify({ appended, discovered: entries.length, file: progressionPath }) + '\n');
+        process.exit(0);
+      } catch (err: any) {
+        process.stderr.write(`kaggle-score-sync: ${err?.message || err}\n`);
+        process.exit(1);
+      }
+      break;
+    }
     case 'classify-issue': {
       const issueId = args[0];
       if (!issueId) {

@@ -201,4 +201,18 @@ for ((i=0; i<n_targets; i++)); do
   echo "    exit=$rc"
   [[ $rc -ne 0 ]] && rc_all=$rc
 done
+
+# Public score は提出直後には pending のことがある。ここで一度同期し、未確定分は次の改善枠の
+# collectImproveContext が同じ冪等同期を再実行して、COMPLETEになった時点で必ず捕捉する。
+score_csv="$(kaggle competitions submissions "$COMP_SLUG" --csv 2>/dev/null || true)"
+if [[ -n "$score_csv" ]]; then
+  score_sync="$(printf '%s\n' "$score_csv" | (
+    cd "$REPO_ROOT" &&
+    npx --no-install tsx src/runner-cli.ts kaggle-score-sync \
+      --registry "$REGISTRY" --competition "$COMP_KEY"
+  ) 2>/dev/null || true)"
+  if [[ -n "$score_sync" ]]; then
+    echo "  → score progression sync: $score_sync"
+  fi
+fi
 exit $rc_all

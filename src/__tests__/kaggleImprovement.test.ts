@@ -308,6 +308,26 @@ describe('kaggleImprovement', () => {
       expect(claude.action).toBe('skip');
       expect(claude.reason).toMatch(/no new material/);
     });
+
+    test('plateau escalation stops drafting with an actionable reason', () => {
+      const plan = planImprovementCycle(
+        baseInput({
+          registry: enabledReg(),
+          hourJst: 0,
+          signals: {
+            'ptcg-agent-claude': {
+              hasUnfinishedCycle: false,
+              hasNewMaterial: true,
+              plateauReason:
+                'plateau escalation: ptcg-agent-claude has 3 consecutive non-improving scores',
+            },
+          },
+        })
+      );
+      const claude = plan.targets.find((t) => t.project === 'ptcg-agent-claude')!;
+      expect(claude.action).toBe('skip');
+      expect(claude.reason).toMatch(/plateau escalation/);
+    });
   });
 
   // SOT-1934 — 完了トリガの champion 提出（コンペ内収束/選定なし）。
