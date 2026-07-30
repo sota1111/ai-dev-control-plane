@@ -57,12 +57,12 @@ your phone, and come back to a merged PR with a completion report.
 
 ## Linear as the Command Surface
 
-The combination with Linear is what makes this a *control plane* rather than a scripting harness.
+The combination with Linear is what makes this a _control plane_ rather than a scripting harness.
 Linear is not just a ticket tracker here — it is the system's command bus, state store, and remote
 control:
 
 - **Issues are execution requests.** Creating an issue (or moving it to `Todo`) triggers a run via
-  webhook or the polling scheduler. The issue description *is* the task specification.
+  webhook or the polling scheduler. The issue description _is_ the task specification.
 
 - **Comments are live instructions.** New comments are read on every run; the newest instruction
   wins. You can change scope, request a rework, or approve a plan by commenting — including from the
@@ -80,7 +80,7 @@ control:
   ```
 
 - **AI-managed decomposition uses Linear's issue hierarchy.** The harness judges whether a parent
-  issue should be split; when it is, the AI *creates the child issues itself* as Linear sub-issues
+  issue should be split; when it is, the AI _creates the child issues itself_ as Linear sub-issues
   (2–5, inheriting project and priority, `blockedBy`-chained when order matters) and works through
   them in dependency order. The human files one parent issue; the tree underneath is machine-made
   and machine-executed, but fully visible and editable in Linear.
@@ -88,7 +88,7 @@ control:
 - **State is synchronized both ways.** Every GitHub event maps to a Linear action: branch created →
   comment, PR created → `In Progress` + link, PR merged → `In Review` + completion report, PR closed
   → reason comment. Statuses follow a fixed contract (`Backlog → Todo → In Progress → In Review →
-  Done`), and nothing is marked `Done` without verification — merged work waits in `In Review` for a
+Done`), and nothing is marked `Done` without verification — merged work waits in `In Review` for a
   human eye.
 
 - **Labels change behavior.** A `Bug` label makes the run open a linked GitHub issue that auto-closes
@@ -138,18 +138,18 @@ control:
                                           └───────────────┘
 ```
 
-| Component | Purpose | Location |
-| --- | --- | --- |
-| Pipeline driver | Sequences the lifecycle for one issue | `scripts/ai/run_auto.sh` |
-| Pipeline graph | Declarative node/edge definition of the pipeline (opt-in) | `config/pipeline_graph.json`, `config/graphs/`, `src/lib/pipelineGraph.ts` |
-| Worker dispatcher | Selects a worker per role, hands off on failure | `scripts/ai/run_worker.sh` |
-| Worker run scripts | One bounded CLI call per worker | `scripts/ai/run_claude.sh` / `run_codex.sh` / `run_antigravity.sh` |
-| Discussion mode | Multi-round debate between heterogeneous models | `scripts/ai/run_discussion.sh` |
-| Role assignment | Per-role worker priority chains, solo mode, model pins | `config/worker_roles.json` |
-| Role prompts | Worker-agnostic instructions per role | `prompts/roles/<role>.md` |
-| Trigger layer | Webhook server (event-driven) and scheduler (polling) | `src/webhook-server.ts`, `scripts/ai/scheduler.sh` |
-| Discord bot | Remote status/control (`/status`, `/queue`, `/pause`, `/ask`) | `src/lib/discord*.ts` |
-| Incident response | Health probe → classify → rollback → postmortem | `scripts/ai/incident_response.sh`, `docs/incident-response.md` |
+| Component          | Purpose                                                       | Location                                                                   |
+| ------------------ | ------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Pipeline driver    | Sequences the lifecycle for one issue                         | `scripts/ai/run_auto.sh`                                                   |
+| Pipeline graph     | Declarative node/edge definition of the pipeline (opt-in)     | `config/pipeline_graph.json`, `config/graphs/`, `src/lib/pipelineGraph.ts` |
+| Worker dispatcher  | Selects a worker per role, hands off on failure               | `scripts/ai/run_worker.sh`                                                 |
+| Worker run scripts | One bounded CLI call per worker                               | `scripts/ai/run_claude.sh` / `run_codex.sh` / `run_antigravity.sh`         |
+| Discussion mode    | Multi-round debate between heterogeneous models               | `scripts/ai/run_discussion.sh`                                             |
+| Role assignment    | Per-role worker priority chains, solo mode, model pins        | `config/worker_roles.json`                                                 |
+| Role prompts       | Worker-agnostic instructions per role                         | `prompts/roles/<role>.md`                                                  |
+| Trigger layer      | Webhook server (event-driven) and scheduler (polling)         | `src/webhook-server.ts`, `scripts/ai/scheduler.sh`                         |
+| Discord bot        | Remote status/control (`/status`, `/queue`, `/pause`, `/ask`) | `src/lib/discord*.ts`                                                      |
+| Incident response  | Health probe → classify → rollback → postmortem               | `scripts/ai/incident_response.sh`, `docs/incident-response.md`             |
 
 Target application code does **not** live here. Projects under development are cloned to
 `/workspaces/<project>` and the harness works on them there; this repository is the orchestration
@@ -177,13 +177,34 @@ After each role, the driver gates on the worker report's `## Next Action` line:
 
 ### Declarative pipeline graph (opt-in)
 
-Set `PIPELINE_GRAPH=1` and the same lifecycle runs from a **data-defined graph**
-(`config/pipeline_graph.json`): nodes are roles, edges are report verdicts, and back-edges draw from
-the shared debug budget so all loops stay globally bounded. Alternative graphs live in
+Set `PIPELINE_GRAPH=1` and the same lifecycle runs from a concise **data-defined pipeline**
+(`config/pipeline_graph.json`). Users list the steps in order and choose one shared retry limit:
+
+```json
+{
+  "version": 1,
+  "steps": [
+    "task-check",
+    "implementation",
+    "verification",
+    "acceptance",
+    "github",
+    "linear-report"
+  ],
+  "retry": { "max": { "env": "PIPELINE_MAX_DEBUG_CYCLES", "default": 2 } }
+}
+```
+
+The loader compiles this form into the internal event graph, so callers do not need to define report
+events, terminal names, budgets, or visit caps. Omit `retry` to disable retries, or use a number such
+as `"retry": { "max": 2 }`. The previous detailed `entry` / `nodes` / `budgets` JSON remains readable
+during the compatibility period. Alternative graphs live in
 `config/graphs/` and can be selected **per issue** with a `graph: <name>` directive from Linear
 (e.g. `graph: plan-with-discussion` inserts a debate before planning). Validation and traversal are
-handled by `runner-cli pipeline-graph validate|begin|next`; a missing or invalid graph fails open to
-the plain serial loop.
+handled by `runner-cli pipeline-graph validate|explain|begin|next`; `explain` prints only the ordered
+steps and retry policy. A missing or invalid graph fails open to
+the plain serial loop. Validation errors name the incorrect user-facing field and include a valid
+replacement shape where useful.
 
 ### Discussion mode (multi-agent debate)
 
@@ -206,7 +227,7 @@ standalone (`--issue <ID> --topic "<question>"`) or as a graph node via `graph: 
    including per-element **model pins** (`worker:model`, e.g. `codex:gpt-5.5`, `claude:sonnet`;
    aliases like `codex:sol` → GPT-5.6 Sol and `claude:fable` → Fable 5 resolve in the run scripts).
 2. Workers are tried in order. **Non-response** — exit 75, a crash, a usage limit, a timeout, or a
-   missing/incomplete report — hands off to the next worker *with the partial report*, so the
+   missing/incomplete report — hands off to the next worker _with the partial report_, so the
    successor continues rather than restarts. Handoff can be disabled per issue (`handoff=off`).
 3. Consecutive calls to the same worker reuse its CLI session to keep the prompt cache warm.
 4. Only when the whole chain is exhausted does the run stop for fallback handling.
@@ -253,7 +274,7 @@ checks and Cloud Run revision rollback without a resident host. Gates: `INCIDENT
 
 ## Quick Start
 
-Everything runs inside the Dev Container (VS Code → *Dev Containers: Rebuild Container*).
+Everything runs inside the Dev Container (VS Code → _Dev Containers: Rebuild Container_).
 
 **1. Install dependencies**
 
@@ -267,21 +288,21 @@ npm install
 cp .env.example .env
 ```
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `ANTHROPIC_API_KEY` | yes | Claude worker CLI |
-| `LINEAR_API_KEY` | optional | Enables Linear polling mode (webhook/MCP auth is separate) |
+| Variable            | Required | Purpose                                                    |
+| ------------------- | -------- | ---------------------------------------------------------- |
+| `ANTHROPIC_API_KEY` | yes      | Claude worker CLI                                          |
+| `LINEAR_API_KEY`    | optional | Enables Linear polling mode (webhook/MCP auth is separate) |
 
 Secrets stay in `.env` (untracked). Full list: [docs/environment-variables.md](docs/environment-variables.md).
 
 **3. Authenticate the tools**
 
-| Tool | Command |
-| --- | --- |
-| Claude CLI + Linear MCP | run `claude` → `/mcp` → select linear |
-| Codex CLI | run `codex` to authenticate; Linear MCP via `codex mcp login linear` |
-| Antigravity CLI | run `agy` to authenticate |
-| GitHub CLI | `GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web` |
+| Tool                    | Command                                                                          |
+| ----------------------- | -------------------------------------------------------------------------------- |
+| Claude CLI + Linear MCP | run `claude` → `/mcp` → select linear                                            |
+| Codex CLI               | run `codex` to authenticate; Linear MCP via `codex mcp login linear`             |
+| Antigravity CLI         | run `agy` to authenticate                                                        |
+| GitHub CLI              | `GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web` |
 
 **4. Start the system (pick one)**
 
@@ -310,17 +331,17 @@ pipeline, and reports progress as Linear comments. Check status remotely via Dis
 Worker selection lives in `config/worker_roles.json` (chains, `__solo__`, `__handoff__`, default
 model pins under `__models__`) — the single top-level switch. Frequently used environment flags:
 
-| Variable | Effect | Default |
-| --- | --- | --- |
-| `PIPELINE_GRAPH` | Drive the pipeline from the declarative graph | off |
-| `PIPELINE_MAX_DEBUG_CYCLES` | Shared budget for debug loop-backs | `2` |
-| `RUNNER_MAX_PARALLEL` | Parallel run slots (`1` = fully serial) | `1` |
-| `RUNNER_SERIALIZE_SCOPE` | Lock granularity: `repo` or `branch` | `repo` |
-| `RUNNER_WORKTREE_ISOLATION` | Per-issue git worktree even for serial runs | off |
-| `RUNNER_STABLE_MODE` | Force fully serial, synchronous operation | off |
-| `CLAUDE_DISABLED` / `CODEX_DISABLED` / `ANTIGRAVITY_DISABLED` | Mark a worker temporarily down (skipped via exit 75) | off |
-| `DISCUSSION_PARTICIPANTS` / `DISCUSSION_MAX_ROUNDS` / `DISCUSSION_MODERATOR` | Discussion mode tuning | `codex:sol+claude:fable` / `3` / `claude:fable` |
-| `INCIDENT_RESPONSE_ENABLED` / `INCIDENT_AUTO_REMEDIATE` | Incident loop / actual rollback | off |
+| Variable                                                                     | Effect                                               | Default                                         |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------- |
+| `PIPELINE_GRAPH`                                                             | Drive the pipeline from the declarative graph        | off                                             |
+| `PIPELINE_MAX_DEBUG_CYCLES`                                                  | Shared budget for debug loop-backs                   | `2`                                             |
+| `RUNNER_MAX_PARALLEL`                                                        | Parallel run slots (`1` = fully serial)              | `1`                                             |
+| `RUNNER_SERIALIZE_SCOPE`                                                     | Lock granularity: `repo` or `branch`                 | `repo`                                          |
+| `RUNNER_WORKTREE_ISOLATION`                                                  | Per-issue git worktree even for serial runs          | off                                             |
+| `RUNNER_STABLE_MODE`                                                         | Force fully serial, synchronous operation            | off                                             |
+| `CLAUDE_DISABLED` / `CODEX_DISABLED` / `ANTIGRAVITY_DISABLED`                | Mark a worker temporarily down (skipped via exit 75) | off                                             |
+| `DISCUSSION_PARTICIPANTS` / `DISCUSSION_MAX_ROUNDS` / `DISCUSSION_MODERATOR` | Discussion mode tuning                               | `codex:sol+claude:fable` / `3` / `claude:fable` |
+| `INCIDENT_RESPONSE_ENABLED` / `INCIDENT_AUTO_REMEDIATE`                      | Incident loop / actual rollback                      | off                                             |
 
 ---
 

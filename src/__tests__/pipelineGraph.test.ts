@@ -4,7 +4,9 @@ import path from 'node:path';
 import {
   DEFAULT_GRAPH_PATH,
   beginPipelineGraph,
+  compileSimplePipelineGraph,
   computeGraphEvent,
+  explainPipelineGraph,
   happyPathRoles,
   loadPipelineGraph,
   normalizeNextAction,
@@ -43,7 +45,7 @@ function drive(
   graph: PipelineGraph,
   state: PipelineGraphState,
   results: Array<[string, string?]>,
-  env: NodeJS.ProcessEnv = {},
+  env: NodeJS.ProcessEnv = {}
 ) {
   const steps = [];
   for (const [na, acc] of results) {
@@ -177,7 +179,7 @@ describe('default graph (config/pipeline_graph.json)', () => {
         ['READY_FOR_REVIEW'],
         ['NEEDS_DEBUG'],
       ],
-      env,
+      env
     );
     const kinds = steps.map((s) => (s.kind === 'node' ? s.role : s.terminal));
     expect(kinds.filter((k) => k === 'implementation')).toHaveLength(4); // initial + 3 loop-backs
@@ -239,7 +241,15 @@ describe('default graph (config/pipeline_graph.json)', () => {
     for (const [prefix, na] of [
       [[['READY_FOR_REVIEW']], 'BLOCKED'], // implementation BLOCKED
       [[['READY_FOR_REVIEW'], ['READY_FOR_REVIEW']], 'NEEDS_USER_INPUT'], // verification
-      [[['READY_FOR_REVIEW'], ['READY_FOR_REVIEW'], ['READY_FOR_REVIEW'], ['READY_FOR_REVIEW', 'PASS']], ''], // github no token
+      [
+        [
+          ['READY_FOR_REVIEW'],
+          ['READY_FOR_REVIEW'],
+          ['READY_FOR_REVIEW'],
+          ['READY_FOR_REVIEW', 'PASS'],
+        ],
+        '',
+      ], // github no token
     ] as Array<[Array<[string, string?]>, string]>) {
       const state = beginPipelineGraph(graph);
       const steps = drive(graph, state, [...prefix, [na]]);
@@ -248,17 +258,100 @@ describe('default graph (config/pipeline_graph.json)', () => {
   });
 });
 
+describe('concise graph DSL', () => {
+  test('compiles the default lifecycle without exposing internal graph concepts', () => {
+    const graph = compileSimplePipelineGraph({
+      version: 1,
+      steps: SERIAL_ROLE_ORDER,
+      retry: { max: 2 },
+    });
+    expect(happyPathRoles(graph)).toEqual(SERIAL_ROLE_ORDER);
+    expect(graph.budgets).toEqual({ debug: { max: 2, on_exhausted: '__stop__' } });
+    expect(graph.nodes.acceptance.verdict_source).toBe('acceptance');
+    expect(graph.nodes.verification.on.NEEDS_DEBUG).toEqual({
+      to: 'implementation',
+      counts: 'debug',
+    });
+    expect(explainPipelineGraph(graph, {})).toBe(
+      `Pipeline steps: ${SERIAL_ROLE_ORDER.join(' → ')}\n` +
+        'Retry policy: retry up to 2 time(s), restarting implementation or verification as appropriate'
+    );
+  });
+
+  test('loads the discussion variant from the concise format', () => {
+    const graphPath = path.join(
+      path.dirname(DEFAULT_GRAPH_PATH),
+      'graphs',
+      'plan-with-discussion.json'
+    );
+    const { graph, errors } = loadPipelineGraph(graphPath);
+    expect(errors).toEqual([]);
+    expect(happyPathRoles(graph!)).toEqual([
+      'task-check',
+      'discussion',
+      'implementation',
+      'verification',
+      'acceptance',
+      'github',
+      'linear-report',
+    ]);
+    expect(graph!.nodes.discussion.type).toBe('discussion');
+  });
+
+  test('keeps detailed graph documents compatible', () => {
+    const detailed = {
+      version: 1,
+      entry: 'custom',
+      nodes: {
+        custom: { role: 'custom', on: { READY_FOR_REVIEW: '__done__', '*': '__stop__' } },
+      },
+    };
+    expect(validatePipelineGraph(detailed)).toEqual([]);
+    expect(compileSimplePipelineGraph).toBeDefined();
+  });
+
+  test('returns actionable diagnostics for invalid concise settings', () => {
+    expect(validatePipelineGraph({ version: 1, steps: [] }).join(' ')).toContain(
+      '"steps" must be a non-empty array'
+    );
+    expect(
+      validatePipelineGraph({
+        version: 1,
+        steps: ['task-check', 'implementation', 'implementation'],
+        retry: { max: -1 },
+      }).join(' ')
+    ).toEqual(expect.stringContaining('"retry.max" must be a non-negative integer'));
+    expect(
+      validatePipelineGraph({
+        version: 1,
+        steps: ['task-check', 'implementation'],
+        retry: { max: 2 },
+      }).join(' ')
+    ).toContain('"retry" requires both "implementation" and "verification"');
+  });
+});
+
 describe('named discussion graph', () => {
   test('validates and uses the discussion report Next Action for its outgoing edge', () => {
-    const graphPath = path.join(path.dirname(DEFAULT_GRAPH_PATH), 'graphs', 'plan-with-discussion.json');
+    const graphPath = path.join(
+      path.dirname(DEFAULT_GRAPH_PATH),
+      'graphs',
+      'plan-with-discussion.json'
+    );
     const { graph, errors } = loadPipelineGraph(graphPath);
     expect(errors).toEqual([]);
     const state = beginPipelineGraph(graph!);
     expect(stepPipelineGraph(graph!, state, 'READY_FOR_REVIEW', '')).toMatchObject({
-      kind: 'node', node: 'discussion', role: 'discussion', event: 'READY_FOR_REVIEW',
+      kind: 'node',
+      node: 'discussion',
+      role: 'discussion',
+      event: 'READY_FOR_REVIEW',
     });
     expect(stepPipelineGraph(graph!, state, 'READY_FOR_REVIEW', '')).toMatchObject({
-      kind: 'node', node: 'implementation', role: 'implementation', event: 'READY_FOR_REVIEW',
+      kind: 'node',
+      node: 'implementation',
+      role: 'implementation',
+      event: 'READY_FOR_REVIEW',
     });
   });
 });
@@ -279,7 +372,9 @@ describe('validatePipelineGraph', () => {
   test('rejects non-object / wrong version / missing entry', () => {
     expect(validatePipelineGraph(null)).toHaveLength(1);
     expect(validatePipelineGraph({ ...minimal(), version: 2 }).join(' ')).toContain('version');
-    expect(validatePipelineGraph({ ...minimal(), entry: 'missing' }).join(' ')).toContain('not a defined node');
+    expect(validatePipelineGraph({ ...minimal(), entry: 'missing' }).join(' ')).toContain(
+      'not a defined node'
+    );
   });
 
   test('rejects unknown edge targets, unknown events, and missing "*" default', () => {
@@ -396,12 +491,12 @@ describe('state file round-trip', () => {
       state: { current: 'verification' },
     });
     expect(() =>
-      openPipelineGraphCheckpoint(file, graph, { ...identity, issueId: 'SOT-OTHER' }, true),
+      openPipelineGraphCheckpoint(file, graph, { ...identity, issueId: 'SOT-OTHER' }, true)
     ).toThrow('issueId mismatch');
 
     fs.writeFileSync(file, JSON.stringify({ ...created.state, schemaVersion: 0 }), 'utf8');
     expect(() => openPipelineGraphCheckpoint(file, graph, identity, true)).toThrow(
-      'incompatible pipeline graph checkpoint schema',
+      'incompatible pipeline graph checkpoint schema'
     );
     fs.rmSync(dir, { recursive: true, force: true });
   });
