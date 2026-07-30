@@ -40,7 +40,7 @@ describe('queueOrdering', () => {
       expect(queueOrdering.selectNextReadyIndex(queue, { lastProcessedGroup: 'group1', now })).toBe(0);
     });
 
-    test('runs blockers first, waits for retrying blockers, and tolerates cycles', () => {
+    test('runs blockers first, waits for retrying blockers, and refuses cycles', () => {
       expect(queueOrdering.selectNextReadyIndex([
         { issueId: 'dependent', priority: 1, blockedByIssueIds: ['blocker'] },
         { issueId: 'blocker', priority: 3 }
@@ -49,10 +49,12 @@ describe('queueOrdering', () => {
         { issueId: 'dependent', priority: 1, blockedByIssueIds: ['blocker'] },
         { issueId: 'blocker', priority: 3, retryAt: '2023-01-01T13:00:00Z' }
       ], { now })).toBe(null);
-      expect(queueOrdering.selectNextReadyIndex([
+      const cyclic = [
         { issueId: 'a', priority: 3, blockedByIssueIds: ['b'] },
         { issueId: 'b', priority: 2, blockedByIssueIds: ['a'] }
-      ], { now })).toBe(1);
+      ];
+      expect(queueOrdering.selectNextReadyIndex(cyclic, { now })).toBe(null);
+      expect(queueOrdering.findDependencyCycle(cyclic)).toEqual(['a', 'b', 'a']);
     });
 
     test('normal priority order: rank -> retryAt -> enqueuedAt', () => {

@@ -20,6 +20,41 @@ interface SelectNextOptions {
   now?: Date;
 }
 
+export function findDependencyCycle(queue: QueueItem[]): string[] {
+  const keys = new Map<string, number>();
+  queue.forEach((item, index) => {
+    if (item.issueId) keys.set(item.issueId, index);
+    if (item.issueIdentifier) keys.set(item.issueIdentifier, index);
+  });
+  const visiting = new Set<number>();
+  const visited = new Set<number>();
+  const path: number[] = [];
+  const visit = (index: number): string[] => {
+    if (visiting.has(index)) {
+      const start = path.indexOf(index);
+      return path.slice(start).concat(index).map(i => queue[i].issueIdentifier || queue[i].issueId || String(i));
+    }
+    if (visited.has(index)) return [];
+    visiting.add(index);
+    path.push(index);
+    for (const blocker of queue[index].blockedByIssueIds || []) {
+      const blockerIndex = keys.get(blocker);
+      if (blockerIndex == null) continue;
+      const cycle = visit(blockerIndex);
+      if (cycle.length) return cycle;
+    }
+    path.pop();
+    visiting.delete(index);
+    visited.add(index);
+    return [];
+  };
+  for (let i = 0; i < queue.length; i++) {
+    const cycle = visit(i);
+    if (cycle.length) return cycle;
+  }
+  return [];
+}
+
 /**
  * Maps Linear priority to a numerical rank.
  * 1: Urgent, 2: High, 3: Medium, 4: Low, 5: None/Other
@@ -138,15 +173,7 @@ export function selectNextReadyIndex(queue: QueueItem[], { lastProcessedGroup = 
     !(queue[i].blockedByIssueIds || []).some(blockerId => queuedKeys.has(blockerId)));
   let selectableIndices = dependencyReadyIndices;
   if (selectableIndices.length === 0) {
-    const readyKeys = new Set<string>();
-    readyIndices.forEach(i => {
-      if (queue[i].issueId) readyKeys.add(queue[i].issueId!);
-      if (queue[i].issueIdentifier) readyKeys.add(queue[i].issueIdentifier!);
-    });
-    const cycle = readyIndices.every(i =>
-      (queue[i].blockedByIssueIds || []).some(blockerId => readyKeys.has(blockerId)));
-    if (!cycle) return null;
-    selectableIndices = readyIndices;
+    return null;
   }
 
   // Helper: compare two candidate indices, returning the better one
@@ -248,6 +275,7 @@ export function previewQueueOrder(queue: QueueItem[], { lastProcessedGroup = nul
   while (currentQueue.length > 0) {
     const nextIdx = selectNextReadyIndex(currentQueue, { lastProcessedGroup: currentGroup, now });
     if (nextIdx === null) {
+      waiting.push(...currentQueue);
       break;
     }
 
