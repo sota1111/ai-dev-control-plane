@@ -494,22 +494,27 @@ run_role_pipeline() {
   run_cli set-issue-in-progress "$issue" >/dev/null 2>>"$LOG_FILE" || true
   plog "issue $issue → In Progress (pipeline start)"
 
-  # Resolve a per-issue `graph: <name>` before solo-mode selection. An explicitly named graph is an
-  # instruction to run that graph, so it takes precedence over the repository's default __solo__.
-  local selected_graph graph_is_named=0
-  selected_graph="$(run_cli resolve-pipeline-graph "$issue" 2>>"$LOG_FILE" || true)"
+  # SOT-2202: resolve issue directives, solo config, and graph environment flags once. The pure
+  # resolver in executionPlan.ts is the single source of truth for precedence and explanation.
+  local execution_plan execution_mode selected_graph solo_worker
+  execution_plan="$(run_cli execution-plan "$issue" 2>>"$LOG_FILE" || true)"
+  if [ -z "$execution_plan" ]; then
+    plog "PIPELINE_STOP: execution plan could not be resolved"
+    return "$COMPLETION_UNVERIFIED"
+  fi
+  execution_mode="$(node -e 'const p=JSON.parse(process.argv[1]); process.stdout.write(p.mode||"")' "$execution_plan" 2>>"$LOG_FILE" || true)"
+  selected_graph="$(node -e 'const p=JSON.parse(process.argv[1]); process.stdout.write(p.graphPath||"")' "$execution_plan" 2>>"$LOG_FILE" || true)"
+  solo_worker="$(node -e 'const p=JSON.parse(process.argv[1]); process.stdout.write(p.soloWorker||"")' "$execution_plan" 2>>"$LOG_FILE" || true)"
+  plog "EXECUTION_PLAN: $(node -e 'const p=JSON.parse(process.argv[1]); process.stdout.write(`mode=${p.mode} source=${p.source} reason=${p.reason}`)' "$execution_plan" 2>>"$LOG_FILE" || true)"
   if [ -n "$selected_graph" ]; then
     export PIPELINE_GRAPH_FILE="$selected_graph"
-    [ "$selected_graph" != "$PWD/config/pipeline_graph.json" ] && graph_is_named=1
   fi
 
   # SOT-1591 SOLO MODE: if the worker-roles config sets `__solo__`, ONE AI runs the entire lifecycle in a
   # SINGLE dispatch — no per-role loop, no script handoff/gating in between. Query the resolved config
   # (WORKER_ROLES_FILE carries the per-issue merge; solo mode is preserved through it). Fail-open: empty
   # output → fall through to the normal per-role pipeline below.
-  local solo_worker
-  solo_worker="$(run_cli solo-worker 2>>"$LOG_FILE" || true)"
-  if [ -n "$solo_worker" ] && [ "$graph_is_named" -eq 0 ]; then
+  if [ "$execution_mode" = "solo" ] && [ -n "$solo_worker" ]; then
     plog "SOLO MODE: worker=$solo_worker runs the whole lifecycle in one dispatch (no per-role handoff)"
     PIPELINE_NO_PR=0
     local scap; scap="$(mktemp)"
@@ -568,12 +573,7 @@ run_role_pipeline() {
   # below. The default graph is a faithful copy of the serial pipeline, so behavior is identical.
   # Fail-open: PIPELINE_GRAPH unset (default) skips this entirely (fully backward compatible); a
   # missing/invalid graph logs and falls through to the serial loop instead of exiting.
-  local graph_enabled=0
-  case "$(printf '%s' "${PIPELINE_GRAPH:-0}" | tr '[:upper:]' '[:lower:]')" in
-    1|true|yes|on) graph_enabled=1 ;;
-  esac
-  [ "$graph_is_named" -eq 1 ] && graph_enabled=1
-  if [ "$graph_enabled" -eq 1 ]; then
+  if [ "$execution_mode" = "graph" ]; then
     local graph_state="docs/ai/pipeline/graph_state.$issue.json"
     local graph_first="" graph_rc=0
     set +e
