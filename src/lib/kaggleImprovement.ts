@@ -341,6 +341,8 @@ export interface GuardSignals {
   hasNewMaterial: boolean;
   /** 同一方式で連続非改善が閾値に達した場合の、人間向けescalation理由。 */
   plateauReason?: string;
+  /** Kaggle CLI の認証/疎通失敗で公式スコアを観測できない場合の、人間向けhealth signal。 */
+  measurementFailureReason?: string;
 }
 
 /** planImprovementCycle の入力。 */
@@ -664,6 +666,9 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
     let skipReason: string | null = globalSkip;
     if (!skipReason && sig.hasUnfinishedCycle) {
       skipReason = 'previous auto-improve cycle for this project is still open';
+    }
+    if (!skipReason && sig.measurementFailureReason) {
+      skipReason = sig.measurementFailureReason;
     }
     if (!skipReason && sig.plateauReason) {
       skipReason = sig.plateauReason;
