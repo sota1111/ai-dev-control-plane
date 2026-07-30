@@ -71,7 +71,8 @@ linear-report — each through `run_worker.sh <role>`, gating on the winning rep
 - `BLOCKED` / `NEEDS_USER_INPUT` / chain exhausted → stop (needs human);
 - all `READY_FOR_REVIEW` → complete.
 
-`PIPELINE_MODE=0` (or a run with no issue id) falls back to a legacy single Claude-orchestrator launch.
+The declarative graph is the only multi-role execution path. `run_auto.sh` requires a target issue;
+solo mode is the only alternate lifecycle model.
 
 ## Per-issue worker override from Linear
 

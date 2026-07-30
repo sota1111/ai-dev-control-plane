@@ -117,8 +117,8 @@ Done`), and nothing is marked `Done` without verification — merged work waits 
      │                                            │ runner.ts picks the issue
      │                            ┌───────────────▼─────────────────┐
      └────────────────────────────│ scripts/ai/run_auto.sh          │
-                                  │  serial role pipeline, or the   │
-                                  │  declarative graph engine       │
+                                  │  declarative graph engine, or   │
+                                  │  single-worker solo lifecycle   │
                                   │  (config/pipeline_graph.json)   │
                                   └───────────────┬─────────────────┘
                                                   │ per node
@@ -175,10 +175,11 @@ After each role, the driver gates on the worker report's `## Next Action` line:
 - `BLOCKED` / `NEEDS_USER_INPUT`, or every worker in a chain exhausted → stop and wait for a human.
 - All roles `READY_FOR_REVIEW` → complete: PR created, merged when clean, Linear updated.
 
-### Declarative pipeline graph (opt-in)
+### Declarative pipeline graph
 
-Set `PIPELINE_GRAPH=1` and the same lifecycle runs from a concise **data-defined pipeline**
-(`config/pipeline_graph.json`). Users list the steps in order and choose one shared retry limit:
+The lifecycle always runs from the concise **data-defined pipeline**
+(`config/pipeline_graph.json`) unless solo mode is selected. Users list the steps in order and choose
+one shared retry limit:
 
 ```json
 {
@@ -201,10 +202,10 @@ as `"retry": { "max": 2 }`. The previous detailed `entry` / `nodes` / `budgets` 
 during the compatibility period. Alternative graphs live in
 `config/graphs/` and can be selected **per issue** with a `graph: <name>` directive from Linear
 (e.g. `graph: plan-with-discussion` inserts a debate before planning). Validation and traversal are
-handled by `runner-cli pipeline-graph validate|explain|begin|next`; `explain` prints only the ordered
-steps and retry policy. A missing or invalid graph fails open to
-the plain serial loop. Validation errors name the incorrect user-facing field and include a valid
-replacement shape where useful.
+handled by `runner-cli pipeline-graph validate|explain|open|advance`; `explain` prints only the ordered
+steps and retry policy. A missing or invalid graph stops safely instead of switching execution
+models. Validation errors name the incorrect user-facing field and include a valid replacement shape
+where useful.
 
 ### Discussion mode (multi-agent debate)
 
@@ -333,7 +334,7 @@ model pins under `__models__`) — the single top-level switch. Frequently used 
 
 | Variable                                                                     | Effect                                               | Default                                         |
 | ---------------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------- |
-| `PIPELINE_GRAPH`                                                             | Drive the pipeline from the declarative graph        | off                                             |
+| `PIPELINE_GRAPH_FILE`                                                        | Override the unified pipeline graph file             | `config/pipeline_graph.json`                    |
 | `PIPELINE_MAX_DEBUG_CYCLES`                                                  | Shared budget for debug loop-backs                   | `2`                                             |
 | `RUNNER_MAX_PARALLEL`                                                        | Parallel run slots (`1` = fully serial)              | `1`                                             |
 | `RUNNER_SERIALIZE_SCOPE`                                                     | Lock granularity: `repo` or `branch`                 | `repo`                                          |

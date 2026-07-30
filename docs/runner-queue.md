@@ -204,7 +204,8 @@ JS のロックを長時間占有しないよう、起動直後にロックを�
   Claude オーケストレータは起動せず、各ロールを委譲 worker として回す。各ロール後に勝者レポートの
   `## Next Action` でゲート（task-check 非アクション→成功 no-op、verification/acceptance の NEEDS_DEBUG→
   implementation へループ上限 `PIPELINE_MAX_DEBUG_CYCLES` 既定2、BLOCKED/exhausted→停止 exit70）。
-  `PIPELINE_MODE=0` または issue 未指定（手動キュー走査）は、レガシーの単一オーケストレータ起動へ退避する。
+  実行順は常に宣言的グラフで決まり、`__solo__` が有効な場合だけ単一 worker の全工程実行へ切り替わる。
+  `run_auto.sh` は対象 issue 必須であり、旧単一オーケストレータ経路へは退避しない。
 - **ディスパッチャ `scripts/ai/run_worker.sh <role>`** が単一の入口。パイプライン（およびレガシー
   オーケストレータ）は worker を直接呼ばず、必ずこのスクリプト経由で役割を実行する（**AI が AI を直接呼ばない**）。
   役割の指示は committed な `prompts/roles/<role>.md`（`docs/ai/pipeline/context.md` で issue を参照）に置き、

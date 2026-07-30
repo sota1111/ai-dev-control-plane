@@ -17,7 +17,7 @@
 
 | 変数                       | 必須 | デフォルト | 説明                                                                                                    |
 | -------------------------- | ---- | ---------- | ------------------------------------------------------------------------------------------------------- |
-| `PIPELINE_MODE`            | 任意 | `1`（有効）| `0/false/no/off` で案B の完全スクリプト駆動パイプラインを無効化し、レガシーの単一 Claude オーケストレータ起動へ退避 |
+| `PIPELINE_GRAPH_FILE`      | 任意 | `config/pipeline_graph.json` | 単一実行モデルで使用するグラフ設定を上書きする。無効な設定は安全に停止する |
 | `PIPELINE_MAX_DEBUG_CYCLES`| 任意 | `2`        | verification/acceptance が `NEEDS_DEBUG` のとき implementation へループバックする最大回数                |
 | `WORKER_SESSION_REUSE`     | 任意 | `1`（有効）| `0/false/no/off` で同一ワーカー連続時のセッション再利用（会話キャッシュ温存）を無効化                    |
 | `ANTIGRAVITY_DISABLED`     | 任意 | 無効       | 真値で Antigravity worker を一時停止（`run_antigravity.sh` が `75` で終了 → 次候補へ引き継ぎ）           |

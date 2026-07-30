@@ -49,9 +49,9 @@ describe('resolveExecutionPlan', () => {
       source: 'environment',
     },
     {
-      name: 'no selection preserves the legacy serial default',
+      name: 'no selection uses the unified default graph',
       input: {},
-      mode: 'serial',
+      mode: 'graph',
       source: 'default',
     },
   ])('$name', ({ input, mode, source }) => {
@@ -66,6 +66,17 @@ describe('resolveExecutionPlan', () => {
       graphDirective: 'default',
       soloWorker: 'codex',
     })).toMatchObject({ mode: 'solo', soloWorker: 'codex' });
+  });
+
+  test('configured graph file selects graph mode without a feature flag', () => {
+    expect(resolveExecutionPlan({
+      defaultGraphPath: DEFAULT,
+      configuredGraphPath: '/tmp/custom.json',
+    })).toMatchObject({
+      mode: 'graph',
+      graphPath: '/tmp/custom.json',
+      source: 'environment',
+    });
   });
 
   test('explanation includes the decision and overridden candidates', () => {

@@ -73,8 +73,8 @@ each role, `run_auto.sh` reads the winning report's `## Next Action` and gates:
 
 A dispatched Claude worker gets a hard preamble constraining it to its assigned role and forbidding it
 from launching `run_auto.sh` / `run_worker.sh` / the scheduler. Linear issue selection is not restricted
-by that preamble. Escape hatch: `PIPELINE_MODE=0` (or a run with no issue id) falls back to the
-legacy single Claude-orchestrator launch, which still routes each role through the dispatcher.
+by that preamble. The declarative graph is the only multi-role execution path; solo mode is the only
+alternate lifecycle model.
 
 ### Per-issue worker override from Linear (SOT-1459)
 
@@ -266,8 +266,7 @@ Linear webhook / queue ─► runner.ts (injects WEBHOOK_ISSUE_ID) ─► run_au
         ─► worker report ─► run_auto.sh gates on ## Next Action (proceed / loop / stop)
 ```
 
-Legacy fallback (`PIPELINE_MODE=0`, or a manual run with no issue id): Claude Code orchestrator handles
-requirements/plan/decomposition and routes each role through `run_worker.sh <role>`.
+`run_auto.sh` requires a targeted issue. Manual orchestration is outside this runner entry point.
 
 ---
 

@@ -824,13 +824,13 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
     }
     case 'pipeline-graph': {
       // SOT-1754: declarative pipeline graph engine (src/lib/pipelineGraph.ts). run_auto.sh drives
-      // the opt-in PIPELINE_GRAPH=1 role loop through this subcommand:
+      // the unified role loop through this subcommand:
       //   pipeline-graph validate|explain [--graph <path>]
       //     → exit 0 + `PIPELINE_GRAPH_OK …` when the graph loads and validates, else errors on
-      //       stderr + exit 1 (run_auto.sh fail-opens to the serial loop on non-zero).
-      //   pipeline-graph begin --state <file> --run-id <id> --issue-id <id> [--resume]
+      //       stderr + exit 1.
+      //   pipeline-graph open --state <file> --run-id <id> --issue-id <id> [--resume]
       //     → create or resume an identity-checked checkpoint; prints structured JSON.
-      //   pipeline-graph next --state <file> --next-action <TOKEN|NONE> [--acceptance PASS|FAIL|NONE]
+      //   pipeline-graph advance --state <file> --next-action <TOKEN|NONE> [--acceptance PASS|FAIL|NONE]
       //     → resolve one transition and prints a structured JSON result.
       const sub = args[0];
       const flags: Record<string, string> = {};
@@ -860,17 +860,17 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         process.exit(0);
       }
       const stateFile = flags.state;
-      if ((sub !== 'begin' && sub !== 'next') || !stateFile) {
+      if ((sub !== 'open' && sub !== 'advance') || !stateFile) {
         process.stderr.write(
-          'Usage: runner-cli.js pipeline-graph validate|explain|begin|next [--graph <path>] --state <file> [--run-id <id>] [--issue-id <id>] [--resume true] [--next-action <TOKEN|NONE>] [--acceptance PASS|FAIL|NONE]\n'
+          'Usage: runner-cli.js pipeline-graph validate|explain|open|advance [--graph <path>] --state <file> [--run-id <id>] [--issue-id <id>] [--resume true] [--next-action <TOKEN|NONE>] [--acceptance PASS|FAIL|NONE]\n'
         );
         process.exit(1);
       }
-      if (sub === 'begin') {
+      if (sub === 'open') {
         const runId = flags['run-id'];
         const issueId = flags['issue-id'];
         if (!runId || !issueId) {
-          process.stderr.write('pipeline-graph begin requires --run-id and --issue-id\n');
+          process.stderr.write('pipeline-graph open requires --run-id and --issue-id\n');
           process.exit(1);
         }
         const opened = openPipelineGraphCheckpoint(
@@ -890,7 +890,7 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         );
         process.exit(0);
       }
-      // sub === 'next'
+      // sub === 'advance'
       const state = readPipelineGraphState(stateFile, {
         runId: flags['run-id'] || '',
         issueId: flags['issue-id'] || '',
