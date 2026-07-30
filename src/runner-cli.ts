@@ -34,6 +34,7 @@ import {
   type GuardSignals,
   type ImprovementMaterial,
 } from './lib/kaggleImprovement.js';
+import { collectImproveContext } from './lib/kaggleImproveMaterial.js';
 import { pipelineReviewComment, type PipelineReviewOutcome } from './lib/pipelineReviewComment.js';
 import {
   DEFAULT_GRAPH_PATH,
@@ -45,6 +46,36 @@ import {
 } from './lib/pipelineGraph.js';
 
 const [,, command, ...args] = process.argv;
+
+/**
+ * SOT-1913 材料自動収集の共通ラッパ。当番枠が active で、かつ signals/material の少なくとも一方が
+ * 明示指定されていないときだけ、当番コンペの材料/シグナルを収集する（best-effort・never throws）。
+ * 非 active / 枠外 / --no-collect / 両方明示済み のときは null（収集スキップ）。
+ */
+async function maybeCollectImproveContext(o: {
+  registry: import('./lib/kaggleImprovement.js').TargetsRegistry;
+  hourJst: number;
+  active: boolean;
+  label?: string;
+  noCollect: boolean;
+  haveSignals: boolean;
+  haveMaterial: boolean;
+  kaggle: boolean;
+}): Promise<{ signals: Record<string, GuardSignals>; material: Record<string, ImprovementMaterial> } | null> {
+  if (o.noCollect || !o.active || (o.haveSignals && o.haveMaterial)) return null;
+  const competitionKey = resolveCompetitionForHour(o.registry, o.hourJst);
+  if (!competitionKey) return null;
+  try {
+    return await collectImproveContext(o.registry, competitionKey, {
+      label: o.label || 'auto-improve',
+      kaggle: o.kaggle,
+      log: (m) => process.stderr.write(`[improve-collect] ${m}\n`),
+    });
+  } catch (err: any) {
+    process.stderr.write(`kaggle-improve: material collection failed (best-effort): ${err?.message || err}\n`);
+    return null;
+  }
+}
 
 async function main() {
   switch (command) {
@@ -693,17 +724,31 @@ async function main() {
       const hourJst = Number.isFinite(Number(flags.hour)) ? Number(flags.hour) : new Date().getHours();
       const issueCount = Number.isFinite(Number(flags['issue-count'])) ? Number(flags['issue-count']) : 0;
       const truthy = (v: string | undefined) => v === '1' || v === 'true' || v === 'yes';
+      // env kill switch: explicit --env-enabled wins, else fall back to KAGGLE_IMPROVE_ENABLED.
+      const envEnabled = flags['env-enabled'] !== undefined
+        ? truthy(flags['env-enabled'])
+        : truthy(process.env.KAGGLE_IMPROVE_ENABLED);
+      let signals = parseJsonFlag<Record<string, GuardSignals>>('signals');
+      let material = parseJsonFlag<Record<string, ImprovementMaterial>>('material');
+      // 材料/シグナルは cron が自動収集する（未指定かつ active な当番枠のみ・best-effort）。
+      const collected = await maybeCollectImproveContext({
+        registry, hourJst, active: registry.enabled && envEnabled,
+        label: flags.label, noCollect: flags['no-collect'] === '1' || truthy(process.env.KAGGLE_IMPROVE_NO_COLLECT),
+        haveSignals: signals !== undefined, haveMaterial: material !== undefined,
+        kaggle: flags['no-kaggle'] !== '1',
+      });
+      if (collected) {
+        if (signals === undefined) signals = collected.signals;
+        if (material === undefined) material = collected.material;
+      }
       const plan = planImprovementCycle({
         registry,
         hourJst,
-        // env kill switch: explicit --env-enabled wins, else fall back to KAGGLE_IMPROVE_ENABLED.
-        envEnabled: flags['env-enabled'] !== undefined
-          ? truthy(flags['env-enabled'])
-          : truthy(process.env.KAGGLE_IMPROVE_ENABLED),
+        envEnabled,
         issueCount,
         cooldownActive: truthy(flags.cooldown),
-        signals: parseJsonFlag<Record<string, GuardSignals>>('signals'),
-        material: parseJsonFlag<Record<string, ImprovementMaterial>>('material'),
+        signals,
+        material,
       });
       process.stdout.write(JSON.stringify(plan) + '\n');
       process.exit(0);
@@ -746,16 +791,30 @@ async function main() {
       };
       const truthy = (v: string | undefined) => v === '1' || v === 'true' || v === 'yes';
       const hourJst = Number.isFinite(Number(flags.hour)) ? Number(flags.hour) : new Date().getHours();
+      const envEnabled = flags['env-enabled'] !== undefined
+        ? truthy(flags['env-enabled'])
+        : truthy(process.env.KAGGLE_IMPROVE_ENABLED);
+      let signals = parseJsonFlag<Record<string, GuardSignals>>('signals');
+      let material = parseJsonFlag<Record<string, ImprovementMaterial>>('material');
+      // 材料/シグナルは cron が自動収集する（未指定かつ active な当番枠のみ・best-effort）。
+      const collected = await maybeCollectImproveContext({
+        registry, hourJst, active: registry.enabled && envEnabled,
+        label: flags.label, noCollect: flags['no-collect'] === '1' || truthy(process.env.KAGGLE_IMPROVE_NO_COLLECT),
+        haveSignals: signals !== undefined, haveMaterial: material !== undefined,
+        kaggle: flags['no-kaggle'] !== '1',
+      });
+      if (collected) {
+        if (signals === undefined) signals = collected.signals;
+        if (material === undefined) material = collected.material;
+      }
       const plan = planImprovementCycle({
         registry,
         hourJst,
-        envEnabled: flags['env-enabled'] !== undefined
-          ? truthy(flags['env-enabled'])
-          : truthy(process.env.KAGGLE_IMPROVE_ENABLED),
+        envEnabled,
         issueCount: Number.isFinite(Number(flags['issue-count'])) ? Number(flags['issue-count']) : 0,
         cooldownActive: truthy(flags.cooldown),
-        signals: parseJsonFlag<Record<string, GuardSignals>>('signals'),
-        material: parseJsonFlag<Record<string, ImprovementMaterial>>('material'),
+        signals,
+        material,
       });
 
       const execute = bare.has('execute');
