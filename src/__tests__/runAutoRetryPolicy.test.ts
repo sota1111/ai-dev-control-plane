@@ -3,6 +3,10 @@ import path from 'node:path';
 
 describe('run_auto incomplete-dispatch retry policy (SOT-1928)', () => {
   const script = fs.readFileSync(path.join(process.cwd(), 'scripts/ai/run_auto.sh'), 'utf8');
+  const linearReportPrompt = fs.readFileSync(
+    path.join(process.cwd(), 'prompts/roles/linear-report.md'),
+    'utf8',
+  );
 
   test('solo dispatch without a report is retryable for every exit code', () => {
     expect(script).toMatch(
@@ -51,6 +55,7 @@ describe('run_auto incomplete-dispatch retry policy (SOT-1928)', () => {
     expect(script).toMatch(
       /\[ -n "\$REPORT_LINEAR_POSTED" \][\s\S]*?lacks Linear Report POSTED[\s\S]*?return "\$COMPLETION_UNVERIFIED"/,
     );
+    expect(linearReportPrompt).toContain('## Linear Report: POSTED');
   });
 
   test('node execution, report parsing, and finalization are each centralized', () => {

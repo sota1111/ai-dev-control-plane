@@ -20,5 +20,10 @@ Sync the final state back to Linear (the only human-facing report channel in aut
 3. Do NOT expose internal worker/dispatcher mechanics in the Linear comment — report only the outcome.
 
 ## Output
+After the Completion Report comment succeeds, emit:
+`## Linear Report: POSTED`
+
+If posting fails, do not emit the marker; report `BLOCKED`.
+
 End with a `## Next Action` line:
 READY_FOR_REVIEW (reported, issue set to In Review) | BLOCKED
