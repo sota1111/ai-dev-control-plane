@@ -7,6 +7,25 @@ interface State {
   name?: string;
 }
 
+export type IssueMeaningState =
+  | 'actionable'
+  | 'dependency_wait'
+  | 'human_wait'
+  | 'auth_unhealthy'
+  | 'terminal';
+
+export function classifyIssueMeaningState(
+  state: State | null | undefined,
+  opts: { archived?: boolean; hasUnresolvedBlockers?: boolean; authUnhealthy?: boolean } = {}
+): IssueMeaningState {
+  if (opts.archived || isTerminalState(state)) return 'terminal';
+  if (opts.authUnhealthy) return 'auth_unhealthy';
+  if (opts.hasUnresolvedBlockers) return 'dependency_wait';
+  const name = (state?.name || '').toLowerCase();
+  if (name === 'in review' || name === 'blocked' || name === 'on hold') return 'human_wait';
+  return 'actionable';
+}
+
 export function isTerminalState(state: State | null | undefined): boolean {
   return ['completed', 'canceled', 'duplicate'].includes(state?.type || '')
     || ['Done', 'Canceled', 'Cancelled', 'Duplicate'].includes(state?.name || '');

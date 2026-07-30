@@ -340,6 +340,13 @@ async function main() {
       }
       const outcome: PipelineReviewOutcome =
         args[1] === 'completed' || args[1] === 'completed-no-pr' ? args[1] : 'incomplete';
+      if (outcome === 'incomplete') {
+        await runner.setIssueInProgress(issueId).catch(() => {});
+        runner.log('WORKER_ROLES', `ensure-issue-reviewed ${issueId}: incomplete run kept active`, { issue: issueId });
+        process.stdout.write('active');
+        process.exit(0);
+        break;
+      }
       const comment = pipelineReviewComment(outcome);
       const moved = await runner.setIssueInReview(issueId, comment).catch(() => false);
       runner.log('WORKER_ROLES', `ensure-issue-reviewed ${issueId}: ${moved ? 'moved to In Review' : 'no change (already reviewed/terminal)'}`, { issue: issueId });
@@ -549,6 +556,13 @@ async function main() {
         // Separated alert: CHRONIC (human must re-authenticate) — distinct from a transient cooldown.
         runner.log('WORKER_HEALTH', `${worker} CHRONIC auth failure — re-authentication required; marked auth-unhealthy until epoch ${expiresAt}`);
         process.stderr.write(`WORKER_AUTH_UNHEALTHY: ${worker} chronic auth failure — human re-auth required (marker until ${expiresAt})\n`);
+        const issueId = process.env.WEBHOOK_ISSUE_ID;
+        if (issueId) {
+          const body = `## 自動処理停止: 認証切れ
+
+${worker} の認証が無効なため、この Issue を **Blocked** に移行しました。再認証後に Todo または In Progress へ戻すと自動処理を再開できます。`;
+          await runner.setIssueBlocked(issueId, body).catch(() => false);
+        }
       }
       process.stdout.write(kind + '\n');
       process.exit(0);
