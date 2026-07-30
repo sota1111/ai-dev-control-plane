@@ -22,6 +22,12 @@ import { execFileSync } from 'node:child_process';
 import type { GuardSignals, ImprovementMaterial, TargetsRegistry } from './kaggleImprovement.js';
 import { getCompetition } from './kaggleImprovement.js';
 import { findOpenAutoImproveIssue, linearQuery } from './linearApi.js';
+import {
+  appendNewScoreProgression,
+  detectScorePlateau,
+  progressionEntriesFromRows,
+  readScoreProgression,
+} from './kaggleScoreProgression.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -195,18 +201,18 @@ export function buildRecentIssuesDigest(
  * 収集本体（Linear / Kaggle CLI / ファイル I/O を純関数ヘルパーに橋渡し）
  * ========================================================================== */
 
-function collectPreviousSubmission(slug: string, log: (m: string) => void): string | undefined {
-  if (!slug) return undefined;
+function collectSubmissionRows(slug: string, log: (m: string) => void): KaggleSubmissionRow[] {
+  if (!slug) return [];
   try {
     const out = execFileSync('kaggle', ['competitions', 'submissions', slug, '--csv'], {
       encoding: 'utf8',
       timeout: 25000,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
-    return formatPreviousSubmission(parseKaggleSubmissionsCsv(out));
+    return parseKaggleSubmissionsCsv(out);
   } catch (err: any) {
     log(`kaggle submissions failed for ${slug}: ${err?.message || err}`);
-    return undefined;
+    return [];
   }
 }
 
@@ -287,6 +293,10 @@ export async function collectImproveContext(
     /** false で Kaggle CLI 呼び出しを無効化（テスト・オフライン用）。既定 true。 */
     kaggle?: boolean;
     log?: (m: string) => void;
+    /** score progression JSONL。既定 docs/ai/kaggle/score-progression.jsonl。 */
+    scoreProgressionPath?: string;
+    /** 同一方式の連続非改善をescalateする回数。既定3。 */
+    plateauThreshold?: number;
   } = {}
 ): Promise<CollectedContext> {
   const label = opts.label || 'auto-improve';
@@ -298,9 +308,20 @@ export async function collectImproveContext(
   if (!comp) return { signals, material };
 
   // 前回提出はコンペ単位（同一 kaggle slug）なので1回だけ収集して両ターゲットで共有する。
-  const previousSubmission = opts.kaggle === false
-    ? undefined
-    : collectPreviousSubmission(comp.kaggleCompetition, log);
+  const submissionRows = opts.kaggle === false
+    ? []
+    : collectSubmissionRows(comp.kaggleCompetition, log);
+  const previousSubmission = formatPreviousSubmission(submissionRows);
+  const scoreProgressionPath = opts.scoreProgressionPath
+    || path.join(__dirname, '..', '..', 'docs', 'ai', 'kaggle', 'score-progression.jsonl');
+  if (submissionRows.length > 0) {
+    const appended = appendNewScoreProgression(
+      scoreProgressionPath,
+      progressionEntriesFromRows(comp, submissionRows)
+    );
+    if (appended > 0) log(`score progression: appended ${appended} result(s) to ${scoreProgressionPath}`);
+  }
+  const progression = readScoreProgression(scoreProgressionPath);
 
   // failure-log も1回だけ読む。
   const failureContent = readFailureLog(opts.failureLogPath, log);
@@ -331,7 +352,12 @@ export async function collectImproveContext(
       ? filterFailureLog(failureContent, [t.repo, comp.key])
       : undefined;
 
-    signals[t.project] = { hasUnfinishedCycle, hasNewMaterial };
+    const plateau = detectScorePlateau(progression, t.repo, opts.plateauThreshold ?? 3);
+    signals[t.project] = {
+      hasUnfinishedCycle,
+      hasNewMaterial,
+      ...(plateau.plateau && plateau.reason ? { plateauReason: plateau.reason } : {}),
+    };
     material[t.project] = { previousSubmission, recentIssuesDigest: digest, failureKpiExcerpt };
   }
 

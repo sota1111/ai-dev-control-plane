@@ -339,6 +339,8 @@ export interface GuardSignals {
   hasUnfinishedCycle: boolean;
   /** 新材料ガード: 前回サイクル以降にそのプロジェクトで新しい完了 Issue があるか。 */
   hasNewMaterial: boolean;
+  /** 同一方式で連続非改善が閾値に達した場合の、人間向けescalation理由。 */
+  plateauReason?: string;
 }
 
 /** planImprovementCycle の入力。 */
@@ -662,6 +664,9 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
     let skipReason: string | null = globalSkip;
     if (!skipReason && sig.hasUnfinishedCycle) {
       skipReason = 'previous auto-improve cycle for this project is still open';
+    }
+    if (!skipReason && sig.plateauReason) {
+      skipReason = sig.plateauReason;
     }
     if (!skipReason && !sig.hasNewMaterial) {
       skipReason = 'no new completed issue since the last cycle (no new material)';
