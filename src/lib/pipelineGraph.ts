@@ -103,6 +103,15 @@ export interface PipelineGraph {
   nodes: Record<string, GraphNode>;
 }
 
+/** User-facing graph format. Internal events, terminals, budgets, and visit caps are compiled away. */
+export interface SimplePipelineGraph {
+  version: number;
+  steps: string[];
+  retry?: {
+    max: Bound;
+  };
+}
+
 export interface PipelineGraphState {
   schemaVersion: typeof PIPELINE_GRAPH_STATE_SCHEMA_VERSION;
   runId: string;
@@ -143,7 +152,7 @@ function normalizeEdge(raw: string | GraphEdge): GraphEdge {
 /** Resolve a Bound to a finite non-negative integer (null when the bound is absent/invalid). */
 export function resolveBound(
   bound: Bound | undefined,
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = process.env
 ): number | null {
   if (bound === undefined || bound === null) return null;
   if (typeof bound === 'number') {
@@ -166,11 +175,128 @@ function isValidBound(bound: unknown): boolean {
   if (typeof bound === 'object' && bound !== null) {
     const b = bound as { env?: unknown; default?: unknown; plus?: unknown };
     if (b.env !== undefined && typeof b.env !== 'string') return false;
-    if (!(typeof b.default === 'number' && Number.isInteger(b.default) && b.default >= 0)) return false;
-    if (b.plus !== undefined && !(typeof b.plus === 'number' && Number.isInteger(b.plus) && b.plus >= 0)) return false;
+    if (!(typeof b.default === 'number' && Number.isInteger(b.default) && b.default >= 0))
+      return false;
+    if (
+      b.plus !== undefined &&
+      !(typeof b.plus === 'number' && Number.isInteger(b.plus) && b.plus >= 0)
+    )
+      return false;
     return true;
   }
   return false;
+}
+
+function validateSimplePipelineGraph(raw: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  if (raw.version !== 1) {
+    errors.push(`"version" must be 1 (received ${JSON.stringify(raw.version)})`);
+  }
+  if (!Array.isArray(raw.steps) || raw.steps.length === 0) {
+    errors.push(
+      '"steps" must be a non-empty array, for example ["task-check", "implementation", "verification"]'
+    );
+    return errors;
+  }
+  const seen = new Set<string>();
+  raw.steps.forEach((step, index) => {
+    if (typeof step !== 'string' || step.trim() === '') {
+      errors.push(`"steps[${index}]" must be a non-empty role name`);
+      return;
+    }
+    if (step.startsWith('__')) {
+      errors.push(
+        `"steps[${index}]" must not start with "__"; terminal names are managed automatically`
+      );
+    }
+    if (seen.has(step)) {
+      errors.push(`"steps[${index}]" duplicates "${step}"; list each pipeline step once`);
+    }
+    seen.add(step);
+  });
+  if (raw.retry !== undefined) {
+    if (typeof raw.retry !== 'object' || raw.retry === null || Array.isArray(raw.retry)) {
+      errors.push('"retry" must be an object, for example {"max": 2}');
+    } else {
+      const retry = raw.retry as Record<string, unknown>;
+      if (!isValidBound(retry.max)) {
+        errors.push('"retry.max" must be a non-negative integer or {"env": "NAME", "default": 2}');
+      }
+      if (!seen.has('implementation') || !seen.has('verification')) {
+        errors.push('"retry" requires both "implementation" and "verification" in "steps"');
+      }
+    }
+  }
+  return errors;
+}
+
+/**
+ * Compile the concise format into the detailed runtime graph. Retry routing preserves the historical
+ * lifecycle: implementation failures re-enter verification, verification/acceptance failures restart
+ * implementation, and failures after acceptance re-enter verification.
+ */
+export function compileSimplePipelineGraph(simple: SimplePipelineGraph): PipelineGraph {
+  const retryMax = simple.retry?.max;
+  const retryEnabled = retryMax !== undefined;
+  const implementationIndex = simple.steps.indexOf('implementation');
+  const verificationIndex = simple.steps.indexOf('verification');
+  const acceptanceIndex = simple.steps.indexOf('acceptance');
+  const nodes: Record<string, GraphNode> = {};
+  const retryEdge = (index: number, role: string): GraphEdge | undefined => {
+    if (!retryEnabled) return undefined;
+    if (role === 'implementation') return { to: 'verification', counts: 'debug' };
+    if (role === 'verification' || role === 'acceptance') {
+      return { to: 'implementation', counts: 'debug' };
+    }
+    if (acceptanceIndex >= 0 && index > acceptanceIndex) {
+      return { to: 'verification', counts: 'debug' };
+    }
+    return undefined;
+  };
+
+  simple.steps.forEach((role, index) => {
+    const next = simple.steps[index + 1] ?? '__done__';
+    const on: Record<string, string | GraphEdge> = { READY_FOR_REVIEW: next, '*': '__stop__' };
+    const retry = retryEdge(index, role);
+    if (retry) on.NEEDS_DEBUG = retry;
+    if (role === 'task-check') on['*'] = '__done_no_pr__';
+    if (role === 'acceptance') {
+      nodes[role] = {
+        role,
+        verdict_source: 'acceptance',
+        on: {
+          ACCEPTANCE_FAIL: retry ?? '__stop__',
+          ACCEPTANCE_PASS: next,
+          READY_FOR_REVIEW: next,
+          ...(retry ? { NEEDS_DEBUG: retry } : {}),
+          '*': '__stop__',
+        },
+      };
+      return;
+    }
+    const needsVisitCap =
+      retryEnabled && (index === implementationIndex || index === verificationIndex);
+    nodes[role] = {
+      ...(role === 'discussion' ? { type: 'discussion' as const } : {}),
+      role,
+      ...(needsVisitCap
+        ? {
+            max_visits:
+              typeof retryMax === 'number'
+                ? retryMax + 1
+                : { ...retryMax, plus: (retryMax.plus ?? 0) + 1 },
+          }
+        : {}),
+      on,
+    };
+  });
+
+  return {
+    version: 1,
+    entry: simple.steps[0],
+    ...(retryEnabled ? { budgets: { debug: { max: retryMax, on_exhausted: '__stop__' } } } : {}),
+    nodes,
+  };
 }
 
 /**
@@ -182,19 +308,27 @@ function isValidBound(bound: unknown): boolean {
 export function validatePipelineGraph(raw: unknown): string[] {
   const errors: string[] = [];
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    return ['graph document must be a JSON object'];
+    return ['graph document must be a JSON object with a "steps" array'];
   }
   const doc = raw as Record<string, unknown>;
-  if (doc.version !== 1) errors.push(`unsupported version ${JSON.stringify(doc.version)} (expected 1)`);
+  if ('steps' in doc && !('nodes' in doc)) return validateSimplePipelineGraph(doc);
+  if (doc.version !== 1)
+    errors.push(`unsupported version ${JSON.stringify(doc.version)} (expected 1)`);
   const nodesRaw = doc.nodes;
-  if (typeof nodesRaw !== 'object' || nodesRaw === null || Array.isArray(nodesRaw) || Object.keys(nodesRaw).length === 0) {
+  if (
+    typeof nodesRaw !== 'object' ||
+    nodesRaw === null ||
+    Array.isArray(nodesRaw) ||
+    Object.keys(nodesRaw).length === 0
+  ) {
     errors.push('graph must define a non-empty "nodes" object');
     return errors;
   }
   const nodes = nodesRaw as Record<string, unknown>;
-  const budgets = (typeof doc.budgets === 'object' && doc.budgets !== null && !Array.isArray(doc.budgets)
-    ? (doc.budgets as Record<string, unknown>)
-    : {});
+  const budgets =
+    typeof doc.budgets === 'object' && doc.budgets !== null && !Array.isArray(doc.budgets)
+      ? (doc.budgets as Record<string, unknown>)
+      : {};
   for (const [name, b] of Object.entries(budgets)) {
     if (typeof b !== 'object' || b === null) {
       errors.push(`budget "${name}" must be an object`);
@@ -246,7 +380,10 @@ export function validatePipelineGraph(raw: unknown): string[] {
       if (!(GRAPH_EVENTS as readonly string[]).includes(event)) {
         errors.push(`node "${id}" has unknown event key "${event}"`);
       }
-      const edge = typeof edgeRaw === 'string' ? { to: edgeRaw } : (edgeRaw as { to?: unknown; counts?: unknown });
+      const edge =
+        typeof edgeRaw === 'string'
+          ? { to: edgeRaw }
+          : (edgeRaw as { to?: unknown; counts?: unknown });
       if (typeof edge !== 'object' || edge === null || typeof edge.to !== 'string') {
         errors.push(`node "${id}" event "${event}" must map to a target string or {to, counts?}`);
         continue;
@@ -255,7 +392,10 @@ export function validatePipelineGraph(raw: unknown): string[] {
       if (!(target in nodes) && !isGraphTerminal(target)) {
         errors.push(`node "${id}" event "${event}" targets unknown node/terminal "${target}"`);
       }
-      if (edge.counts !== undefined && !(typeof edge.counts === 'string' && edge.counts in budgets)) {
+      if (
+        edge.counts !== undefined &&
+        !(typeof edge.counts === 'string' && edge.counts in budgets)
+      ) {
         errors.push(`node "${id}" event "${event}" counts unknown budget "${String(edge.counts)}"`);
       }
     }
@@ -283,7 +423,9 @@ export function validatePipelineGraph(raw: unknown): string[] {
     for (const next of residual.get(id) ?? []) {
       const c = color.get(next);
       if (c === 'gray') {
-        errors.push(`unbounded cycle detected: ${[...trail, id, next].join(' → ')} (add a budget-counted edge or max_visits)`);
+        errors.push(
+          `unbounded cycle detected: ${[...trail, id, next].join(' → ')} (add a budget-counted edge or max_visits)`
+        );
         continue;
       }
       if (c !== 'black') visit(next, [...trail, id]);
@@ -315,13 +457,38 @@ export function loadPipelineGraph(filePath: string = DEFAULT_GRAPH_PATH): {
   }
   const errors = validatePipelineGraph(raw);
   if (errors.length > 0) return { errors };
-  return { graph: raw as PipelineGraph, errors: [] };
+  const doc = raw as Record<string, unknown>;
+  return {
+    graph:
+      'steps' in doc
+        ? compileSimplePipelineGraph(raw as SimplePipelineGraph)
+        : (raw as PipelineGraph),
+    errors: [],
+  };
+}
+
+/** Human-facing summary that hides compiled events, terminals, budgets, and visit caps. */
+export function explainPipelineGraph(
+  graph: PipelineGraph,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const steps = happyPathRoles(graph);
+  const retry = graph.budgets?.debug;
+  const retryMax = resolveBound(retry?.max, env);
+  return [
+    `Pipeline steps: ${steps.join(' → ')}`,
+    retry
+      ? `Retry policy: retry up to ${retryMax ?? 0} time(s), restarting implementation or verification as appropriate`
+      : 'Retry policy: disabled',
+  ].join('\n');
 }
 
 /** Normalize a raw `## Next Action` string to a known token (null when absent/unknown/NONE). */
 export function normalizeNextAction(raw: string | undefined | null): NextActionToken | null {
   const token = (raw ?? '').trim().toUpperCase();
-  return (NEXT_ACTION_TOKENS as readonly string[]).includes(token) ? (token as NextActionToken) : null;
+  return (NEXT_ACTION_TOKENS as readonly string[]).includes(token)
+    ? (token as NextActionToken)
+    : null;
 }
 
 /**
@@ -333,7 +500,7 @@ export function normalizeNextAction(raw: string | undefined | null): NextActionT
 export function computeGraphEvent(
   node: GraphNode,
   nextAction: string | undefined | null,
-  acceptanceVerdict?: string | null,
+  acceptanceVerdict?: string | null
 ): { event: string; warning?: string } {
   const na = normalizeNextAction(nextAction);
   if (node.verdict_source === 'acceptance') {
@@ -345,7 +512,8 @@ export function computeGraphEvent(
     }
     return {
       event: na ?? 'NONE',
-      warning: 'no machine-readable "## Acceptance: PASS|FAIL" verdict → falling back to Next Action',
+      warning:
+        'no machine-readable "## Acceptance: PASS|FAIL" verdict → falling back to Next Action',
     };
   }
   return { event: na ?? 'NONE' };
@@ -362,7 +530,7 @@ export function beginPipelineGraph(
     runId: 'legacy',
     issueId: 'legacy',
     graphId: pipelineGraphId(graph),
-  },
+  }
 ): PipelineGraphState {
   return {
     schemaVersion: PIPELINE_GRAPH_STATE_SCHEMA_VERSION,
@@ -386,16 +554,27 @@ export function stepPipelineGraph(
   state: PipelineGraphState,
   nextAction: string | undefined | null,
   acceptanceVerdict?: string | null,
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = process.env
 ): GraphStepResult {
   const node = graph.nodes[state.current];
   if (!node) {
-    return { kind: 'terminal', terminal: 'stop', event: 'NONE', reason: `unknown current node "${state.current}"` };
+    return {
+      kind: 'terminal',
+      terminal: 'stop',
+      event: 'NONE',
+      reason: `unknown current node "${state.current}"`,
+    };
   }
   const { event, warning } = computeGraphEvent(node, nextAction, acceptanceVerdict);
   const edgeRaw = node.on[event] ?? node.on['*'];
   if (edgeRaw === undefined) {
-    return { kind: 'terminal', terminal: 'stop', event, warning, reason: `node "${state.current}" has no transition for event "${event}"` };
+    return {
+      kind: 'terminal',
+      terminal: 'stop',
+      event,
+      warning,
+      reason: `node "${state.current}" has no transition for event "${event}"`,
+    };
   }
   const edge = normalizeEdge(edgeRaw);
   if (edge.counts) {
@@ -405,7 +584,10 @@ export function stepPipelineGraph(
     if (spent >= max) {
       const terminal = terminalName(budget?.on_exhausted ?? '__stop__');
       return {
-        kind: 'terminal', terminal, event, warning,
+        kind: 'terminal',
+        terminal,
+        event,
+        warning,
         reason: `budget "${edge.counts}" exhausted (${spent}/${max}) at "${state.current}" on ${event}`,
       };
     }
@@ -415,13 +597,22 @@ export function stepPipelineGraph(
   if (isGraphTerminal(edge.to)) {
     const from = state.current;
     state.current = edge.to;
-    return { kind: 'terminal', terminal: terminalName(edge.to), event, warning, reason: `"${from}" → ${edge.to} on ${event}` };
+    return {
+      kind: 'terminal',
+      terminal: terminalName(edge.to),
+      event,
+      warning,
+      reason: `"${from}" → ${edge.to} on ${event}`,
+    };
   }
   const visits = (state.visits[edge.to] ?? 0) + 1;
   const maxVisits = resolveBound(graph.nodes[edge.to].max_visits, env);
   if (maxVisits !== null && visits > maxVisits) {
     return {
-      kind: 'terminal', terminal: 'stop', event, warning,
+      kind: 'terminal',
+      terminal: 'stop',
+      event,
+      warning,
       reason: `max_visits exceeded for "${edge.to}" (visit ${visits} > ${maxVisits})`,
     };
   }
@@ -433,7 +624,7 @@ export function stepPipelineGraph(
 /** Read a state file written by writePipelineGraphState. Throws on missing/corrupt state. */
 export function readPipelineGraphState(
   filePath: string,
-  expected?: PipelineGraphCheckpointIdentity,
+  expected?: PipelineGraphCheckpointIdentity
 ): PipelineGraphState {
   const raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as PipelineGraphState;
   if (typeof raw !== 'object' || raw === null || typeof raw.current !== 'string') {
@@ -441,7 +632,7 @@ export function readPipelineGraphState(
   }
   if (raw.schemaVersion !== PIPELINE_GRAPH_STATE_SCHEMA_VERSION) {
     throw new Error(
-      `incompatible pipeline graph checkpoint schema in ${filePath}: expected ${PIPELINE_GRAPH_STATE_SCHEMA_VERSION}, got ${String(raw.schemaVersion)}`,
+      `incompatible pipeline graph checkpoint schema in ${filePath}: expected ${PIPELINE_GRAPH_STATE_SCHEMA_VERSION}, got ${String(raw.schemaVersion)}`
     );
   }
   for (const key of ['runId', 'issueId', 'graphId'] as const) {
@@ -450,7 +641,7 @@ export function readPipelineGraphState(
     }
     if (expected && raw[key] !== expected[key]) {
       throw new Error(
-        `pipeline graph checkpoint ${key} mismatch in ${filePath}: expected ${expected[key]}, got ${raw[key]}`,
+        `pipeline graph checkpoint ${key} mismatch in ${filePath}: expected ${expected[key]}, got ${raw[key]}`
       );
     }
   }
@@ -495,7 +686,7 @@ export function openPipelineGraphCheckpoint(
   filePath: string,
   graph: PipelineGraph,
   identity: PipelineGraphCheckpointIdentity,
-  resume: boolean,
+  resume: boolean
 ): { state: PipelineGraphState; resumed: boolean } {
   if (resume) {
     if (!fs.existsSync(filePath)) {
