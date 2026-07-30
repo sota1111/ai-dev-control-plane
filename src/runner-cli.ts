@@ -49,6 +49,11 @@ import {
   readPipelineGraphState,
   writePipelineGraphState,
 } from './lib/pipelineGraph.js';
+import {
+  explainExecutionPlan,
+  isTruthyFlag,
+  resolveExecutionPlan,
+} from './lib/executionPlan.js';
 
 const [,, command, ...args] = process.argv;
 
@@ -309,6 +314,61 @@ async function main() {
         process.stderr.write(`resolve-pipeline-graph: ${issueId} selected graph=${name}\n`);
         process.stdout.write(graphPath);
       }
+      process.exit(0);
+      break;
+    }
+    case 'execution-plan': {
+      const issueId = args[0];
+      if (!issueId) {
+        process.stderr.write('Usage: runner-cli.js execution-plan <issueIdentifier> [--explain]\n');
+        process.exit(1);
+      }
+      let text = '';
+      const warnings: string[] = [];
+      try {
+        const data: any = await runner.linearQuery(
+          'query($id: String!) { issue(id: $id) { description comments(first: 50) { nodes { body } } } }',
+          { id: issueId },
+        );
+        const description = typeof data?.issue?.description === 'string' ? data.issue.description : '';
+        const comments = (data?.issue?.comments?.nodes || [])
+          .map((n: any) => typeof n?.body === 'string' ? n.body : '');
+        text = [description, ...comments].join('\n');
+      } catch (err: any) {
+        warnings.push(`could not fetch ${issueId}: ${err?.message || err}`);
+      }
+
+      const graphDirective = parseGraphDirective(text);
+      let namedGraphPath: string | undefined;
+      let namedGraphError: string | undefined;
+      if (graphDirective && graphDirective !== 'default') {
+        const candidate = path.join(__dirname, '..', 'config', 'graphs', `${graphDirective}.json`);
+        const loaded = loadPipelineGraph(candidate);
+        if (loaded.graph) namedGraphPath = candidate;
+        else namedGraphError = `unknown or invalid graph "${graphDirective}": ${loaded.errors.join('; ')}`;
+      }
+      const workerConfigPath = process.env.WORKER_ROLES_FILE
+        || path.join(__dirname, '..', 'config', 'worker_roles.json');
+      const plan = resolveExecutionPlan({
+        graphDirective,
+        namedGraphPath,
+        namedGraphError,
+        pipelineGraphEnabled: isTruthyFlag(process.env.PIPELINE_GRAPH),
+        configuredGraphPath: process.env.PIPELINE_GRAPH_FILE,
+        defaultGraphPath: DEFAULT_GRAPH_PATH,
+        soloWorker: loadSoloWorker(workerConfigPath),
+      });
+      plan.warnings.unshift(...warnings);
+      // Discussion consumes the issue material as a topic file. Keep this I/O in the CLI
+      // orchestration layer, after the pure mode decision, so selection itself stays side-effect free.
+      if (plan.mode === 'graph' && graphDirective && text) {
+        const topicDir = path.join(__dirname, '..', 'docs', 'ai', 'pipeline');
+        const safeIssue = String(issueId).replace(/[^a-zA-Z0-9_-]/g, '_');
+        fs.mkdirSync(topicDir, { recursive: true });
+        fs.writeFileSync(path.join(topicDir, `discussion_topic.${safeIssue}.md`), text);
+      }
+      if (args.includes('--explain')) process.stdout.write(explainExecutionPlan(plan));
+      else process.stdout.write(`${JSON.stringify(plan)}\n`);
       process.exit(0);
       break;
     }
@@ -991,7 +1051,7 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       break;
     }
     default: {
-      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, pipeline-graph, kaggle-plan, kaggle-improve-plan, kaggle-champion-plan, ...\n`);
+      process.stderr.write(`Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, execution-plan, pipeline-graph, kaggle-plan, kaggle-improve-plan, kaggle-champion-plan, ...\n`);
       process.exit(1);
     }
   }
