@@ -264,6 +264,101 @@ _cb_fingerprint() {
     | sha1sum 2>/dev/null | awk '{print $1}'
 }
 
+declare -A PIPELINE_EXECUTORS=(
+  [worker]=execute_worker_node
+  [discussion]=execute_discussion_node
+)
+
+execute_worker_node() {
+  local issue="$1" role="$2" cap="$3"
+  bash scripts/ai/run_worker.sh "$role" 2>&1 | python3 -u -c "$_PIPE_TAG_FILTER" | tee -a "$LOG_FILE" "$cap"
+  NODE_RC=${PIPESTATUS[0]}
+  local dispatch_done
+  dispatch_done="$(grep -oE 'WORKER_DISPATCH_DONE role=[^ ]+ worker=[^ ]+ report=[^ ]+' "$cap" 2>/dev/null | tail -1 || true)"
+  NODE_REPORT="$(printf '%s' "$dispatch_done" | sed 's/.*report=//' || true)"
+  NODE_WINNER="$(printf '%s' "$dispatch_done" | sed -E 's/.*worker=([^ ]+).*/\1/' || true)"
+}
+
+execute_discussion_node() {
+  local issue="$1" _role="$2" cap="$3"
+  local topic_file="docs/ai/pipeline/discussion_topic.$issue.md"
+  if [ -s "$topic_file" ]; then
+    bash scripts/ai/run_discussion.sh --issue "$issue" --topic-file "$topic_file" 2>&1 | tee -a "$LOG_FILE" "$cap"
+  else
+    DISCUSSION_TOPIC="Review Linear issue $issue and agree on the implementation approach before implementation." \
+      bash scripts/ai/run_discussion.sh --issue "$issue" 2>&1 | tee -a "$LOG_FILE" "$cap"
+  fi
+  NODE_RC=${PIPESTATUS[0]}
+  NODE_REPORT="docs/ai/pipeline/discussion_$issue.md"
+  NODE_WINNER="discussion"
+}
+
+# Execute any graph node through its registered executor. The role loop does not need to know which
+# roles use the normal dispatcher and which have a purpose-built executor.
+executeNode() {
+  local issue="$1" role="$2"
+  local executor_key="worker"
+  [ -n "${PIPELINE_EXECUTORS[$role]:-}" ] && executor_key="$role"
+  local executor="${PIPELINE_EXECUTORS[$executor_key]}"
+  local cap; cap="$(mktemp)"
+  NODE_RC=0 NODE_REPORT="" NODE_WINNER=""
+  set +e
+  "$executor" "$issue" "$role" "$cap"
+  set -e
+  rm -f "$cap"
+}
+
+# Parse every worker/discussion/solo report through one implementation. Missing files intentionally
+# yield empty fields; executeNode/finalizeRun decide whether that is retryable or terminal.
+parsePipelineReport() {
+  local report="$1"
+  REPORT_NEXT_ACTION="" REPORT_ACCEPTANCE="" REPORT_LINEAR_POSTED="" REPORT_HAS_PR=0
+  [ -f "$report" ] || return 0
+  REPORT_NEXT_ACTION="$(awk '/[Nn]ext[[:space:]]*[Aa]ction/{cap=1; buf=""} cap{buf=buf"\n"$0} END{print buf}' "$report" 2>/dev/null | grep -oiE 'READY_FOR_REVIEW|NEEDS_DEBUG|NEEDS_USER_INPUT|BLOCKED' | head -n1 | tr '[:lower:]' '[:upper:]' || true)"
+  REPORT_ACCEPTANCE="$(grep -ioE '^##[[:space:]]*Acceptance:[[:space:]]*(PASS|FAIL)' "$report" 2>/dev/null | grep -ioE '(PASS|FAIL)' | tail -1 | tr '[:lower:]' '[:upper:]' || true)"
+  REPORT_LINEAR_POSTED="$(grep -ioE '^##[[:space:]]*Linear[[:space:]]+Report:[[:space:]]*POSTED' "$report" 2>/dev/null | tail -1 || true)"
+  grep -qiE 'pull/[0-9]+|PR[ :*]*#[0-9]+' "$report" 2>/dev/null && REPORT_HAS_PR=1
+}
+
+# Apply the completion contract in one place for graph and solo runs. This preserves the SOT-1928
+# missing-report retry rule and the SOT-2127 acceptance/Linear-report requirements for PR results.
+finalizeRun() {
+  local mode="$1" rc="$2" report="$3"
+  local acceptance_override="${4:-}" linear_override="${5:-}"
+  if [ "$rc" -ne 0 ] || [ -z "$report" ] || [ ! -f "$report" ]; then
+    plog "PIPELINE_RETRY: $mode dispatch rc=$rc (no report) → leave issue active and retry"
+    return "$WORKER_UNAVAILABLE"
+  fi
+  parsePipelineReport "$report"
+  [ -n "$acceptance_override" ] && REPORT_ACCEPTANCE="$acceptance_override"
+  [ -n "$linear_override" ] && REPORT_LINEAR_POSTED="$linear_override"
+  [ "$mode" = role ] && return 0
+  if [ "$mode" = "solo" ]; then
+    [ "$REPORT_ACCEPTANCE" = "FAIL" ] && {
+      plog "PIPELINE_STOP: solo acceptance FAIL → needs attention"
+      return "$COMPLETION_UNVERIFIED"
+    }
+    [ "$REPORT_NEXT_ACTION" = "READY_FOR_REVIEW" ] || {
+      plog "PIPELINE_STOP: solo '${REPORT_NEXT_ACTION:-<none>}' → stop (needs human)"
+      return "$COMPLETION_UNVERIFIED"
+    }
+  fi
+  if [ "$REPORT_HAS_PR" -eq 1 ]; then
+    [ "$REPORT_ACCEPTANCE" = "PASS" ] || {
+      plog "PIPELINE_STOP: $mode PR result lacks explicit Acceptance PASS → unverified"
+      return "$COMPLETION_UNVERIFIED"
+    }
+    [ -n "$REPORT_LINEAR_POSTED" ] || {
+      plog "PIPELINE_STOP: $mode PR result lacks Linear Report POSTED → completion was not reported"
+      return "$COMPLETION_UNVERIFIED"
+    }
+    PIPELINE_NO_PR=0
+  else
+    PIPELINE_NO_PR=1
+  fi
+  return 0
+}
+
 # Unified role loop. The declarative graph is the only multi-role execution model; solo mode remains
 # a single-worker lifecycle. The graph bounds debug back-edges and classifies all terminal outcomes.
 run_graph_role_loop() {
@@ -281,6 +376,7 @@ run_graph_role_loop() {
 
   PIPELINE_NO_PR=0
   GITHUB_REPORT=""
+  local pipeline_acceptance="" pipeline_linear_posted=""
   unset PIPELINE_PINNED_WORKER
   local pipeline_start_ms; pipeline_start_ms="$(date +%s%3N 2>/dev/null || echo '')"
   local cb_no_progress=0 cb_last_fp=""
@@ -330,42 +426,15 @@ run_graph_role_loop() {
       return "$COMPLETION_UNVERIFIED"
     fi
 
-    local cap; cap="$(mktemp)"
-    local report="" winner="" dispatch_done="" rc=0
-    set +e
-    if [ "$role" = "discussion" ]; then
-      local topic_file="docs/ai/pipeline/discussion_topic.$issue.md"
-      if [ -s "$topic_file" ]; then
-        bash scripts/ai/run_discussion.sh --issue "$issue" --topic-file "$topic_file" 2>&1 | tee -a "$LOG_FILE" "$cap"
-      else
-        DISCUSSION_TOPIC="Review Linear issue $issue and agree on the implementation approach before implementation." \
-          bash scripts/ai/run_discussion.sh --issue "$issue" 2>&1 | tee -a "$LOG_FILE" "$cap"
-      fi
-      rc=${PIPESTATUS[0]}
-      report="docs/ai/pipeline/discussion_$issue.md"
-      winner="discussion"
-    else
-      bash scripts/ai/run_worker.sh "$role" 2>&1 | python3 -u -c "$_PIPE_TAG_FILTER" | tee -a "$LOG_FILE" "$cap"
-      rc=${PIPESTATUS[0]}
-      dispatch_done="$(grep -oE 'WORKER_DISPATCH_DONE role=[^ ]+ worker=[^ ]+ report=[^ ]+' "$cap" 2>/dev/null | tail -1 || true)"
-      report="$(printf '%s' "$dispatch_done" | sed 's/.*report=//' || true)"
-      winner="$(printf '%s' "$dispatch_done" | sed -E 's/.*worker=([^ ]+).*/\1/' || true)"
-    fi
-    set -e
-    rm -f "$cap"
-
-    if [ "$rc" -ne 0 ] || [ -z "$report" ] || [ ! -f "$report" ]; then
-      # No report means the role never produced a lifecycle verdict. This is an incomplete dispatch,
-      # not NEEDS_USER_INPUT: leave the issue active and let the runner retry it. In particular, a
-      # pipeline/filter SIGPIPE (rc=141) must not be converted into In Review by the loop-breaker.
-      plog "PIPELINE_RETRY: role=$role dispatcher rc=$rc (no report) → leave issue active and retry"
-      return "$WORKER_UNAVAILABLE"
-    fi
-
-    local na; na="$(awk '/[Nn]ext[[:space:]]*[Aa]ction/{cap=1; buf=""} cap{buf=buf"\n"$0} END{print buf}' "$report" 2>/dev/null | grep -oiE 'READY_FOR_REVIEW|NEEDS_DEBUG|NEEDS_USER_INPUT|BLOCKED' | head -n1 | tr '[:lower:]' '[:upper:]' || true)"
+    executeNode "$issue" "$role"
+    finalizeRun "role" "$NODE_RC" "$NODE_REPORT" || return $?
+    local report="$NODE_REPORT" winner="$NODE_WINNER"
+    parsePipelineReport "$report"
+    local na="$REPORT_NEXT_ACTION"
     plog "role=$role next_action='${na:-<none>}' report=$report"
 
     [ "$role" = "github" ] && GITHUB_REPORT="$report"
+    [ "$role" = "linear-report" ] && pipeline_linear_posted="$REPORT_LINEAR_POSTED"
 
     # SOT-1555 pin — same as the serial task-check gate.
     if [ "$role" = "task-check" ] && printf '%s' "$na" | grep -q 'READY_FOR_REVIEW'; then
@@ -383,7 +452,8 @@ run_graph_role_loop() {
     # FAIL-wins / PASS-unless-human-stop / fallback-to-Next-Action precedence as the serial gate.
     local acc="NONE"
     if [ "$role" = "acceptance" ]; then
-      acc="$(grep -ioE '^##[[:space:]]*Acceptance:[[:space:]]*(PASS|FAIL)' "$report" 2>/dev/null | grep -ioE '(PASS|FAIL)' | tail -1 | tr '[:lower:]' '[:upper:]' || true)"
+      acc="$REPORT_ACCEPTANCE"
+      pipeline_acceptance="$REPORT_ACCEPTANCE"
       [ -z "$acc" ] && acc="NONE"
       plog "role=acceptance machine_verdict='$([ "$acc" = "NONE" ] && echo '<none>' || echo "$acc")' next_action='${na:-<none>}'"
     fi
@@ -440,13 +510,8 @@ run_graph_role_loop() {
     esac
   done
 
-  # PR detection (SOT-1550).
-  if [ -n "$GITHUB_REPORT" ] && [ -f "$GITHUB_REPORT" ]; then
-    if grep -qiE 'pull/[0-9]+|PR[ :*]*#[0-9]+' "$GITHUB_REPORT" 2>/dev/null; then
-      PIPELINE_NO_PR=0
-    else
-      PIPELINE_NO_PR=1
-    fi
+  if [ -n "$GITHUB_REPORT" ]; then
+    finalizeRun "graph" 0 "$GITHUB_REPORT" "$pipeline_acceptance" "$pipeline_linear_posted" || return $?
   fi
 
   plog "PIPELINE_DONE: all graph roles completed for $issue (no_pr=$PIPELINE_NO_PR)"
@@ -522,43 +587,7 @@ run_role_pipeline() {
     sdone="$(grep -oE 'WORKER_DISPATCH_DONE role=[^ ]+ worker=[^ ]+ report=[^ ]+' "$scap" 2>/dev/null | tail -1 || true)"
     sreport="$(printf '%s' "$sdone" | sed 's/.*report=//' || true)"
     rm -f "$scap"
-    if [ "$src" -ne 0 ] || [ -z "$sreport" ] || [ ! -f "$sreport" ]; then
-      # Without a report the solo worker did not finish the lifecycle, regardless of its exit code.
-      # Treat this as retryable infrastructure/worker interruption (including SIGPIPE rc=141), not as
-      # a human-review stop; otherwise ensure-issue-reviewed strands unfinished work in In Review.
-      plog "PIPELINE_RETRY: solo dispatch rc=$src (no report) → leave issue active and retry"
-      return "$WORKER_UNAVAILABLE"
-    fi
-    # Solo verdict: acceptance FAIL or a human-stop Next Action → needs attention; else complete.
-    local sacc sna slinear
-    sacc="$(grep -ioE '^##[[:space:]]*Acceptance:[[:space:]]*(PASS|FAIL)' "$sreport" 2>/dev/null | grep -ioE '(PASS|FAIL)' | tail -1 | tr '[:lower:]' '[:upper:]' || true)"
-    slinear="$(grep -ioE '^##[[:space:]]*Linear[[:space:]]+Report:[[:space:]]*POSTED' "$sreport" 2>/dev/null | tail -1 || true)"
-    sna="$(awk '/[Nn]ext[[:space:]]*[Aa]ction/{cap=1; buf=""} cap{buf=buf"\n"$0} END{print buf}' "$sreport" 2>/dev/null | grep -oiE 'READY_FOR_REVIEW|NEEDS_DEBUG|NEEDS_USER_INPUT|BLOCKED' | head -n1 | tr '[:lower:]' '[:upper:]' || true)"
-    plog "SOLO result: acceptance='${sacc:-<none>}' linear_report='${slinear:-<none>}' next_action='${sna:-<none>}' report=$sreport"
-    if [ "$sacc" = "FAIL" ]; then
-      plog "PIPELINE_STOP: solo acceptance FAIL → needs attention"; return "$COMPLETION_UNVERIFIED"
-    fi
-    case "$sna" in
-      *READY_FOR_REVIEW*) ;;  # complete
-      *) plog "PIPELINE_STOP: solo '${sna:-<none>}' → stop (needs human)"; return "$COMPLETION_UNVERIFIED" ;;
-    esac
-    # PR detection (reuse the github-role heuristic): no PR reference in the solo report → no-PR terminal
-    # (PLAN/REVIEW/decomposition/no-op) → In Review; a PR reference → normal COMPLETED. A PR-producing
-    # lifecycle must also carry explicit acceptance evidence; READY_FOR_REVIEW or a PR URL alone must
-    # never turn an unverified implementation into a completed run (SOT-2127).
-    if grep -qiE 'pull/[0-9]+|PR[ :*]*#[0-9]+' "$sreport" 2>/dev/null; then
-      if [ "$sacc" != "PASS" ]; then
-        plog "PIPELINE_STOP: solo PR result lacks explicit Acceptance PASS → unverified"
-        return "$COMPLETION_UNVERIFIED"
-      fi
-      if [ -z "$slinear" ]; then
-        plog "PIPELINE_STOP: solo PR result lacks Linear Report POSTED → completion was not reported"
-        return "$COMPLETION_UNVERIFIED"
-      fi
-      PIPELINE_NO_PR=0
-    else
-      PIPELINE_NO_PR=1
-    fi
+    finalizeRun "solo" "$src" "$sreport" || return $?
     plog "PIPELINE_DONE: solo lifecycle completed for $issue (no_pr=$PIPELINE_NO_PR)"
     return 0
   fi

@@ -6,19 +6,14 @@ describe('run_auto incomplete-dispatch retry policy (SOT-1928)', () => {
 
   test('solo dispatch without a report is retryable for every exit code', () => {
     expect(script).toMatch(
-      /if \[ "\$src" -ne 0 \] \|\| \[ -z "\$sreport" \] \|\| \[ ! -f "\$sreport" \]; then[\s\S]*?PIPELINE_RETRY: solo dispatch rc=\$src \(no report\)[\s\S]*?return "\$WORKER_UNAVAILABLE"/,
+      /finalizeRun\(\)[\s\S]*?if \[ "\$rc" -ne 0 \] \|\| \[ -z "\$report" \] \|\| \[ ! -f "\$report" \]; then[\s\S]*?return "\$WORKER_UNAVAILABLE"/,
     );
+    expect(script).toContain('finalizeRun "solo" "$src" "$sreport" || return $?');
   });
 
   test('role dispatch without a report never becomes a human-review stop', () => {
-    const incompleteRoleBlocks = script.match(
-      /if \[ "\$rc" -ne 0 \] \|\| \[ -z "\$report" \] \|\| \[ ! -f "\$report" \]; then[\s\S]*?return "\$WORKER_UNAVAILABLE"/g,
-    );
-
-    expect(incompleteRoleBlocks).toHaveLength(1);
-    for (const block of incompleteRoleBlocks ?? []) {
-      expect(block).not.toContain('return "$COMPLETION_UNVERIFIED"');
-    }
+    expect(script).toContain('finalizeRun "role" "$NODE_RC" "$NODE_REPORT" || return $?');
+    expect(script.match(/PIPELINE_RETRY: .*dispatch rc=\$rc \(no report\)/g)).toHaveLength(1);
   });
 
   test('the graph is the only multi-role execution path', () => {
@@ -48,13 +43,21 @@ describe('run_auto incomplete-dispatch retry policy (SOT-1928)', () => {
 
   test('solo PR results cannot complete without explicit acceptance PASS', () => {
     expect(script).toMatch(
-      /grep -qiE 'pull\/\[0-9\]\+\|PR\[ :\*\]\*#\[0-9\]\+' "\$sreport"[\s\S]*?if \[ "\$sacc" != "PASS" \]; then[\s\S]*?return "\$COMPLETION_UNVERIFIED"/,
+      /if \[ "\$REPORT_HAS_PR" -eq 1 \]; then[\s\S]*?\[ "\$REPORT_ACCEPTANCE" = "PASS" \][\s\S]*?return "\$COMPLETION_UNVERIFIED"/,
     );
   });
 
   test('solo PR results cannot complete without a posted Linear report', () => {
     expect(script).toMatch(
-      /slin(?:ear)?=.*Linear\[\[:space:\]\]\+Report:[\s\S]*?if \[ -z "\$slinear" \]; then[\s\S]*?lacks Linear Report POSTED[\s\S]*?return "\$COMPLETION_UNVERIFIED"/,
+      /\[ -n "\$REPORT_LINEAR_POSTED" \][\s\S]*?lacks Linear Report POSTED[\s\S]*?return "\$COMPLETION_UNVERIFIED"/,
     );
+  });
+
+  test('node execution, report parsing, and finalization are each centralized', () => {
+    expect(script.match(/^executeNode\(\)/gm)).toHaveLength(1);
+    expect(script.match(/^parsePipelineReport\(\)/gm)).toHaveLength(1);
+    expect(script.match(/^finalizeRun\(\)/gm)).toHaveLength(1);
+    expect(script).toContain('[discussion]=execute_discussion_node');
+    expect(script).not.toMatch(/if \[ "\$role" = "discussion" \]/);
   });
 });
