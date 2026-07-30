@@ -8,6 +8,8 @@ import {
   happyPathRoles,
   loadPipelineGraph,
   normalizeNextAction,
+  openPipelineGraphCheckpoint,
+  pipelineGraphId,
   readPipelineGraphState,
   resolveBound,
   stepPipelineGraph,
@@ -366,6 +368,10 @@ describe('state file round-trip', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipeline-graph-'));
     const file = path.join(dir, 'nested', 'state.json');
     const state: PipelineGraphState = {
+      schemaVersion: 1,
+      runId: 'run-1',
+      issueId: 'SOT-2199',
+      graphId: 'graph-1',
       current: 'verification',
       visits: { 'task-check': 1, implementation: 2, verification: 2 },
       budgets: { debug: 1 },
@@ -373,6 +379,30 @@ describe('state file round-trip', () => {
     };
     writePipelineGraphState(file, state);
     expect(readPipelineGraphState(file)).toEqual(state);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('resume validates schema and run identity before accepting a checkpoint', () => {
+    const graph = loadDefaultGraph();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipeline-graph-resume-'));
+    const file = path.join(dir, 'state.json');
+    const identity = { runId: 'run-1', issueId: 'SOT-2199', graphId: pipelineGraphId(graph) };
+
+    const created = openPipelineGraphCheckpoint(file, graph, identity, false);
+    created.state.current = 'verification';
+    writePipelineGraphState(file, created.state);
+    expect(openPipelineGraphCheckpoint(file, graph, identity, true)).toMatchObject({
+      resumed: true,
+      state: { current: 'verification' },
+    });
+    expect(() =>
+      openPipelineGraphCheckpoint(file, graph, { ...identity, issueId: 'SOT-OTHER' }, true),
+    ).toThrow('issueId mismatch');
+
+    fs.writeFileSync(file, JSON.stringify({ ...created.state, schemaVersion: 0 }), 'utf8');
+    expect(() => openPipelineGraphCheckpoint(file, graph, identity, true)).toThrow(
+      'incompatible pipeline graph checkpoint schema',
+    );
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

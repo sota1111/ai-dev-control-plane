@@ -48,6 +48,8 @@ import {
   stepPipelineGraph,
   readPipelineGraphState,
   writePipelineGraphState,
+  openPipelineGraphCheckpoint,
+  pipelineGraphId,
 } from './lib/pipelineGraph.js';
 import {
   explainExecutionPlan,
@@ -711,12 +713,10 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       //   pipeline-graph validate [--graph <path>]
       //     → exit 0 + `PIPELINE_GRAPH_OK …` when the graph loads and validates, else errors on
       //       stderr + exit 1 (run_auto.sh fail-opens to the serial loop on non-zero).
-      //   pipeline-graph begin --state <file> [--graph <path>]
-      //     → initialize run state at the entry node; prints `NODE=<id> ROLE=<role>`.
+      //   pipeline-graph begin --state <file> --run-id <id> --issue-id <id> [--resume]
+      //     → create or resume an identity-checked checkpoint; prints structured JSON.
       //   pipeline-graph next --state <file> --next-action <TOKEN|NONE> [--acceptance PASS|FAIL|NONE]
-      //     → resolve one transition from the persisted state; prints `NODE=<id> ROLE=<role>
-      //       DEBUG_SPENT=<n> EVENT=<event>` or `TERMINAL=<done|done_no_pr|stop> REASON=<…>`.
-      // The state file keeps the engine stateless per invocation (bash loop ↔ CLI round-trips).
+      //     → resolve one transition and prints a structured JSON result.
       const sub = args[0];
       const flags: Record<string, string> = {};
       for (let i = 1; i < args.length; i += 1) {
@@ -738,26 +738,46 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       }
       const stateFile = flags.state;
       if ((sub !== 'begin' && sub !== 'next') || !stateFile) {
-        process.stderr.write('Usage: runner-cli.js pipeline-graph validate|begin|next [--graph <path>] --state <file> [--next-action <TOKEN|NONE>] [--acceptance PASS|FAIL|NONE]\n');
+        process.stderr.write('Usage: runner-cli.js pipeline-graph validate|begin|next [--graph <path>] --state <file> [--run-id <id>] [--issue-id <id>] [--resume true] [--next-action <TOKEN|NONE>] [--acceptance PASS|FAIL|NONE]\n');
         process.exit(1);
       }
       if (sub === 'begin') {
-        const state = beginPipelineGraph(graph);
-        writePipelineGraphState(stateFile, state);
-        process.stdout.write(`NODE=${state.current} ROLE=${graph.nodes[state.current].role}\n`);
+        const runId = flags['run-id'];
+        const issueId = flags['issue-id'];
+        if (!runId || !issueId) {
+          process.stderr.write('pipeline-graph begin requires --run-id and --issue-id\n');
+          process.exit(1);
+        }
+        const opened = openPipelineGraphCheckpoint(
+          stateFile,
+          graph,
+          { runId, issueId, graphId: pipelineGraphId(graph) },
+          flags.resume === 'true',
+        );
+        process.stdout.write(`${JSON.stringify({
+          kind: 'node',
+          node: opened.state.current,
+          role: graph.nodes[opened.state.current].role,
+          resumed: opened.resumed,
+          debugSpent: opened.state.budgets.debug ?? 0,
+        })}\n`);
         process.exit(0);
       }
       // sub === 'next'
-      const state = readPipelineGraphState(stateFile);
+      const state = readPipelineGraphState(stateFile, {
+        runId: flags['run-id'] || '',
+        issueId: flags['issue-id'] || '',
+        graphId: pipelineGraphId(graph),
+      });
       const nextAction = flags['next-action'] === 'NONE' ? '' : flags['next-action'];
       const acceptance = flags.acceptance === 'NONE' ? '' : flags.acceptance;
       const res = stepPipelineGraph(graph, state, nextAction, acceptance);
       writePipelineGraphState(stateFile, state);
       if (res.warning) process.stderr.write(`pipeline-graph: WARN ${res.warning}\n`);
       if (res.kind === 'terminal') {
-        process.stdout.write(`TERMINAL=${res.terminal} EVENT=${res.event} REASON=${res.reason}\n`);
+        process.stdout.write(`${JSON.stringify({ ...res, debugSpent: state.budgets.debug ?? 0 })}\n`);
       } else {
-        process.stdout.write(`NODE=${res.node} ROLE=${res.role} DEBUG_SPENT=${state.budgets.debug ?? 0} EVENT=${res.event}\n`);
+        process.stdout.write(`${JSON.stringify({ ...res, debugSpent: state.budgets.debug ?? 0 })}\n`);
       }
       process.exit(0);
       break;

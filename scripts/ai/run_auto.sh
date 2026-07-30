@@ -274,13 +274,14 @@ _cb_fingerprint() {
 # debug_cycles counter), and classifies terminals (done / done_no_pr / stop). The default graph is a
 # faithful copy of the serial pipeline, so both paths behave identically.
 run_graph_role_loop() {
-  local issue="$1" state_file="$2" first_line="$3"
+  local issue="$1" state_file="$2" first_result="$3" run_id="$4"
   local target_repo="${WEBHOOK_TARGET_REPO:-${TARGET_REPO:-}}"
-  local node role
-  node="$(printf '%s\n' "$first_line" | sed -n 's/.*NODE=\([^ ]*\).*/\1/p')"
-  role="$(printf '%s\n' "$first_line" | sed -n 's/.*ROLE=\([^ ]*\).*/\1/p')"
+  local node role debug_spent
+  IFS=$'\t' read -r node role debug_spent < <(
+    node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write([r.node||"",r.role||"",r.debugSpent??0].join("\t"))' "$first_result"
+  )
   if [ -z "$node" ] || [ -z "$role" ]; then
-    plog "PIPELINE_STOP: unparseable graph entry '$first_line' → needs attention"
+    plog "PIPELINE_STOP: invalid structured graph entry '$first_result' → needs attention"
     return "$COMPLETION_UNVERIFIED"
   fi
   plog "PIPELINE_GRAPH: graph-driven role loop active (entry=$node state=$state_file)"
@@ -289,7 +290,7 @@ run_graph_role_loop() {
   GITHUB_REPORT=""
   unset PIPELINE_PINNED_WORKER
   local pipeline_start_ms; pipeline_start_ms="$(date +%s%3N 2>/dev/null || echo '')"
-  local cb_no_progress=0 cb_last_fp="" debug_spent=0
+  local cb_no_progress=0 cb_last_fp=""
 
   # Delegation preflight (SOT-1574) — same best-effort block as the serial loop.
   local _delegation_preflight_enabled=1
@@ -397,7 +398,7 @@ run_graph_role_loop() {
 
     local step step_rc
     set +e
-    step="$(run_cli pipeline-graph next --state "$state_file" --next-action "${na:-NONE}" --acceptance "$acc" 2>>"$LOG_FILE")"
+    step="$(run_cli pipeline-graph next --state "$state_file" --run-id "$run_id" --issue-id "$issue" --next-action "${na:-NONE}" --acceptance "$acc" 2>>"$LOG_FILE")"
     step_rc=$?
     set -e
     if [ "$step_rc" -ne 0 ] || [ -z "$step" ]; then
@@ -414,31 +415,34 @@ run_graph_role_loop() {
         grep -E '^- Rounds completed:|^- Outcome:' "docs/ai/pipeline/discussion_$issue.md" || true
       fi
     } > "docs/ai/pipeline/graph_run_summary.$issue.md"
-    case "$step" in
-      TERMINAL=done_no_pr*)
+    local step_kind step_target step_role next_spent
+    IFS=$'\t' read -r step_kind step_target step_role next_spent < <(
+      node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write([r.kind||"",r.kind==="terminal"?(r.terminal||""):(r.node||""),r.role||"",r.debugSpent??0].join("\t"))' "$step"
+    )
+    case "$step_kind:$step_target" in
+      terminal:done_no_pr)
         plog "PIPELINE_DONE: graph terminal done_no_pr for $issue → success no-op"
         PIPELINE_NO_PR=1
         return 0
         ;;
-      TERMINAL=done*)
+      terminal:done)
         break
         ;;
-      TERMINAL=stop*)
+      terminal:stop)
         plog "PIPELINE_STOP: graph terminal stop at role=$role → needs attention"
         return "$COMPLETION_UNVERIFIED"
         ;;
-      NODE=*)
-        local next_spent; next_spent="$(printf '%s\n' "$step" | sed -n 's/.*DEBUG_SPENT=\([0-9]*\).*/\1/p')"
+      node:*)
         [ -n "$next_spent" ] && debug_spent="$next_spent"
-        node="$(printf '%s\n' "$step" | sed -n 's/.*NODE=\([^ ]*\).*/\1/p')"
-        role="$(printf '%s\n' "$step" | sed -n 's/.*ROLE=\([^ ]*\).*/\1/p')"
+        node="$step_target"
+        role="$step_role"
         if [ -z "$node" ] || [ -z "$role" ]; then
-          plog "PIPELINE_STOP: unparseable graph step '$step' → needs attention"
+          plog "PIPELINE_STOP: invalid structured graph step '$step' → needs attention"
           return "$COMPLETION_UNVERIFIED"
         fi
         ;;
       *)
-        plog "PIPELINE_STOP: unparseable graph step '$step' → needs attention"
+        plog "PIPELINE_STOP: invalid structured graph step '$step' → needs attention"
         return "$COMPLETION_UNVERIFIED"
         ;;
     esac
@@ -576,12 +580,20 @@ run_role_pipeline() {
   if [ "$execution_mode" = "graph" ]; then
     local graph_state="docs/ai/pipeline/graph_state.$issue.json"
     local graph_first="" graph_rc=0
+    local graph_run_id="${RUN_ID:-${PIPELINE_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}}"
+    local graph_resume=false
+    [ -n "${RESUME_ISSUE:-}" ] && graph_resume=true
+    if [ "$graph_resume" = true ] && [ -s "$graph_state" ]; then
+      local checkpoint_run_id
+      checkpoint_run_id="$(node -e 'const s=require(process.argv[1]); process.stdout.write(typeof s.runId==="string"?s.runId:"")' "$graph_state" 2>/dev/null || true)"
+      [ -n "$checkpoint_run_id" ] && graph_run_id="$checkpoint_run_id"
+    fi
     set +e
-    graph_first="$(run_cli pipeline-graph begin --state "$graph_state" 2>>"$LOG_FILE")"
+    graph_first="$(run_cli pipeline-graph begin --state "$graph_state" --run-id "$graph_run_id" --issue-id "$issue" --resume "$graph_resume" 2>>"$LOG_FILE")"
     graph_rc=$?
     set -e
     if [ "$graph_rc" -eq 0 ] && [ -n "$graph_first" ]; then
-      run_graph_role_loop "$issue" "$graph_state" "$graph_first"
+      run_graph_role_loop "$issue" "$graph_state" "$graph_first" "$graph_run_id"
       return $?
     fi
     plog "PIPELINE_GRAPH: graph unavailable/invalid (rc=$graph_rc) → fail-open to the serial role loop"

@@ -30,6 +30,7 @@
 // a missing/invalid graph makes the CLI exit non-zero and the serial pipeline runs unchanged.
 
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
@@ -103,12 +104,24 @@ export interface PipelineGraph {
 }
 
 export interface PipelineGraphState {
+  schemaVersion: typeof PIPELINE_GRAPH_STATE_SCHEMA_VERSION;
+  runId: string;
+  issueId: string;
+  graphId: string;
   current: string;
   /** Times each node has been entered (entry node starts at 1). */
   visits: Record<string, number>;
   /** Budget name → traversals spent. */
   budgets: Record<string, number>;
   history: Array<{ from: string; event: string; to: string }>;
+}
+
+export const PIPELINE_GRAPH_STATE_SCHEMA_VERSION = 1 as const;
+
+export interface PipelineGraphCheckpointIdentity {
+  runId: string;
+  issueId: string;
+  graphId: string;
 }
 
 export type GraphStepResult =
@@ -339,8 +352,26 @@ export function computeGraphEvent(
 }
 
 /** Initialize run state at the graph entry (entry counts as visited once). */
-export function beginPipelineGraph(graph: PipelineGraph): PipelineGraphState {
-  return { current: graph.entry, visits: { [graph.entry]: 1 }, budgets: {}, history: [] };
+export function pipelineGraphId(graph: PipelineGraph): string {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(graph)).digest('hex')}`;
+}
+
+export function beginPipelineGraph(
+  graph: PipelineGraph,
+  identity: PipelineGraphCheckpointIdentity = {
+    runId: 'legacy',
+    issueId: 'legacy',
+    graphId: pipelineGraphId(graph),
+  },
+): PipelineGraphState {
+  return {
+    schemaVersion: PIPELINE_GRAPH_STATE_SCHEMA_VERSION,
+    ...identity,
+    current: graph.entry,
+    visits: { [graph.entry]: 1 },
+    budgets: {},
+    history: [],
+  };
 }
 
 /**
@@ -400,12 +431,34 @@ export function stepPipelineGraph(
 }
 
 /** Read a state file written by writePipelineGraphState. Throws on missing/corrupt state. */
-export function readPipelineGraphState(filePath: string): PipelineGraphState {
+export function readPipelineGraphState(
+  filePath: string,
+  expected?: PipelineGraphCheckpointIdentity,
+): PipelineGraphState {
   const raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as PipelineGraphState;
   if (typeof raw !== 'object' || raw === null || typeof raw.current !== 'string') {
     throw new Error(`corrupt pipeline graph state in ${filePath}`);
   }
+  if (raw.schemaVersion !== PIPELINE_GRAPH_STATE_SCHEMA_VERSION) {
+    throw new Error(
+      `incompatible pipeline graph checkpoint schema in ${filePath}: expected ${PIPELINE_GRAPH_STATE_SCHEMA_VERSION}, got ${String(raw.schemaVersion)}`,
+    );
+  }
+  for (const key of ['runId', 'issueId', 'graphId'] as const) {
+    if (typeof raw[key] !== 'string' || raw[key].length === 0) {
+      throw new Error(`corrupt pipeline graph checkpoint in ${filePath}: missing ${key}`);
+    }
+    if (expected && raw[key] !== expected[key]) {
+      throw new Error(
+        `pipeline graph checkpoint ${key} mismatch in ${filePath}: expected ${expected[key]}, got ${raw[key]}`,
+      );
+    }
+  }
   return {
+    schemaVersion: raw.schemaVersion,
+    runId: raw.runId,
+    issueId: raw.issueId,
+    graphId: raw.graphId,
     current: raw.current,
     visits: raw.visits ?? {},
     budgets: raw.budgets ?? {},
@@ -416,9 +469,43 @@ export function readPipelineGraphState(filePath: string): PipelineGraphState {
 /** Atomically persist run state (tmp + rename) so a killed run never leaves a torn file. */
 export function writePipelineGraphState(filePath: string, state: PipelineGraphState): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmp = `${filePath}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-  fs.renameSync(tmp, filePath);
+  const tmp = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    const fd = fs.openSync(tmp, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmp, filePath);
+    const dirFd = fs.openSync(path.dirname(filePath), 'r');
+    try {
+      fs.fsyncSync(dirFd);
+    } finally {
+      fs.closeSync(dirFd);
+    }
+  } finally {
+    if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+  }
+}
+
+/** Resume an identity-compatible checkpoint, or create the run's first checkpoint. */
+export function openPipelineGraphCheckpoint(
+  filePath: string,
+  graph: PipelineGraph,
+  identity: PipelineGraphCheckpointIdentity,
+  resume: boolean,
+): { state: PipelineGraphState; resumed: boolean } {
+  if (resume) {
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`pipeline graph resume checkpoint not found: ${filePath}`);
+    }
+    return { state: readPipelineGraphState(filePath, identity), resumed: true };
+  }
+  const state = beginPipelineGraph(graph, identity);
+  writePipelineGraphState(filePath, state);
+  return { state, resumed: false };
 }
 
 /** Walk the all-READY (and ACCEPTANCE_PASS) happy path and return the visited role order. */
