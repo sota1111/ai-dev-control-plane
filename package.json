@@ -56,6 +56,10 @@
       "ts",
       "js",
       "json"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/.worktrees/"
     ]
   }
 }

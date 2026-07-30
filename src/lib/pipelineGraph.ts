@@ -14,7 +14,7 @@
 //     machine-verdict events (ACCEPTANCE_PASS / ACCEPTANCE_FAIL, for nodes with
 //     `verdict_source: "acceptance"`), NONE (no token parsed), and the mandatory `*` default.
 //   - CYCLES are bounded two ways: a shared BUDGET consumed by back-edges (`counts: "debug"` —
-//     the faithful mapping of the serial loop's single `debug_cycles` counter, max =
+//     the shared debug retry budget, max =
 //     PIPELINE_MAX_DEBUG_CYCLES, default 2) and per-node `max_visits` as a backstop. Exceeding
 //     either maps to the `__stop__` terminal (PIPELINE_STOP / needs attention).
 //   - TERMINALS: `__done__` (all roles completed → COMPLETED / PR detection),
@@ -26,8 +26,7 @@
 // unless Next Action is a human-stop (NEEDS_USER_INPUT / BLOCKED); a missing verdict falls back to
 // the Next Action token (with a warning, like PIPELINE_WARN in the serial path).
 //
-// Fail-open contract: run_auto.sh only enters the graph path when `pipeline-graph begin` succeeds;
-// a missing/invalid graph makes the CLI exit non-zero and the serial pipeline runs unchanged.
+// Invalid graph contract: the CLI exits non-zero and run_auto.sh stops safely.
 
 import fs from 'node:fs';
 import crypto from 'node:crypto';

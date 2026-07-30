@@ -1,4 +1,4 @@
-export type ExecutionMode = 'solo' | 'graph' | 'serial';
+export type ExecutionMode = 'solo' | 'graph';
 export type ExecutionPlanSource = 'issue' | 'environment' | 'worker-config' | 'default';
 
 export interface ExecutionPlanInput {
@@ -61,23 +61,13 @@ export function resolveExecutionPlan(input: ExecutionPlanInput): ExecutionPlan {
     };
   }
 
-  if (input.pipelineGraphEnabled) {
-    return {
-      mode: 'graph',
-      graphPath: input.configuredGraphPath || input.defaultGraphPath,
-      source: 'environment',
-      reason: input.configuredGraphPath
-        ? 'PIPELINE_GRAPH enabled the configured graph file'
-        : 'PIPELINE_GRAPH enabled the default graph',
-      overrides,
-      warnings,
-    };
-  }
-
   return {
-    mode: 'serial',
-    source: 'default',
-    reason: 'no explicit graph or solo mode was selected',
+    mode: 'graph',
+    graphPath: input.configuredGraphPath || input.defaultGraphPath,
+    source: input.configuredGraphPath || input.pipelineGraphEnabled ? 'environment' : 'default',
+    reason: input.configuredGraphPath
+      ? 'PIPELINE_GRAPH_FILE selected the configured graph'
+      : 'the default pipeline graph is the unified execution model',
     overrides,
     warnings,
   };

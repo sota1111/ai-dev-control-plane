@@ -15,11 +15,29 @@ describe('run_auto incomplete-dispatch retry policy (SOT-1928)', () => {
       /if \[ "\$rc" -ne 0 \] \|\| \[ -z "\$report" \] \|\| \[ ! -f "\$report" \]; then[\s\S]*?return "\$WORKER_UNAVAILABLE"/g,
     );
 
-    // The graph and serial role pipelines must agree.
-    expect(incompleteRoleBlocks).toHaveLength(2);
+    expect(incompleteRoleBlocks).toHaveLength(1);
     for (const block of incompleteRoleBlocks ?? []) {
       expect(block).not.toContain('return "$COMPLETION_UNVERIFIED"');
     }
+  });
+
+  test('the graph is the only multi-role execution path', () => {
+    expect(script).not.toContain('local roles=(task-check implementation verification acceptance github linear-report)');
+    expect(script).not.toContain('PIPELINE_MODE');
+    expect(script).not.toContain('legacy single Claude-orchestrator');
+    expect(script).toContain('run_graph_role_loop "$issue" "$graph_state" "$graph_first" "$graph_run_id"');
+  });
+
+  test('invalid graphs stop instead of falling back to a compatibility loop', () => {
+    expect(script).toMatch(
+      /PIPELINE_STOP: graph unavailable\/invalid[\s\S]*?return "\$COMPLETION_UNVERIFIED"/,
+    );
+    expect(script).not.toContain('fail-open to the serial');
+  });
+
+  test('run_auto requires an issue and has no orchestrator tail', () => {
+    expect(script).toContain('run_auto.sh requires --resume <issue> or WEBHOOK_ISSUE_ID');
+    expect(script).not.toContain('claude \\\n  --model');
   });
 
   test('exit 71 bypasses the In Review loop-breaker', () => {

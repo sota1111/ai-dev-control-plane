@@ -138,6 +138,6 @@ describe('ask-question-gate: non-blocking clarification', () => {
     expect(isAutonomousEnv({})).toBe(false);
     expect(isAutonomousEnv({ WORKER_ROLE: 'implementation' })).toBe(true);
     expect(isAutonomousEnv({ RUN_WORKER_DISPATCH: '1' })).toBe(true);
-    expect(isAutonomousEnv({ PIPELINE_MODE: '0' })).toBe(false);
+    expect(isAutonomousEnv({ WEBHOOK_ISSUE_ID: 'SOT-2201' })).toBe(true);
   });
 });

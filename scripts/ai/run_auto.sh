@@ -194,8 +194,7 @@ WORKER_UNAVAILABLE=71
 # 回す。これにより「AI が AI を呼ぶ」構造を排し、工程順序はスクリプトが確定的に駆動する。
 #
 # 適用条件: 対象 issue が確定していること（WEBHOOK_ISSUE_ID / --resume）。runner.ts は常に
-# WEBHOOK_ISSUE_ID を注入するため、autonomous 経路は必ずこのパイプラインを通る。issue 未指定の手動起動
-# （キュー走査）や `PIPELINE_MODE=0` のときは、後方互換のためレガシーの単一オーケストレータ起動へ退避する。
+# WEBHOOK_ISSUE_ID を注入するため、autonomous 経路は必ずこのパイプラインを通る。
 plog() { echo "[pipeline] $*" | tee -a "$LOG_FILE"; }
 
 # Worker output filter for the pipeline (SOT-1457 の tag 付与を案B 用に復活): strip ANSI color escapes
@@ -265,14 +264,8 @@ _cb_fingerprint() {
     | sha1sum 2>/dev/null | awk '{print $1}'
 }
 
-# SOT-1754: graph-driven role loop — the opt-in (PIPELINE_GRAPH=1) alternative to the hard-coded
-# serial loop in run_role_pipeline. Node execution is IDENTICAL (same dispatcher run_worker.sh, same
-# tag filter / report parsing / circuit breaker / SOT-1555 pin handling); only "which role runs next"
-# is decided by the declarative graph (config/pipeline_graph.json) via `runner-cli pipeline-graph
-# next`, which maps `## Next Action` / `## Acceptance` verdicts to edges, bounds NEEDS_DEBUG
-# back-edges with the shared debug budget (= PIPELINE_MAX_DEBUG_CYCLES, exactly the serial
-# debug_cycles counter), and classifies terminals (done / done_no_pr / stop). The default graph is a
-# faithful copy of the serial pipeline, so both paths behave identically.
+# Unified role loop. The declarative graph is the only multi-role execution model; solo mode remains
+# a single-worker lifecycle. The graph bounds debug back-edges and classifies all terminal outcomes.
 run_graph_role_loop() {
   local issue="$1" state_file="$2" first_result="$3" run_id="$4"
   local target_repo="${WEBHOOK_TARGET_REPO:-${TARGET_REPO:-}}"
@@ -292,7 +285,7 @@ run_graph_role_loop() {
   local pipeline_start_ms; pipeline_start_ms="$(date +%s%3N 2>/dev/null || echo '')"
   local cb_no_progress=0 cb_last_fp=""
 
-  # Delegation preflight (SOT-1574) — same best-effort block as the serial loop.
+  # Delegation preflight (SOT-1574).
   local _delegation_preflight_enabled=1
   case "$(printf '%s' "${DELEGATION_PREFLIGHT:-1}" | tr '[:upper:]' '[:lower:]')" in
     0|false|no|off) _delegation_preflight_enabled=0 ;;
@@ -315,8 +308,7 @@ run_graph_role_loop() {
       return "$COMPLETION_UNVERIFIED"
     fi
 
-    # Circuit breaker (SOT-1560) — identical to the serial loop; the graph's debug-budget spend
-    # stands in for the serial debug_cycles counter.
+    # Circuit breaker (SOT-1560); the graph's debug-budget spend is the failure counter.
     if [ "$role" = "implementation" ]; then
       local cb_fp; cb_fp="$(_cb_fingerprint "${target_repo:-.}")"
       if [ -n "$cb_last_fp" ]; then
@@ -398,7 +390,7 @@ run_graph_role_loop() {
 
     local step step_rc
     set +e
-    step="$(run_cli pipeline-graph next --state "$state_file" --run-id "$run_id" --issue-id "$issue" --next-action "${na:-NONE}" --acceptance "$acc" 2>>"$LOG_FILE")"
+    step="$(run_cli pipeline-graph advance --state "$state_file" --run-id "$run_id" --issue-id "$issue" --next-action "${na:-NONE}" --acceptance "$acc" 2>>"$LOG_FILE")"
     step_rc=$?
     set -e
     if [ "$step_rc" -ne 0 ] || [ -z "$step" ]; then
@@ -448,7 +440,7 @@ run_graph_role_loop() {
     esac
   done
 
-  # PR detection — same as the serial loop's end (SOT-1550).
+  # PR detection (SOT-1550).
   if [ -n "$GITHUB_REPORT" ] && [ -f "$GITHUB_REPORT" ]; then
     if grep -qiE 'pull/[0-9]+|PR[ :*]*#[0-9]+' "$GITHUB_REPORT" 2>/dev/null; then
       PIPELINE_NO_PR=0
@@ -571,12 +563,8 @@ run_role_pipeline() {
     return 0
   fi
 
-  # SOT-1754: opt-in graph-driven role loop. When PIPELINE_GRAPH is truthy AND the declarative graph
-  # (config/pipeline_graph.json) loads/validates, the role sequence is driven by the graph engine
-  # (runner-cli pipeline-graph → run_graph_role_loop above) instead of the hard-coded serial loop
-  # below. The default graph is a faithful copy of the serial pipeline, so behavior is identical.
-  # Fail-open: PIPELINE_GRAPH unset (default) skips this entirely (fully backward compatible); a
-  # missing/invalid graph logs and falls through to the serial loop instead of exiting.
+  # Every non-solo run uses the graph engine. Invalid graph configuration is a safe stop: silently
+  # switching to a second implementation would make runtime behavior depend on a compatibility path.
   if [ "$execution_mode" = "graph" ]; then
     local graph_state="docs/ai/pipeline/graph_state.$issue.json"
     local graph_first="" graph_rc=0
@@ -589,257 +577,24 @@ run_role_pipeline() {
       [ -n "$checkpoint_run_id" ] && graph_run_id="$checkpoint_run_id"
     fi
     set +e
-    graph_first="$(run_cli pipeline-graph begin --state "$graph_state" --run-id "$graph_run_id" --issue-id "$issue" --resume "$graph_resume" 2>>"$LOG_FILE")"
+    graph_first="$(run_cli pipeline-graph open --state "$graph_state" --run-id "$graph_run_id" --issue-id "$issue" --resume "$graph_resume" 2>>"$LOG_FILE")"
     graph_rc=$?
     set -e
     if [ "$graph_rc" -eq 0 ] && [ -n "$graph_first" ]; then
       run_graph_role_loop "$issue" "$graph_state" "$graph_first" "$graph_run_id"
       return $?
     fi
-    plog "PIPELINE_GRAPH: graph unavailable/invalid (rc=$graph_rc) → fail-open to the serial role loop"
+    plog "PIPELINE_STOP: graph unavailable/invalid (rc=$graph_rc) → needs attention"
+    return "$COMPLETION_UNVERIFIED"
   fi
 
-  # SOT-1553: task-check now folds in the decomposition work (check + 分解判断 + child-issue registration)
-  # so it runs as a single worker dispatch — decomposition is no longer a separate step with a script in
-  # between. The `decomposition` role remains a valid role for manual/override dispatch, just not part of
-  # the default sequential pipeline.
-  local roles=(task-check implementation verification acceptance github linear-report)
-  local n=${#roles[@]}
-  local impl_index=1 verify_index=2
-  local i=0 debug_cycles=0
-  local MAX_DEBUG_CYCLES="${PIPELINE_MAX_DEBUG_CYCLES:-2}"
+  plog "PIPELINE_STOP: unsupported execution mode '$execution_mode'"
+  return "$COMPLETION_UNVERIFIED"
 
-  # SOT-1560: circuit-breaker baseline. `debug_cycles` doubles as the consecutive-failure counter (the
-  # breaker generalizes PIPELINE_MAX_DEBUG_CYCLES). no-progress is measured across implementation cycles
-  # via the working-repo git fingerprint. All knobs ship DISABLED (config/circuit_breaker.json all-zero)
-  # → strict no-op, so this guard changes nothing until a knob is enabled deliberately.
-  local pipeline_start_ms; pipeline_start_ms="$(date +%s%3N 2>/dev/null || echo '')"
-  local cb_no_progress=0 cb_last_fp=""
-
-  # SOT-1550: track whether this pipeline finished as a PLAN/REVIEW no-PR terminal so the caller can
-  # emit COMPLETION_CONTRACT: COMPLETED_NO_PR (a real terminal success, distinct from UNVERIFIED).
-  # Global (no `local`) so it is visible to the caller after run_role_pipeline returns. Default 0 =
-  # unknown/PR-producing → caller emits plain COMPLETED (unchanged behavior).
-  PIPELINE_NO_PR=0
-  GITHUB_REPORT=""
-
-  # SOT-1555: clear any pin from a previous run so it never leaks. task-check may set
-  # PIPELINE_PINNED_WORKER (implementation-not-required → keep the whole lifecycle on one AI).
-  unset PIPELINE_PINNED_WORKER
-
-  # SOT-1574: delegation / cost preflight — before spending any role, emit ONE human-readable block
-  # showing which worker handles each role (summarizing WORKER_ROLES_FILE / per-issue override) plus a
-  # QUALITATIVE usage estimate (cooldown/auth state, Claude-primary role count, PIPELINE_MAX_DEBUG_CYCLES
-  # loop bound). No dollar figures (real spend is not obtainable). Best-effort / fail-open — never blocks
-  # the role loop. Disable with DELEGATION_PREFLIGHT=0/false/no/off.
-  local _delegation_preflight_enabled=1
-  case "$(printf '%s' "${DELEGATION_PREFLIGHT:-1}" | tr '[:upper:]' '[:lower:]')" in
-    0|false|no|off) _delegation_preflight_enabled=0 ;;
-  esac
-  if [ "$_delegation_preflight_enabled" -eq 0 ]; then
-    plog "delegation preflight disabled by DELEGATION_PREFLIGHT; skipping"
-  else
-    set +e
-    run_cli delegation-preflight "$issue" 2>>"$LOG_FILE" | while IFS= read -r _pf_line; do
-      plog "$_pf_line"
-    done
-    set -e
-  fi
-
-  while [ "$i" -lt "$n" ]; do
-    local role="${roles[$i]}"
-    plog "── role[$i]: $role (issue $issue) ──"
-
-    if [ ! -s "prompts/roles/$role.md" ]; then
-      plog "PIPELINE_STOP: missing canonical prompt prompts/roles/$role.md"
-      return "$COMPLETION_UNVERIFIED"
-    fi
-
-    # SOT-1560: circuit-breaker guard — consult the stop-condition breaker BEFORE spending another role,
-    # so a runaway loop is caught before it burns more tokens. Track no-progress across implementation
-    # cycles (git diff/commit fingerprint at each implementation entry). On trip: stop safely, notify
-    # Linear, and park the issue in On Hold so recover/reaper stop re-running it (kill the re-run loop).
-    if [ "$role" = "implementation" ]; then
-      local cb_fp; cb_fp="$(_cb_fingerprint "${target_repo:-.}")"
-      if [ -n "$cb_last_fp" ]; then
-        if [ "$cb_fp" = "$cb_last_fp" ]; then cb_no_progress=$((cb_no_progress + 1)); else cb_no_progress=0; fi
-      fi
-      cb_last_fp="$cb_fp"
-    fi
-    local cb_out cb_rc
-    set +e
-    cb_out="$(CB_STARTED_AT_MS="$pipeline_start_ms" \
-              CB_CONSECUTIVE_FAILURES="$debug_cycles" \
-              CB_NO_PROGRESS_CYCLES="$cb_no_progress" \
-              run_breaker_cli 2>>"$LOG_FILE")"
-    cb_rc=$?
-    set -e
-    if [ "$cb_rc" -eq 10 ]; then
-      plog "PIPELINE_HALT: circuit breaker tripped at role=$role → $cb_out"
-      run_cli move-on-hold "$issue" "$cb_out" >/dev/null 2>&1 || true
-      return "$COMPLETION_UNVERIFIED"
-    fi
-
-    # Run the dispatcher through the tag/ANSI filter; show on the terminal, append to the log, AND
-    # capture output to parse the winning report path. The filter strips ANSI color escapes and tags
-    # each line with the worker actor ([codex]/[agy]/[claude]) so Discord/log lines read cleanly.
-    # PIPESTATUS[0] is the dispatcher's exit code (run_worker.sh), unaffected by the filter/tee.
-    local cap; cap="$(mktemp)"
-    set +e
-    bash scripts/ai/run_worker.sh "$role" 2>&1 | python3 -u -c "$_PIPE_TAG_FILTER" | tee -a "$LOG_FILE" "$cap"
-    local rc=${PIPESTATUS[0]}
-    set -e
-
-    local dispatch_done; dispatch_done="$(grep -oE 'WORKER_DISPATCH_DONE role=[^ ]+ worker=[^ ]+ report=[^ ]+' "$cap" 2>/dev/null | tail -1 || true)"
-    local report; report="$(printf '%s' "$dispatch_done" | sed 's/.*report=//' || true)"
-    local winner; winner="$(printf '%s' "$dispatch_done" | sed -E 's/.*worker=([^ ]+).*/\1/' || true)"
-    rm -f "$cap"
-
-    if [ "$rc" -ne 0 ] || [ -z "$report" ] || [ ! -f "$report" ]; then
-      # A missing report has no worker verdict and therefore cannot be a genuine human-wait outcome.
-      # Keep the issue active for retry for every dispatcher interruption, including rc=141 SIGPIPE.
-      plog "PIPELINE_RETRY: role=$role dispatcher rc=$rc (no report) → leave issue active and retry"
-      return "$WORKER_UNAVAILABLE"
-    fi
-
-    # Parse the role's verdict token from the report. Workers emit it either INLINE
-    # (`## Next Action: READY_FOR_REVIEW`) OR on the line AFTER the header. The old parser only read the
-    # line after the header, so an inline token parsed as <none> and wrongly stopped the pipeline (which,
-    # combined with the errexit leak below, stranded the issue In Progress). Read from the LAST
-    # `## Next Action` header to EOF (awk resets the buffer at each header) and pull the first known
-    # verdict token, case-insensitively, normalized to upper case.
-    local na; na="$(awk '/[Nn]ext[[:space:]]*[Aa]ction/{cap=1; buf=""} cap{buf=buf"\n"$0} END{print buf}' "$report" 2>/dev/null | grep -oiE 'READY_FOR_REVIEW|NEEDS_DEBUG|NEEDS_USER_INPUT|BLOCKED' | head -n1 | tr '[:lower:]' '[:upper:]' || true)"
-    plog "role=$role next_action='${na:-<none>}' report=$report"
-
-    # SOT-1550: remember the github role's report so we can tell (after all roles complete) whether a
-    # PR was actually created — PLAN/REVIEW tasks skip the PR and terminate at In Review (no-PR).
-    [ "$role" = "github" ] && GITHUB_REPORT="$report"
-
-    case "$role" in
-      task-check)
-        case "$na" in
-          *READY_FOR_REVIEW*)
-            # SOT-1555: if task-check flagged the issue implementation-not-required (DOC / REVIEW /
-            # QUESTION / SECURITY-scan / trivial), pin every subsequent role to the worker that just
-            # handled task-check, so the whole lifecycle is completed by ONE AI with no cross-worker
-            # handoff. run_worker.sh moves this worker to the front of each role's chain (rest kept as
-            # fallback → fail-open). Absent flag → REQUIRED → no pin → unchanged multi-worker behavior.
-            if grep -qiE '^##[[:space:]]*Implementation:[[:space:]]*NOT_REQUIRED' "$report" 2>/dev/null; then
-              if [ -n "$winner" ]; then
-                export PIPELINE_PINNED_WORKER="$winner"
-                plog "PIPELINE_PIN: task-check flagged implementation-not-required → pin all remaining roles to worker=$winner (no handoff)"
-              else
-                plog "PIPELINE_PIN: implementation-not-required flagged but winning worker unknown → not pinning"
-              fi
-            fi
-            ;;  # actionable, no decomposition → proceed to implementation
-          # SOT-1550/1553: task-check now also performs decomposition. A non-READY result means either
-          # not-actionable (already terminal / In Review / needs-human) OR the issue was decomposed into
-          # child issues (which run as their own pipelines). Both stop the parent pipeline WITHOUT a PR —
-          # a successful no-op, so mark it a no-PR terminal (classified COMPLETED_NO_PR, not UNVERIFIED).
-          *) plog "PIPELINE_DONE: task-check not-actionable or decomposed ('$na') → success no-op"; PIPELINE_NO_PR=1; return 0 ;;
-        esac
-        ;;
-      verification)
-        case "$na" in
-          *READY_FOR_REVIEW*) ;;  # passed → proceed
-          *NEEDS_DEBUG*)
-            if [ "$debug_cycles" -lt "$MAX_DEBUG_CYCLES" ]; then
-              debug_cycles=$((debug_cycles + 1))
-              plog "PIPELINE_LOOP: $role NEEDS_DEBUG → re-run implementation (cycle $debug_cycles/$MAX_DEBUG_CYCLES)"
-              i="$impl_index"; continue
-            fi
-            plog "PIPELINE_STOP: $role still NEEDS_DEBUG after $MAX_DEBUG_CYCLES cycles → needs attention"
-            return "$COMPLETION_UNVERIFIED"
-            ;;
-          *) plog "PIPELINE_STOP: $role '$na' → stop (needs human)"; return "$COMPLETION_UNVERIFIED" ;;
-        esac
-        ;;
-      acceptance)
-        # SOT-1558: the acceptance verdict is decided by a MACHINE-READABLE line — `## Acceptance: PASS`
-        # or `## Acceptance: FAIL` (criterion-level [x]/[ ] above it). run_auto.sh reads that line
-        # directly instead of trusting an ambiguous natural-language completion claim. Precedence:
-        #   FAIL      → loop back to implementation (bounded), regardless of Next Action.
-        #   PASS      → proceed (Next Action must also not be a stop/blocker).
-        #   (absent)  → fall back to the Next Action verdict (backward compatible; logged as a warning).
-        local acc_verdict; acc_verdict="$(grep -ioE '^##[[:space:]]*Acceptance:[[:space:]]*(PASS|FAIL)' "$report" 2>/dev/null | grep -ioE '(PASS|FAIL)' | tail -1 | tr '[:lower:]' '[:upper:]' || true)"
-        plog "role=acceptance machine_verdict='${acc_verdict:-<none>}' next_action='${na:-<none>}'"
-        if [ "$acc_verdict" = "FAIL" ]; then
-          if [ "$debug_cycles" -lt "$MAX_DEBUG_CYCLES" ]; then
-            debug_cycles=$((debug_cycles + 1))
-            plog "PIPELINE_LOOP: acceptance ## Acceptance: FAIL → re-run implementation (cycle $debug_cycles/$MAX_DEBUG_CYCLES)"
-            i="$impl_index"; continue
-          fi
-          plog "PIPELINE_STOP: acceptance ## Acceptance: FAIL after $MAX_DEBUG_CYCLES cycles → needs attention"
-          return "$COMPLETION_UNVERIFIED"
-        fi
-        if [ "$acc_verdict" = "PASS" ]; then
-          case "$na" in
-            *NEEDS_USER_INPUT*|*BLOCKED*)
-              plog "PIPELINE_STOP: acceptance PASS but '$na' → stop (needs human)"; return "$COMPLETION_UNVERIFIED" ;;
-            *) ;;  # PASS and not a human-stop → proceed
-          esac
-        else
-          # No machine-readable verdict — fall back to Next Action (backward compatible), but warn: the
-          # acceptance role is expected to emit `## Acceptance: PASS|FAIL` (prompts/roles/acceptance.md).
-          plog "PIPELINE_WARN: acceptance report has no '## Acceptance: PASS|FAIL' line → falling back to Next Action"
-          case "$na" in
-            *READY_FOR_REVIEW*) ;;  # passed → proceed
-            *NEEDS_DEBUG*)
-              if [ "$debug_cycles" -lt "$MAX_DEBUG_CYCLES" ]; then
-                debug_cycles=$((debug_cycles + 1))
-                plog "PIPELINE_LOOP: acceptance NEEDS_DEBUG → re-run implementation (cycle $debug_cycles/$MAX_DEBUG_CYCLES)"
-                i="$impl_index"; continue
-              fi
-              plog "PIPELINE_STOP: acceptance still NEEDS_DEBUG after $MAX_DEBUG_CYCLES cycles → needs attention"
-              return "$COMPLETION_UNVERIFIED"
-              ;;
-            *) plog "PIPELINE_STOP: acceptance '$na' → stop (needs human)"; return "$COMPLETION_UNVERIFIED" ;;
-          esac
-        fi
-        ;;
-      *)
-        case "$na" in
-          *READY_FOR_REVIEW*) ;;  # proceed
-          *NEEDS_DEBUG*)
-            if [ "$debug_cycles" -lt "$MAX_DEBUG_CYCLES" ]; then
-              debug_cycles=$((debug_cycles + 1))
-              plog "PIPELINE_LOOP: $role NEEDS_DEBUG → re-run verification (cycle $debug_cycles/$MAX_DEBUG_CYCLES)"
-              i="$verify_index"; continue
-            fi
-            return "$COMPLETION_UNVERIFIED"
-            ;;
-          *) plog "PIPELINE_STOP: $role '$na' → stop (needs human)"; return "$COMPLETION_UNVERIFIED" ;;
-        esac
-        ;;
-    esac
-
-    i=$((i + 1))
-  done
-
-  # SOT-1550: the full pipeline ran. Decide whether it produced a PR. The github role records the PR
-  # number/URL in its report (e.g. "PR: **#182**" / ".../pull/182"); PLAN/REVIEW tasks skip PR
-  # creation, so a github report with no PR reference means this was a no-PR terminal (→ In Review).
-  # Fail-safe: if we can't read the github report, leave PIPELINE_NO_PR=0 (emit plain COMPLETED).
-  if [ -n "$GITHUB_REPORT" ] && [ -f "$GITHUB_REPORT" ]; then
-    if grep -qiE 'pull/[0-9]+|PR[ :*]*#[0-9]+' "$GITHUB_REPORT" 2>/dev/null; then
-      PIPELINE_NO_PR=0  # a PR was created/merged
-    else
-      PIPELINE_NO_PR=1  # no PR reference → PLAN/REVIEW no-PR terminal
-    fi
-  fi
-
-  plog "PIPELINE_DONE: all roles completed for $issue (no_pr=$PIPELINE_NO_PR)"
-  return 0
 }
 
 TARGET_ISSUE="${RESUME_ISSUE:-${WEBHOOK_ISSUE_ID:-}}"
-PIPELINE_ENABLED=1
-case "$(printf '%s' "${PIPELINE_MODE:-1}" | tr '[:upper:]' '[:lower:]')" in
-  0|false|no|off) PIPELINE_ENABLED=0 ;;
-esac
-
-if [ "$PIPELINE_ENABLED" -eq 1 ] && [ -n "$TARGET_ISSUE" ]; then
+if [ -n "$TARGET_ISSUE" ]; then
   echo "== Auto Runner: script-driven role pipeline (issue $TARGET_ISSUE) =="
   echo "Start: ${TIMESTAMP}"
   echo "Log: ${LOG_FILE}"
@@ -892,220 +647,5 @@ if [ "$PIPELINE_ENABLED" -eq 1 ] && [ -n "$TARGET_ISSUE" ]; then
   exit "$EXIT_CODE"
 fi
 
-# ── レガシー経路（issue 未指定 or PIPELINE_MODE=0）: 単一 Claude オーケストレータ起動 ──────────────
-RUNTIME_PROMPT="$(cat "$PROMPT_FILE")"
-
-if [[ "$RESUME_MODE" == true ]]; then
-  RESUME_ISSUE="${RESUME_ISSUE:-${WEBHOOK_ISSUE_ID:-}}"
-  if [[ -z "$RESUME_ISSUE" ]]; then
-    echo "Error: --resume requires an issue ID or WEBHOOK_ISSUE_ID environment variable." >&2
-    exit 1
-  fi
-  RUNTIME_PROMPT="## Issue-Rerun Resume Mode
-
-This is a usage-limit resume run for Issue: ${RESUME_ISSUE}
-
-Context:
-- Resume metadata file: docs/ai/auto_logs/resume/${RESUME_ISSUE}.json
-- This is a continuation of a previous run that hit a usage limit.
-- Resume work on ${RESUME_ISSUE} as the primary target.
-- Treat this as a continuation of the existing work, not a new task.
-- When ${RESUME_ISSUE} reaches a terminal outcome or there is no work to do, this is a SUCCESS: exit 0 and stop. Reserve a non-zero exit for actual errors only (a non-zero exit is treated downstream as a failure and may be misclassified as a usage limit).
-
-Mandatory Resume Flow:
-1. Read the resume metadata JSON if it exists.
-2. Read the previous run log referenced in the metadata.
-3. Check the Linear issue's latest status, comments, and current git state.
-4. If the issue is already terminal (Completed/Canceled/Archived/Duplicate) or is on hold awaiting human review (In Review), stop and exit 0 (this is a successful no-op, not a failure).
-5. If status is 'Todo', set it to 'In Progress'.
-6. Remove 'usage-limit' label if present.
-7. Post a resume-start comment on Linear.
-8. Continue the work from where it left off.
-
----
-
-${RUNTIME_PROMPT}"
-
-elif [[ -n "${WEBHOOK_ISSUE_ID:-}" ]]; then
-  RUNTIME_PROMPT="## Webhook Single-Issue Mode
-
-This run was triggered by Linear webhook for Issue: ${WEBHOOK_ISSUE_ID}
-
-Mandatory behavior:
-- Start with ${WEBHOOK_ISSUE_ID} as the webhook-triggered target.
-- Perform the initial task check exactly once, via the dispatcher (NOT by calling a worker directly).
-  Write the task-check instruction to prompts/roles/task-check.md, then run
-  \`scripts/ai/run_worker.sh task-check\`. The dispatcher tries the task-check priority chain from
-  config/worker_roles.json (default codex → claude → antigravity), hands off to the next worker on
-  non-response / usage-limit, and prints \`WORKER_DISPATCH_DONE role=task-check worker=<w> report=<path>\`.
-  Read that report path for the result (target issue status, latest comments, labels, acceptance
-  criteria, and whether it is actionable).
-- ROUTE ALL ROLE WORK THROUGH THE DISPATCHER. For every role (task-check, decomposition, implementation,
-  verification, acceptance, github, linear-report), write the instruction to prompts/roles/<role>.md and
-  run \`scripts/ai/run_worker.sh <role>\`. NEVER call scripts/ai/run_codex.sh, scripts/ai/run_antigravity.sh,
-  or a nested claude directly — the dispatcher owns worker selection, priority-chain fallback, same-AI
-  session/cache reuse, and usage-limit handoff. Read the report path printed as WORKER_DISPATCH_DONE.
-  If the dispatcher prints WORKER_DISPATCH_EXHAUSTED (exit 75, every worker in the chain non-responsive),
-  perform that role's work yourself per the Worker Non-Response Fallback Policy.
-- After the task check is complete, Claude Code owns sequencing the remaining roles (decomposition, child
-  issue registration, Linear status updates, PR flow, and final reporting) — each executed through the
-  dispatcher as above.
-- When ${WEBHOOK_ISSUE_ID} reaches a terminal outcome for this run, or there is no actionable work (e.g. already terminal, or on hold In Review), this is a SUCCESS: exit immediately with 0. Reserve a non-zero exit for actual errors only.
-
----
-
-${RUNTIME_PROMPT}"
-
-  # Linearプロジェクトから解決した開発対象レポジトリ（runner が WEBHOOK_TARGET_REPO に注入）。
-  # セットされていれば、worker 委譲時の TARGET_REPO を明示する指示行をプロンプトへ追記する。
-  if [[ -n "${WEBHOOK_TARGET_REPO:-}" ]]; then
-    RUNTIME_PROMPT="## Target Repository (resolved from Linear project)
-
-Target repository for this issue: ${WEBHOOK_TARGET_REPO} (project: ${WEBHOOK_PROJECT_NAME:-unknown}).
-When dispatching worker roles, set TARGET_REPO=${WEBHOOK_TARGET_REPO} before running scripts/ai/run_worker.sh <role> (the dispatcher forwards TARGET_REPO to whichever worker it selects).
-
----
-
-${RUNTIME_PROMPT}"
-  fi
-fi
-
-echo "== Claude Code Auto Runner =="
-echo "Start: ${TIMESTAMP}"
-echo "Log: ${LOG_FILE}"
-echo ""
-
-# stream-json イベントから assistant のテキスト、ツール呼び出し、
-# Antigravity/Codex の出力（tool_result）をリアルタイム抽出。
-#
-# SOT-1457: すべての行に「誰が作業しているか」を示すアクタータグ [<actor>] を付ける。
-#   - orchestrator（Claude Code 本体）のナレーション/ツール呼び出し → [<model>]（既定 [opus], sonnet 対応）
-#   - 実際の Codex 出力（== Codex CLI バナー）              → [codex]
-#   - 実際の Antigravity 出力（== Antigravity CLI バナー）   → [agy]
-# これにより「Codex が実際には動いていない run」では実体のある [codex] 行が出ず、
-# 委譲バイパス（"delegating to Claude"）だけが [codex] で残るため、
-# codex が作業していないことがログから判別できる。orchestrator が "Codex is still
-# running..." と語っても [opus]/[sonnet] タグが付くので、発話者が Claude 本体だと分かる。
-# runner.ts が付ける [RUN:<id>] と合成され [RUN:<id>] [opus] / [RUN:<id>] [codex] になる。
-_STREAM_FILTER='
-import sys, json, os
-
-WORKER_MARKERS = ("== Antigravity CLI", "== Codex CLI")
-
-def orch_actor():
-    """orchestrator（Claude 本体）のアクター名を短い名前に正規化する。
-    CLAUDE_MODEL が claude-opus-4-8 / opus / claude-sonnet-4-6 / sonnet / haiku
-    のいずれでも [opus] / [sonnet] / [haiku] に揃える（既定 opus）。"""
-    m = (os.environ.get("CLAUDE_MODEL") or "opus").lower()
-    for short in ("opus", "sonnet", "haiku"):
-        if short in m:
-            return short
-    return m
-
-# orchestrator（Claude Code 本体）のアクター名。run_auto.sh の --model と揃える。
-ORCH = orch_actor()
-
-def tag_lines(actor, text):
-    """text の各行に [actor] を付けて出力する（空行はスキップ）。"""
-    for ln in text.splitlines():
-        if ln.strip() == "":
-            continue
-        print(f"[{actor}] {ln}", flush=True)
-
-def worker_actor(text):
-    """worker バナーから codex / agy(Antigravity) を判定する。"""
-    if text.startswith("== Codex CLI"):
-        return "codex"
-    if text.startswith("== Antigravity CLI"):
-        return "agy"
-    return None
-
-def emit_worker_result(content):
-    """tool_result の中身が Antigravity/Codex 出力なら worker アクター付きで表示する"""
-    if isinstance(content, str):
-        actor = worker_actor(content)
-        if actor:
-            tag_lines(actor, content)
-    elif isinstance(content, list):
-        for c in content:
-            if isinstance(c, dict) and c.get("type") == "text":
-                txt = c.get("text", "")
-                actor = worker_actor(txt)
-                if actor:
-                    tag_lines(actor, txt)
-
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        ev = json.loads(line)
-        t = ev.get("type", "")
-        if t == "assistant":
-            for blk in ev.get("message", {}).get("content", []):
-                bt = blk.get("type", "")
-                if bt == "text":
-                    txt = blk.get("text", "")
-                    if txt.strip():
-                        tag_lines(ORCH, txt)
-                elif bt == "tool_use":
-                    name = blk.get("name", "?")
-                    inp = blk.get("input", {})
-                    d = (inp.get("command") or inp.get("file_path") or
-                         inp.get("path") or inp.get("query") or
-                         inp.get("pattern") or "")
-                    if d:
-                        print(f"[{ORCH}] [{name}] {str(d)[:120]}", flush=True)
-                    else:
-                        print(f"[{ORCH}] [{name}]", flush=True)
-        elif t == "user":
-            for blk in ev.get("message", {}).get("content", []):
-                if blk.get("type") == "tool_result":
-                    emit_worker_result(blk.get("content", ""))
-        elif t == "result" and ev.get("is_error"):
-            tag_lines(ORCH, "ERROR: " + ev.get("result", ""))
-    except Exception:
-        if line:
-            print(line, flush=True)
-'
-
-CLAUDE_MODEL="${CLAUDE_MODEL:-opus}"
-export CLAUDE_MODEL
-claude \
-  --model "$CLAUDE_MODEL" \
-  --dangerously-skip-permissions \
-  --output-format stream-json \
-  --verbose \
-  -p "$RUNTIME_PROMPT" \
-  2>&1 | python3 -u -c "$_STREAM_FILTER" | tee "$LOG_FILE"
-
-EXIT_CODE=${PIPESTATUS[0]}
-COMPLETION_UNVERIFIED=70
-
-# 完了検証ステップ
-if [ "$EXIT_CODE" -eq 0 ]; then
-  # worker レポートの ## Next Action を確認する
-  NEXT_ACTION=""
-  if [ -f "docs/ai/50_worker_antigravity_report.md" ]; then
-    # 直近の Antigravity レポート
-    NEXT_ACTION=$(grep "## Next Action" docs/ai/50_worker_antigravity_report.md -A 1 | tail -n 1)
-  elif [ -f "docs/ai/60_worker_codex_report.md" ]; then
-    # Antigravity がない場合は Codex レポート
-    NEXT_ACTION=$(grep "## Next Action" docs/ai/60_worker_codex_report.md -A 1 | tail -n 1)
-  fi
-
-  case "$NEXT_ACTION" in
-    *NEEDS_DEBUG*|*NEEDS_USER_INPUT*|*BLOCKED*)
-      echo "COMPLETION_CONTRACT: INCOMPLETE reason=report indicates $NEXT_ACTION"
-      EXIT_CODE=$COMPLETION_UNVERIFIED
-      ;;
-    *)
-      # 明示的に未完了でなければ完了とみなす
-      echo "COMPLETION_CONTRACT: COMPLETED"
-      ;;
-  esac
-fi
-
-echo ""
-echo "== Finished: $(date +"%Y%m%d_%H%M%S") (exit: ${EXIT_CODE}) =="
-exit "$EXIT_CODE"
+echo "Error: run_auto.sh requires --resume <issue> or WEBHOOK_ISSUE_ID." >&2
+exit 1

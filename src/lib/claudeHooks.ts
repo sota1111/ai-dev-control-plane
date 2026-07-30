@@ -211,7 +211,6 @@ export const AUTONOMOUS_ENV_MARKERS = [
   'RUN_WORKER_DISPATCH',
   'WEBHOOK_ISSUE_ID',
   'WORKER_ROLE',
-  'PIPELINE_MODE',
 ] as const;
 
 function truthy(v: string | undefined): boolean {
