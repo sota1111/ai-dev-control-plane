@@ -35,6 +35,7 @@ import {
 } from './lib/workerRoles.js';
 import {
   parseWorkerRoleDirectives,
+  parseReasoningDirectives,
   mergeWorkerRoleOverrides,
   parseGraphDirective,
 } from './lib/workerRoleDirective.js';
@@ -235,6 +236,9 @@ async function main() {
       }
 
       const { overrides, models, solo, handoff, warnings } = parseWorkerRoleDirectives(text);
+      const parsedReasoning = parseReasoningDirectives(text);
+      const reasoning = parsedReasoning.reasoning;
+      warnings.push(...parsedReasoning.warnings);
       for (const w of warnings) process.stderr.write(`resolve-worker-roles: ${w}\n`);
       const overriddenRoles = Object.keys(overrides);
       const modelledRoles = Object.keys(models);
@@ -242,6 +246,7 @@ async function main() {
       if (
         overriddenRoles.length === 0 &&
         modelledRoles.length === 0 &&
+        Object.keys(reasoning).length === 0 &&
         !solo &&
         handoff === undefined
       ) {
@@ -299,6 +304,7 @@ async function main() {
         if (soloWorker) output.__solo__ = soloWorker;
       }
       if (Object.keys(modelsOut).length > 0) output.__models__ = modelsOut;
+      if (Object.keys(reasoning).length > 0) output.__reasoning__ = reasoning;
       const outDir = path.join(__dirname, '..', 'docs', 'ai', 'pipeline');
       fs.mkdirSync(outDir, { recursive: true });
       const safeIssue = String(issueId).replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -317,7 +323,8 @@ async function main() {
         )
         .join(', ');
       const handoffSummary = handoff === undefined ? '' : `handoff=${handoff ? 'on' : 'off'}`;
-      const summary = [overrideSummary, modelSummary, soloSummary, handoffSummary]
+      const reasoningSummary = Object.entries(reasoning).map(([r, v]) => `${r}=${v}`).join(',');
+      const summary = [overrideSummary, modelSummary, reasoningSummary && `reasoning{${reasoningSummary}}`, soloSummary, handoffSummary]
         .filter(Boolean)
         .join(' | ');
       process.stderr.write(`resolve-worker-roles: ${issueId} overrides ${summary} → ${outPath}\n`);

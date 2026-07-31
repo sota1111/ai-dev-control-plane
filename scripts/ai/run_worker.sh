@@ -127,6 +127,17 @@ worker_model() {
     } catch (e) { process.stdout.write(""); }
   ' "$WORKER_ROLES_FILE" "$1" "$2" 2>/dev/null || echo ''
 }
+worker_reasoning() {
+  node -e '
+    const fs = require("fs");
+    const [file, role] = process.argv.slice(1);
+    try {
+      const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+      const value = cfg && cfg.__reasoning__ && cfg.__reasoning__[role];
+      process.stdout.write(typeof value === "string" ? value : "");
+    } catch (e) { process.stdout.write(""); }
+  ' "$WORKER_ROLES_FILE" "$1" 2>/dev/null || echo ''
+}
 # Each worker script reads a DIFFERENT prompt file. The orchestrator writes ONE canonical role prompt
 # and the dispatcher fans it out to whichever worker it picks (so the instruction is worker-agnostic).
 worker_prompt() {
@@ -267,6 +278,7 @@ PROGRESS_NOTIFY
   # SOT-1583: resolve the per-issue model pin for this (role, worker) and pass it to the run script via
   # that worker's model env var. Absent → don't set it, so the run script keeps its default model.
   MODEL_ENV=()
+  REASONING_ENV=()
   WORKER_MODEL="$(worker_model "$ROLE" "$WORKER")"
   if [ -n "$WORKER_MODEL" ]; then
     case "$WORKER" in
@@ -275,6 +287,11 @@ PROGRESS_NOTIFY
       claude)      MODEL_ENV=(CLAUDE_MODEL="$WORKER_MODEL") ;;
     esac
     echo "-- model override: role '$ROLE' worker '$WORKER' → model '$WORKER_MODEL' --"
+  fi
+  WORKER_REASONING="$(worker_reasoning "$ROLE")"
+  if [ -n "$WORKER_REASONING" ] && [ "$WORKER" = "codex" ]; then
+    REASONING_ENV=(CODEX_REASONING_EFFORT="$WORKER_REASONING")
+    echo "-- reasoning override: role '$ROLE' worker '$WORKER' → '$WORKER_REASONING' --"
   fi
 
   # SOT-1549: snapshot the metrics-repo baseline + start time so this leg's M4/M6 are measured.
@@ -285,7 +302,7 @@ PROGRESS_NOTIFY
   LEG_START_MS="$(date +%s%3N)"
 
   set +e
-  env RUN_WORKER_DISPATCH=1 WORKER_ROLE="$ROLE" WORKER_SELECTED="$WORKER" "${HANDOFF_ENV[@]}" "${MODEL_ENV[@]}" \
+  env RUN_WORKER_DISPATCH=1 WORKER_ROLE="$ROLE" WORKER_SELECTED="$WORKER" "${HANDOFF_ENV[@]}" "${MODEL_ENV[@]}" "${REASONING_ENV[@]}" \
     bash "$SCRIPT"
   RC=$?
   set -e

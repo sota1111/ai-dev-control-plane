@@ -69,6 +69,35 @@ const WORKER_ALIASES: Record<string, Worker> = {
 
 /** SOT-1583: per-role model pins, keyed by the worker the model applies to. */
 export type RoleModelMap = Partial<Record<WorkerRole, Partial<Record<Worker, string>>>>;
+export type RoleReasoningMap = Partial<Record<WorkerRole, string>>;
+
+/** Parse Linear `reasoning: role=level` lines. Newest value wins per role. */
+export function parseReasoningDirectives(text: string | null | undefined): {
+  reasoning: RoleReasoningMap;
+  warnings: string[];
+} {
+  const reasoning: RoleReasoningMap = {};
+  const warnings: string[] = [];
+  if (!text) return { reasoning, warnings };
+  const allowed = new Set(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*reasoning\s*:\s*(.+?)\s*$/i);
+    if (!match) continue;
+    for (const raw of match[1].split(/[,;]/)) {
+      const [roleRaw, levelRaw, ...extra] = raw.split('=');
+      const role = (roleRaw || '').trim().toLowerCase();
+      const level = (levelRaw || '').trim().toLowerCase();
+      if (extra.length || !isWorkerRole(role)) {
+        warnings.push(`invalid reasoning role "${role}"`);
+      } else if (!allowed.has(level)) {
+        warnings.push(`invalid reasoning level "${level}" for role "${role}"`);
+      } else {
+        reasoning[role] = level;
+      }
+    }
+  }
+  return { reasoning, warnings };
+}
 
 /**
  * SOT-1591: per-issue SOLO override parsed from a `solo=` directive token.

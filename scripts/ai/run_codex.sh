@@ -265,15 +265,15 @@ CODEX_REASONING_ARGS=()
 if [ -n "${CODEX_MODEL:-}" ]; then
   CODEX_RESOLVED_MODEL="$(resolve_codex_model_alias "$CODEX_MODEL")"
   CODEX_MODEL_ARGS=(-m "$CODEX_RESOLVED_MODEL")
-  if [ "$(printf '%s' "$CODEX_MODEL" | tr '[:upper:]' '[:lower:]')" = "sol-max" ]; then
-    CODEX_REASONING_ARGS=(-c 'model_reasoning_effort="ultra"')
-    echo "run_codex.sh: sol-max uses model_reasoning_effort=ultra" >&2
-  fi
   if [ "$CODEX_RESOLVED_MODEL" != "$CODEX_MODEL" ]; then
     echo "run_codex.sh: model alias '$CODEX_MODEL' → '$CODEX_RESOLVED_MODEL' (codex exec -m)" >&2
   else
     echo "run_codex.sh: using model '$CODEX_MODEL' (codex exec -m)" >&2
   fi
+fi
+if [ -n "${CODEX_REASONING_EFFORT:-}" ]; then
+  CODEX_REASONING_ARGS=(-c "model_reasoning_effort=\"${CODEX_REASONING_EFFORT}\"")
+  echo "run_codex.sh: reasoning effort '${CODEX_REASONING_EFFORT}'" >&2
 fi
 
 run_codex_cli() {

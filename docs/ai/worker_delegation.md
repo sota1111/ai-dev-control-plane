@@ -82,6 +82,16 @@ A Linear issue description or comment can reroute roles for its own run only:
 workers: implementation=codex, verification=claude
 ```
 
+Codexのreasoning強度もLinearのIssue本文またはコメントからロール単位で指定できる。新しいコメントが
+同じロールを上書きする。
+
+```text
+reasoning: task-check=ultra, decomposition=ultra, implementation=high
+```
+
+有効値は `low / medium / high / xhigh / max / ultra`。Codex以外のworkerでは指定を保持するが、
+CLIへは渡さない。
+
 `run_auto.sh` resolves this via `runner-cli resolve-worker-roles`, merges onto the base config, and
 points `WORKER_ROLES_FILE` at the per-issue config. Newest occurrence wins; unmentioned roles keep the
 default. Parser: `src/lib/workerRoleDirective.ts`.

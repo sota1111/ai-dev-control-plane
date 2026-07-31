@@ -2,6 +2,7 @@ import {
   parseWorkerRoleDirectives,
   mergeWorkerRoleOverrides,
   parseGraphDirective,
+  parseReasoningDirectives,
 } from '../lib/workerRoleDirective.js';
 import type { WorkerRoleConfig } from '../lib/workerRoles.js';
 
@@ -11,6 +12,20 @@ describe('parseGraphDirective', () => {
   });
   test('ignores embedded and malformed directives', () => {
     expect(parseGraphDirective('Use graph: unsafe\ngraph: ../../unsafe')).toBeUndefined();
+  });
+});
+
+describe('parseReasoningDirectives', () => {
+  test('parses role-specific levels and newest value wins', () => {
+    expect(parseReasoningDirectives(
+      'reasoning: task-check=high\nreasoning: task-check=ultra, decomposition=max'
+    ).reasoning).toEqual({ 'task-check': 'ultra', decomposition: 'max' });
+  });
+
+  test('rejects unknown roles and levels', () => {
+    const parsed = parseReasoningDirectives('reasoning: deploy=ultra, implementation=extreme');
+    expect(parsed.reasoning).toEqual({});
+    expect(parsed.warnings).toHaveLength(2);
   });
 });
 

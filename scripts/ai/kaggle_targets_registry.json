@@ -95,7 +95,7 @@
           "lineage": "gpt",
           "repo": "ptcg-agent-gpt",
           "project": "ptcg-agent-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol-max, decomposition=codex:sol-max, handoff=off",
+          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
           "submit": {
             "file": "/workspaces/ptcg-agent-gpt/submission.tar.gz",
             "message": "auto-improve submit: ptcg-agent-gpt champion"
@@ -126,7 +126,7 @@
           "lineage": "gpt",
           "repo": "kaggriculture-gpt",
           "project": "kaggriculture-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol-max, decomposition=codex:sol-max, handoff=off",
+          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
           "submit": {
             "file": ".targets/kaggriculture-gpt/submission.tar.gz",
             "message": "auto-improve submit: kaggriculture-gpt champion"
@@ -158,7 +158,7 @@
           "lineage": "gpt",
           "repo": "arc-agi-2-gpt",
           "project": "arc-agi-2-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol-max, decomposition=codex:sol-max, handoff=off",
+          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
           "champion_status": "exec-verified",
           "submit": {
             "file": "submission.json",
@@ -213,7 +213,7 @@
           "lineage": "gpt",
           "repo": "arc-agi-3-gpt",
           "project": "arc-agi-3-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol-max, decomposition=codex:sol-max, handoff=off",
+          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
           "evaluation_contract": "production-gateway",
           "champion_status": "exec-verified",
           "submit": {
@@ -260,7 +260,7 @@
           "lineage": "gpt",
           "repo": "agent-security-gpt",
           "project": "agent-security-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol-max, decomposition=codex:sol-max, handoff=off",
+          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
           "submit": {
             "file": "submission.csv",
             "kernel": "sota1111/agent-security-gpt-champion",
@@ -296,7 +296,7 @@
           "lineage": "gpt",
           "repo": "rogii-gpt",
           "project": "rogii-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol-max, decomposition=codex:sol-max, handoff=off",
+          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
           "submit": {
             "file": "",
             "message": "auto-improve submit: rogii-gpt champion"
@@ -330,7 +330,7 @@
           "lineage": "gpt",
           "repo": "biohub-gpt",
           "project": "biohub-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol-max, decomposition=codex:sol-max, handoff=off",
+          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
           "submit": {
             "file": "submission.csv",
             "kernel": "sota1111/biohub-gpt-cycle-2-champion",
