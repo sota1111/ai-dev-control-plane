@@ -26,7 +26,7 @@ fi
 CRON_CMD="${CRON_SCHEDULE} cd ${REPO_DIR} && bash scripts/ai/run_auto.sh >> ${CRON_LOG} 2>&1"
 (crontab -l 2>/dev/null | grep -v "run_auto.sh"; echo "$CRON_CMD") | crontab -
 
-# Kaggle 改善サイクル cron（単一スケジュール JST [0,6,12,18]・1枠=1コンペ）。
+# Kaggle 改善サイクル cron（JST [0,3,6,9,12,15,18,21]・各コンペ1日2枠）。
 # cron は UTC 基準なので毎時起動し、スクリプト側で --only-scheduled により当番 JST 枠だけを処理する
 # （registry.schedule_hours_jst で枠を判定）。default OFF（env KAGGLE_IMPROVE_ENABLED + registry.enabled）
 # なので、登録しても2段 kill switch が ON になるまで実起案しない。

@@ -561,7 +561,7 @@ describe('kaggleImprovement', () => {
   });
 
   describe('shipped registry file', () => {
-    test('scripts/ai/kaggle_targets_registry.json enables the four requested competition slots', () => {
+    test('scripts/ai/kaggle_targets_registry.json schedules two daily slots per requested competition', () => {
       const here = path.dirname(fileURLToPath(import.meta.url));
       const p = path.join(here, '..', '..', 'scripts', 'ai', 'kaggle_targets_registry.json');
       const r = parseTargetsRegistry(JSON.parse(fs.readFileSync(p, 'utf8')));
@@ -569,9 +569,13 @@ describe('kaggleImprovement', () => {
       expect(r.competitions).toHaveLength(7);
       expect(r.rotation).toEqual([
         { hourJst: 0, competition: 'ptcg' },
-        { hourJst: 6, competition: 'kaggriculture' },
-        { hourJst: 12, competition: 'agent-security' },
-        { hourJst: 18, competition: 'biohub' },
+        { hourJst: 3, competition: 'kaggriculture' },
+        { hourJst: 6, competition: 'agent-security' },
+        { hourJst: 9, competition: 'biohub' },
+        { hourJst: 12, competition: 'ptcg' },
+        { hourJst: 15, competition: 'kaggriculture' },
+        { hourJst: 18, competition: 'agent-security' },
+        { hourJst: 21, competition: 'biohub' },
       ]);
       // 各コンペは claude/gpt の2ターゲットを持つ。
       for (const c of r.competitions) {
@@ -591,6 +595,11 @@ describe('kaggleImprovement', () => {
       });
       expect(r.competitions.find((c) => c.key === 'ptcg')).toMatchObject({
         kaggleCompetition: 'pokemon-tcg-ai-battle',
+        dailySubmissionCap: 5,
+        dailySubmissionsPerLineage: 2,
+        submissionMode: 'both',
+      });
+      expect(r.competitions.find((c) => c.key === 'biohub')).toMatchObject({
         dailySubmissionCap: 5,
         dailySubmissionsPerLineage: 2,
         submissionMode: 'both',

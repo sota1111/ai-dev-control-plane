@@ -1,9 +1,9 @@
 {
-  "__doc__": "Kaggle改善・提出サイクルの対象は PTCG / Kaggriculture / Agent Security / Biohub の4コンペ×Claude/GPT＝8ターゲット。単一cronがJSTの4枠で1コンペずつ処理する。",
+  "__doc__": "Kaggle改善・提出サイクルの対象は PTCG / Kaggriculture / Agent Security / Biohub の4コンペ×Claude/GPT＝8ターゲット。各コンペを1日2枠処理し、Claude/GPTを各2回（計4回）提出する。",
   "__fields__": {
     "enabled": "レジストリ側 kill switch。false の間は起案しない（env KAGGLE_IMPROVE_ENABLED と AND）。",
     "schedule_hours_jst": "単一スケジュール。改善サイクル cron を起動する JST の時刻(hour)。",
-    "rotation": "枠→コンペ ローテーション表。1枠=1コンペ。4枠で対象4コンペを毎日一巡する。",
+    "rotation": "枠→コンペ ローテーション表。1枠=1コンペ。8枠で対象4コンペを毎日2巡する。",
     "issue_cap_guard": "workspace 総 Issue 数がこれ以上なら起案せず archive を促す（既定 240）。",
     "competitions[].key": "コンペ識別子（rotation.competition と一致）。",
     "competitions[].kaggle_competition": "Kaggle コンペ slug（実 slug は各 repo の子Issueで確定）。",
@@ -25,12 +25,16 @@
     "state": "cron が更新する実行状態（last_run_at / created_today / last_submitted_date）。"
   },
   "enabled": true,
-  "schedule_hours_jst": [0, 6, 12, 18],
+  "schedule_hours_jst": [0, 3, 6, 9, 12, 15, 18, 21],
   "rotation": [
     { "hour_jst": 0, "competition": "ptcg" },
-    { "hour_jst": 6, "competition": "kaggriculture" },
-    { "hour_jst": 12, "competition": "agent-security" },
-    { "hour_jst": 18, "competition": "biohub" }
+    { "hour_jst": 3, "competition": "kaggriculture" },
+    { "hour_jst": 6, "competition": "agent-security" },
+    { "hour_jst": 9, "competition": "biohub" },
+    { "hour_jst": 12, "competition": "ptcg" },
+    { "hour_jst": 15, "competition": "kaggriculture" },
+    { "hour_jst": 18, "competition": "agent-security" },
+    { "hour_jst": 21, "competition": "biohub" }
   ],
   "issue_cap_guard": 240,
   "competitions": [
@@ -260,6 +264,7 @@
       "key": "biohub",
       "kaggle_competition": "biohub-cell-tracking-during-development",
       "daily_submission_cap": 5,
+      "daily_submissions_per_lineage": 2,
       "submission_mode": "both",
       "targets": [
         {

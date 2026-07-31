@@ -23,17 +23,17 @@ Layer 2: 既存パイプライン（起案Issueを処理）
 
 ## 単一スケジュール・1枠=1コンペ（ローテーション）
 
-単一 cron を毎時起動し、`--only-scheduled` で **JST [0,6,12,18]** の4枠だけを処理する。各枠は
-1コンペの当番で、対象4コンペを1日1枠ずつ処理する
+単一 cron を毎時起動し、`--only-scheduled` で **JST [0,3,6,9,12,15,18,21]** の8枠だけを処理する。各枠は
+1コンペの当番で、対象4コンペを12時間間隔で1日2枠ずつ処理する
 （専用の提出/フロア cron は持たない）。1回の当番で何系統を提出するかは提出モード次第 — `both` は
 claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（下記「提出上限と提出モード」）。
 
 | JST hour | 当番コンペ | claude 系 repo | gpt 系 repo |
 | --- | --- | --- | --- |
-| 0  | ptcg           | ptcg-agent-claude     | ptcg-agent-gpt     |
-| 6  | kaggriculture  | kaggriculture-claude  | kaggriculture-gpt  |
-| 12 | agent-security | agent-security-claude | agent-security-gpt |
-| 18 | biohub         | biohub-claude         | biohub-gpt         |
+| 0 / 12  | ptcg           | ptcg-agent-claude     | ptcg-agent-gpt     |
+| 3 / 15  | kaggriculture  | kaggriculture-claude  | kaggriculture-gpt  |
+| 6 / 18  | agent-security | agent-security-claude | agent-security-gpt |
+| 9 / 21  | biohub         | biohub-claude         | biohub-gpt         |
 
 ローテーション表・コンペ定義・提出物パスは `scripts/ai/kaggle_targets_registry.json`。
 （`config/` は harness 保護下のため `scripts/ai/` に同居。）

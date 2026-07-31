@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Kaggle 改善サイクル cron（単一スケジュール JST [0,6,12,18]・1枠=1コンペ）。
+# Kaggle 改善サイクル cron（JST [0,3,6,9,12,15,18,21]・各コンペ1日2枠）。
 #
 # 設計（docs/kaggle-improvement-cycle.md / docs/ai/linear/SOT-1913.md v4）:
 #   単一 cron を毎時起動し、この枠(JST hour)に割り当てられた1コンペ(rotation)を解決して、その
