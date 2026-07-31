@@ -63,14 +63,15 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
 | コンペ | `daily_submission_cap` | `submission_mode` | 挙動 |
 | --- | --- | --- | --- |
 | ARC（arc-agi-2 / arc-agi-3） | **1** | **`alternate`** | 1日1提出のみ。claude/gpt を**日替わりで交互**に提出（前回提出系統の逆を選ぶ） |
-| 他4コンペ（ptcg / agent-security / rogii / biohub） | **5** | **`both`** | claude/gpt を**両方提出**し、両系統の結果を確認する |
+| 他3コンペ（ptcg / rogii / biohub） | **5** | **`both`** | claude/gpt を**両方提出**し、両系統の結果を確認する |
 | kaggriculture | **5** | **`both`** | JST 2時・14時の2枠で各lineageを1回ずつ、計4提出/日まで受け付ける |
+| agent-security | **5** | **`both`** | Claude/GPTの独立notebook lineageを共通`submission.csv`契約で各2回/日、計4提出/日まで受け付ける |
 
 - `alternate` の「次の系統」は Kaggle 提出履歴の最新提出（`kaggle_targets_submit.sh` が取得）から決める。
   最後に提出した repo の逆系統が今日の番。履歴が取れないときは claude 始まりで交互する。
 - `alternate` は共有 cap のため、当日そのコンペで（どちらの系統でも）すでに提出済みなら選ばれた系統も
   skip（冪等）。
-- `both` は 2系統ぶん（=2提出/日）で cap 5 に十分収まる。
+- `both` の既定は2系統ぶん（=2提出/日）。`daily_submissions_per_lineage=2` のコンペは4提出/日で cap 5 に収まる。
 
 ## ガード（暴走・空回りの防止・順位最優先に緩和）
 

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "agent-security-submission-lineages/v1",
+  "issue": "SOT-2211",
+  "recordedAt": "2026-07-31T07:40:17.567Z",
+  "competition": "ai-agent-security-multi-step-tool-attacks",
+  "dailySubmissionCap": 5,
+  "dailySubmissionsPerLineage": 2,
+  "artifactContract": {
+    "file": "submission.csv",
+    "output": "submission.csv",
+    "submissionMode": "notebook"
+  },
+  "lineages": [
+    {
+      "lineage": "claude",
+      "repository": "https://github.com/sota1111/agent-security-claude",
+      "sourceRevision": "16c2a5e180f6c2035eacd5ab8bafc7db1f977b0d",
+      "kernel": "sota1111/agent-security-claude-cli-baseline",
+      "kernelVersion": 2,
+      "kernelStatus": "COMPLETE",
+      "acceptedBaseline": {
+        "submissionRef": 55025424,
+        "status": "COMPLETE",
+        "publicScore": 0.0
+      },
+      "latestSubmission": {
+        "submissionRef": 55130943,
+        "statusAtRecordTime": "PENDING"
+      }
+    },
+    {
+      "lineage": "gpt",
+      "repository": "https://github.com/sota1111/agent-security-gpt",
+      "sourceRevision": "62bc29c6e9132327df5e93017ae902ac95fc7557",
+      "kernel": "sota1111/agent-security-gpt-champion",
+      "kernelVersion": 2,
+      "kernelStatus": "COMPLETE",
+      "acceptedBaseline": {
+        "submissionRef": 55043648,
+        "status": "COMPLETE",
+        "publicScore": 0.0
+      },
+      "latestSubmission": {
+        "submissionRef": 55130945,
+        "statusAtRecordTime": "PENDING"
+      }
+    }
+  ]
+}
