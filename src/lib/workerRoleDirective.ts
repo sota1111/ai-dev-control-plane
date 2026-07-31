@@ -69,7 +69,8 @@ const WORKER_ALIASES: Record<string, Worker> = {
 
 /** SOT-1583: per-role model pins, keyed by the worker the model applies to. */
 export type RoleModelMap = Partial<Record<WorkerRole, Partial<Record<Worker, string>>>>;
-export type RoleReasoningMap = Partial<Record<WorkerRole, string>>;
+export type ReasoningRole = WorkerRole | 'solo';
+export type RoleReasoningMap = Partial<Record<ReasoningRole, string>>;
 
 /** Parse Linear `reasoning: role=level` lines. Newest value wins per role. */
 export function parseReasoningDirectives(text: string | null | undefined): {
@@ -87,12 +88,12 @@ export function parseReasoningDirectives(text: string | null | undefined): {
       const [roleRaw, levelRaw, ...extra] = raw.split('=');
       const role = (roleRaw || '').trim().toLowerCase();
       const level = (levelRaw || '').trim().toLowerCase();
-      if (extra.length || !isWorkerRole(role)) {
+      if (extra.length || (role !== 'solo' && !isWorkerRole(role))) {
         warnings.push(`invalid reasoning role "${role}"`);
       } else if (!allowed.has(level)) {
         warnings.push(`invalid reasoning level "${level}" for role "${role}"`);
       } else {
-        reasoning[role] = level;
+        reasoning[role as ReasoningRole] = level;
       }
     }
   }

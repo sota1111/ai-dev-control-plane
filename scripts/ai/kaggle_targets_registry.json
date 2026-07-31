@@ -84,7 +84,7 @@
           "lineage": "claude",
           "repo": "ptcg-agent-claude",
           "project": "ptcg-agent-claude",
-          "workers_directive": "solo=off, task-check=claude:fable, decomposition=claude:fable, handoff=off",
+          "workers_directive": "solo=claude:fable, handoff=off",
           "submit": {
             "file": "/workspaces/ptcg-agent-claude/submission.tar.gz",
             "message": "auto-improve submit: ptcg-agent-claude champion"
@@ -95,7 +95,7 @@
           "lineage": "gpt",
           "repo": "ptcg-agent-gpt",
           "project": "ptcg-agent-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
+          "workers_directive": "solo=codex:sol, handoff=off\nreasoning: solo=ultra",
           "submit": {
             "file": "/workspaces/ptcg-agent-gpt/submission.tar.gz",
             "message": "auto-improve submit: ptcg-agent-gpt champion"
@@ -115,7 +115,7 @@
           "lineage": "claude",
           "repo": "kaggriculture-claude",
           "project": "kaggriculture-claude",
-          "workers_directive": "solo=off, task-check=claude:fable, decomposition=claude:fable, handoff=off",
+          "workers_directive": "solo=claude:fable, handoff=off",
           "submit": {
             "file": ".targets/kaggriculture-claude/submission.tar.gz",
             "message": "auto-improve submit: kaggriculture-claude champion"
@@ -126,7 +126,7 @@
           "lineage": "gpt",
           "repo": "kaggriculture-gpt",
           "project": "kaggriculture-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
+          "workers_directive": "solo=codex:sol, handoff=off\nreasoning: solo=ultra",
           "submit": {
             "file": ".targets/kaggriculture-gpt/submission.tar.gz",
             "message": "auto-improve submit: kaggriculture-gpt champion"
@@ -147,7 +147,7 @@
           "lineage": "claude",
           "repo": "arc-agi-2-claude",
           "project": "arc-agi-2-claude",
-          "workers_directive": "solo=off, task-check=claude:fable, decomposition=claude:fable, handoff=off",
+          "workers_directive": "solo=claude:fable, handoff=off",
           "submit": {
             "file": "/workspaces/arc-agi-2-claude/main.py",
             "message": "auto-improve submit: arc-agi-2-claude champion"
@@ -158,7 +158,7 @@
           "lineage": "gpt",
           "repo": "arc-agi-2-gpt",
           "project": "arc-agi-2-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
+          "workers_directive": "solo=codex:sol, handoff=off\nreasoning: solo=ultra",
           "champion_status": "exec-verified",
           "submit": {
             "file": "submission.json",
@@ -200,7 +200,7 @@
           "lineage": "claude",
           "repo": "arc-agi-3-claude",
           "project": "arc-agi-3-claude",
-          "workers_directive": "solo=off, task-check=claude:fable, decomposition=claude:fable, handoff=off",
+          "workers_directive": "solo=claude:fable, handoff=off",
           "evaluation_contract": "production-gateway",
           "champion_status": "unproven",
           "submit": {
@@ -213,7 +213,7 @@
           "lineage": "gpt",
           "repo": "arc-agi-3-gpt",
           "project": "arc-agi-3-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
+          "workers_directive": "solo=codex:sol, handoff=off\nreasoning: solo=ultra",
           "evaluation_contract": "production-gateway",
           "champion_status": "exec-verified",
           "submit": {
@@ -246,7 +246,7 @@
           "lineage": "claude",
           "repo": "agent-security-claude",
           "project": "agent-security-claude",
-          "workers_directive": "solo=off, task-check=claude:fable, decomposition=claude:fable, handoff=off",
+          "workers_directive": "solo=claude:fable, handoff=off",
           "submit": {
             "file": "submission.csv",
             "kernel": "sota1111/agent-security-claude-cli-baseline",
@@ -260,7 +260,7 @@
           "lineage": "gpt",
           "repo": "agent-security-gpt",
           "project": "agent-security-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
+          "workers_directive": "solo=codex:sol, handoff=off\nreasoning: solo=ultra",
           "submit": {
             "file": "submission.csv",
             "kernel": "sota1111/agent-security-gpt-champion",
@@ -282,7 +282,7 @@
           "lineage": "claude",
           "repo": "rogii-claude",
           "project": "rogii-claude",
-          "workers_directive": "solo=off, task-check=claude:fable, decomposition=claude:fable, handoff=off",
+          "workers_directive": "solo=claude:fable, handoff=off",
           "submit": {
             "file": ".targets/rogii-claude/submission.csv",
             "kernel": "sota1111/rogii-claude-baseline",
@@ -296,7 +296,7 @@
           "lineage": "gpt",
           "repo": "rogii-gpt",
           "project": "rogii-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
+          "workers_directive": "solo=codex:sol, handoff=off\nreasoning: solo=ultra",
           "submit": {
             "file": "",
             "message": "auto-improve submit: rogii-gpt champion"
@@ -316,7 +316,7 @@
           "lineage": "claude",
           "repo": "biohub-claude",
           "project": "biohub-claude",
-          "workers_directive": "solo=off, task-check=claude:fable, decomposition=claude:fable, handoff=off",
+          "workers_directive": "solo=claude:fable, handoff=off",
           "submit": {
             "file": "submission.csv",
             "kernel": "sota1111/biohub-claude-champion",
@@ -324,13 +324,13 @@
             "output": "submission.csv",
             "message": "auto-improve submit: biohub-claude champion"
           },
-          "next_cycle": 1
+          "next_cycle": 2
         },
         {
           "lineage": "gpt",
           "repo": "biohub-gpt",
           "project": "biohub-gpt",
-          "workers_directive": "solo=off, task-check=codex:sol, decomposition=codex:sol, handoff=off\nreasoning: task-check=ultra, decomposition=ultra",
+          "workers_directive": "solo=codex:sol, handoff=off\nreasoning: solo=ultra",
           "submit": {
             "file": "submission.csv",
             "kernel": "sota1111/biohub-gpt-cycle-2-champion",
@@ -338,14 +338,14 @@
             "output": "submission.csv",
             "message": "auto-improve submit: biohub-gpt cycle-2 champion"
           },
-          "next_cycle": 1
+          "next_cycle": 2
         }
       ]
     }
   ],
   "state": {
     "last_run_at": null,
-    "created_today": 2,
+    "created_today": 4,
     "last_submitted_date": {}
   }
 }

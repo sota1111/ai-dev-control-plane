@@ -22,6 +22,10 @@ describe('parseReasoningDirectives', () => {
     ).reasoning).toEqual({ 'task-check': 'ultra', decomposition: 'max' });
   });
 
+  test('supports reasoning for a solo issue', () => {
+    expect(parseReasoningDirectives('reasoning: solo=ultra').reasoning).toEqual({ solo: 'ultra' });
+  });
+
   test('rejects unknown roles and levels', () => {
     const parsed = parseReasoningDirectives('reasoning: deploy=ultra, implementation=extreme');
     expect(parsed.reasoning).toEqual({});

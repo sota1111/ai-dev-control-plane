@@ -683,9 +683,9 @@ describe('kaggleImprovement', () => {
       for (const c of r.competitions) {
         const claude = c.targets.find((t) => t.lineage === 'claude')!;
         const gpt = c.targets.find((t) => t.lineage === 'gpt')!;
-        expect(claude.workersDirective).toContain('task-check=claude:fable');
-        expect(gpt.workersDirective).toContain('task-check=codex:sol');
-        expect(gpt.workersDirective).toContain('reasoning: task-check=ultra');
+        expect(claude.workersDirective).toContain('solo=claude:fable');
+        expect(gpt.workersDirective).toContain('solo=codex:sol');
+        expect(gpt.workersDirective).toContain('reasoning: solo=ultra');
         expect(buildIssueBody(claude, c, 1, {})).toContain(
           '`workers: solo=claude:opus, handoff=off`'
         );

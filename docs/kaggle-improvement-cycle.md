@@ -101,8 +101,8 @@ Linear で `label:auto-improve` 検索すれば、この自動化が作った全
 本文は `buildIssueBody`（`src/lib/kaggleImprovement.ts`）が決定的に生成する。要点:
 
 ```markdown
-workers: <claude系: solo=off, task-check/decomposition=Fable |
-          gpt系: solo=off, task-check/decomposition=Sol最大reasoning>, handoff=off
+workers: <claude系: solo=claude:fable | gpt系: solo=codex:sol>, handoff=off
+reasoning: <gpt系のみ: solo=ultra>
 
 ## 目的         Kaggleコンペ <slug>（repo/系統）の順位を向上させる方針を決定し子Issueに分解して実施
 ## 入力材料     ### 前回提出結果（順位/スコア） / ### 直近の完了Issueダイジェスト / ### 失敗ログ・KPI抜粋
@@ -113,7 +113,8 @@ workers: <claude系: solo=off, task-check/decomposition=Fable |
 
 このテンプレートは分解トリガー条件（複数独立軸・複数PR・逐次依存）を満たすので、task-check が
 2〜5子Issueへ分解する（＝「plan が起案Issueを読んで順位向上子Issueを作る」要件）。
-子Issue本文にはClaude系なら `workers: solo=claude:opus, handoff=off`、GPT系なら
+親Issueも分解まで同じAIが担当するsolo実行とする。子Issue本文にはClaude系なら
+`workers: solo=claude:opus, handoff=off`、GPT系なら
 `workers: solo=codex:gpt-5.6-sol, handoff=off` を必ず付け、分解後の実装・検証・GitHub・Linear報告を
 それぞれOpus / Solへ固定する。
 

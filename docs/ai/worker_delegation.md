@@ -87,6 +87,7 @@ Codexのreasoning強度もLinearのIssue本文またはコメントからロー�
 
 ```text
 reasoning: task-check=ultra, decomposition=ultra, implementation=high
+reasoning: solo=ultra
 ```
 
 有効値は `low / medium / high / xhigh / max / ultra`。Codex以外のworkerでは指定を保持するが、
