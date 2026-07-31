@@ -255,15 +255,20 @@ fi
 #   sol / "gpt-5.6 sol" / gpt-5.6-sol  → GPT-5.6 Sol (canonical id: gpt-5.6-sol)
 resolve_codex_model_alias() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
-    sol|"gpt-5.6 sol"|gpt-5.6-sol) echo "gpt-5.6-sol" ;;
+    sol|"gpt-5.6 sol"|gpt-5.6-sol|sol-max) echo "gpt-5.6-sol" ;;
     *) printf '%s' "$1" ;;
   esac
 }
 
 CODEX_MODEL_ARGS=()
+CODEX_REASONING_ARGS=()
 if [ -n "${CODEX_MODEL:-}" ]; then
   CODEX_RESOLVED_MODEL="$(resolve_codex_model_alias "$CODEX_MODEL")"
   CODEX_MODEL_ARGS=(-m "$CODEX_RESOLVED_MODEL")
+  if [ "$(printf '%s' "$CODEX_MODEL" | tr '[:upper:]' '[:lower:]')" = "sol-max" ]; then
+    CODEX_REASONING_ARGS=(-c 'model_reasoning_effort="ultra"')
+    echo "run_codex.sh: sol-max uses model_reasoning_effort=ultra" >&2
+  fi
   if [ "$CODEX_RESOLVED_MODEL" != "$CODEX_MODEL" ]; then
     echo "run_codex.sh: model alias '$CODEX_MODEL' → '$CODEX_RESOLVED_MODEL' (codex exec -m)" >&2
   else
@@ -275,7 +280,7 @@ run_codex_cli() {
   if [ "$1" = "resume" ]; then
     timeout "${WORKER_TIMEOUT}s" codex --sandbox danger-full-access exec resume --last "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
   else
-    timeout "${WORKER_TIMEOUT}s" codex --sandbox danger-full-access exec "${CODEX_MODEL_ARGS[@]}" "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
+    timeout "${WORKER_TIMEOUT}s" codex --sandbox danger-full-access exec "${CODEX_MODEL_ARGS[@]}" "${CODEX_REASONING_ARGS[@]}" "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
   fi
   return "${PIPESTATUS[0]}"
 }
@@ -286,7 +291,7 @@ case "$(printf '%s' "${WORKER_SESSION_REUSE:-1}" | tr '[:upper:]' '[:lower:]')" 
 esac
 
 set +e
-if [ "$_REUSE_ENABLED" -eq 1 ] && [ -f "$CODEX_SESSION_MARKER" ]; then
+if [ "$_REUSE_ENABLED" -eq 1 ] && [ -z "${CODEX_MODEL:-}" ] && [ -f "$CODEX_SESSION_MARKER" ]; then
   echo "CODEX_SESSION_REUSE: resuming most recent Codex session (warm cache)" >&2
   run_codex_cli resume
   EXIT_CODE=$?

@@ -504,6 +504,9 @@ export function buildIssueBody(
   cycleNumber: number,
   material: ImprovementMaterial
 ): string {
+  const childWorkers = target.lineage === 'claude'
+    ? 'workers: solo=claude:opus, handoff=off'
+    : 'workers: solo=codex:gpt-5.6-sol, handoff=off';
   const prev =
     material.previousSubmission?.trim() || '(前回提出の記録なし — 初回サイクル、または取得できず)';
   const recent = material.recentIssuesDigest?.trim() || '(新規の完了Issueなし)';
@@ -542,6 +545,7 @@ ${abEvaluation}
 1. 上記材料から未着手の改善軸を選定（非昇格済み軸の再試行は根拠を明示）。
 2. 2〜5個の子Issueに分解して登録（子Issue記述テンプレ・screen→confirmゲート・
    非昇格時 revert+docs・昇格時 exec互換→Kaggle実証を全子に継承）。
+   各子Issueの本文先頭には必ず \`${childWorkers}\` を記載し、分解後の全工程を指定モデルへ固定する。
 3. 取り組み完了時点で、提出契約を通過した最新 artifact を提出する。champion 昇格は必須条件にしない。
 4. 子完了後、親を In Review にして完了報告。
 

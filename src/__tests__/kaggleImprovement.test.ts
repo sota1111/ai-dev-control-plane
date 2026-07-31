@@ -680,6 +680,18 @@ describe('kaggleImprovement', () => {
         dailySubmissionsPerLineage: 2,
         submissionMode: 'both',
       });
+      for (const c of r.competitions) {
+        const claude = c.targets.find((t) => t.lineage === 'claude')!;
+        const gpt = c.targets.find((t) => t.lineage === 'gpt')!;
+        expect(claude.workersDirective).toContain('task-check=claude:fable');
+        expect(gpt.workersDirective).toContain('task-check=codex:sol-max');
+        expect(buildIssueBody(claude, c, 1, {})).toContain(
+          '`workers: solo=claude:opus, handoff=off`'
+        );
+        expect(buildIssueBody(gpt, c, 1, {})).toContain(
+          '`workers: solo=codex:gpt-5.6-sol, handoff=off`'
+        );
+      }
       // SOT-1913 提出cap補正: ARC=1/day & alternate、他=5/day & both。
       for (const c of r.competitions) {
         const isArc = c.key === 'arc-agi-2' || c.key === 'arc-agi-3';
