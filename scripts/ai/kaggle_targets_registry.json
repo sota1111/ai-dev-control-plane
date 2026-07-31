@@ -254,7 +254,7 @@
             "output": "submission.csv",
             "message": "auto-improve submit: agent-security-claude champion"
           },
-          "next_cycle": 1
+          "next_cycle": 2
         },
         {
           "lineage": "gpt",
@@ -268,7 +268,7 @@
             "output": "submission.csv",
             "message": "auto-improve submit: agent-security-gpt champion"
           },
-          "next_cycle": 1
+          "next_cycle": 2
         }
       ]
     },
@@ -345,7 +345,7 @@
   ],
   "state": {
     "last_run_at": null,
-    "created_today": 0,
+    "created_today": 2,
     "last_submitted_date": {}
   }
 }
