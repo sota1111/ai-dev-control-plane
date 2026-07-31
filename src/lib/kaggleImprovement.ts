@@ -611,8 +611,7 @@ export function planChampionSubmission(
   const source = target.submit?.source ?? 'candidate';
   const candidateId = target.submit?.candidateId?.trim() || undefined;
   const label = candidateId || source;
-  const message =
-    target.submit?.message?.trim() || `auto-improve submit: ${target.repo} ${label}`;
+  const message = target.submit?.message?.trim() || `auto-improve submit: ${target.repo} ${label}`;
 
   if (today >= cap) {
     return { ...base, action: 'skip', reason: `daily cap reached (${today}/${cap})` };
@@ -665,6 +664,10 @@ export interface CompetitionSubmitOptions {
   lastSubmittedLineage?: Lineage | null;
   /** UTC calendar date used by alternate mode. Defaults to the current UTC date. */
   dateUtc?: string;
+  /** Repositories that already consumed this exact daily cron slot. */
+  completedSlotRepos?: ReadonlySet<string>;
+  /** All accepted submissions for the competition today, including manual/unregistered ones. */
+  competitionSubmittedToday?: number;
 }
 
 /**
@@ -687,10 +690,9 @@ export function planCompetitionSubmission(
 
   if (competition.submissionMode === 'alternate') {
     // ARC 系: コンペ1日1提出の共有 cap。系統を日替わりで交互に選ぶ。
-    const totalToday = competition.targets.reduce(
-      (sum, t) => sum + (submittedByRepo[t.repo] ?? 0),
-      0
-    );
+    const totalToday =
+      opts.competitionSubmittedToday ??
+      competition.targets.reduce((sum, t) => sum + (submittedByRepo[t.repo] ?? 0), 0);
     const dateUtc = opts.dateUtc ?? new Date().toISOString().slice(0, 10);
     const chosen =
       competition.alternateAnchorDate && competition.alternateAnchorLineage
@@ -701,6 +703,18 @@ export function planCompetitionSubmission(
           )
         : nextAlternateLineage(opts.lastSubmittedLineage ?? null);
     const targets = competition.targets.map((t) => {
+      if (opts.completedSlotRepos?.has(t.repo)) {
+        return {
+          competition: competition.key,
+          kaggleCompetition: competition.kaggleCompetition,
+          repo: t.repo,
+          lineage: t.lineage,
+          action: 'skip' as const,
+          cap: competition.dailySubmissionCap,
+          submittedToday: submittedByRepo[t.repo] ?? 0,
+          reason: 'daily slot already completed (idempotent rerun)',
+        };
+      }
       if (t.lineage !== chosen) {
         const today = submittedByRepo[t.repo] ?? 0;
         return {
@@ -731,7 +745,29 @@ export function planCompetitionSubmission(
     kaggleCompetition: competition.kaggleCompetition,
     mode: 'both',
     targets: competition.targets.map((t) =>
-      planChampionSubmission(competition, t, submittedByRepo[t.repo] ?? 0)
+      (opts.competitionSubmittedToday ?? 0) >= competition.dailySubmissionCap
+        ? {
+            competition: competition.key,
+            kaggleCompetition: competition.kaggleCompetition,
+            repo: t.repo,
+            lineage: t.lineage,
+            action: 'skip' as const,
+            cap: competition.dailySubmissionCap,
+            submittedToday: submittedByRepo[t.repo] ?? 0,
+            reason: `daily competition cap reached (${opts.competitionSubmittedToday}/${competition.dailySubmissionCap})`,
+          }
+        : opts.completedSlotRepos?.has(t.repo)
+          ? {
+              competition: competition.key,
+              kaggleCompetition: competition.kaggleCompetition,
+              repo: t.repo,
+              lineage: t.lineage,
+              action: 'skip' as const,
+              cap: competition.dailySubmissionCap,
+              submittedToday: submittedByRepo[t.repo] ?? 0,
+              reason: 'daily slot already completed (idempotent rerun)',
+            }
+          : planChampionSubmission(competition, t, submittedByRepo[t.repo] ?? 0)
     ),
   };
 }

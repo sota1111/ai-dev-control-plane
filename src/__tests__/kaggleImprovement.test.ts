@@ -558,6 +558,42 @@ describe('kaggleImprovement', () => {
         })!.targets.every((target) => target.action === 'skip')
       ).toBe(true);
     });
+
+    test('same-slot rerun does not consume the next lineage allowance', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].daily_submissions_per_lineage = 2;
+      raw.competitions[0].targets[0].submit = { file: 'submission/claude.py', message: 'm' };
+      raw.competitions[0].targets[1].submit = { file: 'submission/gpt.py', message: 'm' };
+      const registry = parseTargetsRegistry(raw);
+      const plan = planCompetitionSubmission(
+        registry,
+        'ptcg',
+        { 'ptcg-agent-claude': 1, 'ptcg-agent-gpt': 1 },
+        { completedSlotRepos: new Set(['ptcg-agent-claude', 'ptcg-agent-gpt']) }
+      )!;
+      expect(plan.targets.every((target) => target.action === 'skip')).toBe(true);
+      expect(plan.targets.every((target) => target.reason.includes('slot already completed'))).toBe(
+        true
+      );
+    });
+
+    test('manual submissions also consume the competition daily cap', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].daily_submission_cap = 2;
+      raw.competitions[0].daily_submissions_per_lineage = 2;
+      raw.competitions[0].targets[0].submit = { file: 'submission/claude.py', message: 'm' };
+      raw.competitions[0].targets[1].submit = { file: 'submission/gpt.py', message: 'm' };
+      const plan = planCompetitionSubmission(
+        parseTargetsRegistry(raw),
+        'ptcg',
+        {},
+        {
+          competitionSubmittedToday: 2,
+        }
+      )!;
+      expect(plan.targets.every((target) => target.action === 'skip')).toBe(true);
+      expect(plan.targets[0].reason).toContain('competition cap reached');
+    });
   });
 
   describe('shipped registry file', () => {
