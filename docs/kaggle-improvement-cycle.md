@@ -24,7 +24,8 @@ Layer 2: 既存パイプライン（起案Issueを処理）
 ## 単一スケジュール・1枠=1コンペ（ローテーション）
 
 単一 cron を毎時起動し、`--only-scheduled` で **JST [0,3,6,9,12,15,18,21]** の8枠だけを処理する。各枠は
-1コンペの当番で、対象4コンペを12時間間隔で1日2枠ずつ処理する
+1コンペの当番で、対象4コンペを12時間間隔で1日2枠ずつ処理する。各当番では Claude/GPT の2系統を
+独立に解決するため、各コンペは **2時刻×2系統=4提出枠/日** になる
 （専用の提出/フロア cron は持たない）。1回の当番で何系統を提出するかは提出モード次第 — `both` は
 claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（下記「提出上限と提出モード」）。
 
@@ -48,9 +49,11 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
   当該コンペの設定済みartifact提出（`scripts/ai/kaggle_targets_submit.sh --competition <key>`）も行う
   （SOT-1913「日々提出できる状態」）。起案が guard で skip されても提出は独立に試みるので、有効化すれば
   各コンペ1日1回は提出しようとする。実提出は active(2段kill switch) かつ `--execute` のときだけ。
-- **翌日の同じコンペ枠**では、起案材料の先頭に「前回提出結果（順位/スコア）」を含めてから次の改善
-  方針を決める（材料収集は SOT-1932 側）。
-- 冪等: 当日すでに提出済みなら二重提出しない。`submit.file` 未設定（提出物未整備）のコンペは
+- **各枠の開始時**に Kaggle 提出履歴を取得し、直近の submission ref / status / public score と
+  `YYYY-MM-DD-jst-HH` の slot id を `submission-history.jsonl` に記録する。履歴取得または認証に失敗した
+  場合、実行モードでも **safe skip + Discord通知**とし、提出しない。
+- 冪等: 提出メッセージの `[slot:<slot id>]` を履歴で照合する。同じ枠の再実行は、日次2枠目を消費せず
+  skipする。日次lineage上限またはコンペ上限に達した場合もskipする。`submit.file` 未設定（未完成artifact）は
   **skip + Discord 通知**で安全側に倒す（提出物 wiring は各 repo の改善子Issueで整備）。
 
 ### 提出上限と提出モード（SOT-1913 提出cap補正）
@@ -67,8 +70,8 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
 | ptcg | **5** | **`both`** | Claude/GPTの独立repo lineageを共通`submission.tar.gz`契約で各2回/日、計4提出/日まで受け付ける |
 | biohub | **5** | **`both`** | `biohub-claude` / `biohub-gpt`の独立notebook lineageを共通`submission.csv`契約で各2回/日、計4提出/日まで受け付ける。提出・前回スコア証跡は`docs/ai/kaggle/biohub-lineages.json`に記録する |
 
-- `alternate` の「次の系統」は Kaggle 提出履歴の最新提出（`kaggle_targets_submit.sh` が取得）から決める。
-  最後に提出した repo の逆系統が今日の番。履歴が取れないときは claude 始まりで交互する。
+- `alternate` の「次の系統」は UTC日付とregistryのanchorから決定する。履歴取得失敗時は推測せず、
+  実提出をsafe skipする。
 - `alternate` は共有 cap のため、当日そのコンペで（どちらの系統でも）すでに提出済みなら選ばれた系統も
   skip（冪等）。
 - `both` の既定は2系統ぶん（=2提出/日）。`daily_submissions_per_lineage=2` のコンペは4提出/日で cap 5 に収まる。
@@ -160,7 +163,12 @@ bash scripts/ai/kaggle_improvement_cycle.sh --hour 0
 # 実起案（active 時のみ Linear に作成）
 KAGGLE_IMPROVE_ENABLED=1 bash scripts/ai/kaggle_improvement_cycle.sh --hour 0 --execute
 # 完了トリガ提出（当番コンペのartifact提出・ドライラン）
-bash scripts/ai/kaggle_targets_submit.sh --competition ptcg
+bash scripts/ai/kaggle_targets_submit.sh --competition ptcg --hour 0
+
+# 全8日次枠のdry-run（Kaggle履歴を読み、提出はしない）
+for hour in 0 3 6 9 12 15 18 21; do
+  bash scripts/ai/kaggle_improvement_cycle.sh --hour "$hour"
+done
 ```
 
 ### 緊急停止

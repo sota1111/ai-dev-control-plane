@@ -162,7 +162,7 @@ bash "$SCRIPT_DIR/notify_discord.sh" "$summary" >/dev/null 2>&1 || true
 ACTIVE="$(node -e 'const o=JSON.parse(process.argv[1]||"{}");process.stdout.write(o.plan&&o.plan.active?"1":"0")' "$out_json")"
 COMP="$(node -e 'const o=JSON.parse(process.argv[1]||"{}");process.stdout.write((o.plan&&o.plan.competition)||"")' "$out_json")"
 if [[ -n "$COMP" ]]; then
-  submit_args=(--competition "$COMP")
+  submit_args=(--competition "$COMP" --hour "$HOUR")
   if [[ "$EXECUTE" == "1" && "$ACTIVE" == "1" ]]; then
     submit_args+=(--execute)
     echo "== artifact 提出（当番=${COMP}・実提出）=="

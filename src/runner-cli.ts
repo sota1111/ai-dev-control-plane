@@ -1242,9 +1242,38 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         process.stderr.write('kaggle-submission-plan: --last-lineage must be "claude" or "gpt"\n');
         process.exit(1);
       }
+      let completedSlotRepos = new Set<string>();
+      if (flags['completed-slot-repos']) {
+        try {
+          const parsed = JSON.parse(flags['completed-slot-repos']);
+          if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === 'string')) {
+            throw new Error('expected a JSON string array');
+          }
+          completedSlotRepos = new Set(parsed);
+        } catch (err: any) {
+          process.stderr.write(
+            `kaggle-submission-plan: invalid --completed-slot-repos JSON: ${err?.message || err}\n`
+          );
+          process.exit(1);
+        }
+      }
+      const competitionSubmittedToday = flags['competition-submitted']
+        ? Number(flags['competition-submitted'])
+        : undefined;
+      if (
+        competitionSubmittedToday !== undefined &&
+        (!Number.isInteger(competitionSubmittedToday) || competitionSubmittedToday < 0)
+      ) {
+        process.stderr.write(
+          'kaggle-submission-plan: --competition-submitted must be a non-negative integer\n'
+        );
+        process.exit(1);
+      }
       const plan = planCompetitionSubmission(registry, competitionKey, submittedByRepo, {
         lastSubmittedLineage,
         dateUtc: flags['date-utc'],
+        completedSlotRepos,
+        competitionSubmittedToday,
       });
       if (!plan) {
         process.stderr.write(

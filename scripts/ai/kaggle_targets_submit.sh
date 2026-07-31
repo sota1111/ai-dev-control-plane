@@ -68,15 +68,23 @@ mapfile -t REPOS < <(node -e 'const r=JSON.parse(require("fs").readFileSync(proc
 # このコンペの提出モード（both / alternate）。alternate(ARC=1/day 共有)は日替わりで交互提出する。
 SUBMISSION_MODE="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);process.stdout.write(c&&c.submission_mode?c.submission_mode:"both")' "$REGISTRY" "$COMP_KEY")"
 
-# 各 repo の当日提出数を数える（Kaggle 履歴の description に repo 名が入る前提・best-effort）。
+# 各 repo の当日提出数を数える（Kaggle 履歴の description に repo 名が入る前提）。
 # 併せて alternate モード用に「最後に提出した repo（＝系統）」を Kaggle 履歴の最新行から拾う。
 today_utc="$(date -u +%F)"
+slot_id="${today_utc}-jst-$(printf '%02d' "$HOUR")"
 declare -A today_count
 for repo in "${REPOS[@]}"; do today_count["$repo"]=0; done
 LAST_REPO=""
+HISTORY_OK=0
+HISTORY_REASON=""
+raw=""
+completed_slot_repos=()
+TOTAL_TODAY=0
 
-if command -v kaggle >/dev/null 2>&1; then
-  raw="$(kaggle competitions submissions -c "$COMP_SLUG" 2>/dev/null)"
+if ! command -v kaggle >/dev/null 2>&1; then
+  HISTORY_REASON="Kaggle CLI is not installed"
+elif raw="$(kaggle competitions submissions -c "$COMP_SLUG" 2>&1)"; then
+  HISTORY_OK=1
   if [[ -n "$raw" ]]; then
     while IFS= read -r line; do
       [[ -z "${line// }" ]] && continue
@@ -91,12 +99,34 @@ if command -v kaggle >/dev/null 2>&1; then
       grep -qE 'SubmissionStatus\.(ERROR|CANCELLED)' <<<"$line" && continue
       d="$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' <<<"$line" | head -1)"
       [[ "$d" == "$today_utc" ]] || continue
+      TOTAL_TODAY=$((TOTAL_TODAY + 1))
       for repo in "${REPOS[@]}"; do
-        if grep -q "$repo" <<<"$line"; then today_count["$repo"]=$(( ${today_count["$repo"]} + 1 )); fi
+        if grep -Fq "$repo" <<<"$line"; then
+          today_count["$repo"]=$(( ${today_count["$repo"]} + 1 ))
+          if grep -Fq "[slot:${slot_id}]" <<<"$line"; then
+            completed_slot_repos+=("$repo")
+          fi
+        fi
       done
     done < <(printf '%s\n' "$raw" | tail -n +3)
   fi
+else
+  HISTORY_REASON="$(printf '%s' "$raw" | tr '\n' ' ' | cut -c1-300)"
 fi
+
+previous_results_json="$(printf '%s\n' "$raw" | node -e '
+  const input=require("fs").readFileSync(0,"utf8").split(/\r?\n/).filter(Boolean);
+  const rows=input.slice(2,5).map(line=>{
+    const fields=line.trim().split(/\s{2,}|\t+/);
+    return {
+      submission_ref: fields[0] || null,
+      status: fields.find(v=>/^(complete|pending|error|cancelled|SubmissionStatus\.)/i.test(v)) || null,
+      public_score: [...fields].reverse().find(v=>/^-?\d+(?:\.\d+)?$/.test(v)) || null,
+      raw: line.slice(0,500)
+    };
+  });
+  process.stdout.write(JSON.stringify(rows));
+')"
 
 # LAST_REPO → 系統（claude/gpt）。registry の targets から引く。空なら --last-lineage は付けない
 # （engine 側で claude 始まりの交互になる）。
@@ -114,6 +144,10 @@ for repo in "${REPOS[@]}"; do
   first=0
 done
 submitted_json+="}"
+completed_slot_json="$(printf '%s\n' "${completed_slot_repos[@]}" | node -e '
+  const values=require("fs").readFileSync(0,"utf8").split(/\r?\n/).filter(Boolean);
+  process.stdout.write(JSON.stringify([...new Set(values)]));
+')"
 
 # alternate モードのときだけ --last-lineage を付ける（both では engine が無視する）。
 LINEAGE_ARGS=()
@@ -124,18 +158,25 @@ fi
 # 提出プランを得る（candidate/champion 共通）。
 plan_json="$(cd "$REPO_ROOT" && npx --no-install tsx src/runner-cli.ts kaggle-submission-plan \
   --registry "$REGISTRY" --competition "$COMP_KEY" --submitted "$submitted_json" \
-  --date-utc "$today_utc" "${LINEAGE_ARGS[@]}" 2>/dev/null)"
+  --date-utc "$today_utc" --completed-slot-repos "$completed_slot_json" \
+  --competition-submitted "$TOTAL_TODAY" \
+  "${LINEAGE_ARGS[@]}" 2>/dev/null)"
 if [[ -z "$plan_json" ]]; then
   plan_json="$(cd "$REPO_ROOT" && npx tsx src/runner-cli.ts kaggle-submission-plan \
     --registry "$REGISTRY" --competition "$COMP_KEY" --submitted "$submitted_json" \
-    --date-utc "$today_utc" "${LINEAGE_ARGS[@]}" 2>/dev/null)"
+    --date-utc "$today_utc" --completed-slot-repos "$completed_slot_json" \
+    --competition-submitted "$TOTAL_TODAY" \
+    "${LINEAGE_ARGS[@]}" 2>/dev/null)"
 fi
 if [[ -z "$plan_json" ]]; then
   echo "ERROR: kaggle-submission-plan の実行に失敗しました（tsx/runner-cli を確認）。" >&2
   exit 2
 fi
 
-echo "== Kaggle 完了トリガ提出 ($COMP_KEY / $COMP_SLUG) =="
+echo "== Kaggle 完了トリガ提出 ($COMP_KEY / $COMP_SLUG, slot=$slot_id) =="
+if [[ "$HISTORY_OK" != "1" ]]; then
+  echo "  measurement unavailable: $HISTORY_REASON"
+fi
 node -e '
   const o=JSON.parse(process.argv[1]||"{}");
   const mode=o.mode||"both";
@@ -146,22 +187,31 @@ node -e '
 ' "$plan_json"
 
 # 記録（append-only jsonl）。
-HIST_DIR="$REPO_ROOT/docs/ai/kaggle"; HIST_FILE="$HIST_DIR/submission-history.jsonl"; mkdir -p "$HIST_DIR"
+HIST_FILE="${KAGGLE_SUBMISSION_HISTORY:-$REPO_ROOT/docs/ai/kaggle/submission-history.jsonl}"
+HIST_DIR="$(dirname "$HIST_FILE")"; mkdir -p "$HIST_DIR"
 ts="$(date -u +%FT%TZ)"
 node -e '
   const fs=require("fs");
-  const [, file, ts, plan, mode] = process.argv;
-  fs.appendFileSync(file, JSON.stringify({ ts, source:"kaggle_targets_submit", mode, plan:JSON.parse(plan||"{}") })+"\n");
-' "$HIST_FILE" "$ts" "$plan_json" "$([[ $EXECUTE == 1 ]] && echo execute || echo dry-run)"
+  const [, file, ts, plan, mode, slot, historyOk, reason, previous] = process.argv;
+  fs.appendFileSync(file, JSON.stringify({
+    ts, source:"kaggle_targets_submit", mode, slot,
+    history:{ ok:historyOk==="1", reason:reason||null, previous_results:JSON.parse(previous||"[]") },
+    plan:JSON.parse(plan||"{}")
+  })+"\n");
+' "$HIST_FILE" "$ts" "$plan_json" "$([[ $EXECUTE == 1 ]] && echo execute || echo dry-run)" \
+  "$slot_id" "$HISTORY_OK" "$HISTORY_REASON" "$previous_results_json"
 
 if [[ "$EXECUTE" != "1" ]]; then
   echo "  → ドライラン。実提出するには --execute を付けてください。"
   exit 0
 fi
 
-if ! command -v kaggle >/dev/null 2>&1; then
-  echo "ERROR: kaggle CLI が見つかりません（実提出には認証が必要）。" >&2
-  exit 2
+if [[ "$HISTORY_OK" != "1" ]]; then
+  echo "  → SAFE SKIP: 前回提出status/public score/submission refを取得できないため提出しません。" >&2
+  bash "$SCRIPT_DIR/notify_discord.sh" \
+    "kaggle提出 safe skip $COMP_KEY slot=$slot_id: 前回結果取得失敗 ($HISTORY_REASON)" \
+    >/dev/null 2>&1 || true
+  exit 0
 fi
 
 # --execute: action=submit のターゲットを提出。skip は通知のみ。
@@ -177,7 +227,7 @@ for ((i=0; i<n_targets; i++)); do
     continue
   fi
   file="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].file)||"")' "$plan_json" "$i")"
-  msg="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].message)||"")' "$plan_json" "$i")"
+  msg="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].message)||"")' "$plan_json" "$i") [slot:${slot_id}]"
   kernel="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].kernel)||"")' "$plan_json" "$i")"
   version="$(node -e 'process.stdout.write(String((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].version)||""))' "$plan_json" "$i")"
   output="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].output)||"")' "$plan_json" "$i")"
