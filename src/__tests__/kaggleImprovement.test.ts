@@ -577,6 +577,46 @@ describe('kaggleImprovement', () => {
       );
     });
 
+    test('fingerprint-gated repeats reject duplicates and accept an independently verified artifact', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].daily_submissions_per_lineage = 2;
+      raw.competitions[0].repeat_requires_new_artifact = true;
+      raw.competitions[0].targets[0].submit = { file: 'submission/claude.py', message: 'm' };
+      const registry = parseTargetsRegistry(raw);
+      const common = {
+        artifactFingerprintsByRepo: { 'ptcg-agent-claude': 'sha256:same' },
+        submittedArtifactFingerprintsByRepo: { 'ptcg-agent-claude': ['sha256:same'] },
+      };
+      expect(
+        planCompetitionSubmission(registry, 'ptcg', { 'ptcg-agent-claude': 1 }, common)!.targets[0]
+      ).toMatchObject({ action: 'skip' });
+      expect(
+        planCompetitionSubmission(
+          registry,
+          'ptcg',
+          { 'ptcg-agent-claude': 1 },
+          {
+            ...common,
+            artifactFingerprintsByRepo: { 'ptcg-agent-claude': 'sha256:new' },
+          }
+        )!.targets[0]
+      ).toMatchObject({ action: 'submit' });
+    });
+
+    test('fingerprint-gated repeats fail closed when prior provenance is unavailable', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].daily_submissions_per_lineage = 2;
+      raw.competitions[0].repeat_requires_new_artifact = true;
+      raw.competitions[0].targets[0].submit = { file: 'submission/claude.py', message: 'm' };
+      const plan = planCompetitionSubmission(
+        parseTargetsRegistry(raw),
+        'ptcg',
+        { 'ptcg-agent-claude': 1 },
+        { artifactFingerprintsByRepo: { 'ptcg-agent-claude': 'sha256:current' } }
+      )!;
+      expect(plan.targets[0].reason).toContain('prior fingerprint is unavailable');
+    });
+
     test('manual submissions also consume the competition daily cap', () => {
       const raw = JSON.parse(JSON.stringify(rawRegistry));
       raw.competitions[0].daily_submission_cap = 2;
