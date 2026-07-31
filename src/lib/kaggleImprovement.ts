@@ -849,11 +849,8 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
     if (!skipReason && sig.measurementFailureReason) {
       skipReason = sig.measurementFailureReason;
     }
-    if (!skipReason && sig.plateauReason) {
-      skipReason = sig.plateauReason;
-    }
     if (!skipReason && !sig.hasNewMaterial) {
-      skipReason = 'no new completed issue since the last cycle (no new material)';
+      skipReason = 'no new completed issue or scored Kaggle result since the last cycle';
     }
 
     if (skipReason) {
@@ -863,7 +860,9 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
     return {
       ...common,
       action: 'draft' as const,
-      reason: 'all guards passed',
+      reason: sig.plateauReason
+        ? `new scored result requires improvement planning; ${sig.plateauReason}`
+        : 'all guards passed',
       issueTitle: buildIssueTitle(t, t.nextCycle),
       issueBody: buildIssueBody(t, competition, t.nextCycle, mat),
     };

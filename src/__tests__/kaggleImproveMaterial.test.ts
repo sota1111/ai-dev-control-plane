@@ -3,6 +3,7 @@ import {
   formatPreviousSubmission,
   filterFailureLog,
   buildRecentIssuesDigest,
+  hasScoredSubmissionSince,
   classifyKaggleCliFailure,
   type CompletedIssue,
 } from '../lib/kaggleImproveMaterial.js';
@@ -52,6 +53,34 @@ describe('kaggleImproveMaterial', () => {
 
     test('returns undefined when there are no rows', () => {
       expect(formatPreviousSubmission([])).toBeUndefined();
+    });
+  });
+
+  describe('hasScoredSubmissionSince', () => {
+    const rows = [
+      {
+        date: '2026-07-31 09:00:15.480000',
+        status: 'SubmissionStatus.COMPLETE',
+        publicScore: '0.000',
+      },
+      {
+        date: '2026-07-31 09:00:12.493000',
+        status: 'SubmissionStatus.PENDING',
+      },
+    ];
+
+    test('treats a newly completed score, including zero, as new material', () => {
+      expect(hasScoredSubmissionSince(rows, '2026-07-31T08:00:00Z')).toBe(true);
+    });
+
+    test('does not retrigger for an already-consumed score or a pending submission', () => {
+      expect(hasScoredSubmissionSince(rows, '2026-07-31T10:00:00Z')).toBe(false);
+      expect(
+        hasScoredSubmissionSince(
+          [{ date: '2026-07-31 11:00:00', status: 'PENDING', publicScore: '1.0' }],
+          '2026-07-31T10:00:00Z'
+        )
+      ).toBe(false);
     });
   });
 

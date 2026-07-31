@@ -356,7 +356,7 @@ describe('kaggleImprovement', () => {
       );
       const claude = plan.targets.find((t) => t.project === 'ptcg-agent-claude')!;
       expect(claude.action).toBe('skip');
-      expect(claude.reason).toMatch(/no new material/);
+      expect(claude.reason).toMatch(/no new completed issue or scored Kaggle result/);
     });
 
     test('measurement health guard suppresses blind drafting before plateau/material guards', () => {
@@ -380,7 +380,7 @@ describe('kaggleImprovement', () => {
       expect(target?.reason).toContain('authentication failed');
     });
 
-    test('plateau escalation stops drafting with an actionable reason', () => {
+    test('plateau escalation triggers drafting from the scored result', () => {
       const plan = planImprovementCycle(
         baseInput({
           registry: enabledReg(),
@@ -396,7 +396,7 @@ describe('kaggleImprovement', () => {
         })
       );
       const claude = plan.targets.find((t) => t.project === 'ptcg-agent-claude')!;
-      expect(claude.action).toBe('skip');
+      expect(claude.action).toBe('draft');
       expect(claude.reason).toMatch(/plateau escalation/);
     });
   });

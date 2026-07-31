@@ -132,6 +132,29 @@ export function formatPreviousSubmission(rows: KaggleSubmissionRow[], maxRows = 
   return lines.join('\n');
 }
 
+/** 前回の改善Issue作成後に確定した、スコア付きKaggle結果があるか。 */
+export function hasScoredSubmissionSince(
+  rows: KaggleSubmissionRow[],
+  sinceIso: string | null
+): boolean {
+  if (sinceIso === null) return rows.some(isCompletedScoredSubmission);
+  const sinceMs = Date.parse(sinceIso);
+  if (Number.isNaN(sinceMs)) return rows.some(isCompletedScoredSubmission);
+  return rows.some((row) => {
+    if (!isCompletedScoredSubmission(row) || !row.date) return false;
+    const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(row.date)
+      ? `${row.date.replace(' ', 'T')}Z`
+      : row.date;
+    const submittedMs = Date.parse(normalized);
+    return !Number.isNaN(submittedMs) && submittedMs > sinceMs;
+  });
+}
+
+function isCompletedScoredSubmission(row: KaggleSubmissionRow): boolean {
+  const status = (row.status || '').toUpperCase();
+  return status.endsWith('COMPLETE') && row.publicScore !== undefined;
+}
+
 /**
  * failure-log.md 本文から、指定キー（repo名・コンペkey 等）を含む行だけを抜粋する。
  * 1行も一致しなければ undefined。長すぎる場合は maxLines で打ち切り、省略を明示する。
@@ -371,7 +394,7 @@ export async function collectImproveContext(
       const issues = await fetchCompletedIssues(t.project, label);
       const r = buildRecentIssuesDigest(issues, sinceIso);
       digest = r.digest;
-      hasNewMaterial = r.hasNewMaterial;
+      hasNewMaterial = r.hasNewMaterial || hasScoredSubmissionSince(submissionRows, sinceIso);
     } catch (err: any) {
       log(`recent-issues collection failed for ${t.project}: ${err?.message || err}`);
     }
