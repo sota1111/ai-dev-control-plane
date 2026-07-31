@@ -23,8 +23,8 @@ Layer 2: 既存パイプライン（起案Issueを処理）
 
 ## 単一スケジュール・1枠=1コンペ（ローテーション）
 
-単一 cron を毎時起動し、`--only-scheduled` で **JST [0,4,8,12,16,20] の6枠**だけを処理する。各枠は
-1コンペの当番で、6枠で6コンペを一巡する。各コンペは1日1回当番になり、その当番枠でそのコンペを提出する
+単一 cron を毎時起動し、`--only-scheduled` で registry の JST 枠だけを処理する。各枠は
+1コンペの当番で、Kaggriculture は1日2枠、他コンペは1日1枠で提出する
 （専用の提出/フロア cron は持たない）。1回の当番で何系統を提出するかは提出モード次第 — `both` は
 claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（下記「提出上限と提出モード」）。
 
@@ -35,6 +35,7 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
 | 8  | arc-agi-3      | arc-agi-3-claude     | arc-agi-3-gpt     |
 | 12 | agent-security | agent-security-claude| agent-security-gpt|
 | 16 | rogii          | rogii-claude         | rogii-gpt         |
+| 2 / 14 | kaggriculture | kaggriculture-claude | kaggriculture-gpt |
 | 20 | biohub         | biohub-claude        | biohub-gpt        |
 
 ローテーション表・コンペ定義・提出物パスは `scripts/ai/kaggle_targets_registry.json`。
@@ -63,6 +64,7 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
 | --- | --- | --- | --- |
 | ARC（arc-agi-2 / arc-agi-3） | **1** | **`alternate`** | 1日1提出のみ。claude/gpt を**日替わりで交互**に提出（前回提出系統の逆を選ぶ） |
 | 他4コンペ（ptcg / agent-security / rogii / biohub） | **5** | **`both`** | claude/gpt を**両方提出**し、両系統の結果を確認する |
+| kaggriculture | **5** | **`both`** | JST 2時・14時の2枠で各lineageを1回ずつ、計4提出/日まで受け付ける |
 
 - `alternate` の「次の系統」は Kaggle 提出履歴の最新提出（`kaggle_targets_submit.sh` が取得）から決める。
   最後に提出した repo の逆系統が今日の番。履歴が取れないときは claude 始まりで交互する。

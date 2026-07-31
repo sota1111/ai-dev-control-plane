@@ -2,9 +2,9 @@
  * SOT-1913 / SOT-1932 — Kaggle 改善サイクルの「起案エンジン」（pure functions, no I/O）。
  *
  * 設計（docs/ai/linear/SOT-1913.md v4）:
- *  - 6コンペ × 2系統(claude=旧fable / gpt=旧sol) = 12ターゲットのレジストリ
+ *  - 7コンペ × 2系統(claude=旧fable / gpt=旧sol) = 14ターゲットのレジストリ
  *    (scripts/ai/kaggle_targets_registry.json)。
- *  - 単一スケジュール JST [0,4,8,12,16,20]。**1枠=1コンペ**（rotation 表で枠→コンペを解決）。
+ *  - 単一スケジュールを registry で定義。**1枠=1コンペ**（rotation 表で枠→コンペを解決）。
  *  - 各枠では「その枠の当番コンペ」の claude/gpt 2ターゲットだけを対象にガード(§5)を評価し、
  *    通過分に「改善方針の親Issue」を1本 起案する。cron は LLM を呼ばず、ここは決定的処理のみ。
  *
@@ -74,6 +74,8 @@ export interface ImprovementCompetition {
   key: string;
   kaggleCompetition: string;
   dailySubmissionCap: number;
+  /** `both` mode: accepted submissions allowed per lineage and UTC day. Default 1. */
+  dailySubmissionsPerLineage: number;
   /** 提出モード。default `both`。ARC(1/day 共有)は `alternate`（claude/gpt を日替わり交互提出）。 */
   submissionMode: SubmissionMode;
   alternateAnchorDate?: string;
@@ -175,20 +177,14 @@ export function parseTargetsRegistry(raw: unknown): TargetsRegistry {
   const compKeys = new Set(competitions.map((c) => c.key));
   for (const rot of rotation) {
     if (!compKeys.has(rot.competition)) {
-      throw new Error(
-        `registry.rotation references unknown competition "${rot.competition}"`
-      );
+      throw new Error(`registry.rotation references unknown competition "${rot.competition}"`);
     }
   }
 
   return { enabled, scheduleHoursJst, rotation, issueCapGuard: capGuardRaw, competitions };
 }
 
-function parseCompetition(
-  c: unknown,
-  i: number,
-  seen: Set<string>
-): ImprovementCompetition {
+function parseCompetition(c: unknown, i: number, seen: Set<string>): ImprovementCompetition {
   if (!c || typeof c !== 'object') {
     throw new Error(`registry.competitions[${i}] must be an object`);
   }
@@ -211,19 +207,31 @@ function parseCompetition(
   if (typeof cap !== 'number' || !Number.isInteger(cap) || cap <= 0) {
     throw new Error(`registry.competitions[${i}].daily_submission_cap must be a positive integer`);
   }
+  const dailySubmissionsPerLineage =
+    co.daily_submissions_per_lineage ?? co.dailySubmissionsPerLineage ?? 1;
+  if (
+    typeof dailySubmissionsPerLineage !== 'number' ||
+    !Number.isInteger(dailySubmissionsPerLineage) ||
+    dailySubmissionsPerLineage < 1 ||
+    dailySubmissionsPerLineage > cap
+  ) {
+    throw new Error(
+      `registry.competitions[${i}].daily_submissions_per_lineage must be an integer between 1 and daily_submission_cap`
+    );
+  }
 
   const modeRaw = co.submission_mode ?? co.submissionMode ?? 'both';
   if (modeRaw !== 'both' && modeRaw !== 'alternate') {
-    throw new Error(
-      `registry.competitions[${i}].submission_mode must be "both" or "alternate"`
-    );
+    throw new Error(`registry.competitions[${i}].submission_mode must be "both" or "alternate"`);
   }
   const submissionMode = modeRaw as SubmissionMode;
   const alternateAnchorDate = co.alternate_anchor_date ?? co.alternateAnchorDate;
   const alternateAnchorLineage = co.alternate_anchor_lineage ?? co.alternateAnchorLineage;
   if (submissionMode === 'alternate') {
     if (typeof alternateAnchorDate !== 'string') {
-      throw new Error(`registry.competitions[${i}].alternate_anchor_date is required for alternate mode`);
+      throw new Error(
+        `registry.competitions[${i}].alternate_anchor_date is required for alternate mode`
+      );
     }
     alternateLineageForUtcDate(alternateAnchorDate, alternateAnchorDate, 'claude');
     if (alternateAnchorLineage !== 'claude' && alternateAnchorLineage !== 'gpt') {
@@ -238,9 +246,7 @@ function parseCompetition(
     throw new Error(`registry.competitions[${i}].targets must be a non-empty array`);
   }
   const linSeen = new Set<string>();
-  const targets: ImprovementTarget[] = targetsRaw.map((t, j) =>
-    parseTarget(t, i, j, linSeen)
-  );
+  const targets: ImprovementTarget[] = targetsRaw.map((t, j) => parseTarget(t, i, j, linSeen));
 
   let abEvaluation: ImprovementCompetition['abEvaluation'];
   const abRaw = co.ab_evaluation ?? co.abEvaluation;
@@ -303,6 +309,7 @@ function parseCompetition(
     key,
     kaggleCompetition,
     dailySubmissionCap: cap,
+    dailySubmissionsPerLineage,
     submissionMode,
     alternateAnchorDate: alternateAnchorDate as string | undefined,
     alternateAnchorLineage: alternateAnchorLineage as Lineage | undefined,
@@ -311,12 +318,7 @@ function parseCompetition(
   };
 }
 
-function parseTarget(
-  t: unknown,
-  ci: number,
-  ti: number,
-  linSeen: Set<string>
-): ImprovementTarget {
+function parseTarget(t: unknown, ci: number, ti: number, linSeen: Set<string>): ImprovementTarget {
   if (!t || typeof t !== 'object') {
     throw new Error(`registry.competitions[${ci}].targets[${ti}] must be an object`);
   }
@@ -339,7 +341,9 @@ function parseTarget(
   }
   const project = to.project;
   if (typeof project !== 'string' || !project) {
-    throw new Error(`registry.competitions[${ci}].targets[${ti}].project must be a non-empty string`);
+    throw new Error(
+      `registry.competitions[${ci}].targets[${ti}].project must be a non-empty string`
+    );
   }
   const workersDirective = to.workers_directive ?? to.workersDirective;
   if (typeof workersDirective !== 'string' || !workersDirective) {
@@ -470,7 +474,8 @@ export function buildIssueBody(
   cycleNumber: number,
   material: ImprovementMaterial
 ): string {
-  const prev = material.previousSubmission?.trim() || '(前回提出の記録なし — 初回サイクル、または取得できず)';
+  const prev =
+    material.previousSubmission?.trim() || '(前回提出の記録なし — 初回サイクル、または取得できず)';
   const recent = material.recentIssuesDigest?.trim() || '(新規の完了Issueなし)';
   const failure = material.failureKpiExcerpt?.trim() || '(該当なし)';
   const abEvaluation = competition.abEvaluation
@@ -554,7 +559,7 @@ export interface ChampionSubmitPlan {
 
 /**
  * 1ターゲットの完了トリガ提出を決める。コンペ内の収束/選定は行わず、常に現 champion を提出する。
- *  - 当日すでに提出済み（submittedToday >= 1）なら skip（同日二重提出しない・冪等）。
+ *  - 当日の系統別目標数に到達済みなら skip（同一枠の再実行は冪等）。
  *  - submit.file 未設定（提出物未整備）なら skip（呼び出し側が Discord 通知して安全側に倒す）。
  *  - コンペの daily_submission_cap に達していれば skip。
  *  - それ以外は submit（現 champion）。
@@ -565,7 +570,8 @@ export function planChampionSubmission(
   submittedToday: number
 ): ChampionSubmitPlan {
   const cap = competition.dailySubmissionCap;
-  const today = Number.isFinite(submittedToday) && submittedToday > 0 ? Math.floor(submittedToday) : 0;
+  const today =
+    Number.isFinite(submittedToday) && submittedToday > 0 ? Math.floor(submittedToday) : 0;
   const base = {
     competition: competition.key,
     kaggleCompetition: competition.kaggleCompetition,
@@ -575,19 +581,32 @@ export function planChampionSubmission(
     submittedToday: today,
   };
   const file = target.submit?.file?.trim() || '';
-  const message = target.submit?.message?.trim()
-    || `auto-improve submit: ${target.repo} champion`;
+  const message = target.submit?.message?.trim() || `auto-improve submit: ${target.repo} champion`;
 
-  if (today >= 1) {
-    return { ...base, action: 'skip', reason: `already submitted today (idempotent, no double submit): ${today}` };
-  }
   if (today >= cap) {
     return { ...base, action: 'skip', reason: `daily cap reached (${today}/${cap})` };
   }
-  if (!file) {
-    return { ...base, action: 'skip', reason: 'no submit.file (提出物未整備) — skip + notify (safe side)' };
+  if (today >= competition.dailySubmissionsPerLineage) {
+    return {
+      ...base,
+      action: 'skip',
+      reason: `daily lineage target reached (idempotent): ${today}/${competition.dailySubmissionsPerLineage}`,
+    };
   }
-  return { ...base, action: 'submit', file, message, reason: 'submit current champion (no in-competition selection gate)' };
+  if (!file) {
+    return {
+      ...base,
+      action: 'skip',
+      reason: 'no submit.file (提出物未整備) — skip + notify (safe side)',
+    };
+  }
+  return {
+    ...base,
+    action: 'submit',
+    file,
+    message,
+    reason: 'submit current champion (no in-competition selection gate)',
+  };
 }
 
 /** SOT-1934 — 当番コンペの全ターゲット（claude/gpt）ぶんの提出プラン。 */
