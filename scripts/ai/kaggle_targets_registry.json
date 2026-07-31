@@ -25,16 +25,49 @@
     "state": "cron が更新する実行状態（last_run_at / created_today / last_submitted_date）。"
   },
   "enabled": true,
-  "schedule_hours_jst": [0, 3, 6, 9, 12, 15, 18, 21],
+  "schedule_hours_jst": [
+    0,
+    3,
+    6,
+    9,
+    12,
+    15,
+    18,
+    21
+  ],
   "rotation": [
-    { "hour_jst": 0, "competition": "ptcg" },
-    { "hour_jst": 3, "competition": "kaggriculture" },
-    { "hour_jst": 6, "competition": "agent-security" },
-    { "hour_jst": 9, "competition": "biohub" },
-    { "hour_jst": 12, "competition": "ptcg" },
-    { "hour_jst": 15, "competition": "kaggriculture" },
-    { "hour_jst": 18, "competition": "agent-security" },
-    { "hour_jst": 21, "competition": "biohub" }
+    {
+      "hour_jst": 0,
+      "competition": "ptcg"
+    },
+    {
+      "hour_jst": 3,
+      "competition": "kaggriculture"
+    },
+    {
+      "hour_jst": 6,
+      "competition": "agent-security"
+    },
+    {
+      "hour_jst": 9,
+      "competition": "biohub"
+    },
+    {
+      "hour_jst": 12,
+      "competition": "ptcg"
+    },
+    {
+      "hour_jst": 15,
+      "competition": "kaggriculture"
+    },
+    {
+      "hour_jst": 18,
+      "competition": "agent-security"
+    },
+    {
+      "hour_jst": 21,
+      "competition": "biohub"
+    }
   ],
   "issue_cap_guard": 240,
   "competitions": [
@@ -144,7 +177,11 @@
       "daily_submission_cap": 1,
       "submission_mode": "alternate",
       "ab_evaluation": {
-        "game_ids": ["ls20", "ft09", "sp80"],
+        "game_ids": [
+          "ls20",
+          "ft09",
+          "sp80"
+        ],
         "action_budget": 100,
         "trials_per_game": 3,
         "seed": 2191,
@@ -164,7 +201,10 @@
           "workers_directive": "solo=claude:opus, handoff=off",
           "evaluation_contract": "production-gateway",
           "champion_status": "unproven",
-          "submit": { "file": "", "message": "auto-improve submit: arc-agi-3-claude champion" },
+          "submit": {
+            "file": "",
+            "message": "auto-improve submit: arc-agi-3-claude champion"
+          },
           "next_cycle": 1
         },
         {
@@ -186,7 +226,7 @@
             "artifact_fingerprint": "sha256:c667ea758bf72eab13086ed9f1c29c22b5eb9306b9a0830568cbd5f2995ee0c1",
             "submission_ref": 55095979,
             "submission_status": "COMPLETE",
-            "public_score": 0.0,
+            "public_score": 0,
             "message": "auto-improve submit: arc-agi-3-gpt champion"
           },
           "next_cycle": 6
@@ -255,7 +295,10 @@
           "repo": "rogii-gpt",
           "project": "rogii-gpt",
           "workers_directive": "solo=codex:gpt-5.6-sol, handoff=off",
-          "submit": { "file": "", "message": "auto-improve submit: rogii-gpt champion" },
+          "submit": {
+            "file": "",
+            "message": "auto-improve submit: rogii-gpt champion"
+          },
           "next_cycle": 1
         }
       ]
@@ -298,5 +341,9 @@
       ]
     }
   ],
-  "state": { "last_run_at": null, "created_today": 0, "last_submitted_date": {} }
+  "state": {
+    "last_run_at": null,
+    "created_today": 0,
+    "last_submitted_date": {}
+  }
 }
