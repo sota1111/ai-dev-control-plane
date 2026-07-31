@@ -507,12 +507,12 @@ describe('kaggleImprovement', () => {
   });
 
   describe('shipped registry file', () => {
-    test('scripts/ai/kaggle_targets_registry.json parses and is default-OFF with 6 competitions', () => {
+    test('scripts/ai/kaggle_targets_registry.json parses and is default-OFF with 7 competitions', () => {
       const here = path.dirname(fileURLToPath(import.meta.url));
       const p = path.join(here, '..', '..', 'scripts', 'ai', 'kaggle_targets_registry.json');
       const r = parseTargetsRegistry(JSON.parse(fs.readFileSync(p, 'utf8')));
       expect(r.enabled).toBe(false);
-      expect(r.competitions).toHaveLength(6);
+      expect(r.competitions).toHaveLength(7);
       expect(r.rotation).toHaveLength(6);
       // 各コンペは claude/gpt の2ターゲットを持つ。
       for (const c of r.competitions) {

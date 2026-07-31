@@ -44,7 +44,10 @@
           "repo": "ptcg-agent-claude",
           "project": "ptcg-agent-claude",
           "workers_directive": "solo=claude:opus, handoff=off",
-          "submit": { "file": "", "message": "auto-improve submit: ptcg-agent-claude champion" },
+          "submit": {
+            "file": "/workspaces/ptcg-agent-claude/submission.tar.gz",
+            "message": "auto-improve submit: ptcg-agent-claude champion"
+          },
           "next_cycle": 1
         },
         {
@@ -52,7 +55,10 @@
           "repo": "ptcg-agent-gpt",
           "project": "ptcg-agent-gpt",
           "workers_directive": "solo=codex:gpt-5.6-sol, handoff=off",
-          "submit": { "file": "", "message": "auto-improve submit: ptcg-agent-gpt champion" },
+          "submit": {
+            "file": "/workspaces/ptcg-agent-gpt/submission.tar.gz",
+            "message": "auto-improve submit: ptcg-agent-gpt champion"
+          },
           "next_cycle": 1
         }
       ]
@@ -175,7 +181,13 @@
           "repo": "agent-security-gpt",
           "project": "agent-security-gpt",
           "workers_directive": "solo=codex:gpt-5.6-sol, handoff=off",
-          "submit": { "file": "", "message": "auto-improve submit: agent-security-gpt champion" },
+          "submit": {
+            "file": "submission.csv",
+            "kernel": "sota1111/agent-security-gpt-champion",
+            "version": 2,
+            "output": "submission.csv",
+            "message": "auto-improve submit: agent-security-gpt champion"
+          },
           "next_cycle": 1
         }
       ]
@@ -212,7 +224,7 @@
     },
     {
       "key": "biohub",
-      "kaggle_competition": "biohub-cell-tracking",
+      "kaggle_competition": "biohub-cell-tracking-during-development",
       "daily_submission_cap": 5,
       "submission_mode": "both",
       "targets": [
@@ -221,7 +233,13 @@
           "repo": "biohub-claude",
           "project": "biohub-claude",
           "workers_directive": "solo=claude:opus, handoff=off",
-          "submit": { "file": "", "message": "auto-improve submit: biohub-claude champion" },
+          "submit": {
+            "file": "submission.csv",
+            "kernel": "sota1111/biohub-claude-champion",
+            "version": 4,
+            "output": "submission.csv",
+            "message": "auto-improve submit: biohub-claude champion"
+          },
           "next_cycle": 1
         },
         {
@@ -229,7 +247,43 @@
           "repo": "biohub-gpt",
           "project": "biohub-gpt",
           "workers_directive": "solo=codex:gpt-5.6-sol, handoff=off",
-          "submit": { "file": "", "message": "auto-improve submit: biohub-gpt champion" },
+          "submit": {
+            "file": "submission.csv",
+            "kernel": "sota1111/biohub-gpt-cycle-2-champion",
+            "version": 10,
+            "output": "submission.csv",
+            "message": "auto-improve submit: biohub-gpt cycle-2 champion"
+          },
+          "next_cycle": 1
+        }
+      ]
+    },
+    {
+      "key": "kaggriculture",
+      "kaggle_competition": "kaggriculture",
+      "daily_submission_cap": 5,
+      "submission_mode": "both",
+      "targets": [
+        {
+          "lineage": "claude",
+          "repo": "kaggriculture-claude",
+          "project": "kaggriculture-claude",
+          "workers_directive": "solo=claude:opus, handoff=off",
+          "submit": {
+            "file": "/workspaces/ai-dev-control-plane/.targets/kaggriculture-claude/submission.tar.gz",
+            "message": "auto-improve submit: kaggriculture-claude champion"
+          },
+          "next_cycle": 1
+        },
+        {
+          "lineage": "gpt",
+          "repo": "kaggriculture-gpt",
+          "project": "kaggriculture-gpt",
+          "workers_directive": "solo=codex:gpt-5.6-sol, handoff=off",
+          "submit": {
+            "file": "/workspaces/ai-dev-control-plane/.targets/kaggriculture-gpt/submission.tar.gz",
+            "message": "auto-improve submit: kaggriculture-gpt champion"
+          },
           "next_cycle": 1
         }
       ]

@@ -86,6 +86,9 @@ if command -v kaggle >/dev/null 2>&1; then
           if grep -q "$repo" <<<"$line"; then LAST_REPO="$repo"; break; fi
         done
       fi
+      # Failed submissions do not consume a usable daily lineage slot. Permit a
+      # corrected artifact to retry while still deduplicating PENDING/COMPLETE.
+      grep -qE 'SubmissionStatus\.(ERROR|CANCELLED)' <<<"$line" && continue
       d="$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' <<<"$line" | head -1)"
       [[ "$d" == "$today_utc" ]] || continue
       for repo in "${REPOS[@]}"; do
