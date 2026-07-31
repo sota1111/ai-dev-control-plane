@@ -54,6 +54,14 @@ export interface TargetSubmitSpec {
   file?: string;
   /** 提出メッセージ。 */
   message?: string;
+  /** 提出物の由来。candidate は champion 昇格を要求しない。既定 candidate。 */
+  source?: 'candidate' | 'champion';
+  /** ログ・提出メッセージに残す候補識別子。 */
+  candidateId?: string;
+  /** Notebook submission contract. */
+  kernel?: string;
+  version?: number;
+  output?: string;
 }
 
 /** レジストリの1ターゲット（= 1リポジトリ）。 */
@@ -369,6 +377,20 @@ function parseTarget(t: unknown, ci: number, ti: number, linSeen: Set<string>): 
     const spec: TargetSubmitSpec = {};
     if (typeof so.file === 'string') spec.file = so.file;
     if (typeof so.message === 'string') spec.message = so.message;
+    const source = so.source ?? 'candidate';
+    if (source !== 'candidate' && source !== 'champion') {
+      throw new Error(
+        `registry.competitions[${ci}].targets[${ti}].submit.source must be "candidate" or "champion"`
+      );
+    }
+    spec.source = source;
+    const candidateId = so.candidate_id ?? so.candidateId;
+    if (typeof candidateId === 'string' && candidateId.trim()) spec.candidateId = candidateId;
+    if (typeof so.kernel === 'string') spec.kernel = so.kernel;
+    if (typeof so.version === 'number' && Number.isInteger(so.version) && so.version > 0) {
+      spec.version = so.version;
+    }
+    if (typeof so.output === 'string') spec.output = so.output;
     target.submit = spec;
   }
   return target;
@@ -512,7 +534,7 @@ ${abEvaluation}
 1. 上記材料から未着手の改善軸を選定（非昇格済み軸の再試行は根拠を明示）。
 2. 2〜5個の子Issueに分解して登録（子Issue記述テンプレ・screen→confirmゲート・
    非昇格時 revert+docs・昇格時 exec互換→Kaggle実証を全子に継承）。
-3. 取り組み完了時点で当該コンペの現 champion を提出する。
+3. 取り組み完了時点で、提出契約を通過した最新 artifact を提出する。champion 昇格は必須条件にしない。
 4. 子完了後、親を In Review にして完了報告。
 
 ## 実行リソース
@@ -522,7 +544,7 @@ ${abEvaluation}
 ## 受け入れ条件
 - [ ] 改善方針と選定理由がコメントに記録されている
 - [ ] 子Issueが登録され、全て終端状態に達している
-- [ ] 昇格/非昇格の結論が champion 状態と整合している
+- [ ] 提出した candidate/champion と検証結果の対応が記録されている
 - [ ] 取り組み完了時に提出が行われた（提出物未整備なら skip 理由を明記）
 ${
   competition.abEvaluation
@@ -535,10 +557,10 @@ ${
 }
 
 /**
- * SOT-1934 — 「取り組み完了時に提出」の champion 提出プラン（コンペ内収束/選定なし・純粋関数）。
+ * SOT-1934 — 「取り組み完了時に提出」の artifact 提出プラン（純粋関数）。
  *
  * SOT-1904 の「直近2提出収束ロジック／2枠選定ゲート」は **この経路では使わない**。提出対象は常に
- * そのターゲットの現 champion（registry の submit.file）。別スケジュールの提出 cron は持たず、当番
+ * registry の submit が指す検証済み artifact。champion 昇格は提出の前提にしない。別スケジュールの提出 cron は持たず、当番
  * コンペの取り組み完了時にこのプランで提出する。1枠=1コンペ一巡で各コンペ1日1提出が自然に成立する。
  */
 export interface ChampionSubmitPlan {
@@ -546,23 +568,28 @@ export interface ChampionSubmitPlan {
   kaggleCompetition: string;
   repo: string;
   lineage: Lineage;
-  /** submit = 現 champion を提出 / skip = 提出しない（理由付き）。 */
+  /** submit = 設定済みartifactを提出 / skip = 提出しない（理由付き）。 */
   action: 'submit' | 'skip';
   /** action=submit のときの提出物パス。 */
   file?: string;
   /** action=submit のときの提出メッセージ。 */
   message?: string;
+  source?: 'candidate' | 'champion';
+  candidateId?: string;
+  kernel?: string;
+  version?: number;
+  output?: string;
   cap: number;
   submittedToday: number;
   reason: string;
 }
 
 /**
- * 1ターゲットの完了トリガ提出を決める。コンペ内の収束/選定は行わず、常に現 champion を提出する。
+ * 1ターゲットの完了トリガ提出を決める。candidate/championを区別せず設定済みartifactを提出する。
  *  - 当日の系統別目標数に到達済みなら skip（同一枠の再実行は冪等）。
  *  - submit.file 未設定（提出物未整備）なら skip（呼び出し側が Discord 通知して安全側に倒す）。
  *  - コンペの daily_submission_cap に達していれば skip。
- *  - それ以外は submit（現 champion）。
+ *  - それ以外は submit（champion 昇格不要）。
  */
 export function planChampionSubmission(
   competition: ImprovementCompetition,
@@ -581,7 +608,11 @@ export function planChampionSubmission(
     submittedToday: today,
   };
   const file = target.submit?.file?.trim() || '';
-  const message = target.submit?.message?.trim() || `auto-improve submit: ${target.repo} champion`;
+  const source = target.submit?.source ?? 'candidate';
+  const candidateId = target.submit?.candidateId?.trim() || undefined;
+  const label = candidateId || source;
+  const message =
+    target.submit?.message?.trim() || `auto-improve submit: ${target.repo} ${label}`;
 
   if (today >= cap) {
     return { ...base, action: 'skip', reason: `daily cap reached (${today}/${cap})` };
@@ -605,7 +636,12 @@ export function planChampionSubmission(
     action: 'submit',
     file,
     message,
-    reason: 'submit current champion (no in-competition selection gate)',
+    source,
+    candidateId,
+    kernel: target.submit?.kernel,
+    version: target.submit?.version,
+    output: target.submit?.output,
+    reason: `submit validated ${source} artifact${candidateId ? ` (${candidateId})` : ''}; champion promotion not required`,
   };
 }
 

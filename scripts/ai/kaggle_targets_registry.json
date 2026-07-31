@@ -17,7 +17,9 @@
     "competitions[].targets[].repo": "対象 GitHub repo。",
     "competitions[].targets[].project": "対象 Linear プロジェクト名。",
     "competitions[].targets[].workers_directive": "起案Issue先頭に載せる workers ディレクティブ。claude系=solo=claude:opus / gpt系=solo=codex:gpt-5.6-sol。",
-    "competitions[].targets[].submit.file": "提出物パス（未設定なら実提出 skip+通知で安全側・SOT-1934側）。",
+    "competitions[].targets[].submit.file": "検証済みcandidate/championの提出物パス（未設定なら実提出 skip+通知）。champion昇格は不要。",
+    "competitions[].targets[].submit.source": "任意。candidate（既定）またはchampion。提出可否には影響せず、provenanceとして記録。",
+    "competitions[].targets[].submit.candidate_id": "任意。提出する実験candidateの識別子。",
     "competitions[].targets[].submit.message": "提出メッセージ。",
     "competitions[].targets[].next_cycle": "次に起案する改善サイクル番号（第N次）。起案の度に子Issue(SOT-1933)側でインクリメント。",
     "state": "cron が更新する実行状態（last_run_at / created_today / last_submitted_date）。"

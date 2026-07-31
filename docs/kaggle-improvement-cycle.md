@@ -13,7 +13,7 @@ Layer 1: cron（決定的・LLM非呼出）  scripts/ai/kaggle_improvement_cycle
 Layer 2: 既存パイプライン（起案Issueを処理）
   webhook/queue → run_auto.sh → task-check（分解判断）
     → plan worker が起案Issueを読み、そのリポジトリの順位向上「子Issue」を 2〜5本 作成
-    → 各子の実装/検証/昇格判定 → 取り組み完了時に当該コンペの現 champion を提出
+    → 各子の実装/検証 → 取り組み完了時に検証済み candidate/champion artifact を提出
        （scripts/ai/kaggle_targets_submit.sh）
 ```
 
@@ -43,11 +43,12 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
 
 ## 提出は「取り組み完了時」（コンペ内選定機構なし）
 
-- 提出対象は常にそのターゲットの **現 champion**（registry の `submit.file`）。SOT-1904 の
+- 提出対象はregistryの`submit`が指す **検証済みartifact**。candidateでもよく、champion昇格は不要。
+  SOT-1904 の
   「直近2提出収束ロジック／2枠選定ゲート」は **この経路では使わない**（コンペ内で提出内容を検討する
   機構は廃止）。
 - 別スケジュールの提出ローテ cron・日次フロア cron は持たない。**改善サイクル cron が同じ当番枠で**
-  当該コンペの現 champion 提出（`scripts/ai/kaggle_targets_submit.sh --competition <key>`）も行う
+  当該コンペの設定済みartifact提出（`scripts/ai/kaggle_targets_submit.sh --competition <key>`）も行う
   （SOT-1913「日々提出できる状態」）。起案が guard で skip されても提出は独立に試みるので、有効化すれば
   各コンペ1日1回は提出しようとする。実提出は active(2段kill switch) かつ `--execute` のときだけ。
 - **翌日の同じコンペ枠**では、起案材料の先頭に「前回提出結果（順位/スコア）」を含めてから次の改善
@@ -103,7 +104,7 @@ workers: <claude系: solo=claude:opus | gpt系: solo=codex:gpt-5.6-sol>, handoff
 ## 目的         Kaggleコンペ <slug>（repo/系統）の順位を向上させる方針を決定し子Issueに分解して実施
 ## 入力材料     ### 前回提出結果（順位/スコア） / ### 直近の完了Issueダイジェスト / ### 失敗ログ・KPI抜粋
 ## 実施内容     1. 未着手の改善軸を選定 2. 2〜5子Issueへ分解（screen→confirm・非昇格revert・昇格時exec互換→Kaggle）
-               3. 取り組み完了時に現 champion を提出 4. 子完了後、親を In Review にして完了報告
+               3. 取り組み完了時に検証済みartifactを提出 4. 子完了後、親を In Review にして完了報告
 ## 受け入れ条件  改善方針の記録 / 子Issue全て終端 / 昇格判定と champion 整合 / 完了時提出
 ```
 
@@ -159,7 +160,7 @@ KAGGLE_IMPROVE_EXECUTE=1 KAGGLE_IMPROVE_ENABLED=1 bash scripts/ai/setup_cron.sh
 bash scripts/ai/kaggle_improvement_cycle.sh --hour 0
 # 実起案（active 時のみ Linear に作成）
 KAGGLE_IMPROVE_ENABLED=1 bash scripts/ai/kaggle_improvement_cycle.sh --hour 0 --execute
-# 完了トリガ提出（当番コンペの champion 提出・ドライラン）
+# 完了トリガ提出（当番コンペのartifact提出・ドライラン）
 bash scripts/ai/kaggle_targets_submit.sh --competition ptcg
 ```
 
@@ -181,9 +182,9 @@ bash scripts/ai/kaggle_targets_submit.sh --competition ptcg
 | 起案エンジン（純粋関数） | `src/lib/kaggleImprovement.ts` |
 | 起案プラン CLI（dry-run） | `runner-cli kaggle-improve-plan` |
 | 起案 実行 CLI（--execute で Linear 作成） | `runner-cli kaggle-improve-run` |
-| 提出プラン CLI（champion・収束なし） | `runner-cli kaggle-champion-plan` |
-| 改善サイクル cron（起案＋当番枠 champion 提出） | `scripts/ai/kaggle_improvement_cycle.sh` |
-| champion 提出（当番枠から呼ばれる／手動可） | `scripts/ai/kaggle_targets_submit.sh` |
+| 提出プラン CLI（candidate/champion共通） | `runner-cli kaggle-submission-plan` |
+| 改善サイクル cron（起案＋当番枠artifact提出） | `scripts/ai/kaggle_improvement_cycle.sh` |
+| artifact提出（当番枠から呼ばれる／手動可） | `scripts/ai/kaggle_targets_submit.sh` |
 | レジストリ（6コンペ×2系統） | `scripts/ai/kaggle_targets_registry.json` |
 | cron 登録 | `scripts/ai/setup_cron.sh` |
 </content>

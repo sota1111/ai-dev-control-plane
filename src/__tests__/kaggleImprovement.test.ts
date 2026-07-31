@@ -401,7 +401,7 @@ describe('kaggleImprovement', () => {
     });
   });
 
-  // SOT-1934 — 完了トリガの champion 提出（コンペ内収束/選定なし）。
+  // SOT-1934 — 完了トリガの validated artifact 提出（champion 昇格不要）。
   describe('planChampionSubmission', () => {
     const ptcg = () => getCompetition(reg(), 'ptcg')!;
     const claudeTarget = () => ptcg().targets.find((t) => t.lineage === 'claude')!; // submit.file = ''
@@ -410,11 +410,34 @@ describe('kaggleImprovement', () => {
       return { ...t, submit: { file: 'submission/main.py', message: 'm' } };
     };
 
-    test('submits the current champion when a submit.file exists and none submitted today', () => {
+    test('submits a configured artifact when a submit.file exists and none submitted today', () => {
       const p = planChampionSubmission(ptcg(), gptTarget(), 0);
       expect(p.action).toBe('submit');
       expect(p.file).toBe('submission/main.py');
-      expect(p.reason).toMatch(/no in-competition selection gate/);
+      expect(p.source).toBe('candidate');
+      expect(p.reason).toMatch(/champion promotion not required/);
+    });
+
+    test('submits a validated non-champion candidate with provenance', () => {
+      const target = {
+        ...gptTarget(),
+        submit: {
+          file: 'submission/candidate.py',
+          message: 'candidate experiment',
+          source: 'candidate' as const,
+          candidateId: 'exp-42',
+          kernel: 'owner/kernel',
+          version: 7,
+          output: 'submission.csv',
+        },
+      };
+      const p = planChampionSubmission(ptcg(), target, 0);
+      expect(p.action).toBe('submit');
+      expect(p.candidateId).toBe('exp-42');
+      expect(p.kernel).toBe('owner/kernel');
+      expect(p.version).toBe(7);
+      expect(p.output).toBe('submission.csv');
+      expect(p.reason).toMatch(/validated candidate artifact/);
     });
 
     test('is idempotent per day — skips when already submitted today (no double submit)', () => {
