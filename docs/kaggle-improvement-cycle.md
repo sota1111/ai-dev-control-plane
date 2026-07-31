@@ -60,6 +60,9 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
   過去提出のfingerprintを確認できない場合も、安全側にskipする。
 - 提出結果とスコア改善トリガは `[repo:<repo>]` によりlineage別に帰属させる。Claudeの確定スコアはClaude側だけ、
   GPTの確定スコアはGPT側だけの新材料となり、帰属不能な履歴から改善Issueは起案しない。
+- 定期枠の間隔を採点待機時間として扱い、lineageの最新提出がまだ`PENDING`でも次の改善サイクルを起案する。
+  採点完了待ちでサイクルを停止せず、ローカル検証で改善した新artifactを次枠で提出する。同じ`PENDING`履歴は
+  前回起案時刻との比較で一度だけ消費し、同一artifactの再提出はfingerprint gateで引き続き禁止する。
 
 ### 提出上限と提出モード（SOT-1913 提出cap補正）
 

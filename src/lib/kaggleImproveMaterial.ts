@@ -167,6 +167,27 @@ export function hasScoredSubmissionSince(
   });
 }
 
+/**
+ * 前回の改善Issue作成後に新しいKaggle提出があるか。
+ * 定期枠の間隔を待機時間として扱うため、PENDINGも次の改善サイクルの新材料に含める。
+ */
+export function hasSubmissionSince(
+  rows: KaggleSubmissionRow[],
+  sinceIso: string | null
+): boolean {
+  if (sinceIso === null) return rows.length > 0;
+  const sinceMs = Date.parse(sinceIso);
+  if (Number.isNaN(sinceMs)) return rows.length > 0;
+  return rows.some((row) => {
+    if (!row.date) return false;
+    const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(row.date)
+      ? `${row.date.replace(' ', 'T')}Z`
+      : row.date;
+    const submittedMs = Date.parse(normalized);
+    return !Number.isNaN(submittedMs) && submittedMs > sinceMs;
+  });
+}
+
 function isCompletedScoredSubmission(row: KaggleSubmissionRow): boolean {
   const status = (row.status || '').toUpperCase();
   return status.endsWith('COMPLETE') && row.publicScore !== undefined;
@@ -412,7 +433,7 @@ export async function collectImproveContext(
       const issues = await fetchCompletedIssues(t.project, label);
       const r = buildRecentIssuesDigest(issues, sinceIso);
       digest = r.digest;
-      hasNewMaterial = r.hasNewMaterial || hasScoredSubmissionSince(targetSubmissionRows, sinceIso);
+      hasNewMaterial = r.hasNewMaterial || hasSubmissionSince(targetSubmissionRows, sinceIso);
     } catch (err: any) {
       log(`recent-issues collection failed for ${t.project}: ${err?.message || err}`);
     }

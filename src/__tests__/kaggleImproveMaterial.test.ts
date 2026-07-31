@@ -4,6 +4,7 @@ import {
   filterFailureLog,
   buildRecentIssuesDigest,
   hasScoredSubmissionSince,
+  hasSubmissionSince,
   submissionRowsForRepo,
   classifyKaggleCliFailure,
   type CompletedIssue,
@@ -85,6 +86,26 @@ describe('kaggleImproveMaterial', () => {
     });
   });
 
+  describe('hasSubmissionSince', () => {
+    test('treats a new PENDING submission as material for the next scheduled cycle', () => {
+      expect(
+        hasSubmissionSince(
+          [{ date: '2026-07-31 11:00:00', status: 'SubmissionStatus.PENDING' }],
+          '2026-07-31T10:00:00Z'
+        )
+      ).toBe(true);
+    });
+
+    test('does not consume the same PENDING submission more than once', () => {
+      expect(
+        hasSubmissionSince(
+          [{ date: '2026-07-31 09:00:00', status: 'SubmissionStatus.PENDING' }],
+          '2026-07-31T10:00:00Z'
+        )
+      ).toBe(false);
+    });
+  });
+
   describe('submissionRowsForRepo', () => {
     const rows = [
       {
@@ -99,13 +120,15 @@ describe('kaggleImproveMaterial', () => {
       { description: 'manual submission', status: 'COMPLETE', publicScore: '0.7' },
     ];
 
-    test('attributes completed scores only to their own lineage', () => {
+    test('attributes submissions only to their own lineage, including pending material', () => {
       const claude = submissionRowsForRepo(rows, 'biohub-claude');
       const gpt = submissionRowsForRepo(rows, 'biohub-gpt');
       expect(claude).toHaveLength(1);
       expect(gpt).toHaveLength(1);
       expect(hasScoredSubmissionSince(claude, null)).toBe(true);
       expect(hasScoredSubmissionSince(gpt, null)).toBe(false);
+      expect(hasSubmissionSince(claude, null)).toBe(true);
+      expect(hasSubmissionSince(gpt, null)).toBe(true);
     });
 
     test('does not assign an unidentifiable submission to either lineage', () => {
