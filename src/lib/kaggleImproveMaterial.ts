@@ -51,6 +51,23 @@ export interface KaggleSubmissionRow {
   privateScore?: string;
 }
 
+/**
+ * Kaggle のコンペ履歴を1つの repo/lineage に帰属させる。
+ * 新形式の `[repo:...]` を優先し、移行前のメッセージに含まれる repo 名も受け付ける。
+ * 帰属を確認できない履歴は別 lineage の改善Issueを誤起案しないため除外する。
+ */
+export function submissionRowsForRepo(
+  rows: KaggleSubmissionRow[],
+  repo: string
+): KaggleSubmissionRow[] {
+  const expected = repo.trim().toLowerCase();
+  if (!expected) return [];
+  return rows.filter((row) => {
+    const description = (row.description || '').toLowerCase();
+    return description.includes(`[repo:${expected}]`) || description.includes(expected);
+  });
+}
+
 /** CSV の1行を quote 対応で分割する（description に "," を含む場合に対応）。 */
 function splitCsvLine(line: string): string[] {
   const out: string[] = [];
@@ -357,12 +374,11 @@ export async function collectImproveContext(
   const comp = getCompetition(registry, competitionKey);
   if (!comp) return { signals, material };
 
-  // 前回提出はコンペ単位（同一 kaggle slug）なので1回だけ収集して両ターゲットで共有する。
+  // Kaggle API はコンペ単位で1回だけ取得し、利用時に repo/lineage ごとに分離する。
   const submissionCollection = opts.kaggle === false
     ? { rows: [] }
     : collectSubmissionRows(comp.kaggleCompetition, log);
   const submissionRows = submissionCollection.rows;
-  const previousSubmission = formatPreviousSubmission(submissionRows);
   const scoreProgressionPath = opts.scoreProgressionPath
     || path.join(__dirname, '..', '..', 'docs', 'ai', 'kaggle', 'score-progression.jsonl');
   if (submissionRows.length > 0) {
@@ -378,6 +394,8 @@ export async function collectImproveContext(
   const failureContent = readFailureLog(opts.failureLogPath, log);
 
   for (const t of comp.targets) {
+    const targetSubmissionRows = submissionRowsForRepo(submissionRows, t.repo);
+    const previousSubmission = formatPreviousSubmission(targetSubmissionRows);
     // guard 4: 前サイクル未完了。失敗時は安全側で false（＝ブロックしない）に倒す。
     let hasUnfinishedCycle = false;
     try {
@@ -394,7 +412,7 @@ export async function collectImproveContext(
       const issues = await fetchCompletedIssues(t.project, label);
       const r = buildRecentIssuesDigest(issues, sinceIso);
       digest = r.digest;
-      hasNewMaterial = r.hasNewMaterial || hasScoredSubmissionSince(submissionRows, sinceIso);
+      hasNewMaterial = r.hasNewMaterial || hasScoredSubmissionSince(targetSubmissionRows, sinceIso);
     } catch (err: any) {
       log(`recent-issues collection failed for ${t.project}: ${err?.message || err}`);
     }

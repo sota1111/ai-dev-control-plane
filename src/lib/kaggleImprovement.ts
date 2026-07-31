@@ -230,7 +230,7 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
     );
   }
   const repeatRequiresNewArtifact =
-    co.repeat_requires_new_artifact ?? co.repeatRequiresNewArtifact ?? false;
+    co.repeat_requires_new_artifact ?? co.repeatRequiresNewArtifact ?? true;
   if (typeof repeatRequiresNewArtifact !== 'boolean') {
     throw new Error(`registry.competitions[${i}].repeat_requires_new_artifact must be a boolean`);
   }

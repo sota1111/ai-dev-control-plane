@@ -4,6 +4,7 @@ import {
   filterFailureLog,
   buildRecentIssuesDigest,
   hasScoredSubmissionSince,
+  submissionRowsForRepo,
   classifyKaggleCliFailure,
   type CompletedIssue,
 } from '../lib/kaggleImproveMaterial.js';
@@ -81,6 +82,35 @@ describe('kaggleImproveMaterial', () => {
           '2026-07-31T10:00:00Z'
         )
       ).toBe(false);
+    });
+  });
+
+  describe('submissionRowsForRepo', () => {
+    const rows = [
+      {
+        description: 'auto-improve biohub-claude [repo:biohub-claude]',
+        status: 'COMPLETE',
+        publicScore: '0.509',
+      },
+      {
+        description: 'auto-improve biohub-gpt [repo:biohub-gpt]',
+        status: 'PENDING',
+      },
+      { description: 'manual submission', status: 'COMPLETE', publicScore: '0.7' },
+    ];
+
+    test('attributes completed scores only to their own lineage', () => {
+      const claude = submissionRowsForRepo(rows, 'biohub-claude');
+      const gpt = submissionRowsForRepo(rows, 'biohub-gpt');
+      expect(claude).toHaveLength(1);
+      expect(gpt).toHaveLength(1);
+      expect(hasScoredSubmissionSince(claude, null)).toBe(true);
+      expect(hasScoredSubmissionSince(gpt, null)).toBe(false);
+    });
+
+    test('does not assign an unidentifiable submission to either lineage', () => {
+      expect(submissionRowsForRepo([rows[2]], 'biohub-claude')).toEqual([]);
+      expect(submissionRowsForRepo([rows[2]], 'biohub-gpt')).toEqual([]);
     });
   });
 

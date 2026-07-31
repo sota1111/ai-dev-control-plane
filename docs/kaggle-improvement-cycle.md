@@ -55,6 +55,11 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
 - 冪等: 提出メッセージの `[slot:<slot id>]` を履歴で照合する。同じ枠の再実行は、日次2枠目を消費せず
   skipする。日次lineage上限またはコンペ上限に達した場合もskipする。`submit.file` 未設定（未完成artifact）は
   **skip + Discord 通知**で安全側に倒す（提出物 wiring は各 repo の改善子Issueで整備）。
+- `both` モードの2枠目は全コンペで新しいartifactだけを提出する。ファイルは内容SHA-256、Notebookは
+  immutableな `kernel/version/output` のSHA-256を提出メッセージへ記録し、同一lineageで当日提出済みならskipする。
+  過去提出のfingerprintを確認できない場合も、安全側にskipする。
+- 提出結果とスコア改善トリガは `[repo:<repo>]` によりlineage別に帰属させる。Claudeの確定スコアはClaude側だけ、
+  GPTの確定スコアはGPT側だけの新材料となり、帰属不能な履歴から改善Issueは起案しない。
 
 ### 提出上限と提出モード（SOT-1913 提出cap補正）
 

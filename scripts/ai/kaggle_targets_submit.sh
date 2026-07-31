@@ -77,11 +77,21 @@ declare -A current_fingerprint
 declare -A submitted_fingerprints
 for repo in "${REPOS[@]}"; do today_count["$repo"]=0; done
 for repo in "${REPOS[@]}"; do
-  submit_file="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);const t=(c?c.targets:[]).find(x=>x.repo===process.argv[3]);process.stdout.write(t&&t.submit&&t.submit.file||"")' "$REGISTRY" "$COMP_KEY" "$repo")"
+  submit_spec="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);const t=(c?c.targets:[]).find(x=>x.repo===process.argv[3]);process.stdout.write(JSON.stringify(t&&t.submit||{}))' "$REGISTRY" "$COMP_KEY" "$repo")"
+  submit_file="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).file||"")' "$submit_spec")"
   if [[ -n "$submit_file" && -f "$submit_file" ]]; then
     current_fingerprint["$repo"]="sha256:$(sha256sum "$submit_file" | awk '{print $1}')"
   else
-    current_fingerprint["$repo"]=""
+    # Kaggle Notebook version は immutable。kernel/version/output の組を artifact identity とする。
+    current_fingerprint["$repo"]="$(node -e '
+      const crypto=require("crypto"); const s=JSON.parse(process.argv[1]);
+      if (typeof s.artifact_fingerprint === "string" && /^sha256:[0-9a-f]{64}$/i.test(s.artifact_fingerprint)) {
+        process.stdout.write(s.artifact_fingerprint.toLowerCase());
+      } else if (s.kernel && Number.isInteger(s.version) && s.output) {
+        const identity=`kaggle-notebook:${s.kernel}@${s.version}:${s.output}`;
+        process.stdout.write(`sha256:${crypto.createHash("sha256").update(identity).digest("hex")}`);
+      }
+    ' "$submit_spec")"
   fi
   submitted_fingerprints["$repo"]=""
 done
@@ -256,6 +266,8 @@ for ((i=0; i<n_targets; i++)); do
   fi
   file="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].file)||"")' "$plan_json" "$i")"
   msg="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].message)||"")' "$plan_json" "$i") [slot:${slot_id}]"
+  lineage="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].lineage)||"")' "$plan_json" "$i")"
+  msg+=" [lineage:${lineage}] [repo:${repo}]"
   if [[ -n "${current_fingerprint[$repo]:-}" ]]; then
     msg+=" [artifact:${current_fingerprint[$repo]}]"
   fi

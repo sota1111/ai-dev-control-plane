@@ -539,17 +539,28 @@ describe('kaggleImprovement', () => {
       expect(gpt.reason).toMatch(/daily cap reached/);
     });
 
-    test('both mode can accept two daily submissions per lineage', () => {
+    test('both mode accepts a second daily submission when each lineage has a new artifact', () => {
       const raw = JSON.parse(JSON.stringify(rawRegistry));
       raw.competitions[0].daily_submissions_per_lineage = 2;
       raw.competitions[0].targets[0].submit = { file: 'submission/claude.py', message: 'm' };
       raw.competitions[0].targets[1].submit = { file: 'submission/gpt.py', message: 'm' };
       const registry = parseTargetsRegistry(raw);
       expect(
-        planCompetitionSubmission(registry, 'ptcg', {
-          'ptcg-agent-claude': 1,
-          'ptcg-agent-gpt': 1,
-        })!.targets.every((target) => target.action === 'submit')
+        planCompetitionSubmission(
+          registry,
+          'ptcg',
+          { 'ptcg-agent-claude': 1, 'ptcg-agent-gpt': 1 },
+          {
+            artifactFingerprintsByRepo: {
+              'ptcg-agent-claude': 'sha256:claude-new',
+              'ptcg-agent-gpt': 'sha256:gpt-new',
+            },
+            submittedArtifactFingerprintsByRepo: {
+              'ptcg-agent-claude': ['sha256:claude-old'],
+              'ptcg-agent-gpt': ['sha256:gpt-old'],
+            },
+          }
+        )!.targets.every((target) => target.action === 'submit')
       ).toBe(true);
       expect(
         planCompetitionSubmission(registry, 'ptcg', {
