@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "ptcg-submission-lineages/v1",
+  "issue": "SOT-2210",
+  "recordedAt": "2026-07-31T07:41:53.640Z",
+  "competition": "pokemon-tcg-ai-battle",
+  "dailySubmissionCap": 5,
+  "dailySubmissionsPerLineage": 2,
+  "artifactContract": {
+    "file": "submission.tar.gz",
+    "archiveFormat": "tar+gzip",
+    "requiredPaths": ["main.py", "deck.csv", "agents/", "cg/"],
+    "submissionMode": "code-competition"
+  },
+  "previousResult": {
+    "submissionRef": 55091718,
+    "status": "COMPLETE",
+    "publicScore": 561.9
+  },
+  "lineages": [
+    {
+      "lineage": "claude",
+      "repository": "https://github.com/sota1111/ptcg-agent-claude",
+      "sourceRevision": "e11d357e572b2812f4e2b126c35cc9a8f3fb1854",
+      "artifactSha256": "54776a08bf02e09130c335f7db106a0b1dee2565e19a119cde4de788205612c4",
+      "acceptedSubmission": {
+        "submissionRef": 55130993,
+        "status": "COMPLETE",
+        "publicScore": 410.1
+      }
+    },
+    {
+      "lineage": "gpt",
+      "repository": "https://github.com/sota1111/ptcg-agent-gpt",
+      "sourceRevision": "63f462da65044c469d010b95f5945816c0f7e1b8",
+      "artifactSha256": "c1a9c99b36827c37fb740823ad61204370ea1b37da866f0709688966ae43e0be",
+      "acceptedSubmission": {
+        "submissionRef": 55130939,
+        "status": "COMPLETE",
+        "publicScore": 460.8
+      }
+    }
+  ]
+}

@@ -584,6 +584,12 @@ describe('kaggleImprovement', () => {
         dailySubmissionsPerLineage: 2,
         submissionMode: 'both',
       });
+      expect(r.competitions.find((c) => c.key === 'ptcg')).toMatchObject({
+        kaggleCompetition: 'pokemon-tcg-ai-battle',
+        dailySubmissionCap: 5,
+        dailySubmissionsPerLineage: 2,
+        submissionMode: 'both',
+      });
       // SOT-1913 提出cap補正: ARC=1/day & alternate、他=5/day & both。
       for (const c of r.competitions) {
         const isArc = c.key === 'arc-agi-2' || c.key === 'arc-agi-3';
