@@ -42,6 +42,7 @@
       "key": "ptcg",
       "kaggle_competition": "pokemon-tcg-ai-battle",
       "daily_submission_cap": 5,
+      "daily_submissions_per_lineage": 2,
       "submission_mode": "both",
       "targets": [
         {
