@@ -172,6 +172,15 @@ describe('kaggleImprovement', () => {
       expect(() => parseTargetsRegistry(bad)).toThrow(/submission_mode/);
     });
 
+    test('daily submissions per lineage defaults to one and validates against the cap', () => {
+      expect(reg().competitions[0].dailySubmissionsPerLineage).toBe(1);
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].daily_submissions_per_lineage = 2;
+      expect(parseTargetsRegistry(raw).competitions[0].dailySubmissionsPerLineage).toBe(2);
+      raw.competitions[0].daily_submissions_per_lineage = 6;
+      expect(() => parseTargetsRegistry(raw)).toThrow(/daily_submissions_per_lineage/);
+    });
+
     test('parses a fixed four-condition evaluation contract', () => {
       const raw = JSON.parse(JSON.stringify(rawRegistry));
       raw.competitions[0].ab_evaluation = {
@@ -351,19 +360,21 @@ describe('kaggleImprovement', () => {
     });
 
     test('measurement health guard suppresses blind drafting before plateau/material guards', () => {
-      const plan = planImprovementCycle(baseInput({
-        registry: enabledReg(),
-        hourJst: 0,
-        signals: {
-          'ptcg-agent-claude': {
-            hasUnfinishedCycle: false,
-            hasNewMaterial: true,
-            plateauReason: 'plateau escalation: stale method',
-            measurementFailureReason:
-              'measurement unavailable: Kaggle CLI authentication failed; verify cron credentials/API token',
+      const plan = planImprovementCycle(
+        baseInput({
+          registry: enabledReg(),
+          hourJst: 0,
+          signals: {
+            'ptcg-agent-claude': {
+              hasUnfinishedCycle: false,
+              hasNewMaterial: true,
+              plateauReason: 'plateau escalation: stale method',
+              measurementFailureReason:
+                'measurement unavailable: Kaggle CLI authentication failed; verify cron credentials/API token',
+            },
           },
-        },
-      }));
+        })
+      );
       const target = plan.targets.find((t) => t.project === 'ptcg-agent-claude');
       expect(target?.action).toBe('skip');
       expect(target?.reason).toContain('authentication failed');
@@ -409,7 +420,7 @@ describe('kaggleImprovement', () => {
     test('is idempotent per day — skips when already submitted today (no double submit)', () => {
       const p = planChampionSubmission(ptcg(), gptTarget(), 1);
       expect(p.action).toBe('skip');
-      expect(p.reason).toMatch(/already submitted today/);
+      expect(p.reason).toMatch(/daily lineage target reached/);
     });
 
     test('skips + (caller notifies) when submit.file is not configured', () => {
@@ -502,22 +513,48 @@ describe('kaggleImprovement', () => {
       expect(plan.chosenLineage).toBe('gpt');
       const gpt = plan.targets.find((t) => t.lineage === 'gpt')!;
       expect(gpt.action).toBe('skip');
-      expect(gpt.reason).toMatch(/already submitted today/);
+      expect(gpt.reason).toMatch(/daily cap reached/);
+    });
+
+    test('both mode can accept two daily submissions per lineage', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].daily_submissions_per_lineage = 2;
+      raw.competitions[0].targets[0].submit = { file: 'submission/claude.py', message: 'm' };
+      raw.competitions[0].targets[1].submit = { file: 'submission/gpt.py', message: 'm' };
+      const registry = parseTargetsRegistry(raw);
+      expect(
+        planCompetitionSubmission(registry, 'ptcg', {
+          'ptcg-agent-claude': 1,
+          'ptcg-agent-gpt': 1,
+        })!.targets.every((target) => target.action === 'submit')
+      ).toBe(true);
+      expect(
+        planCompetitionSubmission(registry, 'ptcg', {
+          'ptcg-agent-claude': 2,
+          'ptcg-agent-gpt': 2,
+        })!.targets.every((target) => target.action === 'skip')
+      ).toBe(true);
     });
   });
 
   describe('shipped registry file', () => {
-    test('scripts/ai/kaggle_targets_registry.json parses and is default-OFF with 6 competitions', () => {
+    test('scripts/ai/kaggle_targets_registry.json parses and includes Kaggriculture lineages', () => {
       const here = path.dirname(fileURLToPath(import.meta.url));
       const p = path.join(here, '..', '..', 'scripts', 'ai', 'kaggle_targets_registry.json');
       const r = parseTargetsRegistry(JSON.parse(fs.readFileSync(p, 'utf8')));
       expect(r.enabled).toBe(false);
-      expect(r.competitions).toHaveLength(6);
-      expect(r.rotation).toHaveLength(6);
+      expect(r.competitions).toHaveLength(7);
+      expect(r.rotation).toHaveLength(8);
       // 各コンペは claude/gpt の2ターゲットを持つ。
       for (const c of r.competitions) {
         expect(c.targets.map((t) => t.lineage).sort()).toEqual(['claude', 'gpt']);
       }
+      expect(r.competitions.find((c) => c.key === 'kaggriculture')).toMatchObject({
+        kaggleCompetition: 'kaggriculture',
+        dailySubmissionCap: 5,
+        dailySubmissionsPerLineage: 2,
+        submissionMode: 'both',
+      });
       // SOT-1913 提出cap補正: ARC=1/day & alternate、他=5/day & both。
       for (const c of r.competitions) {
         const isArc = c.key === 'arc-agi-2' || c.key === 'arc-agi-3';
