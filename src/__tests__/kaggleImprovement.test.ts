@@ -86,8 +86,6 @@ describe('kaggleImprovement', () => {
     registry: reg(),
     hourJst: 0,
     envEnabled: true,
-    issueCount: 10,
-    cooldownActive: false,
     ...over,
   });
 
@@ -309,21 +307,38 @@ describe('kaggleImprovement', () => {
       expect(plan.reason).toMatch(/no competition scheduled/);
     });
 
-    test('issue cap guard skips all targets', () => {
+    test('order-first policy: drafts even with no new material (guard removed)', () => {
       const plan = planImprovementCycle(
-        baseInput({ registry: enabledReg(), hourJst: 0, issueCount: 240 })
+        baseInput({
+          registry: enabledReg(),
+          hourJst: 0,
+          signals: {
+            'ptcg-agent-claude': { hasUnfinishedCycle: false, hasNewMaterial: false },
+          },
+        })
       );
-      expect(plan.targets).toHaveLength(2);
-      expect(plan.targets.every((t) => t.action === 'skip')).toBe(true);
-      expect(plan.targets[0].reason).toMatch(/issue cap guard/);
+      const claude = plan.targets.find((t) => t.project === 'ptcg-agent-claude')!;
+      expect(claude.action).toBe('draft');
+      expect(claude.reason).toMatch(/default draft policy/);
     });
 
-    test('cooldown guard skips all targets', () => {
+    test('order-first policy: drafts even when Kaggle measurement failed (guard removed)', () => {
       const plan = planImprovementCycle(
-        baseInput({ registry: enabledReg(), hourJst: 0, cooldownActive: true })
+        baseInput({
+          registry: enabledReg(),
+          hourJst: 0,
+          signals: {
+            'ptcg-agent-claude': {
+              hasUnfinishedCycle: false,
+              hasNewMaterial: true,
+              measurementFailureReason:
+                'measurement unavailable: Kaggle CLI authentication failed; verify cron credentials/API token',
+            },
+          },
+        })
       );
-      expect(plan.targets.every((t) => t.action === 'skip')).toBe(true);
-      expect(plan.targets[0].reason).toMatch(/cooldown/);
+      const claude = plan.targets.find((t) => t.project === 'ptcg-agent-claude')!;
+      expect(claude.action).toBe('draft');
     });
 
     test('unfinished-cycle guard skips only the affected project', () => {
@@ -342,42 +357,6 @@ describe('kaggleImprovement', () => {
       expect(claude.reason).toMatch(/still open/);
       // シグナル未指定の gpt は安全側デフォルト（新材料あり）で draft される。
       expect(gpt.action).toBe('draft');
-    });
-
-    test('no-new-material guard skips the project', () => {
-      const plan = planImprovementCycle(
-        baseInput({
-          registry: enabledReg(),
-          hourJst: 0,
-          signals: {
-            'ptcg-agent-claude': { hasUnfinishedCycle: false, hasNewMaterial: false },
-          },
-        })
-      );
-      const claude = plan.targets.find((t) => t.project === 'ptcg-agent-claude')!;
-      expect(claude.action).toBe('skip');
-      expect(claude.reason).toMatch(/no new completed issue or scored Kaggle result/);
-    });
-
-    test('measurement health guard suppresses blind drafting before plateau/material guards', () => {
-      const plan = planImprovementCycle(
-        baseInput({
-          registry: enabledReg(),
-          hourJst: 0,
-          signals: {
-            'ptcg-agent-claude': {
-              hasUnfinishedCycle: false,
-              hasNewMaterial: true,
-              plateauReason: 'plateau escalation: stale method',
-              measurementFailureReason:
-                'measurement unavailable: Kaggle CLI authentication failed; verify cron credentials/API token',
-            },
-          },
-        })
-      );
-      const target = plan.targets.find((t) => t.project === 'ptcg-agent-claude');
-      expect(target?.action).toBe('skip');
-      expect(target?.reason).toContain('authentication failed');
     });
 
     test('plateau escalation triggers drafting from the scored result', () => {

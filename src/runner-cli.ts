@@ -966,8 +966,8 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       // collects the material/guard signals, calls this to get the plan, then creates the issues.
       // Usage:
       //   runner-cli.js kaggle-improve-plan [--registry <path>] [--hour <0-23>]
-      //       [--issue-count <n>] [--cooldown 1|0] [--env-enabled 1|0]
-      //       [--signals <json>] [--material <json>]
+      //       [--env-enabled 1|0] [--signals <json>] [--material <json>]
+      // (--issue-count / --cooldown are accepted but ignored: order-first "draft by default" policy.)
       // Prints the CyclePlan as JSON on stdout (exit 0). Fail-loud (exit 1) on a bad registry/JSON.
       // Dry-run by design: this never creates issues — it only computes the plan.
       const flags: Record<string, string> = {};
@@ -1004,9 +1004,6 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       const hourJst = Number.isFinite(Number(flags.hour))
         ? Number(flags.hour)
         : new Date().getHours();
-      const issueCount = Number.isFinite(Number(flags['issue-count']))
-        ? Number(flags['issue-count'])
-        : 0;
       const truthy = (v: string | undefined) => v === '1' || v === 'true' || v === 'yes';
       // env kill switch: explicit --env-enabled wins, else fall back to KAGGLE_IMPROVE_ENABLED.
       const envEnabled =
@@ -1034,8 +1031,6 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         registry,
         hourJst,
         envEnabled,
-        issueCount,
-        cooldownActive: truthy(flags.cooldown),
         signals,
         material,
       });
@@ -1117,10 +1112,6 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         registry,
         hourJst,
         envEnabled,
-        issueCount: Number.isFinite(Number(flags['issue-count']))
-          ? Number(flags['issue-count'])
-          : 0,
-        cooldownActive: truthy(flags.cooldown),
         signals,
         material,
       });

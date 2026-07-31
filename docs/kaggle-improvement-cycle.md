@@ -84,20 +84,23 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
   skip（冪等）。
 - `both` の既定は2系統ぶん（=2提出/日）。`daily_submissions_per_lineage=2` のコンペは4提出/日で cap 5 に収まる。
 
-## ガード（暴走・空回りの防止・順位最優先に緩和）
+## ガード（順位最優先・「基本は起案する」方針）
 
-`runner-cli kaggle-improve-run`（engine = `src/lib/kaggleImprovement.ts`）が全て AND で評価。
-NG は黙って skip（+ Discord 通知）。
+`runner-cli kaggle-improve-run`（engine = `src/lib/kaggleImprovement.ts`）は、起案を止めるガードを
+**2つだけ**に絞る。それ以外は skip 理由にしない（＝当番枠なら基本的に毎回起案する）。
 
 1. **active**: `registry.enabled && env KAGGLE_IMPROVE_ENABLED`（2段 kill switch）でなければ何もしない。
-2. **Issue cap ガード**: workspace 総 Issue 数 ≥ `issue_cap_guard`（既定 240）なら起案せず archive を促す。
-3. **cooldown ガード**: worker usage-limit cooldown 中は起案しない。
-4. **前サイクル実行中ガード**: 対象プロジェクトに現在 actionable（`Todo` / `In Progress`）な
+2. **前サイクル実行中ガード（唯一の抑制）**: 対象プロジェクトに現在 actionable（`Todo` / `In Progress`）な
    `auto-improve` 親 Issue があれば重複起案しない（プロジェクト毎に実行中は高々1本）。
    `In Review` を含む過去 Issue は次サイクルを妨げず、execute 時は Linear の現在状態で再確認する。
-5. **新材料ガード**: 前回サイクル以降にそのプロジェクトで新しい完了 Issue が無ければ起案しない。
 
-（撤廃済み: 全体日次上限ハードキャップ／「SOT-1904 提出ガード通過分だけ起案」制約。順位向上を阻害しない。）
+（撤廃済みのガード＝起案停止理由にしない: **新材料 / 測定不能 / worker cooldown / Issue cap** と、
+全体日次上限ハードキャップ／「SOT-1904 提出ガード通過分だけ起案」制約。停滞・スコア低下も止めない。）
+
+**Issue cap は「止める」代わりに「アーカイブして作る」**: `scripts/ai/kaggle_improvement_cycle.sh` が実起案
+（`--execute`）の前に総 Issue 数を測り、`ISSUE_CAP_TRIGGER`（既定 245）以上なら
+`archive_linear_issues.sh --execute`（親150/子50維持）でスペースを空けてから起案する（best-effort）。
+registry の `issue_cap_guard` は engine の判定には使われない（歴史的フィールドとして保持）。
 
 ## `auto-improve` ラベル
 
