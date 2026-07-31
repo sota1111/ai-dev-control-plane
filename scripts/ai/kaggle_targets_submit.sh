@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# SOT-1913 / SOT-1934: 「取り組み完了時に提出」— マルチコンペ champion 提出（コンペ内選定機構なし）。
+# SOT-1913 / SOT-1934: 「取り組み完了時に提出」— マルチコンペ artifact 提出。
 #
 # SOT-1904 の単一コンペ専用・直近2提出収束ロジック（kaggle_auto_submit.sh / runner-cli kaggle-plan）は
-# **この経路では使わない**。提出対象は常にそのターゲットの現 champion（registry の submit.file）。別
+# **この経路では使わない**。提出対象は registry の submit が指す検証済みartifactで、champion昇格は不要。別
 # スケジュールの提出 cron は持たず、当番コンペの取り組み完了時にこのスクリプトを呼んで提出する
 # （1枠=1コンペ一巡で各コンペ1日1提出が自然に成立）。翌日の同じコンペ枠での前回結果確認は起案側
 # （SOT-1932 の材料収集）で行う。
@@ -10,8 +10,8 @@
 # 動作:
 #   (1) --competition <key>（または --hour から rotation で解決）でコンペを決める。
 #   (2) その Kaggle slug の提出履歴を取得し、各ターゲット(repo)の当日提出数を数える（冪等判定用）。
-#   (3) runner-cli kaggle-champion-plan で各ターゲットの提出プラン（submit/skip・収束なし）を得る。
-#   (4) --execute 指定時のみ、action=submit のターゲットの champion を Kaggle へ提出する。
+#   (3) runner-cli kaggle-submission-plan で各ターゲットの提出プランを得る。
+#   (4) --execute 指定時のみ、action=submit の candidate/champion artifact を Kaggle へ提出する。
 #       submit.file 未設定（提出物未整備）は skip + 通知で安全側。当日すでに提出済みなら二重提出しない。
 #
 # 使い方:
@@ -121,17 +121,17 @@ if [[ "$SUBMISSION_MODE" == "alternate" && -n "$LAST_LINEAGE" ]]; then
   LINEAGE_ARGS=(--last-lineage "$LAST_LINEAGE")
 fi
 
-# 提出プランを得る（収束なし・常に champion）。
-plan_json="$(cd "$REPO_ROOT" && npx --no-install tsx src/runner-cli.ts kaggle-champion-plan \
+# 提出プランを得る（candidate/champion 共通）。
+plan_json="$(cd "$REPO_ROOT" && npx --no-install tsx src/runner-cli.ts kaggle-submission-plan \
   --registry "$REGISTRY" --competition "$COMP_KEY" --submitted "$submitted_json" \
   --date-utc "$today_utc" "${LINEAGE_ARGS[@]}" 2>/dev/null)"
 if [[ -z "$plan_json" ]]; then
-  plan_json="$(cd "$REPO_ROOT" && npx tsx src/runner-cli.ts kaggle-champion-plan \
+  plan_json="$(cd "$REPO_ROOT" && npx tsx src/runner-cli.ts kaggle-submission-plan \
     --registry "$REGISTRY" --competition "$COMP_KEY" --submitted "$submitted_json" \
     --date-utc "$today_utc" "${LINEAGE_ARGS[@]}" 2>/dev/null)"
 fi
 if [[ -z "$plan_json" ]]; then
-  echo "ERROR: kaggle-champion-plan の実行に失敗しました（tsx/runner-cli を確認）。" >&2
+  echo "ERROR: kaggle-submission-plan の実行に失敗しました（tsx/runner-cli を確認）。" >&2
   exit 2
 fi
 
@@ -178,9 +178,9 @@ for ((i=0; i<n_targets; i++)); do
   fi
   file="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].file)||"")' "$plan_json" "$i")"
   msg="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].message)||"")' "$plan_json" "$i")"
-  kernel="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);const t=(c?c.targets:[]).find(x=>x.repo===process.argv[3]);process.stdout.write((t&&t.submit&&t.submit.kernel)||"")' "$REGISTRY" "$COMP_KEY" "$repo")"
-  version="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);const t=(c?c.targets:[]).find(x=>x.repo===process.argv[3]);process.stdout.write(String((t&&t.submit&&t.submit.version)||""))' "$REGISTRY" "$COMP_KEY" "$repo")"
-  output="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);const t=(c?c.targets:[]).find(x=>x.repo===process.argv[3]);process.stdout.write((t&&t.submit&&t.submit.output)||"")' "$REGISTRY" "$COMP_KEY" "$repo")"
+  kernel="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].kernel)||"")' "$plan_json" "$i")"
+  version="$(node -e 'process.stdout.write(String((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].version)||""))' "$plan_json" "$i")"
+  output="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].output)||"")' "$plan_json" "$i")"
   if [[ -n "$kernel" && -n "$version" && -n "$output" ]]; then
     kernel_status="$(kaggle kernels status "$kernel" 2>&1 || true)"
     if [[ "$kernel_status" != *COMPLETE* ]]; then

@@ -44,7 +44,17 @@ describe('SOT-1966 champion submission audit', () => {
   const registry = readJson<{
     competitions: Array<{
       key: string;
-      targets: Array<{ repo: string; submit: { file: string } }>;
+      daily_submissions_per_lineage?: number;
+      targets: Array<{
+        lineage: string;
+        repo: string;
+        submit: {
+          file: string;
+          kernel?: string;
+          version?: number;
+          output?: string;
+        };
+      }>;
     }>;
   }>('scripts/ai/kaggle_targets_registry.json');
 
@@ -80,9 +90,30 @@ describe('SOT-1966 champion submission audit', () => {
     });
   });
 
-  it('keeps automatic submission disabled until a champion-compatible artifact exists', () => {
+  it('registers independent Claude/GPT lineages with one shared artifact contract', () => {
     const competition = registry.competitions.find((item) => item.key === 'agent-security');
-    const target = competition?.targets.find((item) => item.repo === 'agent-security-gpt');
-    expect(target?.submit.file).toBe('');
+    expect(competition?.daily_submissions_per_lineage).toBe(2);
+    expect(competition?.targets).toMatchObject([
+      {
+        lineage: 'claude',
+        repo: 'agent-security-claude',
+        submit: {
+          file: 'submission.csv',
+          kernel: 'sota1111/agent-security-claude-cli-baseline',
+          version: 2,
+          output: 'submission.csv',
+        },
+      },
+      {
+        lineage: 'gpt',
+        repo: 'agent-security-gpt',
+        submit: {
+          file: 'submission.csv',
+          kernel: 'sota1111/agent-security-gpt-champion',
+          version: 2,
+          output: 'submission.csv',
+        },
+      },
+    ]);
   });
 });

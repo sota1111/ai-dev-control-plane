@@ -1177,10 +1177,11 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       process.exit(0);
       break;
     }
+    case 'kaggle-submission-plan':
     case 'kaggle-champion-plan': {
-      // SOT-1913/SOT-1934: decide the completion-triggered champion submission for a competition's
-      // targets (claude/gpt). No in-competition convergence/selection gate — always the current
-      // champion (registry submit.file), idempotent per day. Pure logic in kaggleImprovement.ts;
+      // SOT-1913/SOT-1934: decide completion-triggered artifact submission for a competition's
+      // targets (claude/gpt). A validated candidate may be submitted without champion promotion.
+      // `kaggle-champion-plan` remains as a backwards-compatible alias.
       // scripts/ai/kaggle_targets_submit.sh fetches today's counts, calls this, then submits.
       // Usage:
       //   runner-cli.js kaggle-champion-plan [--registry <path>] [--competition <key>] [--hour <0-23>]
@@ -1204,7 +1205,7 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         registry = parseTargetsRegistry(JSON.parse(fs.readFileSync(registryPath, 'utf8')));
       } catch (err: any) {
         process.stderr.write(
-          `kaggle-champion-plan: invalid registry ${registryPath}: ${err?.message || err}\n`
+          `kaggle-submission-plan: invalid registry ${registryPath}: ${err?.message || err}\n`
         );
         process.exit(1);
       }
@@ -1218,7 +1219,7 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       }
       if (!competitionKey) {
         process.stderr.write(
-          'kaggle-champion-plan: no competition (pass --competition or a scheduled --hour)\n'
+          'kaggle-submission-plan: no competition (pass --competition or a scheduled --hour)\n'
         );
         process.exit(1);
       }
@@ -1228,7 +1229,7 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
           submittedByRepo = JSON.parse(flags.submitted) as Record<string, number>;
         } catch (err: any) {
           process.stderr.write(
-            `kaggle-champion-plan: invalid --submitted JSON: ${err?.message || err}\n`
+            `kaggle-submission-plan: invalid --submitted JSON: ${err?.message || err}\n`
           );
           process.exit(1);
         }
@@ -1238,7 +1239,7 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       if (flags['last-lineage'] === 'claude' || flags['last-lineage'] === 'gpt') {
         lastSubmittedLineage = flags['last-lineage'];
       } else if (flags['last-lineage']) {
-        process.stderr.write('kaggle-champion-plan: --last-lineage must be "claude" or "gpt"\n');
+        process.stderr.write('kaggle-submission-plan: --last-lineage must be "claude" or "gpt"\n');
         process.exit(1);
       }
       const plan = planCompetitionSubmission(registry, competitionKey, submittedByRepo, {
@@ -1247,7 +1248,7 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       });
       if (!plan) {
         process.stderr.write(
-          `kaggle-champion-plan: competition "${competitionKey}" not in registry\n`
+          `kaggle-submission-plan: competition "${competitionKey}" not in registry\n`
         );
         process.exit(1);
       }

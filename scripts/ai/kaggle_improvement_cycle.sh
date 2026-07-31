@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOT-1913 / SOT-1933: Kaggle 改善サイクル cron（単一スケジュール JST [0,4,8,12,16,20]・1枠=1コンペ）。
+# Kaggle 改善サイクル cron（単一スケジュール JST [0,6,12,18]・1枠=1コンペ）。
 #
 # 設計（docs/kaggle-improvement-cycle.md / docs/ai/linear/SOT-1913.md v4）:
 #   単一 cron を毎時起動し、この枠(JST hour)に割り当てられた1コンペ(rotation)を解決して、その
@@ -7,7 +7,7 @@
 #   cron は LLM を呼ばない。起案本文/ガード判定は決定的（src/lib/kaggleImprovement.ts）。
 #   起案された親Issueは既存パイプライン（webhook→run_auto.sh→task-check 分解）が読み、順位向上の
 #   子Issueへ分解して実装する（＝要求2）。子Issueは Todo + blockedBy で作られ依存順に自動実装される。
-#   さらに（SOT-1913「日々提出できる状態」）同じ当番枠で当該コンペの現 champion 提出
+#   さらに（SOT-1913「日々提出できる状態」）同じ当番枠で当該コンペの検証済みartifact提出
 #   （kaggle_targets_submit.sh）も行う。別スケジュールの提出 cron は持たず、1枠=1コンペ一巡で各コンペ
 #   1日1提出が自然に成立する。active(2段kill switch)かつ --execute のときだけ実提出、それ以外は dry-run。
 #
@@ -153,7 +153,7 @@ summary="$(node -e '
 ' "$out_json" "$HOUR")"
 bash "$SCRIPT_DIR/notify_discord.sh" "$summary" >/dev/null 2>&1 || true
 
-# SOT-1913「日々提出できる状態」— 同じ当番枠で当該コンペの現 champion 提出も行う（別スケジュールの
+# SOT-1913「日々提出できる状態」— 同じ当番枠で当該コンペの検証済みartifact提出も行う（別スケジュールの
 # 提出 cron は持たない＝「提出専用ローテ廃止」の方針を維持）。1枠=1コンペ一巡なので各コンペ1日1提出
 # が自然に成立する。起案が guard で skip されても提出は独立に試みる（＝必ず1日1回は提出しようとする）。
 #   - active(2段 kill switch: registry.enabled && env KAGGLE_IMPROVE_ENABLED) かつ --execute のときだけ実提出。
@@ -165,13 +165,13 @@ if [[ -n "$COMP" ]]; then
   submit_args=(--competition "$COMP")
   if [[ "$EXECUTE" == "1" && "$ACTIVE" == "1" ]]; then
     submit_args+=(--execute)
-    echo "== champion 提出（当番=${COMP}・実提出）=="
+    echo "== artifact 提出（当番=${COMP}・実提出）=="
   else
-    echo "== champion 提出（当番=${COMP}・ドライラン）=="
+    echo "== artifact 提出（当番=${COMP}・ドライラン）=="
   fi
   bash "$SCRIPT_DIR/kaggle_targets_submit.sh" "${submit_args[@]}" || echo "  (提出ステップは非0終了・best-effort で継続)"
 else
-  echo "== champion 提出: この枠に当番コンペなし（skip）=="
+  echo "== artifact 提出: この枠に当番コンペなし（skip）=="
 fi
 
 exit 0

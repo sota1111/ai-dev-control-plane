@@ -13,7 +13,7 @@ Layer 1: cron（決定的・LLM非呼出）  scripts/ai/kaggle_improvement_cycle
 Layer 2: 既存パイプライン（起案Issueを処理）
   webhook/queue → run_auto.sh → task-check（分解判断）
     → plan worker が起案Issueを読み、そのリポジトリの順位向上「子Issue」を 2〜5本 作成
-    → 各子の実装/検証/昇格判定 → 取り組み完了時に当該コンペの現 champion を提出
+    → 各子の実装/検証 → 取り組み完了時に検証済み candidate/champion artifact を提出
        （scripts/ai/kaggle_targets_submit.sh）
 ```
 
@@ -23,30 +23,29 @@ Layer 2: 既存パイプライン（起案Issueを処理）
 
 ## 単一スケジュール・1枠=1コンペ（ローテーション）
 
-単一 cron を毎時起動し、`--only-scheduled` で **JST [0,4,8,12,16,20] の6枠**だけを処理する。各枠は
-1コンペの当番で、6枠で6コンペを一巡する。各コンペは1日1回当番になり、その当番枠でそのコンペを提出する
+単一 cron を毎時起動し、`--only-scheduled` で **JST [0,6,12,18]** の4枠だけを処理する。各枠は
+1コンペの当番で、対象4コンペを1日1枠ずつ処理する
 （専用の提出/フロア cron は持たない）。1回の当番で何系統を提出するかは提出モード次第 — `both` は
 claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（下記「提出上限と提出モード」）。
 
 | JST hour | 当番コンペ | claude 系 repo | gpt 系 repo |
 | --- | --- | --- | --- |
-| 0  | ptcg           | ptcg-agent-claude    | ptcg-agent-gpt    |
-| 4  | arc-agi-2      | arc-agi-2-claude     | arc-agi-2-gpt     |
-| 8  | arc-agi-3      | arc-agi-3-claude     | arc-agi-3-gpt     |
-| 12 | agent-security | agent-security-claude| agent-security-gpt|
-| 16 | rogii          | rogii-claude         | rogii-gpt         |
-| 20 | biohub         | biohub-claude        | biohub-gpt        |
+| 0  | ptcg           | ptcg-agent-claude     | ptcg-agent-gpt     |
+| 6  | kaggriculture  | kaggriculture-claude  | kaggriculture-gpt  |
+| 12 | agent-security | agent-security-claude | agent-security-gpt |
+| 18 | biohub         | biohub-claude         | biohub-gpt         |
 
 ローテーション表・コンペ定義・提出物パスは `scripts/ai/kaggle_targets_registry.json`。
 （`config/` は harness 保護下のため `scripts/ai/` に同居。）
 
 ## 提出は「取り組み完了時」（コンペ内選定機構なし）
 
-- 提出対象は常にそのターゲットの **現 champion**（registry の `submit.file`）。SOT-1904 の
+- 提出対象はregistryの`submit`が指す **検証済みartifact**。candidateでもよく、champion昇格は不要。
+  SOT-1904 の
   「直近2提出収束ロジック／2枠選定ゲート」は **この経路では使わない**（コンペ内で提出内容を検討する
   機構は廃止）。
 - 別スケジュールの提出ローテ cron・日次フロア cron は持たない。**改善サイクル cron が同じ当番枠で**
-  当該コンペの現 champion 提出（`scripts/ai/kaggle_targets_submit.sh --competition <key>`）も行う
+  当該コンペの設定済みartifact提出（`scripts/ai/kaggle_targets_submit.sh --competition <key>`）も行う
   （SOT-1913「日々提出できる状態」）。起案が guard で skip されても提出は独立に試みるので、有効化すれば
   各コンペ1日1回は提出しようとする。実提出は active(2段kill switch) かつ `--execute` のときだけ。
 - **翌日の同じコンペ枠**では、起案材料の先頭に「前回提出結果（順位/スコア）」を含めてから次の改善
@@ -62,13 +61,15 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
 | コンペ | `daily_submission_cap` | `submission_mode` | 挙動 |
 | --- | --- | --- | --- |
 | ARC（arc-agi-2 / arc-agi-3） | **1** | **`alternate`** | 1日1提出のみ。claude/gpt を**日替わりで交互**に提出（前回提出系統の逆を選ぶ） |
-| 他4コンペ（ptcg / agent-security / rogii / biohub） | **5** | **`both`** | claude/gpt を**両方提出**し、両系統の結果を確認する |
+| 他3コンペ（ptcg / rogii / biohub） | **5** | **`both`** | claude/gpt を**両方提出**し、両系統の結果を確認する |
+| kaggriculture | **5** | **`both`** | JST 2時・14時の2枠で各lineageを1回ずつ、計4提出/日まで受け付ける |
+| agent-security | **5** | **`both`** | Claude/GPTの独立notebook lineageを共通`submission.csv`契約で各2回/日、計4提出/日まで受け付ける |
 
 - `alternate` の「次の系統」は Kaggle 提出履歴の最新提出（`kaggle_targets_submit.sh` が取得）から決める。
   最後に提出した repo の逆系統が今日の番。履歴が取れないときは claude 始まりで交互する。
 - `alternate` は共有 cap のため、当日そのコンペで（どちらの系統でも）すでに提出済みなら選ばれた系統も
   skip（冪等）。
-- `both` は 2系統ぶん（=2提出/日）で cap 5 に十分収まる。
+- `both` の既定は2系統ぶん（=2提出/日）。`daily_submissions_per_lineage=2` のコンペは4提出/日で cap 5 に収まる。
 
 ## ガード（暴走・空回りの防止・順位最優先に緩和）
 
@@ -100,7 +101,7 @@ workers: <claude系: solo=claude:opus | gpt系: solo=codex:gpt-5.6-sol>, handoff
 ## 目的         Kaggleコンペ <slug>（repo/系統）の順位を向上させる方針を決定し子Issueに分解して実施
 ## 入力材料     ### 前回提出結果（順位/スコア） / ### 直近の完了Issueダイジェスト / ### 失敗ログ・KPI抜粋
 ## 実施内容     1. 未着手の改善軸を選定 2. 2〜5子Issueへ分解（screen→confirm・非昇格revert・昇格時exec互換→Kaggle）
-               3. 取り組み完了時に現 champion を提出 4. 子完了後、親を In Review にして完了報告
+               3. 取り組み完了時に検証済みartifactを提出 4. 子完了後、親を In Review にして完了報告
 ## 受け入れ条件  改善方針の記録 / 子Issue全て終端 / 昇格判定と champion 整合 / 完了時提出
 ```
 
@@ -156,7 +157,7 @@ KAGGLE_IMPROVE_EXECUTE=1 KAGGLE_IMPROVE_ENABLED=1 bash scripts/ai/setup_cron.sh
 bash scripts/ai/kaggle_improvement_cycle.sh --hour 0
 # 実起案（active 時のみ Linear に作成）
 KAGGLE_IMPROVE_ENABLED=1 bash scripts/ai/kaggle_improvement_cycle.sh --hour 0 --execute
-# 完了トリガ提出（当番コンペの champion 提出・ドライラン）
+# 完了トリガ提出（当番コンペのartifact提出・ドライラン）
 bash scripts/ai/kaggle_targets_submit.sh --competition ptcg
 ```
 
@@ -178,9 +179,9 @@ bash scripts/ai/kaggle_targets_submit.sh --competition ptcg
 | 起案エンジン（純粋関数） | `src/lib/kaggleImprovement.ts` |
 | 起案プラン CLI（dry-run） | `runner-cli kaggle-improve-plan` |
 | 起案 実行 CLI（--execute で Linear 作成） | `runner-cli kaggle-improve-run` |
-| 提出プラン CLI（champion・収束なし） | `runner-cli kaggle-champion-plan` |
-| 改善サイクル cron（起案＋当番枠 champion 提出） | `scripts/ai/kaggle_improvement_cycle.sh` |
-| champion 提出（当番枠から呼ばれる／手動可） | `scripts/ai/kaggle_targets_submit.sh` |
+| 提出プラン CLI（candidate/champion共通） | `runner-cli kaggle-submission-plan` |
+| 改善サイクル cron（起案＋当番枠artifact提出） | `scripts/ai/kaggle_improvement_cycle.sh` |
+| artifact提出（当番枠から呼ばれる／手動可） | `scripts/ai/kaggle_targets_submit.sh` |
 | レジストリ（6コンペ×2系統） | `scripts/ai/kaggle_targets_registry.json` |
 | cron 登録 | `scripts/ai/setup_cron.sh` |
 </content>
