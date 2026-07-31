@@ -1269,11 +1269,54 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         );
         process.exit(1);
       }
+      const parseStringMap = (flag: string): Record<string, string> => {
+        if (!flag) return {};
+        const parsed = JSON.parse(flag);
+        if (
+          !parsed ||
+          typeof parsed !== 'object' ||
+          Array.isArray(parsed) ||
+          !Object.values(parsed).every((value) => typeof value === 'string')
+        ) {
+          throw new Error('expected a JSON object with string values');
+        }
+        return parsed;
+      };
+      const parseStringArrayMap = (flag: string): Record<string, string[]> => {
+        if (!flag) return {};
+        const parsed = JSON.parse(flag);
+        if (
+          !parsed ||
+          typeof parsed !== 'object' ||
+          Array.isArray(parsed) ||
+          !Object.values(parsed).every(
+            (value) => Array.isArray(value) && value.every((item) => typeof item === 'string')
+          )
+        ) {
+          throw new Error('expected a JSON object with string-array values');
+        }
+        return parsed;
+      };
+      let artifactFingerprintsByRepo: Record<string, string>;
+      let submittedArtifactFingerprintsByRepo: Record<string, string[]>;
+      try {
+        artifactFingerprintsByRepo = parseStringMap(flags['artifact-fingerprints']);
+        submittedArtifactFingerprintsByRepo = parseStringArrayMap(
+          flags['submitted-artifact-fingerprints']
+        );
+      } catch (err: any) {
+        process.stderr.write(
+          `kaggle-submission-plan: invalid artifact fingerprint JSON: ${err?.message || err}\n`
+        );
+        process.exit(1);
+      }
       const plan = planCompetitionSubmission(registry, competitionKey, submittedByRepo, {
         lastSubmittedLineage,
         dateUtc: flags['date-utc'],
         completedSlotRepos,
         competitionSubmittedToday,
+        artifactFingerprintsByRepo,
+        submittedArtifactFingerprintsByRepo,
       });
       if (!plan) {
         process.stderr.write(

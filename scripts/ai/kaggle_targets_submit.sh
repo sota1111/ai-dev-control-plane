@@ -73,7 +73,18 @@ SUBMISSION_MODE="$(node -e 'const r=JSON.parse(require("fs").readFileSync(proces
 today_utc="$(date -u +%F)"
 slot_id="${today_utc}-jst-$(printf '%02d' "$HOUR")"
 declare -A today_count
+declare -A current_fingerprint
+declare -A submitted_fingerprints
 for repo in "${REPOS[@]}"; do today_count["$repo"]=0; done
+for repo in "${REPOS[@]}"; do
+  submit_file="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);const t=(c?c.targets:[]).find(x=>x.repo===process.argv[3]);process.stdout.write(t&&t.submit&&t.submit.file||"")' "$REGISTRY" "$COMP_KEY" "$repo")"
+  if [[ -n "$submit_file" && -f "$submit_file" ]]; then
+    current_fingerprint["$repo"]="sha256:$(sha256sum "$submit_file" | awk '{print $1}')"
+  else
+    current_fingerprint["$repo"]=""
+  fi
+  submitted_fingerprints["$repo"]=""
+done
 LAST_REPO=""
 HISTORY_OK=0
 HISTORY_REASON=""
@@ -103,6 +114,10 @@ elif raw="$(kaggle competitions submissions -c "$COMP_SLUG" 2>&1)"; then
       for repo in "${REPOS[@]}"; do
         if grep -Fq "$repo" <<<"$line"; then
           today_count["$repo"]=$(( ${today_count["$repo"]} + 1 ))
+          line_fingerprint="$(grep -oE '\\[artifact:sha256:[0-9a-f]{64}\\]' <<<"$line" | head -1 | sed -E 's/^\\[artifact:|\\]$//g')"
+          if [[ -n "$line_fingerprint" ]]; then
+            submitted_fingerprints["$repo"]+="${line_fingerprint}"$'\n'
+          fi
           if grep -Fq "[slot:${slot_id}]" <<<"$line"; then
             completed_slot_repos+=("$repo")
           fi
@@ -148,6 +163,15 @@ completed_slot_json="$(printf '%s\n' "${completed_slot_repos[@]}" | node -e '
   const values=require("fs").readFileSync(0,"utf8").split(/\r?\n/).filter(Boolean);
   process.stdout.write(JSON.stringify([...new Set(values)]));
 ')"
+artifact_fingerprints_json="$(
+  for repo in "${REPOS[@]}"; do printf '%s\t%s\n' "$repo" "${current_fingerprint[$repo]}"; done |
+    node -e 'const rows=require("fs").readFileSync(0,"utf8").trim().split(/\r?\n/).filter(Boolean);const out={};for(const row of rows){const [repo,fp]=row.split("\t");if(fp)out[repo]=fp;}process.stdout.write(JSON.stringify(out));'
+)"
+submitted_artifact_fingerprints_json="$(
+  for repo in "${REPOS[@]}"; do
+    while IFS= read -r fp; do [[ -n "$fp" ]] && printf '%s\t%s\n' "$repo" "$fp"; done <<<"${submitted_fingerprints[$repo]}"
+  done | node -e 'const rows=require("fs").readFileSync(0,"utf8").trim().split(/\r?\n/).filter(Boolean);const out={};for(const row of rows){const [repo,fp]=row.split("\t");(out[repo]??=[]).push(fp);}process.stdout.write(JSON.stringify(out));'
+)"
 
 # alternate モードのときだけ --last-lineage を付ける（both では engine が無視する）。
 LINEAGE_ARGS=()
@@ -160,12 +184,16 @@ plan_json="$(cd "$REPO_ROOT" && npx --no-install tsx src/runner-cli.ts kaggle-su
   --registry "$REGISTRY" --competition "$COMP_KEY" --submitted "$submitted_json" \
   --date-utc "$today_utc" --completed-slot-repos "$completed_slot_json" \
   --competition-submitted "$TOTAL_TODAY" \
+  --artifact-fingerprints "$artifact_fingerprints_json" \
+  --submitted-artifact-fingerprints "$submitted_artifact_fingerprints_json" \
   "${LINEAGE_ARGS[@]}" 2>/dev/null)"
 if [[ -z "$plan_json" ]]; then
   plan_json="$(cd "$REPO_ROOT" && npx tsx src/runner-cli.ts kaggle-submission-plan \
     --registry "$REGISTRY" --competition "$COMP_KEY" --submitted "$submitted_json" \
     --date-utc "$today_utc" --completed-slot-repos "$completed_slot_json" \
     --competition-submitted "$TOTAL_TODAY" \
+    --artifact-fingerprints "$artifact_fingerprints_json" \
+    --submitted-artifact-fingerprints "$submitted_artifact_fingerprints_json" \
     "${LINEAGE_ARGS[@]}" 2>/dev/null)"
 fi
 if [[ -z "$plan_json" ]]; then
@@ -228,6 +256,9 @@ for ((i=0; i<n_targets; i++)); do
   fi
   file="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].file)||"")' "$plan_json" "$i")"
   msg="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].message)||"")' "$plan_json" "$i") [slot:${slot_id}]"
+  if [[ -n "${current_fingerprint[$repo]:-}" ]]; then
+    msg+=" [artifact:${current_fingerprint[$repo]}]"
+  fi
   kernel="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].kernel)||"")' "$plan_json" "$i")"
   version="$(node -e 'process.stdout.write(String((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].version)||""))' "$plan_json" "$i")"
   output="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].output)||"")' "$plan_json" "$i")"
