@@ -455,11 +455,7 @@ export interface CycleInput {
   hourJst: number;
   /** env KAGGLE_IMPROVE_ENABLED（registry.enabled と AND）。 */
   envEnabled: boolean;
-  /** workspace の総 Issue 数（Issue cap ガード用）。 */
-  issueCount: number;
-  /** worker usage-limit cooldown 中か（cooldown ガード用）。 */
-  cooldownActive: boolean;
-  /** project 名 → その project のガードシグナル。無ければ安全側（未完了なし・新材料なし）。 */
+  /** project 名 → その project のガードシグナル。無ければ安全側（未完了なし・新材料あり）。 */
   signals?: Record<string, GuardSignals>;
   /** project 名 → 起案材料。 */
   material?: Record<string, ImprovementMaterial>;
@@ -815,15 +811,17 @@ export function planCompetitionSubmission(
  * その枠の当番コンペの2ターゲットについて「起案するか（draft）／ガードで抑制するか（skip）」を決め、
  * draft のものは起案Issueのタイトル/本文まで生成する。cron はこの結果をそのまま Issue 作成に使う。
  *
- * ガード（§5・全て AND で通過したターゲットのみ draft）:
- *  1. active（registry.enabled && envEnabled）でなければ全 skip。
- *  2. Issue cap ガード: issueCount >= issueCapGuard なら全 skip。
- *  3. cooldown ガード: cooldownActive なら全 skip。
- *  4. 前サイクル未完了ガード: project に未終端 auto-improve 親があれば skip。
- *  5. 新材料ガード: 前回サイクル以降に新しい完了 Issue が無ければ skip。
+ * 方針（順位最優先・「基本は起案する」）: 停滞/スコア低下や新材料の有無で起案を止めない。残すガードは
+ * 構造上の active/rotation と、Linear を溢れさせない重複防止だけ。
+ *  1. active（registry.enabled && envEnabled）でなければ全 skip（kill switch）。
+ *  2. 当番コンペが解決できなければ全 skip（rotation）。
+ *  3. 前サイクル未完了ガード（唯一の抑制）: 同じ project に稼働中（Todo/In Progress）の auto-improve
+ *     親があれば、そのターゲットだけ skip（重複起案を防ぐ）。
+ * それ以外（Issue cap / cooldown / 新材料 / 測定不能）は skip 理由にしない。Issue cap は起案側
+ * （cron の archive → 起案）で吸収し、engine では判定しない。
  */
 export function planImprovementCycle(input: CycleInput): CyclePlan {
-  const { registry, hourJst, envEnabled, issueCount, cooldownActive } = input;
+  const { registry, hourJst, envEnabled } = input;
   const signals = input.signals ?? {};
   const material = input.material ?? {};
   const active = registry.enabled && envEnabled;
@@ -861,14 +859,6 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
     };
   }
 
-  // 全ターゲット共通の抑制（cap / cooldown）。
-  const globalSkip =
-    issueCount >= registry.issueCapGuard
-      ? `issue cap guard (total ${issueCount} >= ${registry.issueCapGuard})`
-      : cooldownActive
-        ? 'worker cooldown active'
-        : null;
-
   const targets: TargetPlan[] = competition.targets.map((t) => {
     const sig = signals[t.project] ?? { hasUnfinishedCycle: false, hasNewMaterial: true };
     const mat = material[t.project] ?? {};
@@ -881,27 +871,22 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
       cycleNumber: t.nextCycle,
     };
 
-    let skipReason: string | null = globalSkip;
-    if (!skipReason && sig.hasUnfinishedCycle) {
-      skipReason = 'previous auto-improve cycle for this project is still open';
-    }
-    if (!skipReason && sig.measurementFailureReason) {
-      skipReason = sig.measurementFailureReason;
-    }
-    if (!skipReason && !sig.hasNewMaterial) {
-      skipReason = 'no new completed issue or scored Kaggle result since the last cycle';
-    }
-
-    if (skipReason) {
-      return { ...common, action: 'skip' as const, reason: skipReason };
+    // 唯一の抑制: 同じ project に稼働中の auto-improve 親があれば重複起案しない。
+    // Issue cap / cooldown / 新材料 / 測定不能では止めない（「基本は起案する」方針）。
+    if (sig.hasUnfinishedCycle) {
+      return {
+        ...common,
+        action: 'skip' as const,
+        reason: 'previous auto-improve cycle for this project is still open',
+      };
     }
 
     return {
       ...common,
       action: 'draft' as const,
       reason: sig.plateauReason
-        ? `new scored result requires improvement planning; ${sig.plateauReason}`
-        : 'all guards passed',
+        ? `default draft policy (order-first); ${sig.plateauReason}`
+        : 'default draft policy (order-first): only duplicate-prevention guard applies',
       issueTitle: buildIssueTitle(t, t.nextCycle),
       issueBody: buildIssueBody(t, competition, t.nextCycle, mat),
     };
