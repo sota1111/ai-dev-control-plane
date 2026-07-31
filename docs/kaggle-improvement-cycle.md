@@ -126,8 +126,9 @@ reasoning: <gpt系のみ: solo=ultra>
 2〜5子Issueへ分解する（＝「plan が起案Issueを読んで順位向上子Issueを作る」要件）。
 親Issueも分解まで同じAIが担当するsolo実行とする。子Issue本文にはClaude系なら
 `workers: solo=claude:opus, handoff=off`、GPT系なら
-`workers: solo=codex:gpt-5.6-sol, handoff=off` を必ず付け、分解後の実装・検証・GitHub・Linear報告を
-それぞれOpus / Solへ固定する。
+`workers: solo=codex:gpt-5.6-sol, handoff=off` と `reasoning: solo=low` を必ず付ける。これにより、GPT系は
+親Issueの方針検討・子Issue作成まではSol `ultra`、子Issueの実装・検証・GitHub・Linear報告はSol `low`へ
+全周期で固定する。Claude系の子IssueはOpusへ固定する。
 
 ## 子Issueは Todo + blockedBy で作る（待機中は Blocked へ自動遷移）
 

@@ -677,11 +677,11 @@ describe('kaggleImprovement', () => {
         expect(gpt.workersDirective).toContain('solo=codex:sol');
         expect(gpt.workersDirective).toContain('reasoning: solo=ultra');
         expect(buildIssueBody(claude, c, 1, {})).toContain(
-          '`workers: solo=claude:opus, handoff=off`'
+          'workers: solo=claude:opus, handoff=off'
         );
-        expect(buildIssueBody(gpt, c, 1, {})).toContain(
-          '`workers: solo=codex:gpt-5.6-sol, handoff=off`'
-        );
+        const gptBody = buildIssueBody(gpt, c, 1, {});
+        expect(gptBody).toContain('workers: solo=codex:gpt-5.6-sol, handoff=off');
+        expect(gptBody).toContain('reasoning: solo=low');
       }
       // SOT-1913 提出cap補正: ARC=1/day & alternate、他=5/day & both。
       for (const c of r.competitions) {
