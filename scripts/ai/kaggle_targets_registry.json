@@ -9,6 +9,7 @@
     "competitions[].kaggle_competition": "Kaggle コンペ slug（実 slug は各 repo の子Issueで確定）。",
     "competitions[].daily_submission_cap": "そのコンペの1日提出上限（Kaggle実制限。ARC=1 / 他=5）。",
     "competitions[].daily_submissions_per_lineage": "bothモードで各lineageがUTC日ごとに受け付ける提出数（対象4コンペは2。2枠×2系統=4提出/日）。",
+    "competitions[].repeat_requires_new_artifact": "trueなら同一lineageの2枠目は、そのUTC日に未提出のartifact SHA-256だけ許可する。",
     "competitions[].submission_mode": "提出モード。both=claude/gptを両方提出し両結果を確認（cap≥2の他コンペ）/ alternate=1日1提出のみ許すARC(共有cap=1)でclaude・gptを日替わり交互に提出。既定 both。",
     "competitions[].ab_evaluation": "任意。4条件A/B評価の固定game・action budget・試行数・seedとchampion昇格guardrail。ARC-AGI-3 harnessへ渡す。",
     "competitions[].alternate_anchor_date": "alternateモードの基準UTC日 (YYYY-MM-DD)。",
@@ -43,6 +44,7 @@
       "kaggle_competition": "pokemon-tcg-ai-battle",
       "daily_submission_cap": 5,
       "daily_submissions_per_lineage": 2,
+      "repeat_requires_new_artifact": true,
       "submission_mode": "both",
       "targets": [
         {

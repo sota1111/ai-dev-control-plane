@@ -84,6 +84,8 @@ export interface ImprovementCompetition {
   dailySubmissionCap: number;
   /** `both` mode: accepted submissions allowed per lineage and UTC day. Default 1. */
   dailySubmissionsPerLineage: number;
+  /** A second daily slot is usable only for an artifact not already submitted that UTC day. */
+  repeatRequiresNewArtifact: boolean;
   /** 提出モード。default `both`。ARC(1/day 共有)は `alternate`（claude/gpt を日替わり交互提出）。 */
   submissionMode: SubmissionMode;
   alternateAnchorDate?: string;
@@ -227,6 +229,11 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
       `registry.competitions[${i}].daily_submissions_per_lineage must be an integer between 1 and daily_submission_cap`
     );
   }
+  const repeatRequiresNewArtifact =
+    co.repeat_requires_new_artifact ?? co.repeatRequiresNewArtifact ?? false;
+  if (typeof repeatRequiresNewArtifact !== 'boolean') {
+    throw new Error(`registry.competitions[${i}].repeat_requires_new_artifact must be a boolean`);
+  }
 
   const modeRaw = co.submission_mode ?? co.submissionMode ?? 'both';
   if (modeRaw !== 'both' && modeRaw !== 'alternate') {
@@ -318,6 +325,7 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
     kaggleCompetition,
     dailySubmissionCap: cap,
     dailySubmissionsPerLineage,
+    repeatRequiresNewArtifact,
     submissionMode,
     alternateAnchorDate: alternateAnchorDate as string | undefined,
     alternateAnchorLineage: alternateAnchorLineage as Lineage | undefined,
@@ -668,6 +676,10 @@ export interface CompetitionSubmitOptions {
   completedSlotRepos?: ReadonlySet<string>;
   /** All accepted submissions for the competition today, including manual/unregistered ones. */
   competitionSubmittedToday?: number;
+  /** SHA-256 fingerprint of the artifact currently selected for each repository. */
+  artifactFingerprintsByRepo?: Readonly<Record<string, string>>;
+  /** Artifact fingerprints already accepted today, grouped by repository. */
+  submittedArtifactFingerprintsByRepo?: Readonly<Record<string, readonly string[]>>;
 }
 
 /**
@@ -744,8 +756,17 @@ export function planCompetitionSubmission(
     competition: competition.key,
     kaggleCompetition: competition.kaggleCompetition,
     mode: 'both',
-    targets: competition.targets.map((t) =>
-      (opts.competitionSubmittedToday ?? 0) >= competition.dailySubmissionCap
+    targets: competition.targets.map((t) => {
+      const submittedToday = submittedByRepo[t.repo] ?? 0;
+      const currentFingerprint = opts.artifactFingerprintsByRepo?.[t.repo];
+      const submittedFingerprints = opts.submittedArtifactFingerprintsByRepo?.[t.repo] ?? [];
+      const repeatBlocked =
+        competition.repeatRequiresNewArtifact &&
+        submittedToday > 0 &&
+        (!currentFingerprint ||
+          submittedFingerprints.length < submittedToday ||
+          submittedFingerprints.includes(currentFingerprint));
+      return (opts.competitionSubmittedToday ?? 0) >= competition.dailySubmissionCap
         ? {
             competition: competition.key,
             kaggleCompetition: competition.kaggleCompetition,
@@ -753,7 +774,7 @@ export function planCompetitionSubmission(
             lineage: t.lineage,
             action: 'skip' as const,
             cap: competition.dailySubmissionCap,
-            submittedToday: submittedByRepo[t.repo] ?? 0,
+            submittedToday,
             reason: `daily competition cap reached (${opts.competitionSubmittedToday}/${competition.dailySubmissionCap})`,
           }
         : opts.completedSlotRepos?.has(t.repo)
@@ -764,11 +785,25 @@ export function planCompetitionSubmission(
               lineage: t.lineage,
               action: 'skip' as const,
               cap: competition.dailySubmissionCap,
-              submittedToday: submittedByRepo[t.repo] ?? 0,
+              submittedToday,
               reason: 'daily slot already completed (idempotent rerun)',
             }
-          : planChampionSubmission(competition, t, submittedByRepo[t.repo] ?? 0)
-    ),
+          : repeatBlocked
+            ? {
+                competition: competition.key,
+                kaggleCompetition: competition.kaggleCompetition,
+                repo: t.repo,
+                lineage: t.lineage,
+                action: 'skip' as const,
+                cap: competition.dailySubmissionCap,
+                submittedToday,
+                reason:
+                  submittedFingerprints.length < submittedToday
+                    ? 'repeat requires a new artifact fingerprint; prior fingerprint is unavailable'
+                    : 'repeat requires a new artifact fingerprint; selected artifact was already submitted today',
+              }
+            : planChampionSubmission(competition, t, submittedToday);
+    }),
   };
 }
 
