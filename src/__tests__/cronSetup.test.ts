@@ -7,7 +7,7 @@ describe('cron setup', () => {
   test('removes the obsolete untargeted run_auto cron without registering it again', () => {
     expect(script).toContain('grep -v "run_auto.sh"');
     expect(script).not.toMatch(/CRON_CMD=.*run_auto\.sh/);
-    expect(script).not.toMatch(/echo \"\$CRON_CMD\"/);
+    expect(script).not.toContain('echo "$CRON_CMD"');
   });
 
   test('keeps the scheduled Kaggle improvement cycle', () => {

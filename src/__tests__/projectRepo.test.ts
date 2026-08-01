@@ -81,6 +81,7 @@ describe('loadProjectRepoConfig (real config/project_repos.json)', () => {
       'utf8',
     ));
     const mappings = new Map(loadProjectRepoConfig().map((entry) => [entry.project, entry]));
+    const controlPlaneRoot = mappings.get('ai-dev-control-plane')!.localPath;
     const scheduledCompetitionKeys = new Set(
       (registry.rotation ?? []).map((slot: { competition: string }) => slot.competition),
     );
@@ -92,7 +93,9 @@ describe('loadProjectRepoConfig (real config/project_repos.json)', () => {
         if (!submit.file || submit.kernel) continue;
         const mapping = mappings.get(target.project);
         expect(mapping).toBeDefined();
-        const artifact = path.resolve(process.cwd(), submit.file);
+        const artifact = path.isAbsolute(submit.file)
+          ? path.normalize(submit.file)
+          : path.resolve(controlPlaneRoot, submit.file);
         const repoRoot = path.resolve(mapping!.localPath);
         expect(artifact === repoRoot || artifact.startsWith(`${repoRoot}${path.sep}`)).toBe(true);
       }
