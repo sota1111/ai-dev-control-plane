@@ -3,6 +3,8 @@ import {
   loadProjectRepoConfig,
   ProjectRepo,
 } from '../lib/projectRepo.js';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const fixture: ProjectRepo[] = [
   { project: 'ai-dev-control-plane', repo: 'sota1111/ai-dev-control-plane', localPath: '/workspaces/ai-dev-control-plane' },
@@ -53,6 +55,24 @@ describe('loadProjectRepoConfig (real config/project_repos.json)', () => {
       expect(typeof e.localPath).toBe('string');
       expect(e.localPath.length).toBeGreaterThan(0);
     }
+  });
+
+  test('maps every project used by the Kaggle cycle registry', () => {
+    const registry = JSON.parse(fs.readFileSync(
+      path.join(process.cwd(), 'scripts/ai/kaggle_targets_registry.json'),
+      'utf8',
+    ));
+    const projects = new Set<string>();
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach(visit);
+      if (!value || typeof value !== 'object') return;
+      const record = value as Record<string, unknown>;
+      if (typeof record.project === 'string') projects.add(record.project);
+      Object.values(record).forEach(visit);
+    };
+    visit(registry);
+    const mapped = new Set(loadProjectRepoConfig().map((entry) => entry.project));
+    expect([...projects].filter((project) => !mapped.has(project))).toEqual([]);
   });
 });
 

@@ -35,6 +35,76 @@
     "localPath": "/workspaces/booking-monitor"
   },
   {
+    "project": "agent-security-claude",
+    "repo": "sota1111/agent-security-claude",
+    "localPath": "/workspaces/agent-security-claude"
+  },
+  {
+    "project": "agent-security-gpt",
+    "repo": "sota1111/agent-security-gpt",
+    "localPath": "/workspaces/agent-security-gpt"
+  },
+  {
+    "project": "biohub-claude",
+    "repo": "sota1111/biohub-claude",
+    "localPath": "/workspaces/ai-dev-control-plane/.targets/biohub-claude"
+  },
+  {
+    "project": "biohub-gpt",
+    "repo": "sota1111/biohub-gpt",
+    "localPath": "/workspaces/biohub-gpt"
+  },
+  {
+    "project": "kaggriculture-claude",
+    "repo": "sota1111/kaggriculture-claude",
+    "localPath": "/workspaces/ai-dev-control-plane/.targets/kaggriculture-claude"
+  },
+  {
+    "project": "kaggriculture-gpt",
+    "repo": "sota1111/kaggriculture-gpt",
+    "localPath": "/workspaces/ai-dev-control-plane/.targets/kaggriculture-gpt"
+  },
+  {
+    "project": "ptcg-agent-claude",
+    "repo": "sota1111/ptcg-agent-claude",
+    "localPath": "/workspaces/ptcg-agent-claude"
+  },
+  {
+    "project": "ptcg-agent-gpt",
+    "repo": "sota1111/ptcg-agent-gpt",
+    "localPath": "/workspaces/ptcg-agent-gpt"
+  },
+  {
+    "project": "arc-agi-2-claude",
+    "repo": "sota1111/arc-agi-2-claude",
+    "localPath": "/workspaces/ai-dev-control-plane/.targets/arc-agi-2-claude"
+  },
+  {
+    "project": "arc-agi-2-gpt",
+    "repo": "sota1111/arc-agi-2-gpt",
+    "localPath": "/workspaces/ai-dev-control-plane/.targets/arc-agi-2-gpt"
+  },
+  {
+    "project": "arc-agi-3-claude",
+    "repo": "sota1111/arc-agi-3-claude",
+    "localPath": "/workspaces/ai-dev-control-plane/.targets/arc-agi-3-claude"
+  },
+  {
+    "project": "arc-agi-3-gpt",
+    "repo": "sota1111/arc-agi-3-gpt",
+    "localPath": "/workspaces/ai-dev-control-plane/.targets/arc-agi-3-gpt"
+  },
+  {
+    "project": "rogii-claude",
+    "repo": "sota1111/rogii-claude",
+    "localPath": "/workspaces/ai-dev-control-plane/.targets/rogii-claude"
+  },
+  {
+    "project": "rogii-gpt",
+    "repo": "sota1111/rogii-gpt",
+    "localPath": "/workspaces/ai-dev-control-plane/.targets/rogii-gpt"
+  },
+  {
     "project": "toddler-nas-photo-indexer",
     "repo": "sota1111/toddler-nas-photo-indexer",
     "localPath": "/workspaces/toddler-nas-photo-indexer"
