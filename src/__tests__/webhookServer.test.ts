@@ -35,6 +35,7 @@ const mockRunner = {
   reapCompletedDetachedRuns: (jest.fn() as any).mockResolvedValue([]),
   syncQueueWithLinear: (jest.fn() as any).mockResolvedValue(undefined),
   isLocked: jest.fn().mockReturnValue(false),
+  setRunnerPausedState: jest.fn(),
   loadQueue: jest.fn().mockReturnValue([]),
   getIssueExecutionEligibility: (jest.fn() as any).mockResolvedValue({ eligible: true }),
   LOG_DIR: '/tmp/test-logs',
@@ -56,7 +57,7 @@ const originalSecret = process.env.LINEAR_WEBHOOK_SECRET;
 process.env.LINEAR_WEBHOOK_SECRET = '';
 
 const webhookServer: any = await import('../webhook-server.js');
-const { app, runPeriodicDrainTick, startPeriodicDrain, runReaperTick, scheduleIssueEvent, _debounceTimers, _resetDebounceTimers } = webhookServer;
+const { app, runPeriodicDrainTick, startPeriodicDrain, runReaperTick, scheduleIssueEvent, waitForRunnerIdle, _debounceTimers, _resetDebounceTimers } = webhookServer;
 
 // Helper: create a mock spawn child that emits given stdout, stderr, then closes
 function mockSpawnChild({ stdout = '', stderr = '', exitCode = 0 } = {}) {
@@ -309,6 +310,31 @@ describe('webhook usage limit retry', () => {
     expect(runner.runItem).toHaveBeenCalledWith({ issueId: id1, trigger: 'webhook' });
     // Verify runner.drainQueue was called after main task completed
     expect(runner.drainQueue).toHaveBeenCalled();
+  });
+});
+
+describe('graceful shutdown idle wait', () => {
+  beforeEach(() => {
+    mockRunner.isLocked.mockReset();
+  });
+
+  test('returns immediately when no runner lock is held', async () => {
+    mockRunner.isLocked.mockReturnValue(false);
+    await expect(waitForRunnerIdle(20, 1)).resolves.toBe(true);
+  });
+
+  test('waits for an active runner instead of terminating it', async () => {
+    mockRunner.isLocked
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false);
+    await expect(waitForRunnerIdle(100, 1)).resolves.toBe(true);
+    expect(mockRunner.isLocked).toHaveBeenCalledTimes(3);
+  });
+
+  test('reports timeout while the runner remains active', async () => {
+    mockRunner.isLocked.mockReturnValue(true);
+    await expect(waitForRunnerIdle(1, 1)).resolves.toBe(false);
   });
 });
 

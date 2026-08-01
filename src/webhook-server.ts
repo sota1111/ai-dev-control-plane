@@ -42,19 +42,6 @@ if (_discordNotifier) {
 const WEBHOOK_EVENTS_FILE = path.join(runner.LOG_DIR, 'linear.webhook-events.json');
 const WEBHOOK_EVENT_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-// Distinguish parent-received signals from child process signals
-process.on('SIGTERM', () => {
-  console.log(`[WEBHOOK:PARENT] Server received SIGTERM at ${new Date().toISOString()} — user-initiated stop, shutting down gracefully`);
-  if (_discordNotifier) _discordNotifier.stop();
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log(`[WEBHOOK:PARENT] Server received SIGINT at ${new Date().toISOString()} — user-initiated stop (Ctrl+C), shutting down gracefully`);
-  if (_discordNotifier) _discordNotifier.stop();
-  process.exit(0);
-});
-
 process.on('uncaughtException', (err) => {
   // Log but DO NOT exit — keep server alive
   console.error(`[WEBHOOK:PARENT] uncaughtException at ${new Date().toISOString()}: ${err.message}\n${err.stack}`);
@@ -88,6 +75,56 @@ let _periodicDrainRunning = false; // in-process 再入ガード（interval call
 let _reaperRunning = false;        // reaper 再入ガード
 let _prevReaperCooldownActive = false; // 前tick時点で cooldown 中だったか（cooldown明け検知用）
 let _lastStrandedScanAt = 0;       // 直近で取り残し In-Progress の Linear 再スキャンを行った epoch(ms)。0=未実施
+let _periodicDrainTimer: NodeJS.Timeout | null = null;
+let _httpServer: ReturnType<typeof app.listen> | null = null;
+let _shutdownStarted = false;
+
+const SHUTDOWN_POLL_MS = 500;
+const SHUTDOWN_TIMEOUT_MS = 35 * 60 * 1000; // 30-minute worker timeout plus cleanup margin
+
+/** Wait for the foreground runner lock to clear without interrupting its child process. */
+async function waitForRunnerIdle(
+  timeoutMs: number = SHUTDOWN_TIMEOUT_MS,
+  pollMs: number = SHUTDOWN_POLL_MS,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (runner.isLocked()) {
+    if (Date.now() >= deadline) return false;
+    await new Promise<void>((resolve) => setTimeout(resolve, pollMs));
+  }
+  return true;
+}
+
+async function shutdownGracefully(signal: NodeJS.Signals): Promise<void> {
+  if (_shutdownStarted) return;
+  _shutdownStarted = true;
+  console.log(`[WEBHOOK:PARENT] Server received ${signal} at ${new Date().toISOString()} — stopping intake and waiting for the active worker`);
+
+  if (_periodicDrainTimer) {
+    clearInterval(_periodicDrainTimer);
+    _periodicDrainTimer = null;
+  }
+  // The current run may be inside drainQueue's serial loop. Pause the in-memory runner so that,
+  // after the active item finishes, the next queued item is retained rather than launched.
+  runner.setRunnerPausedState(true);
+  // Stop accepting new HTTP requests first. Existing requests are allowed to complete.
+  const intakeClosed = _httpServer
+    ? new Promise<void>((resolve) => _httpServer!.close(() => resolve()))
+    : Promise.resolve();
+
+  if (!(await waitForRunnerIdle())) {
+    console.error(`[WEBHOOK:PARENT] Graceful shutdown still waiting after ${SHUTDOWN_TIMEOUT_MS}ms; active worker was not terminated`);
+    await waitForRunnerIdle(Number.POSITIVE_INFINITY);
+  }
+  await intakeClosed;
+  console.log('[WEBHOOK:PARENT] Active worker finished; graceful shutdown complete');
+  if (_discordNotifier) _discordNotifier.stop();
+  process.exit(0);
+}
+
+// Parent signals stop intake first and never terminate an active worker midway through its run.
+process.on('SIGTERM', () => { void shutdownGracefully('SIGTERM'); });
+process.on('SIGINT', () => { void shutdownGracefully('SIGINT'); });
 
 // 取り残し回収の最大間隔（SOT-925 逸脱1）。ビジーなキューが続いても、この間隔が経過していれば
 // 1回だけ Linear 再スキャンを許可し、In Progress のまま取り残された Issue の starvation を防ぐ。
@@ -717,14 +754,14 @@ const isMain = fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
   (async () => {
     await initSecrets(['LINEAR_WEBHOOK_SECRET', 'DISCORD_PUBLIC_KEY', 'LINEAR_API_KEY', 'DISCORD_WEBHOOK_URL', 'DISCORD_WEBHOOK_URL_NOTIFY']);
-    app.listen(PORT, () => {
+    _httpServer = app.listen(PORT, () => {
       console.log(`[WEBHOOK] Server listening on port ${PORT}`);
       setImmediate(() => {
         runBootstrapScan().catch((err) => {
           runner.log('BOOTSTRAP', `startup scan uncaught error: ${err.message}`);
         });
         runner.log('QUEUE', `periodic drain started, interval=${QUEUE_DRAIN_INTERVAL_MS}ms`);
-        startPeriodicDrain();
+        _periodicDrainTimer = startPeriodicDrain();
       });
     });
   })();
@@ -736,4 +773,4 @@ function _resetDebounceTimers(): void {
   _debounceTimers.clear();
 }
 
-export { app, runBootstrapScan, hasDueQueueItem, runPeriodicDrainTick, startPeriodicDrain, scanAndEnqueueActiveIssues, runReaperTick, processIssueEvent, scheduleIssueEvent, _debounceTimers, _resetDebounceTimers };
+export { app, runBootstrapScan, hasDueQueueItem, runPeriodicDrainTick, startPeriodicDrain, scanAndEnqueueActiveIssues, runReaperTick, processIssueEvent, scheduleIssueEvent, waitForRunnerIdle, _debounceTimers, _resetDebounceTimers };
