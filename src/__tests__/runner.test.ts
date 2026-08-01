@@ -1572,6 +1572,39 @@ describe('runner', () => {
       expect(logsFlat.some(l => l.includes('completed successfully'))).toBe(true);
     });
 
+    it('treats an explicit completed contract plus Linear In Review as verified success', async () => {
+      const item: any = queueItem('SOT-REVIEWED', 1);
+      mockRunAutoExit(0, 'COMPLETION_CONTRACT: COMPLETED');
+      setupLinearMocks([
+        { issue: { id: 'SOT-REVIEWED', state: { type: 'started', name: 'In Progress' } } },
+        { issue: { project: { name: 'ai-dev-control-plane' } } },
+        { issue: { id: 'SOT-REVIEWED', state: { type: 'started', name: 'In Review' } } }
+      ]);
+
+      const logSpy = jest.spyOn(fs, 'appendFileSync');
+      await runner.runItem(item);
+
+      const logs = logSpy.mock.calls.map(c => c[1] as string);
+      expect(logs.some(l => l.includes('outcome=TASK_COMPLETED'))).toBe(true);
+      expect(logs.some(l => l.includes('task completion not verified'))).toBe(false);
+    });
+
+    it('does not trust Linear In Review without an explicit completed contract', async () => {
+      const item: any = queueItem('SOT-UNVERIFIED-REVIEW', 1);
+      mockRunAutoExit(0, 'worker exited without a completion contract');
+      setupLinearMocks([
+        { issue: { id: 'SOT-UNVERIFIED-REVIEW', state: { type: 'started', name: 'In Progress' } } },
+        { issue: { project: { name: 'ai-dev-control-plane' } } },
+        { issue: { id: 'SOT-UNVERIFIED-REVIEW', state: { type: 'started', name: 'In Review' } } }
+      ]);
+
+      const logSpy = jest.spyOn(fs, 'appendFileSync');
+      await runner.runItem(item);
+
+      const logs = logSpy.mock.calls.map(c => c[1] as string);
+      expect(logs.some(l => l.includes('outcome=COMPLETION_UNVERIFIED'))).toBe(true);
+    });
+
     it('exits 70 (COMPLETION_UNVERIFIED): skips success cleanup', async () => {
       const item: any = queueItem('SOT-101', 1);
       mockRunAutoExit(70, 'COMPLETION_CONTRACT: INCOMPLETE');

@@ -166,6 +166,11 @@ async function verifyTaskCompletion(issueId: string, output: string): Promise<Co
     return { completed: true, noPr: true };
   }
 
+  // A PR-producing lifecycle intentionally finishes in Linear's human-review hold state rather than
+  // Done. The explicit contract alone is not sufficient (Linear remains the source of truth), but the
+  // contract plus an observed In Review state is a verified successful terminal for automation.
+  const hasCompletedContract = !!output?.includes('COMPLETION_CONTRACT: COMPLETED');
+
   // 2. Query Linear for final state (Source of Truth)
   try {
     const query = `
@@ -183,7 +188,9 @@ async function verifyTaskCompletion(issueId: string, output: string): Promise<Co
     }
 
     const { state } = data.issue;
-    const isActuallyCompleted = state?.type === 'completed' || state?.name === 'Done';
+    const isActuallyCompleted = state?.type === 'completed'
+      || state?.name === 'Done'
+      || (hasCompletedContract && state?.name === 'In Review');
 
     if (isActuallyCompleted) {
       return { completed: true };
