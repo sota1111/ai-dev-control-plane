@@ -502,7 +502,10 @@ function blockingIssueIds(issue: any): string[] {
     .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
 }
 
-export async function setIssueInProgress(issueId: string): Promise<void> {
+export async function setIssueInProgress(
+  issueId: string,
+  options: { preserveBlocked?: boolean } = {}
+): Promise<void> {
   const { log } = requireDeps();
   try {
     const issueData: any = await linearQuery(
@@ -515,6 +518,13 @@ export async function setIssueInProgress(issueId: string): Promise<void> {
     // wrong. isTerminalState also guards the Discord `/recover` caller for free.
     if (isTerminalState(issueData.issue.state)) {
       log('WEBHOOK', `setIssueInProgress: ${issueId} is terminal (${issueData.issue.state?.name ?? issueData.issue.state?.type}), skip`);
+      return;
+    }
+    // A worker can deliberately stop an incomplete run in Blocked when human action or unavailable
+    // provenance is required. The post-run loop-breaker must preserve that decision; otherwise it
+    // immediately rewrites Blocked to In Progress and makes the issue look permanently active.
+    if (options.preserveBlocked && (issueData.issue.state?.name || '').toLowerCase() === 'blocked') {
+      log('WEBHOOK', `setIssueInProgress: ${issueId} is Blocked, preserve worker decision`);
       return;
     }
     if (issueData.issue.state?.type === 'started') {
@@ -889,9 +899,10 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
     // `blocks` relation points at a completed/archived issue, and do not remove it from the queue:
     // the runner re-enqueues it with backoff so later drain/reaper rounds pick it up after the
     // prerequisite finishes. This also covers blockers that are not present in the local queue.
-    const waitingOnBlockers = (data.issue.inverseRelations?.nodes || [])
+    const blockingRelations = (data.issue.inverseRelations?.nodes || [])
       .filter((relation: any) => relation?.type === 'blocks')
-      .map((relation: any) => relation.relatedIssue)
+      .map((relation: any) => relation.relatedIssue);
+    const waitingOnBlockers = blockingRelations
       .filter((blocker: any) => {
         if (!blocker || blocker.archivedAt) return false;
         const stateName = (blocker.state?.name || '').toLowerCase();
@@ -943,6 +954,14 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
         waitingOnBlockers,
         meaningState: classifyIssueMeaningState(state, { hasUnresolvedBlockers: true }),
       };
+    }
+
+    // Blocked without an incoming dependency is an explicit worker/human hold (authentication,
+    // missing immutable artifacts, approval, etc.). Do not let the reaper silently rerun it. A
+    // dependency-blocked issue whose relations are all resolved remains eligible and can resume.
+    if ((state?.name || '').toLowerCase() === 'blocked' && blockingRelations.length === 0) {
+      removeFromQueue(issueId);
+      return { eligible: false, reason: 'human wait state (Blocked) before run', meaningState: 'human_wait' };
     }
 
     return { eligible: true, isLongRun, meaningState: classifyIssueMeaningState(state) };

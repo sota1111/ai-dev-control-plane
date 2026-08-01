@@ -474,8 +474,8 @@ async function main() {
       const outcome: PipelineReviewOutcome =
         args[1] === 'completed' || args[1] === 'completed-no-pr' ? args[1] : 'incomplete';
       if (outcome === 'incomplete') {
-        await runner.setIssueInProgress(issueId).catch(() => {});
-        runner.log('WORKER_ROLES', `ensure-issue-reviewed ${issueId}: incomplete run kept active`, {
+        await runner.setIssueInProgress(issueId, { preserveBlocked: true }).catch(() => {});
+        runner.log('WORKER_ROLES', `ensure-issue-reviewed ${issueId}: incomplete run state preserved`, {
           issue: issueId,
         });
         process.stdout.write('active');

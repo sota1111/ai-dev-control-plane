@@ -413,6 +413,13 @@ describe('Linear Integration', () => {
       expect(linearMock.calls.some((c) => c.query.includes('issueUpdate'))).toBe(false);
     });
 
+    it('preserves a worker-set Blocked state during incomplete-run cleanup', async () => {
+      linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'Blocked', type: 'unstarted' }, team: { id: 't1' } } } });
+      await runner.setIssueInProgress('SOT-1', { preserveBlocked: true });
+      expect(linearMock.calls).toHaveLength(1);
+      expect(linearMock.calls.some((c) => c.query.includes('issueUpdate'))).toBe(false);
+    });
+
     it('does nothing when the issue is missing', async () => {
       linearMock.enqueue({ data: { issue: null } });
       await runner.setIssueInProgress('SOT-1');
@@ -441,6 +448,24 @@ describe('Linear Integration', () => {
   });
 
   describe('getIssueExecutionEligibility dependency waiting (SOT-2020)', () => {
+    it('removes an explicit Blocked issue with no dependency from automatic retries', async () => {
+      linearMock.enqueue({ data: { issue: {
+        id: 'blocked',
+        identifier: 'SOT-2226',
+        archivedAt: null,
+        state: { name: 'Blocked', type: 'unstarted' },
+        team: { id: 'team-1' },
+        labels: { nodes: [] },
+        inverseRelations: { nodes: [] },
+      } } });
+
+      await expect(runner.getIssueExecutionEligibility('SOT-2226')).resolves.toEqual({
+        eligible: false,
+        reason: 'human wait state (Blocked) before run',
+        meaningState: 'human_wait',
+      });
+    });
+
     it('keeps a Blocked issue ineligible while a blocking issue is active', async () => {
       linearMock.enqueue({ data: { issue: {
         id: 'dependent',
