@@ -539,21 +539,22 @@ ${abEvaluation}
 
 ## 実施内容
 1. 上記材料から未着手の改善軸を選定（非昇格済み軸の再試行は根拠を明示）。
-2. 2〜5個の子Issueに分解して登録（子Issue記述テンプレ・screen→confirmゲート・
-   非昇格時 revert+docs・昇格時 exec互換→Kaggle実証を全子に継承）。
+2. 2〜5個の実装・検証子Issueに分解して登録（子Issue記述テンプレ・screen→confirmゲート・
+   非昇格時 revert+docs・昇格時 exec互換を全子に継承）。子IssueはKaggle提出を実行してはならない。
    各子Issueの本文先頭には必ず次のdirectiveを記載し、分解後の全工程を指定モデル・reasoningへ固定する。
 
 \`\`\`
 ${childWorkers}
 \`\`\`
-3. 依存順の最後に「提出・証跡」子Issueを必ず1件置く。その最終子Issueだけが、全ての先行子Issueが
-   In Review/Doneへ到達した後、提出契約を通過した最新 artifact を提出する。親Issueの分解runやcronは
-   提出してはならない。champion 昇格は必須条件にしないが、artifact fingerprintが前回提出と同一なら
-   「非昇格・新artifactなし」と記録し、提出成功として扱わない。
+3. 初回runは子Issue登録後に提出せず In Review で待機する。全子Issueが In Review/Doneへ到達すると
+   webhookが \`<!-- auto-parent-resumed -->\` コメントを付けて親をTodoへ戻す。再開runでは子Issueを
+   再作成せず、全子Issueの完了と検証結果を再取得・集約し、この親Issueだけが提出契約を通過した最新
+   artifactを提出する。champion 昇格は必須条件にしないが、artifact fingerprintが前回提出と同一なら
+   「非昇格・新artifactなし」と記録し、提出成功として扱わない。cronと子Issueは提出してはならない。
    提出は必ず control-plane の
    \`bash scripts/ai/kaggle_targets_submit.sh --competition ${competition.key} --repo ${target.repo} --execute\`
    を使用する。Kaggle CLI/APIを直接呼び出してfingerprint gateを迂回してはならない。
-4. 子完了後、親を In Review にして完了報告。
+4. 親による集約・提出判定後、親を In Review にして完了報告。
 
 ## 実行リソース
 - 改善の実装・学習・検証では GPU の使用を許可する。
@@ -563,7 +564,7 @@ ${childWorkers}
 - [ ] 改善方針と選定理由がコメントに記録されている
 - [ ] 子Issueが登録され、全て終端状態に達している
 - [ ] 提出した candidate/champion と検証結果の対応が記録されている
-- [ ] 最終子Issueが先行子Issue完了後に実行され、新artifactを提出した、または非昇格・新artifactなしを明記した
+- [ ] 親の再開runが全子Issue完了を確認し、新artifactを提出した、または非昇格・新artifactなしを明記した
 ${
   competition.abEvaluation
     ? '- [ ] 固定4条件の必須KPI artifactと昇格判定が保存され、次回改善Issueが重複なく自動登録されている'

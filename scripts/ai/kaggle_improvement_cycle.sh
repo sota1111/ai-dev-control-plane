@@ -7,7 +7,7 @@
 #   cron は LLM を呼ばない。起案本文/ガード判定は決定的（src/lib/kaggleImprovement.ts）。
 #   起案された親Issueは既存パイプライン（webhook→run_auto.sh→task-check 分解）が読み、順位向上の
 #   子Issueへ分解して実装する（＝要求2）。子Issueは Todo + blockedBy で作られ依存順に自動実装される。
-#   提出は改善依存列の最終子Issueが、全ての実装・検証完了後に行う。cronは起案だけを担当し、
+#   提出は全子Issue完了後に自動再開された親Issueが行う。cronは起案だけを担当し、
 #   起案直後の古いartifactを提出しない。これにより「改善前artifactのduplicate skip」を完了結果として
 #   誤記録する競合を防ぐ。
 #
@@ -147,6 +147,6 @@ summary="$(node -e '
 ' "$out_json" "$HOUR")"
 bash "$SCRIPT_DIR/notify_discord.sh" "$summary" >/dev/null 2>&1 || true
 
-echo "== artifact 提出: 起案直後は実行しません（改善依存列の最終子Issue完了後に実行）=="
+echo "== artifact 提出: 起案直後は実行しません（全子Issue完了後、再開された親Issueが実行）=="
 
 exit 0

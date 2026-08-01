@@ -9,6 +9,6 @@ describe('kaggle improvement cron ownership', () => {
 
   test('draft cron never invokes the submission helper', () => {
     expect(source).not.toMatch(/bash\s+"\$SCRIPT_DIR\/kaggle_targets_submit\.sh"/);
-    expect(source).toContain('改善依存列の最終子Issue完了後に実行');
+    expect(source).toContain('再開された親Issueが実行');
   });
 });

@@ -13,8 +13,9 @@ Layer 1: cron（決定的・LLM非呼出）  scripts/ai/kaggle_improvement_cycle
 Layer 2: 既存パイプライン（起案Issueを処理）
   webhook/queue → run_auto.sh → task-check（分解判断）
     → plan worker が起案Issueを読み、そのリポジトリの順位向上「子Issue」を 2〜5本 作成
-    → 各子の実装/検証 → 取り組み完了時に検証済み candidate/champion artifact を提出
-       （scripts/ai/kaggle_targets_submit.sh）
+    → 各子の実装/検証 → 全子完了時に親IssueをTodoへ自動再開
+    → 親Issueが全子の結果を集約し、検証済み candidate/champion artifact を提出
+       （scripts/ai/kaggle_targets_submit.sh）→ In Review
 ```
 
 「AI does not call AI」「dispatcher 一元化」「Linear=唯一の人間IF」を崩さない。cron 側は
@@ -46,8 +47,9 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
   「直近2提出収束ロジック／2枠選定ゲート」は **この経路では使わない**（コンペ内で提出内容を検討する
   機構は廃止）。
 - 別スケジュールの提出ローテ cron・日次フロア cron は持たない。改善サイクル cron はIssue起案だけを行い、
-  起案直後の改善前artifactを提出しない。依存列の最後に置く「提出・証跡」子Issueだけが、全先行子Issueの
-  完了後に `scripts/ai/kaggle_targets_submit.sh --competition <key> --repo <repo> --execute` を実行する。
+  起案直後の改善前artifactを提出しない。全子Issue完了後、Webhookが親Issueへ
+  `<!-- auto-parent-resumed -->` を記録してTodoへ戻し、再開された親Issueだけが
+  `scripts/ai/kaggle_targets_submit.sh --competition <key> --repo <repo> --execute` を実行する。
 - **各枠の開始時**に Kaggle 提出履歴を取得し、直近の submission ref / status / public score と
   `YYYY-MM-DD-jst-HH` の slot id を `submission-history.jsonl` に記録する。履歴取得または認証に失敗した
   場合は短い間隔で3回まで再取得し、それでも失敗すれば実行モードでも **safe skip + Discord通知**とし、提出しない。
@@ -118,8 +120,8 @@ reasoning: <gpt系のみ: solo=ultra>
 
 ## 目的         Kaggleコンペ <slug>（repo/系統）の順位を向上させる方針を決定し子Issueに分解して実施
 ## 入力材料     ### 前回提出結果（順位/スコア） / ### 直近の完了Issueダイジェスト / ### 失敗ログ・KPI抜粋
-## 実施内容     1. 未着手の改善軸を選定 2. 2〜5子Issueへ分解（screen→confirm・非昇格revert・昇格時exec互換→Kaggle）
-               3. 最終子Issueだけが先行子完了後に検証済みartifactを提出 4. 子完了後、親を In Review にして完了報告
+## 実施内容     1. 未着手の改善軸を選定 2. 2〜5子Issueへ分解（screen→confirm・非昇格revert・昇格時exec互換）
+               3. 全子完了後に親をTodoへ再開 4. 親が集約・提出して In Review にて完了報告
 ## 受け入れ条件  改善方針の記録 / 子Issue全て終端 / 昇格判定と champion 整合 / 完了時提出
 ```
 
@@ -209,7 +211,7 @@ done
 | 起案 実行 CLI（--execute で Linear 作成） | `runner-cli kaggle-improve-run` |
 | 提出プラン CLI（candidate/champion共通） | `runner-cli kaggle-submission-plan` |
 | 改善サイクル cron（起案のみ） | `scripts/ai/kaggle_improvement_cycle.sh` |
-| artifact提出（最終子Issueから呼ばれる／手動可） | `scripts/ai/kaggle_targets_submit.sh` |
+| artifact提出（再開された親Issueから呼ばれる／手動可） | `scripts/ai/kaggle_targets_submit.sh` |
 | レジストリ（6コンペ×2系統） | `scripts/ai/kaggle_targets_registry.json` |
 | cron 登録 | `scripts/ai/setup_cron.sh` |
 </content>

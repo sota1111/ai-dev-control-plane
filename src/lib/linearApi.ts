@@ -51,6 +51,11 @@ export interface EligibilityResult {
 const PARENT_FINALIZED_MARKER = '<!-- auto-parent-finalized -->';
 const PARENT_RESUMED_MARKER = '<!-- auto-parent-resumed -->';
 
+function isKaggleImprovementParent(issue: any): boolean {
+  return /^\[[^\]]+\] Kaggle順位向上サイクル第\d+次/.test(issue?.title || '')
+    && (issue?.description || '').includes('## 入力材料（cronが自動収集・要約なし）');
+}
+
 type IssueRelationNode = { id?: string; type?: string };
 
 /** Remove `blocks` edges while preserving related/duplicate links. Linear uses the same relation
@@ -737,6 +742,8 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
         issue(id: $id) {
           id
           identifier
+          title
+          description
           state { name type }
           team { id }
           children(first: 100) { nodes { identifier state { name type } } }
@@ -758,7 +765,8 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
       log('WEBHOOK', `finalizeParent: ${parent.identifier} already terminal (${parent.state?.name}), skip`, { issue: parent.identifier });
       return false;
     }
-    if ((parent.state?.name || '').toLowerCase() === 'in review') {
+    const kaggleImprovementParent = isKaggleImprovementParent(parent);
+    if ((parent.state?.name || '').toLowerCase() === 'in review' && !kaggleImprovementParent) {
       log('WEBHOOK', `finalizeParent: ${parent.identifier} already In Review, skip`, { issue: parent.identifier });
       return false;
     }
@@ -778,7 +786,11 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
       return false;
     }
 
-    const resumeParent = (parent.state?.name || '').toLowerCase() === 'on hold';
+    // Kaggle improvement parents have a mandatory second phase: once every child has
+    // finished, resume the parent so it can aggregate evidence and own the submission.
+    // Ordinary parents keep the historical auto-finalize-to-review behavior.
+    const resumeParent = (parent.state?.name || '').toLowerCase() === 'on hold'
+      || kaggleImprovementParent;
     const marker = resumeParent ? PARENT_RESUMED_MARKER : PARENT_FINALIZED_MARKER;
 
     // Idempotency: bail if we already posted the applicable transition marker.
@@ -816,9 +828,9 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
 
     const childList = children.map((c: any) => `- ${c.identifier} (${c.state?.name})`).join('\n');
     const body = resumeParent ? `${PARENT_RESUMED_MARKER}
-## 親Issue自動再開
+## 親Issue自動再開${kaggleImprovementParent ? '（集約・提出フェーズ）' : ''}
 
-全ての前提子Issueが完了したため、親Issueを **Todo** に戻しました（trigger: ${childIdentifier} 完了）。通常の webhook 実行キューから自動再開します。
+全ての前提子Issueが完了したため、親Issueを **Todo** に戻しました（trigger: ${childIdentifier} 完了）。通常の webhook 実行キューから自動再開します。${kaggleImprovementParent ? '\n\n再開後は子Issueを再作成せず、全子Issueの完了・検証結果・最新artifactを集約し、この親Issueだけが提出判定を実行してください。' : ''}
 
 ### 子Issue
 ${childList}` : `${PARENT_FINALIZED_MARKER}
