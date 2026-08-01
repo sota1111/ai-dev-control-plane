@@ -47,6 +47,14 @@ LOG_DIR="docs/ai/auto_logs"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/run_${TIMESTAMP}.log"
 
+# Repository routing safety gate. runner.ts sets this marker when an explicitly assigned Linear
+# project cannot be resolved to a repository. Exit retryably before locks, capacity checks, or any
+# worker invocation so an unknown project can never be executed in the control-plane checkout.
+if [ -n "${RUNNER_REPO_RESOLUTION_ERROR:-}" ]; then
+  echo "REPO_RESOLUTION_UNAVAILABLE: ${RUNNER_REPO_RESOLUTION_ERROR}" >&2
+  exit 71
+fi
+
 # Lane-aware exclusion lock (SOT-933, N-slot parallel pool). The default/unset lane keeps the
 # historical GLOBAL lock path so existing single-lane behavior is byte-for-byte unchanged. A
 # non-default RUNNER_LANE gets its OWN lock file so distinct lanes (別repo / 別branch worktree) can

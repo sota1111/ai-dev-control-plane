@@ -3,6 +3,14 @@ import path from 'node:path';
 
 describe('run_auto incomplete-dispatch retry policy (SOT-1928)', () => {
   const script = fs.readFileSync(path.join(process.cwd(), 'scripts/ai/run_auto.sh'), 'utf8');
+
+  test('fails retryably before taking a lock when repository routing is unresolved', () => {
+    const routingGate = script.indexOf('REPO_RESOLUTION_UNAVAILABLE:');
+    const lockOpen = script.indexOf('exec 9>"$LOCK_FILE"');
+    expect(routingGate).toBeGreaterThan(-1);
+    expect(lockOpen).toBeGreaterThan(routingGate);
+    expect(script).toMatch(/RUNNER_REPO_RESOLUTION_ERROR[\s\S]*?exit 71/);
+  });
   const linearReportPrompt = fs.readFileSync(
     path.join(process.cwd(), 'prompts/roles/linear-report.md'),
     'utf8',

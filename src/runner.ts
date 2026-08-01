@@ -799,7 +799,9 @@ interface TriggerResult {
 }
 
 // Build the environment for a run_auto.sh launch: inject WEBHOOK_ISSUE_ID and resolve the
-// Linear project -> target repo (fail-open). Shared by triggerRun and triggerRunDetached.
+// Linear project -> target repo. An explicitly assigned project must never silently run in the
+// control-plane repository: resolution failures are passed to run_auto.sh, which exits retryably
+// before taking the execution lock or performing any work. Shared by both launch paths.
 async function buildRunEnv(
   issueId: string,
   overrides: Record<string, string | undefined> = {}
@@ -809,9 +811,14 @@ async function buildRunEnv(
   // but never over WEBHOOK_ISSUE_ID. Building a fresh object per call keeps concurrent dispatches
   // isolated (no shared process.env mutation).
   const env: Record<string, string | undefined> = { ...process.env, ...overrides, WEBHOOK_ISSUE_ID: issueId };
+  // Routing is issue-scoped. Never inherit a target or a previous failure marker from the webhook
+  // process environment (or a caller override), because either could send this issue to the wrong repo.
+  delete env.WEBHOOK_PROJECT_NAME;
+  delete env.WEBHOOK_TARGET_REPO;
+  delete env.RUNNER_REPO_RESOLUTION_ERROR;
 
   // Linearプロジェクトから開発対象レポジトリを判定し、解決できればプロンプトへ注入する。
-  // 取得・解決失敗時は env を変えず従来動作にフォールバックする（autonomous loop を止めない）。
+  // 明示 Project の取得・解決失敗は誤レポジトリ実行を防ぐため retryable fail-closed にする。
   try {
     const projectName = await getIssueProjectName(issueId);
     if (projectName) {
@@ -822,7 +829,7 @@ async function buildRunEnv(
         log('RUNNER', `resolved target repo: project="${projectName}" -> ${resolved.localPath}`, { issue: issueId });
       } else if (isNewProject(projectName)) {
         // 「New」プロジェクト: 新規レポジトリを作成して開発対象にする。
-        // 失敗時は内側 catch で fail-open（env を変えず従来動作）。
+        // 失敗時は内側 catch で fail-closed marker を設定する。
         try {
           const meta = await getIssueMeta(issueId);
           const repoName = deriveNewRepoName({
@@ -839,15 +846,17 @@ async function buildRunEnv(
             { issue: issueId }
           );
         } catch (createErr: any) {
-          log('RUNNER', `new-project repo creation failed (fail-open): ${createErr.message}`, { issue: issueId });
+          env.RUNNER_REPO_RESOLUTION_ERROR = `new-project repo creation failed: ${createErr.message}`;
+          log('RUNNER', `${env.RUNNER_REPO_RESOLUTION_ERROR} (fail-closed)`, { issue: issueId });
         }
       } else {
-        log('RUNNER', `no repo mapping for project="${projectName}" (fail-open, no TARGET_REPO injected)`, { issue: issueId });
+        env.RUNNER_REPO_RESOLUTION_ERROR = `no repo mapping for project="${projectName}"`;
+        log('RUNNER', `${env.RUNNER_REPO_RESOLUTION_ERROR} (fail-closed)`, { issue: issueId });
       }
     } else {
       // Repository/Project が無い依頼だけ、PTCG intent profile を最終 fallback として使う。
       // 明示 Project が未知の場合も profile へ横滑りさせないため、この分岐は projectName が
-      // 本当に空のときに限る。無効化・不正 config は外側 catch の fail-open で従来動作へ戻る。
+      // 本当に空のときに限る。
       const meta = await getIssueMeta(issueId);
       const resolution = resolveRepository({ intent: `${meta.title}\n${meta.description ?? ''}` });
       if (resolution?.source === 'ptcg-profile') {
@@ -857,7 +866,8 @@ async function buildRunEnv(
       }
     }
   } catch (err: any) {
-    log('RUNNER', `project->repo resolution error (fail-open): ${err.message}`, { issue: issueId });
+    env.RUNNER_REPO_RESOLUTION_ERROR = `project->repo resolution error: ${err.message}`;
+    log('RUNNER', `${env.RUNNER_REPO_RESOLUTION_ERROR} (fail-closed)`, { issue: issueId });
   }
 
   // Lane worktree 供給 (SOT-932, 案A / SOT-1559): RUNNER_SERIALIZE_SCOPE=branch などで非 default lane
@@ -1739,6 +1749,7 @@ export {
   finalizeParentIfChildrenComplete,
   getIssueExecutionEligibility,
   getIssueProjectName,
+  buildRunEnv,
   triggerRun,
   triggerRunDetached,
   runItem,

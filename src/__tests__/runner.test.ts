@@ -1714,6 +1714,22 @@ describe('runner', () => {
       return child;
     }
 
+    it('marks an explicitly unmapped project fail-closed instead of falling back to control-plane', async () => {
+      setupLinearMocks([
+        { issue: { project: { name: 'future-unconfigured-project' } } }
+      ]);
+
+      const env = await runner.buildRunEnv('SOT-UNMAPPED', {
+        WEBHOOK_PROJECT_NAME: 'stale-project',
+        WEBHOOK_TARGET_REPO: '/tmp/stale-target',
+        RUNNER_REPO_RESOLUTION_ERROR: 'stale error'
+      });
+
+      expect(env.WEBHOOK_TARGET_REPO).toBeUndefined();
+      expect(env.WEBHOOK_PROJECT_NAME).toBeUndefined();
+      expect(env.RUNNER_REPO_RESOLUTION_ERROR).toContain('future-unconfigured-project');
+    });
+
     it('long-run label → detached launch, immediate return, inflight + sentinel recorded', async () => {
       fs.existsSync.mockReturnValue(false);
       const item: any = queueItem('SOT-200');
