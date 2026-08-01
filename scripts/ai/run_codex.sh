@@ -318,8 +318,9 @@ fi
 # Codex prints "You've hit your usage limit ... try again at <date>" and exits
 # non-zero. Detect it, persist the reset time so future runs can auto-resume, and
 # exit with the non-response code so the orchestrator falls back to Claude now.
-if [ -f "$REPORT_FILE" ] \
-  && grep -qi "usage limit" "$REPORT_FILE" \
+if [ "$EXIT_CODE" -ne 0 ] \
+  && [ -f "$REPORT_FILE" ] \
+  && grep -Eqi "you('|’)ve hit your usage limit" "$REPORT_FILE" \
   && grep -qi "try again at" "$REPORT_FILE"; then
   mkdir -p "$(dirname "$CODEX_COOLDOWN_FILE")"
   RESUME_EPOCH="$( run_cli parse-usage-limit-epoch < "$REPORT_FILE" 2>/dev/null || true)"
