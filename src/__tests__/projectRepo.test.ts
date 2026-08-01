@@ -74,6 +74,30 @@ describe('loadProjectRepoConfig (real config/project_repos.json)', () => {
     const mapped = new Set(loadProjectRepoConfig().map((entry) => entry.project));
     expect([...projects].filter((project) => !mapped.has(project))).toEqual([]);
   });
+
+  test('local Kaggle artifacts come from the same checkout that improvement issues modify', () => {
+    const registry = JSON.parse(fs.readFileSync(
+      path.join(process.cwd(), 'scripts/ai/kaggle_targets_registry.json'),
+      'utf8',
+    ));
+    const mappings = new Map(loadProjectRepoConfig().map((entry) => [entry.project, entry]));
+    const scheduledCompetitionKeys = new Set(
+      (registry.rotation ?? []).map((slot: { competition: string }) => slot.competition),
+    );
+    for (const competition of registry.competitions ?? []) {
+      if (!scheduledCompetitionKeys.has(competition.key)) continue;
+      for (const target of competition.targets ?? []) {
+        const submit = target.submit ?? {};
+        // Notebook submissions are immutable Kaggle outputs rather than files built by the checkout.
+        if (!submit.file || submit.kernel) continue;
+        const mapping = mappings.get(target.project);
+        expect(mapping).toBeDefined();
+        const artifact = path.resolve(process.cwd(), submit.file);
+        const repoRoot = path.resolve(mapping!.localPath);
+        expect(artifact === repoRoot || artifact.startsWith(`${repoRoot}${path.sep}`)).toBe(true);
+      }
+    }
+  });
 });
 
 describe('resolveRepoForProject (default config load)', () => {
