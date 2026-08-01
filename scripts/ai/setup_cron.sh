@@ -5,9 +5,6 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-CRON_SCHEDULE="${CRON_SCHEDULE:-0 * * * *}"   # デフォルト毎時0分
-CRON_LOG="${REPO_DIR}/docs/ai/auto_logs/cron.log"
-
 mkdir -p "${REPO_DIR}/docs/ai/auto_logs"
 
 # cron がなければインストール
@@ -22,9 +19,10 @@ if ! service cron status &>/dev/null; then
   sudo service cron start
 fi
 
-# 既存エントリを削除して追加
-CRON_CMD="${CRON_SCHEDULE} cd ${REPO_DIR} && bash scripts/ai/run_auto.sh >> ${CRON_LOG} 2>&1"
-(crontab -l 2>/dev/null | grep -v "run_auto.sh"; echo "$CRON_CMD") | crontab -
+# run_auto.sh now requires a concrete issue id and is dispatched by the webhook queue. Remove the
+# obsolete untargeted hourly entry left by older installations; otherwise it only exits with an error
+# (or collides with an active run's flock). Do not register it again.
+crontab -l 2>/dev/null | grep -v "run_auto.sh" | crontab - || true
 
 # Kaggle 改善サイクル cron（JST [0,3,6,9,12,15,18,21]・各コンペ1日2枠）。
 # cron は UTC 基準なので毎時起動し、スクリプト側で --only-scheduled により当番 JST 枠だけを処理する
@@ -47,8 +45,8 @@ IMPROVE_CMD="${IMPROVE_SCHEDULE} cd ${REPO_DIR} && ${IMPROVE_ENV}bash scripts/ai
 (crontab -l 2>/dev/null | grep -v "kaggle_improvement_cycle.sh"; echo "$IMPROVE_CMD") | crontab -
 
 echo "Cron jobs registered:"
-crontab -l | grep -E "run_auto|kaggle_improvement_cycle"
+crontab -l | grep "kaggle_improvement_cycle"
 echo ""
-echo "Logs: ${CRON_LOG} / ${KAGGLE_IMPROVE_LOG}"
+echo "Log: ${KAGGLE_IMPROVE_LOG}"
 echo ""
 echo "To remove: crontab -l | grep -vE 'run_auto.sh|kaggle_improvement_cycle.sh' | crontab -"
