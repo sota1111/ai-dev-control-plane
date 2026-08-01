@@ -334,6 +334,12 @@ finalizeRun() {
   [ -n "$linear_override" ] && REPORT_LINEAR_POSTED="$linear_override"
   [ "$mode" = role ] && return 0
   if [ "$mode" = "solo" ]; then
+    [ "$REPORT_NEXT_ACTION" = "NEEDS_DEBUG" ] && {
+      # NEEDS_DEBUG is machine-actionable continuation, not human wait. Reuse the retryable exit so
+      # the runner re-enqueues with backoff and does not write human-wait suppression state.
+      plog "PIPELINE_RETRY: solo NEEDS_DEBUG → automatic retry"
+      return "$WORKER_UNAVAILABLE"
+    }
     [ "$REPORT_ACCEPTANCE" = "FAIL" ] && {
       plog "PIPELINE_STOP: solo acceptance FAIL → needs attention"
       return "$COMPLETION_UNVERIFIED"
@@ -658,7 +664,7 @@ if [ -n "$TARGET_ISSUE" ]; then
   # transient worker unavailability — so moving to In Review would be misleading and would strand
   # ready work. Leave the issue active; the runner re-enqueues it with backoff to retry on recovery.
   if [ "$EXIT_CODE" -eq "$WORKER_UNAVAILABLE" ]; then
-    echo "[pipeline] WORKER_UNAVAILABLE (71): all workers transiently non-responsive → skip ensure-issue-reviewed, leave issue active for retry"
+    echo "[pipeline] RETRYABLE (71): worker unavailable or NEEDS_DEBUG → skip ensure-issue-reviewed, leave issue active for retry"
   else
     # A clean completion can still leave the issue active when the worker's best-effort Linear sync
     # did not run. Preserve the loop-breaker transition, but do not misreport that successful run as

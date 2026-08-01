@@ -255,8 +255,8 @@ describe('Linear Integration', () => {
       linearMock.enqueue({ data: { issues: { nodes: [{
         id: 'u2', identifier: 'ENG-2', state: { type: 'unstarted', name: 'Todo' },
         inverseRelations: { nodes: [
-          { type: 'blocks', relatedIssue: { id: 'u1', identifier: 'ENG-1' } },
-          { type: 'related', relatedIssue: { id: 'u3', identifier: 'ENG-3' } }
+          { type: 'blocks', issue: { id: 'u1', identifier: 'ENG-1' }, relatedIssue: { id: 'u2', identifier: 'ENG-2' } },
+          { type: 'related', issue: { id: 'u3', identifier: 'ENG-3' }, relatedIssue: { id: 'u2', identifier: 'ENG-2' } }
         ] }
       }] } } });
       const [issue] = await runner.fetchActiveIssues(50);
@@ -476,7 +476,7 @@ describe('Linear Integration', () => {
         labels: { nodes: [] },
         inverseRelations: { nodes: [{
           type: 'blocks',
-          relatedIssue: {
+          issue: {
             id: 'blocker',
             identifier: 'SOT-2020-A',
             archivedAt: null,
@@ -503,7 +503,7 @@ describe('Linear Integration', () => {
         labels: { nodes: [] },
         inverseRelations: { nodes: [{
           type: 'blocks',
-          relatedIssue: {
+          issue: {
             id: 'blocker',
             identifier: 'SOT-2097',
             archivedAt: null,
@@ -538,7 +538,7 @@ describe('Linear Integration', () => {
         labels: { nodes: [] },
         inverseRelations: { nodes: [{
           type: 'blocks',
-          relatedIssue: {
+          issue: {
             id: 'blocker',
             identifier: 'SOT-2020-A',
             archivedAt: null,
@@ -564,7 +564,7 @@ describe('Linear Integration', () => {
         labels: { nodes: [] },
         inverseRelations: { nodes: [{
           type: 'blocks',
-          relatedIssue: {
+          issue: {
             id: 'blocker',
             identifier: 'SOT-2020-A',
             archivedAt: null,

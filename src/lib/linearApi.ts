@@ -282,7 +282,7 @@ export async function getIssueQueueMetadata(issueId: string): Promise<IssueQueue
           updatedAt
           state { type name }
           parent { id identifier }
-          inverseRelations { nodes { type relatedIssue { id identifier } } }
+          inverseRelations { nodes { type issue { id identifier } } }
         }
       }
     `;
@@ -467,7 +467,7 @@ export async function fetchActiveIssues(
           updatedAt
           state { type name }
           parent { id identifier }
-          inverseRelations { nodes { type relatedIssue { id identifier } } }
+          inverseRelations { nodes { type issue { id identifier } } }
         }
       }
     }
@@ -498,7 +498,9 @@ export async function fetchActiveIssues(
 function blockingIssueIds(issue: any): string[] {
   return (issue.inverseRelations?.nodes || [])
     .filter((relation: any) => relation.type === 'blocks')
-    .flatMap((relation: any) => [relation.relatedIssue?.id, relation.relatedIssue?.identifier])
+    // For an inverse relation, `issue` is the source (the blocker) and `relatedIssue` is the
+    // current/dependent issue. Reading relatedIssue creates a self-dependency in the queue.
+    .flatMap((relation: any) => [relation.issue?.id, relation.issue?.identifier])
     .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
 }
 
@@ -855,7 +857,7 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
           inverseRelations {
             nodes {
               type
-              relatedIssue {
+              issue {
                 id
                 identifier
                 archivedAt
@@ -901,7 +903,7 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
     // prerequisite finishes. This also covers blockers that are not present in the local queue.
     const blockingRelations = (data.issue.inverseRelations?.nodes || [])
       .filter((relation: any) => relation?.type === 'blocks')
-      .map((relation: any) => relation.relatedIssue);
+      .map((relation: any) => relation.issue);
     const waitingOnBlockers = blockingRelations
       .filter((blocker: any) => {
         if (!blocker || blocker.archivedAt) return false;

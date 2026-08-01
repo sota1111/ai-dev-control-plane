@@ -15,6 +15,12 @@ describe('run_auto incomplete-dispatch retry policy (SOT-1928)', () => {
     expect(script).toContain('finalizeRun "solo" "$src" "$sreport" || return $?');
   });
 
+  test('solo NEEDS_DEBUG is automatically retried instead of recorded as human wait', () => {
+    expect(script).toMatch(
+      /\[ "\$REPORT_NEXT_ACTION" = "NEEDS_DEBUG" \][\s\S]*?automatic retry[\s\S]*?return "\$WORKER_UNAVAILABLE"/,
+    );
+  });
+
   test('role dispatch without a report never becomes a human-review stop', () => {
     expect(script).toContain('finalizeRun "role" "$NODE_RC" "$NODE_REPORT" || return $?');
     expect(script.match(/PIPELINE_RETRY: .*dispatch rc=\$rc \(no report\)/g)).toHaveLength(1);

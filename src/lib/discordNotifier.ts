@@ -1,6 +1,7 @@
 import https from 'node:https';
 
 const MAX_LENGTH = 1990;
+const REQUEST_TIMEOUT_MS = 10_000;
 
 function splitChunks(text: string): string[] {
   const chunks: string[] = [];
@@ -18,6 +19,14 @@ interface DiscordResponse {
 
 function postToDiscord(webhookUrl: string, content: string): Promise<DiscordResponse> {
   return new Promise((resolve) => {
+    let settled = false;
+    let timer: NodeJS.Timeout;
+    const finish = (result: DiscordResponse) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
     const body = JSON.stringify({ content });
     const url = new URL(webhookUrl);
     const options = {
@@ -32,9 +41,14 @@ function postToDiscord(webhookUrl: string, content: string): Promise<DiscordResp
     const req = https.request(options, (res: any) => {
       let data = '';
       res.on('data', (chunk: string) => { data += chunk; });
-      res.on('end', () => resolve({ status: res.statusCode, body: data }));
+      res.on('end', () => finish({ status: res.statusCode, body: data }));
     });
-    req.on('error', () => resolve({ status: 0, body: '' }));
+    req.on('error', () => finish({ status: 0, body: '' }));
+    timer = setTimeout(() => {
+      if (typeof req.destroy === 'function') req.destroy();
+      finish({ status: 0, body: '' });
+    }, REQUEST_TIMEOUT_MS);
+    timer.unref?.();
     req.write(body);
     req.end();
   });

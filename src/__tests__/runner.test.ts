@@ -1192,7 +1192,7 @@ describe('runner', () => {
       ]));
       setupLinearMocks([{ issues: { nodes: [
         { id: 'uuid-2', identifier: 'SOT-2', priority: 1, state: { type: 'unstarted', name: 'Todo' },
-          inverseRelations: { nodes: [{ type: 'blocks', relatedIssue: { id: 'uuid-1', identifier: 'SOT-1' } }] } },
+          inverseRelations: { nodes: [{ type: 'blocks', issue: { id: 'uuid-1', identifier: 'SOT-1' }, relatedIssue: { id: 'uuid-2', identifier: 'SOT-2' } }] } },
         { id: 'uuid-1', identifier: 'SOT-1', priority: 4, state: { type: 'unstarted', name: 'Todo' },
           inverseRelations: { nodes: [] } }
       ] } }]);
@@ -1512,7 +1512,7 @@ describe('runner', () => {
           labels: { nodes: [] },
           inverseRelations: { nodes: [{
             type: 'blocks',
-            relatedIssue: {
+            issue: {
               id: 'blocker',
               identifier: 'SOT-2020-A',
               archivedAt: null,
