@@ -7,9 +7,9 @@
 #   cron は LLM を呼ばない。起案本文/ガード判定は決定的（src/lib/kaggleImprovement.ts）。
 #   起案された親Issueは既存パイプライン（webhook→run_auto.sh→task-check 分解）が読み、順位向上の
 #   子Issueへ分解して実装する（＝要求2）。子Issueは Todo + blockedBy で作られ依存順に自動実装される。
-#   さらに（SOT-1913「日々提出できる状態」）同じ当番枠で当該コンペの検証済みartifact提出
-#   （kaggle_targets_submit.sh）も行う。別スケジュールの提出 cron は持たず、1枠=1コンペ一巡で各コンペ
-#   1日1提出が自然に成立する。active(2段kill switch)かつ --execute のときだけ実提出、それ以外は dry-run。
+#   提出は改善依存列の最終子Issueが、全ての実装・検証完了後に行う。cronは起案だけを担当し、
+#   起案直後の古いartifactを提出しない。これにより「改善前artifactのduplicate skip」を完了結果として
+#   誤記録する競合を防ぐ。
 #
 # 起案方針（順位最優先・「基本は起案する」）: engine(kaggle-improve-run) が残すガードは2つだけ。
 #   1. active（registry.enabled && env KAGGLE_IMPROVE_ENABLED）でなければ何もしない（kill switch）。
@@ -147,25 +147,6 @@ summary="$(node -e '
 ' "$out_json" "$HOUR")"
 bash "$SCRIPT_DIR/notify_discord.sh" "$summary" >/dev/null 2>&1 || true
 
-# SOT-1913「日々提出できる状態」— 同じ当番枠で当該コンペの検証済みartifact提出も行う（別スケジュールの
-# 提出 cron は持たない＝「提出専用ローテ廃止」の方針を維持）。1枠=1コンペ一巡なので各コンペ1日1提出
-# が自然に成立する。起案が guard で skip されても提出は独立に試みる（＝必ず1日1回は提出しようとする）。
-#   - active(2段 kill switch: registry.enabled && env KAGGLE_IMPROVE_ENABLED) かつ --execute のときだけ実提出。
-#   - それ以外はドライラン（プラン表示のみ）。実提出でも submit.file 未整備なら kaggle_targets_submit.sh が
-#     skip+通知して安全側に倒す（冪等: 当日提出済み/ cap 到達も skip）。
-ACTIVE="$(node -e 'const o=JSON.parse(process.argv[1]||"{}");process.stdout.write(o.plan&&o.plan.active?"1":"0")' "$out_json")"
-COMP="$(node -e 'const o=JSON.parse(process.argv[1]||"{}");process.stdout.write((o.plan&&o.plan.competition)||"")' "$out_json")"
-if [[ -n "$COMP" ]]; then
-  submit_args=(--competition "$COMP" --hour "$HOUR")
-  if [[ "$EXECUTE" == "1" && "$ACTIVE" == "1" ]]; then
-    submit_args+=(--execute)
-    echo "== artifact 提出（当番=${COMP}・実提出）=="
-  else
-    echo "== artifact 提出（当番=${COMP}・ドライラン）=="
-  fi
-  bash "$SCRIPT_DIR/kaggle_targets_submit.sh" "${submit_args[@]}" || echo "  (提出ステップは非0終了・best-effort で継続)"
-else
-  echo "== artifact 提出: この枠に当番コンペなし（skip）=="
-fi
+echo "== artifact 提出: 起案直後は実行しません（改善依存列の最終子Issue完了後に実行）=="
 
 exit 0

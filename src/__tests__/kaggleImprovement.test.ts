@@ -241,6 +241,9 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('SOT-1866 champion 収束');
       expect(body).toContain('改善の実装・学習・検証では GPU の使用を許可する。');
       expect(body).toContain('改善方針の検討では Kaggle の公開ノートブック等を参考にしてよい。');
+      expect(body).toContain('依存順の最後に「提出・証跡」子Issueを必ず1件置く');
+      expect(body).toContain('親Issueの分解runやcronは');
+      expect(body).toContain('提出してはならない');
       // 未指定の材料は安全側のプレースホルダになる。
       expect(body).toContain('(該当なし)');
     });

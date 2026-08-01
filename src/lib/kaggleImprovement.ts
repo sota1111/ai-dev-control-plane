@@ -546,7 +546,10 @@ ${abEvaluation}
 \`\`\`
 ${childWorkers}
 \`\`\`
-3. 取り組み完了時点で、提出契約を通過した最新 artifact を提出する。champion 昇格は必須条件にしない。
+3. 依存順の最後に「提出・証跡」子Issueを必ず1件置く。その最終子Issueだけが、全ての先行子Issueが
+   In Review/Doneへ到達した後、提出契約を通過した最新 artifact を提出する。親Issueの分解runやcronは
+   提出してはならない。champion 昇格は必須条件にしないが、artifact fingerprintが前回提出と同一なら
+   「非昇格・新artifactなし」と記録し、提出成功として扱わない。
    提出は必ず control-plane の
    \`bash scripts/ai/kaggle_targets_submit.sh --competition ${competition.key} --repo ${target.repo} --execute\`
    を使用する。Kaggle CLI/APIを直接呼び出してfingerprint gateを迂回してはならない。
@@ -560,7 +563,7 @@ ${childWorkers}
 - [ ] 改善方針と選定理由がコメントに記録されている
 - [ ] 子Issueが登録され、全て終端状態に達している
 - [ ] 提出した candidate/champion と検証結果の対応が記録されている
-- [ ] 取り組み完了時に提出が行われた（提出物未整備なら skip 理由を明記）
+- [ ] 最終子Issueが先行子Issue完了後に実行され、新artifactを提出した、または非昇格・新artifactなしを明記した
 ${
   competition.abEvaluation
     ? '- [ ] 固定4条件の必須KPI artifactと昇格判定が保存され、次回改善Issueが重複なく自動登録されている'

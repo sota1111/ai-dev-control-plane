@@ -18,7 +18,7 @@ Layer 2: 既存パイプライン（起案Issueを処理）
 ```
 
 「AI does not call AI」「dispatcher 一元化」「Linear=唯一の人間IF」を崩さない。cron 側は
-決定的処理（読み取り + ガード + Issue作成 + 提出）だけを行い、「どの改善軸を打つか」は起案Issueを
+決定的処理（読み取り + ガード + Issue作成）だけを行い、「どの改善軸を打つか」は起案Issueを
 処理する既存 worker に委ねる。
 
 ## 単一スケジュール・1枠=1コンペ（ローテーション）
@@ -45,10 +45,9 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
   SOT-1904 の
   「直近2提出収束ロジック／2枠選定ゲート」は **この経路では使わない**（コンペ内で提出内容を検討する
   機構は廃止）。
-- 別スケジュールの提出ローテ cron・日次フロア cron は持たない。**改善サイクル cron が同じ当番枠で**
-  当該コンペの設定済みartifact提出（`scripts/ai/kaggle_targets_submit.sh --competition <key>`）も行う
-  （SOT-1913「日々提出できる状態」）。起案が guard で skip されても提出は独立に試みるので、有効化すれば
-  各コンペ1日1回は提出しようとする。実提出は active(2段kill switch) かつ `--execute` のときだけ。
+- 別スケジュールの提出ローテ cron・日次フロア cron は持たない。改善サイクル cron はIssue起案だけを行い、
+  起案直後の改善前artifactを提出しない。依存列の最後に置く「提出・証跡」子Issueだけが、全先行子Issueの
+  完了後に `scripts/ai/kaggle_targets_submit.sh --competition <key> --repo <repo> --execute` を実行する。
 - **各枠の開始時**に Kaggle 提出履歴を取得し、直近の submission ref / status / public score と
   `YYYY-MM-DD-jst-HH` の slot id を `submission-history.jsonl` に記録する。履歴取得または認証に失敗した
   場合は短い間隔で3回まで再取得し、それでも失敗すれば実行モードでも **safe skip + Discord通知**とし、提出しない。
@@ -120,7 +119,7 @@ reasoning: <gpt系のみ: solo=ultra>
 ## 目的         Kaggleコンペ <slug>（repo/系統）の順位を向上させる方針を決定し子Issueに分解して実施
 ## 入力材料     ### 前回提出結果（順位/スコア） / ### 直近の完了Issueダイジェスト / ### 失敗ログ・KPI抜粋
 ## 実施内容     1. 未着手の改善軸を選定 2. 2〜5子Issueへ分解（screen→confirm・非昇格revert・昇格時exec互換→Kaggle）
-               3. 取り組み完了時に検証済みartifactを提出 4. 子完了後、親を In Review にして完了報告
+               3. 最終子Issueだけが先行子完了後に検証済みartifactを提出 4. 子完了後、親を In Review にして完了報告
 ## 受け入れ条件  改善方針の記録 / 子Issue全て終端 / 昇格判定と champion 整合 / 完了時提出
 ```
 
@@ -160,13 +159,13 @@ blockedBy にすれば、既存の topological ソートが依存側を保留す
 # ドライランで cron 登録（既定・何も起案/提出しない）:
 bash scripts/ai/setup_cron.sh
 
-# 実起案・実提出まで有効化する（＝「起動」ワンコマンド）:
+# 実起案を有効化する（提出は最終子Issueが実行）:
 #   1) registry.enabled を true にする（scripts/ai/kaggle_targets_registry.json）
 #   2) 下記コマンドで cron を実行モードで登録する
 KAGGLE_IMPROVE_EXECUTE=1 KAGGLE_IMPROVE_ENABLED=1 bash scripts/ai/setup_cron.sh
 ```
 
-改善サイクルは毎時起動され、`--only-scheduled` により当番 JST 枠だけを処理する。実起案・実提出は
+改善サイクルは毎時起動され、`--only-scheduled` により当番 JST 枠だけを処理する。実起案は
 `KAGGLE_IMPROVE_ENABLED=1`（env）+ `registry.enabled=true` の両方が ON かつ `--execute` のときだけ。
 
 > **cron の env について**: cron は登録時のシェル env を継承しない。`KAGGLE_IMPROVE_EXECUTE=1` で
@@ -209,8 +208,8 @@ done
 | 起案プラン CLI（dry-run） | `runner-cli kaggle-improve-plan` |
 | 起案 実行 CLI（--execute で Linear 作成） | `runner-cli kaggle-improve-run` |
 | 提出プラン CLI（candidate/champion共通） | `runner-cli kaggle-submission-plan` |
-| 改善サイクル cron（起案＋当番枠artifact提出） | `scripts/ai/kaggle_improvement_cycle.sh` |
-| artifact提出（当番枠から呼ばれる／手動可） | `scripts/ai/kaggle_targets_submit.sh` |
+| 改善サイクル cron（起案のみ） | `scripts/ai/kaggle_improvement_cycle.sh` |
+| artifact提出（最終子Issueから呼ばれる／手動可） | `scripts/ai/kaggle_targets_submit.sh` |
 | レジストリ（6コンペ×2系統） | `scripts/ai/kaggle_targets_registry.json` |
 | cron 登録 | `scripts/ai/setup_cron.sh` |
 </content>
