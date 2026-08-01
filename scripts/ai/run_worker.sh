@@ -22,6 +22,7 @@ CONTROL_PLANE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$CONTROL_PLANE_DIR"
 
 WORKER_NONRESPONSE_EXIT=75
+WORKER_POLICY_BLOCKED_EXIT=76
 
 ROLE=""
 DRY_RUN=false
@@ -316,6 +317,13 @@ PROGRESS_NOTIFY
   if [ "$RC" -eq 0 ]; then
     echo "WORKER_DISPATCH_DONE role=$ROLE worker=$WORKER report=$REPORT"
     exit 0
+  fi
+
+  # Safety-policy refusals are deterministic for unchanged content. Do not hand off or retry them as
+  # worker availability failures; run_auto owns the explicit Blocked transition and human-wait stop.
+  if [ "$RC" -eq "$WORKER_POLICY_BLOCKED_EXIT" ]; then
+    echo "WORKER_DISPATCH_POLICY_BLOCKED role=$ROLE worker=$WORKER exit=$RC" >&2
+    exit "$WORKER_POLICY_BLOCKED_EXIT"
   fi
 
   # Non-response (75) or any other non-zero exit → hand off to the next worker in the chain.

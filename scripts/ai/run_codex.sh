@@ -79,6 +79,7 @@ else
   WORKER_TIMEOUT="$DEFAULT_WORKER_TIMEOUT"
 fi
 WORKER_NONRESPONSE_EXIT=75
+WORKER_POLICY_BLOCKED_EXIT=76
 
 # --- Per-role gate (DIRECT invocation only; SOT-1459) ---
 # Worker selection is owned by the dispatcher `scripts/ai/run_worker.sh`, which reads the role's
@@ -297,7 +298,8 @@ if [ "$_REUSE_ENABLED" -eq 1 ] && [ -z "${CODEX_MODEL:-}" ] && [ -f "$CODEX_SESS
   EXIT_CODE=$?
   if [ "$EXIT_CODE" -ne 0 ] \
     && ! grep -q "## Next Action" "$REPORT_FILE" 2>/dev/null \
-    && ! grep -qi "usage limit" "$REPORT_FILE" 2>/dev/null; then
+    && ! grep -qi "usage limit" "$REPORT_FILE" 2>/dev/null \
+    && ! grep -Eqi "flagged for possible cybersecurity risk|Trusted Access for Cyber" "$REPORT_FILE" 2>/dev/null; then
     echo "CODEX_RESUME_FALLBACK: resume --last failed (exit $EXIT_CODE); retrying with a fresh session" >&2
     run_codex_cli fresh
     EXIT_CODE=$?
@@ -312,6 +314,16 @@ set -e
 if [ "$EXIT_CODE" -eq 0 ]; then
   mkdir -p "$(dirname "$CODEX_SESSION_MARKER")" 2>/dev/null || true
   : > "$CODEX_SESSION_MARKER" 2>/dev/null || true
+fi
+
+# A safety-policy refusal is deterministic for the same content. It is neither a usage limit nor a
+# transient crash, so retrying the same solo worker wastes quota and repeats the refusal. Surface a
+# dedicated exit that the dispatcher/run_auto path converts into a Blocked human-wait state.
+if [ "$EXIT_CODE" -ne 0 ] \
+  && [ -f "$REPORT_FILE" ] \
+  && grep -Eqi "flagged for possible cybersecurity risk|Trusted Access for Cyber" "$REPORT_FILE"; then
+  echo "WORKER_POLICY_BLOCKED: codex safety policy refusal; automatic retry disabled" >&2
+  exit "$WORKER_POLICY_BLOCKED_EXIT"
 fi
 
 # --- Codex usage-limit detection (set cooldown, delegate to Claude) ---

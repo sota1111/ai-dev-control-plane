@@ -16,11 +16,30 @@ describe('run_auto incomplete-dispatch retry policy (SOT-1928)', () => {
     'utf8',
   );
 
-  test('solo dispatch without a report is retryable for every exit code', () => {
+  test('solo dispatch without a report is retryable for ordinary worker failures', () => {
     expect(script).toMatch(
       /finalizeRun\(\)[\s\S]*?if \[ "\$rc" -ne 0 \] \|\| \[ -z "\$report" \] \|\| \[ ! -f "\$report" \]; then[\s\S]*?return "\$WORKER_UNAVAILABLE"/,
     );
     expect(script).toContain('finalizeRun "solo" "$src" "$sreport" || return $?');
+  });
+
+  test('safety-policy refusal is blocked and never enters the exit-71 retry path', () => {
+    expect(script).toMatch(
+      /if \[ "\$rc" -eq "\$WORKER_POLICY_BLOCKED" \]; then[\s\S]*?set-issue-blocked[\s\S]*?return "\$COMPLETION_UNVERIFIED"/,
+    );
+    const dispatcher = fs.readFileSync(
+      path.join(process.cwd(), 'scripts/ai/run_worker.sh'),
+      'utf8',
+    );
+    expect(dispatcher).toMatch(
+      /if \[ "\$RC" -eq "\$WORKER_POLICY_BLOCKED_EXIT" \]; then[\s\S]*?WORKER_DISPATCH_POLICY_BLOCKED[\s\S]*?exit "\$WORKER_POLICY_BLOCKED_EXIT"/,
+    );
+    const codex = fs.readFileSync(
+      path.join(process.cwd(), 'scripts/ai/run_codex.sh'),
+      'utf8',
+    );
+    expect(codex).toContain('flagged for possible cybersecurity risk');
+    expect(codex).toContain('WORKER_POLICY_BLOCKED: codex safety policy refusal');
   });
 
   test('solo NEEDS_DEBUG is automatically retried instead of recorded as human wait', () => {

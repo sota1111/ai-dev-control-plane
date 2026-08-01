@@ -190,6 +190,7 @@ COMPLETION_UNVERIFIED=70
 # top-level does NOT fire the ensure-issue-reviewed loop-breaker (which would falsely move the issue to
 # In Review and strand ready work) and the runner re-enqueues it with backoff to retry when a worker recovers.
 WORKER_UNAVAILABLE=71
+WORKER_POLICY_BLOCKED=76
 
 # ── 完全スクリプト駆動ロールパイプライン（案B / SOT-1459） ─────────────────────────
 # run_auto.sh 自身が task-check → implementation → verification → acceptance →
@@ -333,6 +334,13 @@ parsePipelineReport() {
 finalizeRun() {
   local mode="$1" rc="$2" report="$3"
   local acceptance_override="${4:-}" linear_override="${5:-}"
+  if [ "$rc" -eq "$WORKER_POLICY_BLOCKED" ]; then
+    plog "PIPELINE_STOP: $mode worker safety-policy refusal → Blocked (automatic retry disabled)"
+    run_cli set-issue-blocked "$TARGET_ISSUE" \
+      "Codex safety policy refusal: automatic retry disabled. Review the issue scope/authorization before resuming." \
+      >/dev/null 2>>"$LOG_FILE" || true
+    return "$COMPLETION_UNVERIFIED"
+  fi
   if [ "$rc" -ne 0 ] || [ -z "$report" ] || [ ! -f "$report" ]; then
     plog "PIPELINE_RETRY: $mode dispatch rc=$rc (no report) → leave issue active and retry"
     return "$WORKER_UNAVAILABLE"

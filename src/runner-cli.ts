@@ -515,6 +515,24 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'set-issue-blocked': {
+      const issueId = args[0];
+      if (!issueId) {
+        process.stderr.write('Usage: runner-cli.js set-issue-blocked <issueIdentifier> [reason]\n');
+        process.exit(1);
+      }
+      const reason = args.slice(1).join(' ').trim();
+      const comment = `## 自動実行停止 — worker safety policy refusal\n\n同じ内容の自動再試行を停止し、このIssueを **Blocked** に移行しました。${reason ? `\n\n**理由:** ${reason}` : ''}\n\n作業範囲と利用環境の認可を確認後、TodoまたはIn Progressへ戻すと再開できます。`;
+      const moved = await runner.setIssueBlocked(issueId, comment).catch(() => false);
+      runner.log(
+        'WORKER_ROLES',
+        `set-issue-blocked ${issueId}: ${moved ? 'moved to Blocked' : 'no change (already blocked/terminal/missing)'}`,
+        { issue: issueId }
+      );
+      process.stdout.write(moved ? 'moved' : 'nochange');
+      process.exit(0);
+      break;
+    }
     case 'parse-usage-limit-epoch': {
       let input = '';
       process.stdin.setEncoding('utf8');
