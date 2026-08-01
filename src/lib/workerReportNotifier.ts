@@ -5,6 +5,7 @@ import { DiscordNotifier } from './discordNotifier.js';
 import { getSecret } from '../config/secrets.js';
 
 export type WorkerName = 'antigravity' | 'codex';
+const MAX_REPORT_CHARS = 3500;
 
 const WORKER_LABEL: Record<WorkerName, string> = {
   antigravity: 'Antigravity',
@@ -16,9 +17,12 @@ const WORKER_LABEL: Record<WorkerName, string> = {
 export function buildWorkerReportMessage(worker: WorkerName, report: string): string {
   const label = WORKER_LABEL[worker] || worker;
   const header = `📋 **${label} Worker Report**`;
-  const body = (report || '').replace(/\s+$/, '');
+  let body = (report || '').replace(/\s+$/, '');
   if (!body.trim()) {
     return `${header}\n(レポートが空です)`;
+  }
+  if (body.length > MAX_REPORT_CHARS) {
+    body = `${body.slice(0, MAX_REPORT_CHARS)}\n\n… truncated; full report remains in the workspace artifact.`;
   }
   return `${header}\n${body}`;
 }

@@ -47,6 +47,12 @@ describe('workerReportNotifier', () => {
       expect(msg).toContain('📋 **Codex Worker Report**');
       expect(msg).toContain('レポートが空です');
     });
+
+    it('bounds large reports so notification time cannot scale with report size', () => {
+      const msg = buildWorkerReportMessage('codex', 'x'.repeat(100_000));
+      expect(msg.length).toBeLessThan(4000);
+      expect(msg).toContain('truncated');
+    });
   });
 
   describe('notifyWorkerReport', () => {

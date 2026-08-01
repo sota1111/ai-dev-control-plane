@@ -1,7 +1,8 @@
 import https from 'node:https';
 
 const MAX_LENGTH = 1990;
-const REQUEST_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 3_000;
+const MAX_RETRY_WAIT_MS = 3_000;
 
 function splitChunks(text: string): string[] {
   const chunks: string[] = [];
@@ -59,10 +60,10 @@ async function sendWithRetry(webhookUrl: string, content: string): Promise<void>
   if (result.status === 429) {
     try {
       const json = JSON.parse(result.body);
-      const waitMs = (parseFloat(json.retry_after) || 5) * 1000;
+      const waitMs = Math.min((parseFloat(json.retry_after) || 3) * 1000, MAX_RETRY_WAIT_MS);
       await new Promise((r) => setTimeout(r, waitMs));
     } catch (_) {
-      await new Promise((r) => setTimeout(r, 5000));
+      await new Promise((r) => setTimeout(r, MAX_RETRY_WAIT_MS));
     }
     await postToDiscord(webhookUrl, content);
   }
