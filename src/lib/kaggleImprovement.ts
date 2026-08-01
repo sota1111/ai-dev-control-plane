@@ -520,6 +520,19 @@ export function buildIssueBody(
 - response chainは各game・試行・条件で新規作成し、日次・Issue間へ持ち越さない。継続情報はartifactとLinear Issueだけに保存する。
 - 完了後の次回改善Issueは自動処理が冪等キー付きで登録する。人にIssue登録を依頼する完了文は出さない。`
     : '';
+  const securityEvaluationContract = competition.key === 'agent-security'
+    ? `
+
+## Agent Security再開ゲート（恒久契約）
+- 作業は参加中のKaggle競技repoと、公式 \`aicomp_sdk\` のローカル合成fixtureに限定する。
+- 子Issueは新しい攻撃手順、認可回避、credential取得、第三者システムへの操作を起案しない。
+- 改善候補は親Issueの入力材料にID・SHA・評価条件が固定済みのvariantだけを扱う。未固定なら実装せず親へ差し戻す。
+- 実行前にcontrol-planeから \`bash scripts/ai/agent_security_preflight.sh <repo-path>\` を実行し、
+  repoの \`.venv/bin/python\` で \`import aicomp_sdk\` とdistribution versionを確認する。
+  system Pythonや誤ったmodule名 \`aicomp\` のimport結果をSDK不在判定に使わない。
+- 評価は外向き通信を無効化した隔離環境で行い、artifactには集計値・真偽値・hashだけを保存する。
+- 上記ゲートの成否を親Issueへ記録する。失敗時は提出せず、具体的な不足条件をBlocked理由にする。`
+    : '';
   return `workers: ${target.workersDirective}
 
 ## 目的
@@ -536,6 +549,7 @@ ${recent}
 ### 失敗ログ・KPI抜粋
 ${failure}
 ${abEvaluation}
+${securityEvaluationContract}
 
 ## 実施内容
 1. 上記材料から未着手の改善軸を選定（非昇格済み軸の再試行は根拠を明示）。

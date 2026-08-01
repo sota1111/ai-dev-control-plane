@@ -268,6 +268,20 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('日次・Issue間へ持ち越さない');
       expect(body).toContain('次回改善Issueは自動処理が冪等キー付きで登録');
     });
+
+    test('agent-security embeds the permanent authorization and SDK resume gate', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].key = 'agent-security';
+      raw.competitions[0].kaggle_competition = 'ai-agent-security-multi-step-tool-attacks';
+      raw.rotation[0].competition = 'agent-security';
+      const competition = parseTargetsRegistry(raw).competitions[0];
+      const body = buildIssueBody(competition.targets[0], competition, 3, {});
+      expect(body).toContain('Agent Security再開ゲート（恒久契約）');
+      expect(body).toContain('agent_security_preflight.sh <repo-path>');
+      expect(body).toContain('import aicomp_sdk');
+      expect(body).toContain('新しい攻撃手順、認可回避');
+      expect(body).toContain('ID・SHA・評価条件が固定済み');
+    });
   });
 
   describe('planImprovementCycle guards', () => {
