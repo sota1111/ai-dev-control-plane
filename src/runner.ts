@@ -197,6 +197,19 @@ async function verifyTaskCompletion(issueId: string, output: string): Promise<Co
   }
 }
 const LOG_DIR = path.join(__dirname, '..', 'docs', 'ai', 'auto_logs');
+const PAUSE_FILE = path.join(LOG_DIR, 'runner.pause');
+// Loaded once at process start, then kept in sync by Discord pause/resume handlers. Keeping the hot
+// path in memory avoids coupling every queue operation to filesystem mocks while preserving pause
+// across webhook restarts through PAUSE_FILE.
+let runnerPaused = fs.existsSync(PAUSE_FILE);
+
+function isRunnerPaused(): boolean {
+  return runnerPaused;
+}
+
+function setRunnerPausedState(paused: boolean): void {
+  runnerPaused = paused;
+}
 
 // Lane support (SOT-913): the lock/queue paths can be split per lane (repo/レーン) so
 // that detached/parallel drain (SOT-911 案②) can run without sharing a single lock/queue.
@@ -1068,6 +1081,21 @@ interface RunItemOutcome {
   lockConflict: boolean;
   detached: boolean;
   dependencyBlocked?: boolean;
+  paused?: boolean;
+}
+
+function requeuePaused(item: QueueItem): void {
+  enqueue(item.issueId, item.trigger || 'queue', null, {
+    issueIdentifier: item.issueIdentifier || null,
+    reason: 'paused',
+    priority: item.priority ?? null,
+    priorityLabel: item.priorityLabel ?? null,
+    parentIssueId: item.parentIssueId ?? null,
+    parentIssueIdentifier: item.parentIssueIdentifier ?? null,
+    queueGroup: item.queueGroup ?? null,
+    queueGroupOrder: item.queueGroupOrder ?? null,
+  });
+  log('QUEUE', 'runner paused — item retained without launching a worker', { issue: item.issueId });
 }
 
 function requeueDependencyBlocked(item: QueueItem, blockers: string[]): void {
@@ -1090,6 +1118,10 @@ function requeueDependencyBlocked(item: QueueItem, blockers: string[]): void {
 async function runItem(item: QueueItem, options: TriggerOptions = {}): Promise<RunItemOutcome> {
   const { issueId } = item;
   const envOverrides = options.envOverrides;
+  if (isRunnerPaused()) {
+    requeuePaused(item);
+    return { lockConflict: false, detached: false, paused: true };
+  }
   // Lane this dispatch runs in: the per-dispatch override (N-slot pool, SOT-933) when present,
   // otherwise the process-level lane (default single-lane path, unchanged).
   const dispatchLane = resolveLane(envOverrides?.RUNNER_LANE ?? undefined);
@@ -1504,6 +1536,10 @@ async function drainQueuePooled(maxParallel: number): Promise<void> {
 }
 
 async function drainQueue(): Promise<void> {
+  if (isRunnerPaused()) {
+    log('QUEUE', 'drain skipped: runner is paused');
+    return;
+  }
   // Normalize queue to eliminate any duplicate issueId entries
   const normalizedQueue = normalizeQueue(loadQueue());
   saveQueue(normalizedQueue);
@@ -1634,6 +1670,10 @@ async function drainQueue(): Promise<void> {
       log('QUEUE', 'drain: run_auto.sh lock held by another run, stopping pass (backed off)', { issue: item.issueId });
       break;
     }
+    if (outcome.paused) {
+      log('QUEUE', 'drain stopped: runner was paused before worker launch', { issue: item.issueId });
+      break;
+    }
   }
 
   if (processedCount >= MAX_DRAIN_ITEMS) {
@@ -1646,6 +1686,9 @@ async function drainQueue(): Promise<void> {
 export {
   SKIPPED_LOCKED,
   LOG_DIR,
+  PAUSE_FILE,
+  isRunnerPaused,
+  setRunnerPausedState,
   DEFAULT_LANE,
   SERIALIZE_SCOPE_REPO,
   SERIALIZE_SCOPE_BRANCH,

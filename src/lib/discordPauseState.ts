@@ -1,10 +1,9 @@
 'use strict';
 
 import fs from 'node:fs';
-import path from 'node:path';
 import * as runner from '../runner.js';
 
-const PAUSE_FILE: string = path.join(runner.LOG_DIR, 'runner.pause');
+const PAUSE_FILE: string = runner.PAUSE_FILE;
 
 interface PauseInfo {
   pausedAt: string;
@@ -20,13 +19,16 @@ function setPaused(reason: string = 'Discord /pause command'): void {
     pausedAt: new Date().toISOString(),
     reason,
   }), 'utf8');
+  runner.setRunnerPausedState(true);
 }
 
 function clearPause(): boolean {
   if (fs.existsSync(PAUSE_FILE)) {
     fs.unlinkSync(PAUSE_FILE);
+    runner.setRunnerPausedState(false);
     return true;
   }
+  runner.setRunnerPausedState(false);
   return false;
 }
 

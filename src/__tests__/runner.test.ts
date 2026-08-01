@@ -34,6 +34,7 @@ describe('runner', () => {
     jest.spyOn(process, 'kill').mockImplementation(() => true);
     // Default mock for existsSync
     fs.existsSync.mockReturnValue(false);
+    runner.setRunnerPausedState(false);
   });
 
   afterEach(() => {
@@ -1713,6 +1714,20 @@ describe('runner', () => {
       (spawn as jest.Mock).mockReturnValue(child);
       return child;
     }
+
+    it('retains an item and launches no worker while the runner is paused', async () => {
+      runner.setRunnerPausedState(true);
+      const item: any = queueItem('SOT-PAUSED');
+
+      const outcome = await runner.runItem(item);
+
+      expect(outcome).toEqual({ lockConflict: false, detached: false, paused: true });
+      expect(spawn).not.toHaveBeenCalled();
+      const queueWrites = (fs.writeFileSync as jest.Mock).mock.calls
+        .filter(c => typeof c[0] === 'string' && c[0].includes('runner.queue.json'));
+      expect(queueWrites.length).toBeGreaterThan(0);
+      expect(queueWrites.at(-1)?.[1]).toContain('SOT-PAUSED');
+    });
 
     it('marks an explicitly unmapped project fail-closed instead of falling back to control-plane', async () => {
       setupLinearMocks([
