@@ -378,6 +378,16 @@ app.get('/health', (req: any, res: any) => {
   res.status(200).json({ status: 'ok' });
 });
 
+function wakeDependentsAfterTerminal(blockerIssueId: string): void {
+  const awakened = runner.wakeDependencyBlocked(blockerIssueId);
+  if (awakened === 0 || runner.isLocked()) return;
+  setImmediate(() => {
+    runner.drainQueue().catch((err: any) => {
+      runner.log('WEBHOOK', `dependency wake drain error: ${err.message}`, { issue: blockerIssueId });
+    });
+  });
+}
+
 app.post('/webhooks/linear', (req: any, res: any) => {
   const body = req.body;
   
@@ -438,6 +448,7 @@ app.post('/webhooks/linear', (req: any, res: any) => {
   if (isTerminalState({ type: stateType, name: stateName })) {
     runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=terminal state`, { issue: issueId });
     runner.removeFromQueue(issueId);
+    wakeDependentsAfterTerminal(issueId);
     // A child issue just reached a terminal state. Children are processed in their own
     // single-issue runs, so nobody finalizes the parent — advance it to In Review here
     // if all of its children are now done (SOT-840). Fire-and-forget; never blocks the ack.
@@ -461,6 +472,7 @@ app.post('/webhooks/linear', (req: any, res: any) => {
     // is itself a hold state, so this issue is not queued for a run. Fire-and-forget; never blocks.
     runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=hold state (In Review)`, { issue: issueId });
     runner.removeFromQueue(issueId);
+    wakeDependentsAfterTerminal(issueId);
     const parentId = body.data?.parent?.identifier ?? body.data?.parent?.id ?? null;
     if (parentId) {
       setImmediate(async () => {

@@ -91,6 +91,7 @@ import {
   dequeue,
   removeFromQueue,
   isQueued,
+  wakeDependencyBlocked,
 } from './lib/queueStore.js';
 import { parseOutcomeLines, summarizeOutcomes, type OutcomeSummary, type OutcomeRecord } from './lib/outcomeStats.js';
 import { levelForTag, shouldLog, rotateIfNeeded, listLogFilesNewestFirst } from './lib/logRotation.js';
@@ -1116,6 +1117,7 @@ function requeueDependencyBlocked(item: QueueItem, blockers: string[]): void {
     parentIssueIdentifier: item.parentIssueIdentifier ?? null,
     queueGroup: item.queueGroup ?? null,
     queueGroupOrder: item.queueGroupOrder ?? null,
+    blockedByIssueIds: blockers,
   });
   log('QUEUE', `dependency blocked — keeping Blocked issue for a later round (retryAt=${retryAt}, blockers=${blockers.join(', ')})`, {
     issue: item.issueId,
@@ -1763,6 +1765,7 @@ export {
   dequeue,
   removeFromQueue,
   isQueued,
+  wakeDependencyBlocked,
   loadInflight,
   saveInflight,
   loadInflightRecords,

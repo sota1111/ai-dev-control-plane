@@ -27,6 +27,7 @@ const mockRunner = {
   dequeue: jest.fn().mockReturnValue(null),
   removeFromQueue: jest.fn(),
   isQueued: jest.fn().mockReturnValue(false),
+  wakeDependencyBlocked: jest.fn().mockReturnValue(0),
   isQueuedOrRunning: jest.fn().mockReturnValue(false),
   isReaperEnqueueSuppressed: jest.fn().mockReturnValue(false),
   humanWaitSuppressionInfo: jest.fn().mockReturnValue({ count: 0, nextAt: null }),
@@ -97,6 +98,7 @@ describe('webhook usage limit retry', () => {
     runner.acquireLock.mockReturnValue(true);
     runner.hasPendingIssues.mockResolvedValue(true);
     runner.isQueued.mockReturnValue(false);
+    runner.wakeDependencyBlocked.mockReturnValue(0);
     runner.isQueuedOrRunning.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
@@ -506,6 +508,24 @@ describe('webhook issue filtering', () => {
 
     await new Promise(resolve => originalSetTimeout(resolve, 20));
     expect(runner.finalizeParentIfChildrenComplete).toHaveBeenCalledWith('TEST-CHILD-REVIEW', 'TEST-PARENT');
+  });
+
+  test('a blocker moving to In Review wakes dependency-blocked queue items immediately', async () => {
+    const runner: any = mockRunner;
+    runner.wakeDependencyBlocked.mockReturnValueOnce(1);
+    runner.isLocked.mockReturnValue(false);
+    const payload: any = makePayload(
+      'update',
+      { name: 'In Review', type: 'started' },
+      { identifier: 'TEST-BLOCKER-REVIEW' },
+    );
+    payload.updatedFrom = { stateId: 'blocked-state' };
+
+    const res = await request(app).post('/webhooks/linear').send(payload);
+    expect(res.status).toBe(200);
+    expect(runner.wakeDependencyBlocked).toHaveBeenCalledWith('TEST-BLOCKER-REVIEW');
+    await new Promise(resolve => originalSetTimeout(resolve, 20));
+    expect(runner.drainQueue).toHaveBeenCalled();
   });
 
   test('active issue create is accepted', async () => {

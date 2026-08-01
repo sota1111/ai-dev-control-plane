@@ -351,6 +351,7 @@ interface EnqueueOptions {
   parentIssueIdentifier?: string | null;
   queueGroup?: string | null;
   queueGroupOrder?: string | null;
+  blockedByIssueIds?: string[];
 }
 
 export function enqueue(issueId: string, trigger: string | null, retryAt: string | null = null, {
@@ -361,7 +362,8 @@ export function enqueue(issueId: string, trigger: string | null, retryAt: string
   parentIssueId = null,
   parentIssueIdentifier = null,
   queueGroup = null,
-  queueGroupOrder = null
+  queueGroupOrder = null,
+  blockedByIssueIds = []
 }: EnqueueOptions = {}): void {
   const { log } = requireDeps();
   try {
@@ -409,7 +411,10 @@ export function enqueue(issueId: string, trigger: string | null, retryAt: string
         ...(resolvedQueueGroup !== null ? {
           queueGroup: resolvedQueueGroup,
           ...(queueGroupOrder !== null ? { queueGroupOrder } : {})
-        } : {})
+        } : {}),
+        blockedByIssueIds: blockedByIssueIds.length > 0
+          ? blockedByIssueIds
+          : existing.blockedByIssueIds || []
       };
       saveQueue(queueOrdering.sortQueueByPriority(queue));
       log('QUEUE', 'enqueue: updated existing item', { issue: issueId, trigger, retryAt: mergedRetryAt });
@@ -434,13 +439,37 @@ export function enqueue(issueId: string, trigger: string | null, retryAt: string
       parentIssueIdentifier: parentIssueIdentifier ?? null,
       queueGroup: resolvedQueueGroup,
       queueGroupOrder: queueGroupOrder ?? null,
-      blockedByIssueIds: []
+      blockedByIssueIds
     });
     saveQueue(queueOrdering.sortQueueByPriority(queue));
     log('QUEUE', 'enqueued', { issue: issueId, trigger });
   } catch (err: any) {
     log('QUEUE', `enqueue ERROR: ${err.message}`, { issue: issueId });
   }
+}
+
+/** Make dependency-blocked queue items immediately runnable when one of their blockers completes. */
+export function wakeDependencyBlocked(blockerIssueId: string): number {
+  const { log } = requireDeps();
+  const queue = loadQueue();
+  let awakened = 0;
+  for (const item of queue) {
+    if (
+      item.reason !== 'dependency_blocked' ||
+      !(item.blockedByIssueIds || []).includes(blockerIssueId)
+    ) continue;
+    item.retryAt = null;
+    item.reason = 'dependency_recheck';
+    item.blockedByIssueIds = (item.blockedByIssueIds || []).filter((id) => id !== blockerIssueId);
+    awakened++;
+  }
+  if (awakened > 0) {
+    saveQueue(queueOrdering.sortQueueByPriority(queue));
+    log('QUEUE', `dependency terminal — awakened ${awakened} blocked item(s)`, {
+      issue: blockerIssueId,
+    });
+  }
+  return awakened;
 }
 
 export function dequeue(lastProcessedGroup: string | null = null): QueueItem | null {

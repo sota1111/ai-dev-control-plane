@@ -1587,6 +1587,7 @@ describe('runner', () => {
       expect(queued[0]).toEqual(expect.objectContaining({
         issueId: 'SOT-2020-B',
         reason: 'dependency_blocked',
+        blockedByIssueIds: ['SOT-2020-A'],
       }));
       expect(new Date(queued[0].retryAt).getTime()).toBeGreaterThan(Date.now());
     });
