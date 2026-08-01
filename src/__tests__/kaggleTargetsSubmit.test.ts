@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 const repoRoot = process.cwd();
 const script = path.join(repoRoot, 'scripts', 'ai', 'kaggle_targets_submit.sh');
@@ -78,13 +79,50 @@ exit 1
           ...process.env,
           PATH: `${bin}:${process.env.PATH}`,
           KAGGLE_SUBMISSION_HISTORY: path.join(dir, 'history.jsonl'),
+          KAGGLE_HISTORY_ATTEMPTS: '2',
+          KAGGLE_HISTORY_RETRY_DELAY_SECONDS: '0',
         },
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
       }
     );
     expect(output).toContain('measurement unavailable');
+    expect(fs.readFileSync(calls, 'utf8').match(/competitions submissions/g)).toHaveLength(2);
     expect(fs.readFileSync(calls, 'utf8')).not.toContain('competitions submit');
+  });
+
+  test('recognizes a submitted artifact fingerprint and blocks an identical second slot', () => {
+    const { dir, bin, registry } = fixture();
+    const calls = path.join(dir, 'calls');
+    const today = new Date().toISOString().slice(0, 10);
+    const artifact = JSON.parse(fs.readFileSync(registry, 'utf8')).competitions[0].targets[0].submit.file;
+    const fingerprint = createHash('sha256').update(fs.readFileSync(artifact)).digest('hex');
+    fs.writeFileSync(
+      path.join(bin, 'kaggle'),
+      `#!/usr/bin/env bash
+echo "$*" >> "${calls}"
+if [[ "$*" == *"competitions submissions"* ]]; then
+  cat <<'EOF'
+ref  fileName  date  description  status  publicScore
+---  --------  ----  -----------  ------  -----------
+101  submission.csv  ${today}  demo-claude [repo:demo-claude] [artifact:sha256:${fingerprint}]  COMPLETE  0.51
+EOF
+fi
+`
+    );
+    fs.chmodSync(path.join(bin, 'kaggle'), 0o755);
+
+    const output = execFileSync(
+      'bash',
+      [script, '--registry', registry, '--competition', 'demo', '--repo', 'demo-claude', '--hour', '12', '--execute'],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, KAGGLE_SUBMISSION_HISTORY: path.join(dir, 'history.jsonl') },
+        encoding: 'utf8',
+      }
+    );
+    expect(output).toContain('selected artifact was already submitted today');
+    expect(fs.readFileSync(calls, 'utf8')).not.toContain('competitions submit -c');
   });
 
   test('a completed slot marker makes an execute rerun idempotent', () => {

@@ -51,7 +51,7 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
   各コンペ1日1回は提出しようとする。実提出は active(2段kill switch) かつ `--execute` のときだけ。
 - **各枠の開始時**に Kaggle 提出履歴を取得し、直近の submission ref / status / public score と
   `YYYY-MM-DD-jst-HH` の slot id を `submission-history.jsonl` に記録する。履歴取得または認証に失敗した
-  場合、実行モードでも **safe skip + Discord通知**とし、提出しない。
+  場合は短い間隔で3回まで再取得し、それでも失敗すれば実行モードでも **safe skip + Discord通知**とし、提出しない。
 - 冪等: 提出メッセージの `[slot:<slot id>]` を履歴で照合する。同じ枠の再実行は、日次2枠目を消費せず
   skipする。日次lineage上限またはコンペ上限に達した場合もskipする。`submit.file` 未設定（未完成artifact）は
   **skip + Discord 通知**で安全側に倒す（提出物 wiring は各 repo の改善子Issueで整備）。
@@ -63,6 +63,8 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
 - 定期枠の間隔を採点待機時間として扱い、lineageの最新提出がまだ`PENDING`でも次の改善サイクルを起案する。
   採点完了待ちでサイクルを停止せず、ローカル検証で改善した新artifactを次枠で提出する。同じ`PENDING`履歴は
   前回起案時刻との比較で一度だけ消費し、同一artifactの再提出はfingerprint gateで引き続き禁止する。
+- 子Issueからの提出も `kaggle_targets_submit.sh --competition <key> --repo <repo> --execute` に統一する。
+  Kaggle CLI/APIの直接呼出しは禁止し、定期枠外の完了時提出にも同じfingerprint・日次上限・履歴取得gateを適用する。
 
 ### 提出上限と提出モード（SOT-1913 提出cap補正）
 

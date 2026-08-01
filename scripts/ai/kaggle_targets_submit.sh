@@ -29,6 +29,7 @@ REGISTRY="$SCRIPT_DIR/kaggle_targets_registry.json"
 EXECUTE=0
 COMP_KEY=""
 HOUR_OVERRIDE=""
+REPO_FILTER=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --execute) EXECUTE=1 ;;
@@ -36,6 +37,8 @@ while [[ $# -gt 0 ]]; do
     --competition=*) COMP_KEY="${1#*=}" ;;
     --hour) HOUR_OVERRIDE="$2"; shift ;;
     --hour=*) HOUR_OVERRIDE="${1#*=}" ;;
+    --repo) REPO_FILTER="$2"; shift ;;
+    --repo=*) REPO_FILTER="${1#*=}" ;;
     --registry) REGISTRY="$2"; shift ;;
     --registry=*) REGISTRY="${1#*=}" ;;
     -h|--help) sed -n '2,28p' "${BASH_SOURCE[0]}"; exit 0 ;;
@@ -64,6 +67,13 @@ fi
 COMP_SLUG="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);process.stdout.write(c?c.kaggle_competition:"")' "$REGISTRY" "$COMP_KEY")"
 if [[ -z "$COMP_SLUG" ]]; then echo "ERROR: competition '$COMP_KEY' が registry にありません。" >&2; exit 2; fi
 mapfile -t REPOS < <(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);(c?c.targets:[]).forEach(t=>console.log(t.repo))' "$REGISTRY" "$COMP_KEY")
+if [[ -n "$REPO_FILTER" ]]; then
+  if ! printf '%s\n' "${REPOS[@]}" | grep -Fxq "$REPO_FILTER"; then
+    echo "ERROR: repo '$REPO_FILTER' is not a target of competition '$COMP_KEY'." >&2
+    exit 2
+  fi
+  REPOS=("$REPO_FILTER")
+fi
 
 # このコンペの提出モード（both / alternate）。alternate(ARC=1/day 共有)は日替わりで交互提出する。
 SUBMISSION_MODE="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);process.stdout.write(c&&c.submission_mode?c.submission_mode:"both")' "$REGISTRY" "$COMP_KEY")"
@@ -104,8 +114,22 @@ TOTAL_TODAY=0
 
 if ! command -v kaggle >/dev/null 2>&1; then
   HISTORY_REASON="Kaggle CLI is not installed"
-elif raw="$(kaggle competitions submissions -c "$COMP_SLUG" 2>&1)"; then
-  HISTORY_OK=1
+else
+  history_attempts="${KAGGLE_HISTORY_ATTEMPTS:-3}"
+  [[ "$history_attempts" =~ ^[1-9][0-9]*$ ]] || history_attempts=3
+  for ((history_attempt=1; history_attempt<=history_attempts; history_attempt++)); do
+    if raw="$(kaggle competitions submissions -c "$COMP_SLUG" 2>&1)"; then
+      HISTORY_OK=1
+      break
+    fi
+    HISTORY_REASON="$(printf '%s' "$raw" | tr '\n' ' ' | cut -c1-300)"
+    if (( history_attempt < history_attempts )); then
+      echo "  → history取得失敗 (${history_attempt}/${history_attempts}); retryします。" >&2
+      sleep "${KAGGLE_HISTORY_RETRY_DELAY_SECONDS:-2}"
+    fi
+  done
+fi
+if [[ "$HISTORY_OK" == "1" ]]; then
   if [[ -n "$raw" ]]; then
     while IFS= read -r line; do
       [[ -z "${line// }" ]] && continue
@@ -124,7 +148,7 @@ elif raw="$(kaggle competitions submissions -c "$COMP_SLUG" 2>&1)"; then
       for repo in "${REPOS[@]}"; do
         if grep -Fq "$repo" <<<"$line"; then
           today_count["$repo"]=$(( ${today_count["$repo"]} + 1 ))
-          line_fingerprint="$(grep -oE '\\[artifact:sha256:[0-9a-f]{64}\\]' <<<"$line" | head -1 | sed -E 's/^\\[artifact:|\\]$//g')"
+          line_fingerprint="$(grep -oE '\[artifact:sha256:[0-9a-f]{64}\]' <<<"$line" | head -1 | sed -E 's/^\[artifact:|\]$//g')"
           if [[ -n "$line_fingerprint" ]]; then
             submitted_fingerprints["$repo"]+="${line_fingerprint}"$'\n'
           fi
@@ -135,8 +159,6 @@ elif raw="$(kaggle competitions submissions -c "$COMP_SLUG" 2>&1)"; then
       done
     done < <(printf '%s\n' "$raw" | tail -n +3)
   fi
-else
-  HISTORY_REASON="$(printf '%s' "$raw" | tr '\n' ' ' | cut -c1-300)"
 fi
 
 previous_results_json="$(printf '%s\n' "$raw" | node -e '
@@ -210,6 +232,13 @@ if [[ -z "$plan_json" ]]; then
   echo "ERROR: kaggle-submission-plan の実行に失敗しました（tsx/runner-cli を確認）。" >&2
   exit 2
 fi
+if [[ -n "$REPO_FILTER" ]]; then
+  plan_json="$(node -e '
+    const plan=JSON.parse(process.argv[1]);
+    plan.targets=(plan.targets||[]).filter(target=>target.repo===process.argv[2]);
+    process.stdout.write(JSON.stringify(plan));
+  ' "$plan_json" "$REPO_FILTER")"
+fi
 
 echo "== Kaggle 完了トリガ提出 ($COMP_KEY / $COMP_SLUG, slot=$slot_id) =="
 if [[ "$HISTORY_OK" != "1" ]]; then
@@ -258,6 +287,9 @@ n_targets="$(node -e 'process.stdout.write(String((JSON.parse(process.argv[1]||"
 for ((i=0; i<n_targets; i++)); do
   action="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].action)||"")' "$plan_json" "$i")"
   repo="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].repo)||"")' "$plan_json" "$i")"
+  if [[ -n "$REPO_FILTER" && "$repo" != "$REPO_FILTER" ]]; then
+    continue
+  fi
   if [[ "$action" != "submit" ]]; then
     reason="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].reason)||"")' "$plan_json" "$i")"
     echo "  → skip $repo: $reason"

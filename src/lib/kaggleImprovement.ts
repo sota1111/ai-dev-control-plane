@@ -547,6 +547,9 @@ ${abEvaluation}
 ${childWorkers}
 \`\`\`
 3. 取り組み完了時点で、提出契約を通過した最新 artifact を提出する。champion 昇格は必須条件にしない。
+   提出は必ず control-plane の
+   \`bash scripts/ai/kaggle_targets_submit.sh --competition ${competition.key} --repo ${target.repo} --execute\`
+   を使用する。Kaggle CLI/APIを直接呼び出してfingerprint gateを迂回してはならない。
 4. 子完了後、親を In Review にして完了報告。
 
 ## 実行リソース

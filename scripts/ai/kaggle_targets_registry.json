@@ -86,7 +86,7 @@
           "project": "ptcg-agent-claude",
           "workers_directive": "solo=claude:fable, handoff=off",
           "submit": {
-            "file": "/workspaces/ptcg-agent-claude/submission.tar.gz",
+            "file": ".targets/ptcg-agent-claude/submission.tar.gz",
             "message": "auto-improve submit: ptcg-agent-claude champion"
           },
           "next_cycle": 1
