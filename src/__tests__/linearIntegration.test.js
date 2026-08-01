@@ -256,6 +256,7 @@ describe('Linear Integration', () => {
         id: 'u2', identifier: 'ENG-2', state: { type: 'unstarted', name: 'Todo' },
         inverseRelations: { nodes: [
           { type: 'blocks', issue: { id: 'u1', identifier: 'ENG-1' }, relatedIssue: { id: 'u2', identifier: 'ENG-2' } },
+          { type: 'blocks', issue: { id: 'u2', identifier: 'ENG-2' }, relatedIssue: { id: 'u2', identifier: 'ENG-2' } },
           { type: 'related', issue: { id: 'u3', identifier: 'ENG-3' }, relatedIssue: { id: 'u2', identifier: 'ENG-2' } }
         ] }
       }] } } });

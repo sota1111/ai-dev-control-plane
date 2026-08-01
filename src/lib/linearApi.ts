@@ -496,12 +496,13 @@ export async function fetchActiveIssues(
 }
 
 function blockingIssueIds(issue: any): string[] {
+  const selfIds = new Set([issue.id, issue.identifier].filter(Boolean));
   return (issue.inverseRelations?.nodes || [])
     .filter((relation: any) => relation.type === 'blocks')
     // For an inverse relation, `issue` is the source (the blocker) and `relatedIssue` is the
     // current/dependent issue. Reading relatedIssue creates a self-dependency in the queue.
     .flatMap((relation: any) => [relation.issue?.id, relation.issue?.identifier])
-    .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
+    .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0 && !selfIds.has(id));
 }
 
 export async function setIssueInProgress(
@@ -903,7 +904,8 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
     // prerequisite finishes. This also covers blockers that are not present in the local queue.
     const blockingRelations = (data.issue.inverseRelations?.nodes || [])
       .filter((relation: any) => relation?.type === 'blocks')
-      .map((relation: any) => relation.issue);
+      .map((relation: any) => relation.issue)
+      .filter((blocker: any) => blocker?.id !== data.issue.id && blocker?.identifier !== data.issue.identifier);
     const waitingOnBlockers = blockingRelations
       .filter((blocker: any) => {
         if (!blocker || blocker.archivedAt) return false;
