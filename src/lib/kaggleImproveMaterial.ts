@@ -227,6 +227,28 @@ function isCompletedScoredSubmission(row: KaggleSubmissionRow): boolean {
 }
 
 /**
+ * 自分の best public score を submission 履歴の生行から直接取る（design §42 LB順位が一次KPI）。
+ * score-progression.jsonl は `[repo:...]` 帰属マーカー付きの完了提出が拾えないと空になり、順位計算が
+ * 出せない。ここでは COMPLETE かつ数値スコアを持つ行から、方向（max/min）に応じた最良値を返す。
+ * 1件も無ければ undefined。
+ */
+export function bestPublicScoreFromRows(
+  rows: KaggleSubmissionRow[],
+  direction: 'max' | 'min' = 'max'
+): number | undefined {
+  let best: number | undefined;
+  for (const row of rows) {
+    if (!isCompletedScoredSubmission(row)) continue;
+    const score = Number(row.publicScore);
+    if (!Number.isFinite(score)) continue;
+    if (best === undefined || (direction === 'max' ? score > best : score < best)) {
+      best = score;
+    }
+  }
+  return best;
+}
+
+/**
  * failure-log.md 本文から、指定キー（repo名・コンペkey 等）を含む行だけを抜粋する。
  * 1行も一致しなければ undefined。長すぎる場合は maxLines で打ち切り、省略を明示する。
  */
@@ -509,14 +531,19 @@ export async function collectImproveContext(
     // LB順位サマリ + 順位履歴（best-effort）。ローカル評価は代理指標、順位が一次KPI。
     let leaderboardSummary: string | undefined;
     try {
+      const direction = comp.scoreDirection;
+      // 自分の best public score を submission 履歴の生行から直接取る（score-progression.jsonl は
+      // `[repo:...]` 帰属マーカーが無いと空になり順位を出せないため、そこに依存しない）。生行から
+      // 取れない場合のみ score-progression にフォールバックする。
       const repoScores = progression
         .filter((entry) => entry.repo === t.repo)
         .map((entry) => entry.publicScore);
-      const direction = comp.scoreDirection;
-      const bestPublicScore = repoScores.length > 0
+      const progressionBest = repoScores.length > 0
         ? repoScores.reduce((best, s) =>
             (direction === 'max' ? s > best : s < best) ? s : best, repoScores[0])
         : undefined;
+      const bestPublicScore =
+        bestPublicScoreFromRows(targetSubmissionRows, direction) ?? progressionBest;
       if (bestPublicScore !== undefined && leaderboardScores.length > 0) {
         const standing = computePublicRank(leaderboardScores, bestPublicScore, direction);
         const entry: LeaderboardRankEntry = {
