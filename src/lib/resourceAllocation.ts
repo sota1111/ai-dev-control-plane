@@ -89,17 +89,53 @@ export interface CompetitionCandidate {
   eligible: boolean;
 }
 
+export interface SelectionOptions {
+  /**
+   * Competition keys drafted in recent slots, newest first (design §50 多様性補正). Without this a
+   * competition that earns momentum keeps the top priority and monopolizes every slot, starving the
+   * others (agent-security did exactly this). Each competition's priority is multiplied by
+   * `cooldownFactor` once per appearance within the last `cooldownWindow` slots, so a recently-drafted
+   * competition steps aside and its penalty decays back as other slots pass.
+   */
+  recentlyDrafted?: string[];
+  /** How many recent slots the cooldown looks back over (default 3). */
+  cooldownWindow?: number;
+  /** Per-appearance multiplicative penalty in (0,1] (default 0.5; 1 disables the cooldown). */
+  cooldownFactor?: number;
+}
+
 /**
- * Pick the competition for a cron slot: the eligible one with the highest priority. Ties break by the
- * registry order of `candidates` (deterministic — cron must not depend on Date/random). Returns null
- * when nothing is eligible (every competition saturated / closed / already has an open cycle) so the
- * caller drafts nothing this slot.
+ * Effective priority after the recency cooldown: base priority × cooldownFactor^(appearances in the
+ * last cooldownWindow drafted slots). Exported for logging/tests.
  */
-export function selectDynamicCompetition(candidates: CompetitionCandidate[]): string | null {
-  let best: CompetitionCandidate | null = null;
+export function cooldownAdjustedPriority(
+  key: string,
+  basePriority: number,
+  opts: SelectionOptions = {}
+): number {
+  const window = opts.cooldownWindow ?? 3;
+  const factor = opts.cooldownFactor ?? 0.5;
+  if (window <= 0 || factor >= 1) return basePriority;
+  const recent = (opts.recentlyDrafted ?? []).slice(0, window);
+  const appearances = recent.filter((k) => k === key).length;
+  return basePriority * Math.pow(factor, appearances);
+}
+
+/**
+ * Pick the competition for a cron slot: the eligible one with the highest cooldown-adjusted priority.
+ * Ties break by the registry order of `candidates` (deterministic — cron must not depend on
+ * Date/random). Returns null when nothing is eligible (every competition saturated / closed / already
+ * has an open cycle) so the caller drafts nothing this slot.
+ */
+export function selectDynamicCompetition(
+  candidates: CompetitionCandidate[],
+  opts: SelectionOptions = {}
+): string | null {
+  let best: { key: string; adj: number } | null = null;
   for (const c of candidates) {
     if (!c.eligible) continue;
-    if (best === null || c.priority > best.priority) best = c;
+    const adj = cooldownAdjustedPriority(c.key, c.priority, opts);
+    if (best === null || adj > best.adj) best = { key: c.key, adj };
   }
   return best ? best.key : null;
 }
@@ -126,12 +162,18 @@ export interface AllocationConfig {
   /** Consecutive non-improving cycles that auto-flip a lineage to maintain (0 disables). */
   autoMaintainThreshold: number;
   weights: PriorityWeights;
+  /** Recency-cooldown window (slots) that prevents one competition monopolizing selection (§50). */
+  cooldownWindow: number;
+  /** Per-appearance cooldown penalty in (0,1]; 1 disables the cooldown. */
+  cooldownFactor: number;
 }
 
 export const DEFAULT_ALLOCATION_CONFIG: AllocationConfig = {
   mode: 'static',
   autoMaintainThreshold: 0,
   weights: DEFAULT_PRIORITY_WEIGHTS,
+  cooldownWindow: 3,
+  cooldownFactor: 0.5,
 };
 
 /** Parse the optional registry `allocation` block. Missing → static/legacy (fully backward compatible). */
@@ -151,5 +193,15 @@ export function parseAllocationConfig(raw: unknown): AllocationConfig {
     rankGain: num(wRaw.rank_gain ?? wRaw.rankGain, DEFAULT_PRIORITY_WEIGHTS.rankGain),
     deadline: num(wRaw.deadline, DEFAULT_PRIORITY_WEIGHTS.deadline),
   };
-  return { mode, autoMaintainThreshold, weights };
+  const cwRaw = o.cooldown_window ?? o.cooldownWindow;
+  const cooldownWindow =
+    typeof cwRaw === 'number' && Number.isFinite(cwRaw) && cwRaw >= 0
+      ? Math.floor(cwRaw)
+      : DEFAULT_ALLOCATION_CONFIG.cooldownWindow;
+  const cfRaw = o.cooldown_factor ?? o.cooldownFactor;
+  const cooldownFactor =
+    typeof cfRaw === 'number' && Number.isFinite(cfRaw) && cfRaw > 0 && cfRaw <= 1
+      ? cfRaw
+      : DEFAULT_ALLOCATION_CONFIG.cooldownFactor;
+  return { mode, autoMaintainThreshold, weights, cooldownWindow, cooldownFactor };
 }
