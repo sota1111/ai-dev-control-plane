@@ -1,6 +1,7 @@
 import {
   computeTargetPriority,
   selectDynamicCompetition,
+  cooldownAdjustedPriority,
   shouldAutoMaintain,
   parseAllocationConfig,
   DEFAULT_PRIORITY_WEIGHTS,
@@ -98,6 +99,42 @@ describe('resourceAllocation — selectDynamicCompetition', () => {
   });
 });
 
+describe('resourceAllocation — cooldown (anti-monopoly, §50)', () => {
+  const c = (key: string, priority: number, eligible = true): CompetitionCandidate => ({ key, priority, eligible });
+
+  it('decays a competition drafted in recent slots by cooldownFactor per appearance', () => {
+    expect(cooldownAdjustedPriority('a', 0.8, { recentlyDrafted: [], cooldownFactor: 0.5, cooldownWindow: 3 })).toBe(0.8);
+    expect(cooldownAdjustedPriority('a', 0.8, { recentlyDrafted: ['a'], cooldownFactor: 0.5, cooldownWindow: 3 })).toBeCloseTo(0.4);
+    expect(cooldownAdjustedPriority('a', 0.8, { recentlyDrafted: ['a', 'a'], cooldownFactor: 0.5, cooldownWindow: 3 })).toBeCloseTo(0.2);
+  });
+
+  it('only counts appearances within the cooldown window', () => {
+    expect(cooldownAdjustedPriority('a', 0.8, { recentlyDrafted: ['a', 'b', 'c', 'a'], cooldownFactor: 0.5, cooldownWindow: 3 })).toBeCloseTo(0.4);
+  });
+
+  it('is disabled by cooldownFactor=1 or cooldownWindow=0', () => {
+    expect(cooldownAdjustedPriority('a', 0.8, { recentlyDrafted: ['a', 'a'], cooldownFactor: 1 })).toBe(0.8);
+    expect(cooldownAdjustedPriority('a', 0.8, { recentlyDrafted: ['a', 'a'], cooldownWindow: 0 })).toBe(0.8);
+  });
+
+  it('breaks the monopoly: a recently-drafted high-priority competition yields to a fresh one', () => {
+    // agent-security (0.78) drafted last two slots decays to 0.195; biohub (0.61) untouched wins.
+    const pick = selectDynamicCompetition(
+      [c('agent-security', 0.78), c('biohub', 0.61), c('ptcg', 0.42)],
+      { recentlyDrafted: ['agent-security', 'agent-security'], cooldownFactor: 0.5, cooldownWindow: 3 }
+    );
+    expect(pick).toBe('biohub');
+  });
+
+  it('lets a high-priority competition win again once its penalty decays out of the window', () => {
+    const pick = selectDynamicCompetition(
+      [c('agent-security', 0.78), c('biohub', 0.61)],
+      { recentlyDrafted: ['biohub', 'ptcg', 'kaggriculture'], cooldownFactor: 0.5, cooldownWindow: 3 }
+    );
+    expect(pick).toBe('agent-security');
+  });
+});
+
 describe('resourceAllocation — shouldAutoMaintain', () => {
   it('flips after threshold consecutive non-improving cycles', () => {
     expect(shouldAutoMaintain(6, false, 6)).toBe(true);
@@ -119,15 +156,26 @@ describe('resourceAllocation — parseAllocationConfig', () => {
     expect(parseAllocationConfig(null).mode).toBe('static');
   });
 
-  it('parses dynamic mode, threshold, and weights (snake_case)', () => {
+  it('parses dynamic mode, threshold, weights, and cooldown (snake_case)', () => {
     const cfg = parseAllocationConfig({
       mode: 'dynamic',
       auto_maintain_threshold: 6,
       weights: { momentum: 0.5, headroom: 0.2, rank_gain: 0.2, deadline: 0.1 },
+      cooldown_window: 4,
+      cooldown_factor: 0.4,
     });
     expect(cfg.mode).toBe('dynamic');
     expect(cfg.autoMaintainThreshold).toBe(6);
     expect(cfg.weights).toEqual({ momentum: 0.5, headroom: 0.2, rankGain: 0.2, deadline: 0.1 });
+    expect(cfg.cooldownWindow).toBe(4);
+    expect(cfg.cooldownFactor).toBe(0.4);
+  });
+
+  it('defaults cooldown to window=3 factor=0.5 and rejects out-of-range factor', () => {
+    expect(parseAllocationConfig({ mode: 'dynamic' }).cooldownWindow).toBe(3);
+    expect(parseAllocationConfig({ mode: 'dynamic' }).cooldownFactor).toBe(0.5);
+    expect(parseAllocationConfig({ cooldown_factor: 2 }).cooldownFactor).toBe(0.5);
+    expect(parseAllocationConfig({ cooldown_factor: 0 }).cooldownFactor).toBe(0.5);
   });
 
   it('falls back to default weights for missing/invalid fields', () => {

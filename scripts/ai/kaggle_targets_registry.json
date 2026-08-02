@@ -24,7 +24,7 @@
     "competitions[].targets[].submit.message": "提出メッセージ。",
     "competitions[].targets[].next_cycle": "次に起案する改善サイクル番号（第N次）。起案の度に子Issue(SOT-1933)側でインクリメント。",
     "state": "cron が更新する実行状態（last_run_at / created_today / last_submitted_date）。",
-    "allocation": "適応的資源配分（design §50）。mode=dynamic で各cron枠は履歴から算出したpriority最高のimproveコンペを動的選択（静的rotationは無視、未設定/staticなら従来通り）。auto_maintain_threshold=連続非昇格がこの回数以上の系統を自動でmode:maintainへ落として枠を再配分（design §49、0で無効）。weightsはpriority合成係数（momentum/headroom/rank_gain/deadline）。"
+    "allocation": "適応的資源配分（design §50）。mode=dynamic で各cron枠は履歴から算出したpriority最高のimproveコンペを動的選択（静的rotationは無視、未設定/staticなら従来通り）。auto_maintain_threshold=連続非昇格がこの回数以上の系統を自動でmode:maintainへ落として枠を再配分（design §49、0で無効）。weightsはpriority合成係数（momentum/headroom/rank_gain/deadline）。 cooldown_window/cooldown_factor=直近起案コンペのpriority減衰(多様性補正・momentum独占防止)。window枠内の各出現ごとにfactor(0<f<=1)を乗算、factor=1で無効。"
   },
   "enabled": true,
   "schedule_hours_jst": [
@@ -352,7 +352,9 @@
       "headroom": 0.3,
       "rank_gain": 0.2,
       "deadline": 0.15
-    }
+    },
+    "cooldown_window": 3,
+    "cooldown_factor": 0.5
   },
   "state": {
     "last_run_at": null,

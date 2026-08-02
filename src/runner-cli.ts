@@ -1120,6 +1120,7 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       // この枠で priority 最高の improve コンペを選ぶ。静的モード（既定）は従来の hour→rotation。
       // 同時に自動 maintain（design §49）: 連続非昇格が閾値を超えた系統を maintain へ落として枠を再配分。
       let competitionKeyOverride: string | undefined;
+      let selectedCompetition: string | null = null;
       const autoMaintained: Array<{ repo: string; reason: string }> = [];
       const dynamicActive = registry.allocation.mode === 'dynamic' && registry.enabled && envEnabled;
       if (dynamicActive) {
@@ -1153,10 +1154,21 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
             );
             return { ...c, eligible: stillEligible };
           });
-          const selected = selectDynamicCompetition(candidates);
+          // 多様性補正（design §50）: 直近起案コンペを registry.state.recent_competitions から読み、
+          // クールダウン減衰を効かせて同一コンペの連続独占を防ぐ（momentum 偏重の抑制）。
+          const recentlyDrafted: string[] = Array.isArray(raw?.state?.recent_competitions)
+            ? raw.state.recent_competitions.filter((k: unknown): k is string => typeof k === 'string')
+            : [];
+          const selected = selectDynamicCompetition(candidates, {
+            recentlyDrafted,
+            cooldownWindow: registry.allocation.cooldownWindow,
+            cooldownFactor: registry.allocation.cooldownFactor,
+          });
+          selectedCompetition = selected;
           competitionKeyOverride = selected ?? '';
           process.stderr.write(
             `[allocation] slot=${hourJst} selected=${selected ?? '(none — all saturated/closed/open)'} ` +
+              `recentlyDrafted=${JSON.stringify(recentlyDrafted.slice(0, registry.allocation.cooldownWindow))} ` +
               `candidates=${JSON.stringify(candidates)}\n`
           );
         } catch (err: any) {
@@ -1244,10 +1256,22 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
             }
           }
         }
-        // Persist next_cycle bumps + maintain flips + last_run_at (best-effort; keeps doc keys intact).
+        // Persist next_cycle bumps + maintain flips + recent-competition history + last_run_at
+        // (best-effort; keeps doc keys intact).
         try {
           raw.state = raw.state && typeof raw.state === 'object' ? raw.state : {};
           raw.state.created_today = (Number(raw.state.created_today) || 0) + created.length;
+          // 多様性補正のクールダウン履歴（design §50）: 実際に起案できた枠だけ記録し、newest-first で保持。
+          // cooldownWindow の2倍まで保持すれば十分（それより古い出現は減衰計算に影響しない）。
+          if (selectedCompetition && created.length > 0) {
+            const prior: string[] = Array.isArray(raw.state.recent_competitions)
+              ? raw.state.recent_competitions.filter((k: unknown): k is string => typeof k === 'string')
+              : [];
+            raw.state.recent_competitions = [selectedCompetition, ...prior].slice(
+              0,
+              Math.max(6, registry.allocation.cooldownWindow * 2)
+            );
+          }
           fs.writeFileSync(registryPath, JSON.stringify(raw, null, 2) + '\n');
         } catch (err: any) {
           process.stderr.write(
