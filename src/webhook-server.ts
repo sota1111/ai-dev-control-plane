@@ -14,6 +14,8 @@ import { verifyDiscordSignature } from './lib/discordInteractions.js';
 import { timingSafeEqualStr } from './lib/timingSafeEqual.js';
 import { routeInteraction } from './lib/discordCommandRouter.js';
 import { isTerminalState, isHoldState } from './lib/issueState.js';
+import { wasRecentlyAutoAccepted } from './lib/autoAccept.js';
+import { runDetachedWatchdog } from './lib/detachedState.js';
 import * as runner from './runner.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -229,6 +231,13 @@ async function runReaperTick(): Promise<void> {
     await runner.reapCompletedDetachedRuns();
   } catch (err: any) {
     runner.log('REAPER', `reapCompletedDetachedRuns error (non-fatal): ${err.message}`);
+  }
+  // 停滞watchdog（design/README.md §34）: 生きているが出力が止まった detached run を検出して警告し、
+  // 閾値超過で kill → 既存 reaper（dead sentinel 回収 → stranded 再スキャン）が人手なしで再実行する。
+  try {
+    runDetachedWatchdog();
+  } catch (err: any) {
+    runner.log('REAPER', `runDetachedWatchdog error (non-fatal): ${err.message}`);
   }
   if (runner.isLocked()) return;        // 実行中はスキップ
   if (cooldownActive) return;           // cooldown中はスキップ（明けてから回収）
@@ -459,8 +468,12 @@ app.post('/webhooks/linear', (req: any, res: any) => {
     // not authoritative while this runner still owns the issue. Repair it to In Review immediately;
     // after the run releases ownership, a human Done transition remains untouched. Never repair
     // Canceled/Duplicate, which are explicit terminal decisions.
+    // A Done set by our own autonomous acceptance (processCompletedRun promoting the verified
+    // In Review terminal, design/README.md §37) arrives while the inflight entry is still present —
+    // it must NOT be treated as a premature GitHub Done and reverted.
     const isPrematureDone = stateName.toLowerCase() === 'done'
-      && runner.isQueuedOrRunning(issueId);
+      && runner.isQueuedOrRunning(issueId)
+      && !wasRecentlyAutoAccepted(issueId);
     if (isPrematureDone) {
       runner.log('WEBHOOK', `premature Done detected while autonomous run is active; restoring In Review`, { issue: issueId });
       setImmediate(async () => {

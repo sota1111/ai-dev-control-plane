@@ -64,6 +64,14 @@ export interface TargetSubmitSpec {
   output?: string;
 }
 
+/**
+ * ターゲットの運用モード（design/README.md §49 飽和時の戦略転換）。
+ *  - `improve`  : 通常の改善サイクル起案対象（既定）。
+ *  - `maintain` : 全 escalation ladder を尽くして飽和した系統。新規改善Issueを起案せず、既存
+ *                 champion/candidate の維持提出だけを続ける（資源を他コンペへ再配分する縮退状態）。
+ */
+export type TargetMode = 'improve' | 'maintain';
+
 /** レジストリの1ターゲット（= 1リポジトリ）。 */
 export interface ImprovementTarget {
   lineage: Lineage;
@@ -75,6 +83,8 @@ export interface ImprovementTarget {
   submit?: TargetSubmitSpec;
   /** 次に起案する改善サイクル番号（第N次）。 */
   nextCycle: number;
+  /** 運用モード。既定 improve。 */
+  mode: TargetMode;
 }
 
 /** レジストリの1コンペ（claude/gpt の2ターゲットを持つ）。 */
@@ -101,7 +111,43 @@ export interface ImprovementCompetition {
       maxLatencyRatio: number;
     };
   };
+  /** コンペ締切（UTC, YYYY-MM-DD または ISO datetime）。未設定は締切なし＝常に explore。 */
+  deadlineUtc?: string;
+  /** 締切前の収束モード（converge）へ切り替える残日数。既定 7。 */
+  finalWindowDays: number;
+  /** LB スコアの方向。max=大きいほど良い（既定）/ min=小さいほど良い。順位計算に使う。 */
+  scoreDirection: 'max' | 'min';
   targets: ImprovementTarget[];
+}
+
+/**
+ * 締切に対するサイクルの位相（design/README.md §51 締切と最終提出選定）。
+ *  - `explore`  : 通常の探索（新規軸の起案可）。
+ *  - `converge` : 締切まで finalWindowDays 以内。新規軸を止め、検証済み candidate の確定と
+ *                 最終提出2枠の選定を優先する。
+ *  - `closed`   : 締切超過。起案しない。
+ */
+export type CompetitionPhase = 'explore' | 'converge' | 'closed';
+
+export interface CompetitionPhaseResult {
+  phase: CompetitionPhase;
+  daysToDeadline?: number;
+}
+
+export function resolveCompetitionPhase(
+  competition: Pick<ImprovementCompetition, 'deadlineUtc' | 'finalWindowDays'>,
+  nowUtc: string
+): CompetitionPhaseResult {
+  if (!competition.deadlineUtc) return { phase: 'explore' };
+  const deadline = /^\d{4}-\d{2}-\d{2}$/.test(competition.deadlineUtc)
+    ? Date.parse(`${competition.deadlineUtc}T23:59:59Z`)
+    : Date.parse(competition.deadlineUtc);
+  const now = Date.parse(nowUtc);
+  if (!Number.isFinite(deadline) || !Number.isFinite(now)) return { phase: 'explore' };
+  const daysToDeadline = (deadline - now) / 86_400_000;
+  if (daysToDeadline < 0) return { phase: 'closed', daysToDeadline };
+  if (daysToDeadline <= competition.finalWindowDays) return { phase: 'converge', daysToDeadline };
+  return { phase: 'explore', daysToDeadline };
 }
 
 /** 枠→コンペ ローテーションの1エントリ。 */
@@ -320,6 +366,33 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
     };
   }
 
+  const deadlineUtcRaw = co.deadline_utc ?? co.deadlineUtc;
+  let deadlineUtc: string | undefined;
+  if (deadlineUtcRaw !== undefined) {
+    if (typeof deadlineUtcRaw !== 'string' || !Number.isFinite(
+      /^\d{4}-\d{2}-\d{2}$/.test(deadlineUtcRaw)
+        ? Date.parse(`${deadlineUtcRaw}T00:00:00Z`)
+        : Date.parse(deadlineUtcRaw)
+    )) {
+      throw new Error(
+        `registry.competitions[${i}].deadline_utc must be YYYY-MM-DD or an ISO datetime`
+      );
+    }
+    deadlineUtc = deadlineUtcRaw;
+  }
+  const finalWindowDaysRaw = co.final_window_days ?? co.finalWindowDays ?? 7;
+  if (
+    typeof finalWindowDaysRaw !== 'number' ||
+    !Number.isFinite(finalWindowDaysRaw) ||
+    finalWindowDaysRaw < 0
+  ) {
+    throw new Error(`registry.competitions[${i}].final_window_days must be a non-negative number`);
+  }
+  const scoreDirectionRaw = co.score_direction ?? co.scoreDirection ?? 'max';
+  if (scoreDirectionRaw !== 'max' && scoreDirectionRaw !== 'min') {
+    throw new Error(`registry.competitions[${i}].score_direction must be "max" or "min"`);
+  }
+
   return {
     key,
     kaggleCompetition,
@@ -330,6 +403,9 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
     alternateAnchorDate: alternateAnchorDate as string | undefined,
     alternateAnchorLineage: alternateAnchorLineage as Lineage | undefined,
     abEvaluation,
+    deadlineUtc,
+    finalWindowDays: finalWindowDaysRaw,
+    scoreDirection: scoreDirectionRaw,
     targets,
   };
 }
@@ -373,12 +449,19 @@ function parseTarget(t: unknown, ci: number, ti: number, linSeen: Set<string>): 
       `registry.competitions[${ci}].targets[${ti}].next_cycle must be a positive integer`
     );
   }
+  const modeRaw = to.mode ?? 'improve';
+  if (modeRaw !== 'improve' && modeRaw !== 'maintain') {
+    throw new Error(
+      `registry.competitions[${ci}].targets[${ti}].mode must be "improve" or "maintain"`
+    );
+  }
   const target: ImprovementTarget = {
     lineage,
     repo,
     project,
     workersDirective,
     nextCycle: nextCycleRaw,
+    mode: modeRaw,
   };
   if (to.submit && typeof to.submit === 'object') {
     const so = to.submit as Record<string, unknown>;
@@ -434,6 +517,10 @@ export interface ImprovementMaterial {
   recentIssuesDigest?: string;
   /** failure-log / KPI 抜粋。 */
   failureKpiExcerpt?: string;
+  /** LB 順位サマリ（design §42 一次KPI）: best score / rank / top との差 / 順位推移。 */
+  leaderboardSummary?: string;
+  /** 実験台帳ダイジェスト（design §48）: 試行済み軸と非昇格軸（再試行禁止リスト）。 */
+  experimentLedgerDigest?: string;
 }
 
 /** ガードの各シグナル（cron が Linear/cooldown を見て渡す）。 */
@@ -459,6 +546,8 @@ export interface CycleInput {
   signals?: Record<string, GuardSignals>;
   /** project 名 → 起案材料。 */
   material?: Record<string, ImprovementMaterial>;
+  /** 現在時刻（UTC ISO）。締切位相の判定に使う。未指定は現在時刻。 */
+  nowUtc?: string;
 }
 
 /** 1ターゲットの起案結果。 */
@@ -498,7 +587,8 @@ export function buildIssueBody(
   target: ImprovementTarget,
   competition: ImprovementCompetition,
   cycleNumber: number,
-  material: ImprovementMaterial
+  material: ImprovementMaterial,
+  phase?: CompetitionPhaseResult
 ): string {
   const childWorkers = target.lineage === 'claude'
     ? 'workers: solo=claude:opus, handoff=off'
@@ -507,6 +597,19 @@ export function buildIssueBody(
     material.previousSubmission?.trim() || '(前回提出の記録なし — 初回サイクル、または取得できず)';
   const recent = material.recentIssuesDigest?.trim() || '(新規の完了Issueなし)';
   const failure = material.failureKpiExcerpt?.trim() || '(該当なし)';
+  const leaderboard =
+    material.leaderboardSummary?.trim() || '(LB順位を取得できず — CLI疎通/認証を確認。順位が一次KPI)';
+  const ledger = material.experimentLedgerDigest?.trim()
+    || '(実験台帳なし — 初回サイクル、または未整備。今回から docs/ai/experiment_ledger.jsonl へ記録すること)';
+  const convergeMode = phase?.phase === 'converge'
+    ? `
+
+## 収束モード（締切まで残り約${Math.max(0, Math.floor(phase.daysToDeadline ?? 0))}日）
+締切接近のため探索から収束へ切り替える（design/README.md §51）:
+- 新規の改善軸は起案しない。検証済み candidate の確定・最終化を優先する。
+- 最終提出枠の選定（LB実績・ローカル評価・性質の異なる候補でのリスク分散）を行い、選定理由を記録する。
+- リスクの高い大規模変更（アーキテクチャ変更・学習やり直し）は開始しない。`
+    : '';
   const abEvaluation = competition.abEvaluation
     ? `
 
@@ -540,8 +643,14 @@ Kaggleコンペ \`${competition.kaggleCompetition}\`（repo: ${target.repo} / �
 順位を向上させる次の改善方針を決定し、子Issueに分解して実施する。
 
 ## 入力材料（cronが自動収集・要約なし）
+### Leaderboard 順位（一次KPI）
+${leaderboard}
+
 ### 前回提出結果（順位/スコア）
 ${prev}
+
+### 実験台帳ダイジェスト（試行済み軸 — 非昇格軸の再試行禁止）
+${ledger}
 
 ### 直近の完了Issueダイジェスト
 ${recent}
@@ -550,9 +659,16 @@ ${recent}
 ${failure}
 ${abEvaluation}
 ${securityEvaluationContract}
+${convergeMode}
 
 ## 実施内容
-1. 上記材料から未着手の改善軸を選定（非昇格済み軸の再試行は根拠を明示）。
+1. 上記材料から未着手の改善軸を選定（実験台帳を必ず参照し、非昇格済み軸の再試行は新しい根拠を明示。
+   ローカル評価が飽和しているのにLB順位が停滞/低下している場合は oracle ドリフトを疑い、局所A/Bを
+   続けず再アンカリング（holdout/GT再整備・評価系再構築）を軸に選ぶ。連続非昇格が続く場合は
+   escalation ladder（局所チューニング → データ/oracle整備 → アーキテクチャ変更 → 外部知識取り込み）
+   の次の段へ強制的に進む）。
+   選定した軸・仮説・結果は target repo の \`docs/ai/experiment_ledger.jsonl\` へ JSONL で追記する
+   （fields: recordedAt, axis, result=promoted|rejected|inconclusive, cycle, hypothesis, evidence）。
 2. 2〜5個の実装・検証子Issueに分解して登録（子Issue記述テンプレ・screen→confirmゲート・
    非昇格時 revert+docs・昇格時 exec互換を全子に継承）。子IssueはKaggle提出を実行してはならない。
    各子Issueの本文先頭には必ず次のdirectiveを記載し、分解後の全工程を指定モデル・reasoningへ固定する。
@@ -884,6 +1000,8 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
     };
   }
 
+  const phase = resolveCompetitionPhase(competition, input.nowUtc ?? new Date().toISOString());
+
   const targets: TargetPlan[] = competition.targets.map((t) => {
     const sig = signals[t.project] ?? { hasUnfinishedCycle: false, hasNewMaterial: true };
     const mat = material[t.project] ?? {};
@@ -896,7 +1014,26 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
       cycleNumber: t.nextCycle,
     };
 
-    // 唯一の抑制: 同じ project に稼働中の auto-improve 親があれば重複起案しない。
+    // 締切超過コンペには起案しない（design §51）。提出も締切後は意味を持たない。
+    if (phase.phase === 'closed') {
+      return {
+        ...common,
+        action: 'skip' as const,
+        reason: `competition deadline passed (deadline_utc=${competition.deadlineUtc})`,
+      };
+    }
+
+    // maintenance モード（design §49）: escalation ladder を尽くして飽和した系統は新規起案せず、
+    // 維持提出だけを続ける。資源（cron枠・compute）は improve モードの系統へ回る。
+    if (t.mode === 'maintain') {
+      return {
+        ...common,
+        action: 'skip' as const,
+        reason: 'maintenance mode: lineage saturated — no new improvement cycles (submissions continue)',
+      };
+    }
+
+    // 重複防止: 同じ project に稼働中の auto-improve 親があれば重複起案しない。
     // Issue cap / cooldown / 新材料 / 測定不能では止めない（「基本は起案する」方針）。
     if (sig.hasUnfinishedCycle) {
       return {
@@ -910,10 +1047,10 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
       ...common,
       action: 'draft' as const,
       reason: sig.plateauReason
-        ? `default draft policy (order-first); ${sig.plateauReason}`
-        : 'default draft policy (order-first): only duplicate-prevention guard applies',
+        ? `default draft policy (order-first); ${sig.plateauReason}${phase.phase === 'converge' ? '; converge phase (deadline near)' : ''}`
+        : `default draft policy (order-first): only duplicate-prevention guard applies${phase.phase === 'converge' ? '; converge phase (deadline near)' : ''}`,
       issueTitle: buildIssueTitle(t, t.nextCycle),
-      issueBody: buildIssueBody(t, competition, t.nextCycle, mat),
+      issueBody: buildIssueBody(t, competition, t.nextCycle, mat, phase),
     };
   });
 

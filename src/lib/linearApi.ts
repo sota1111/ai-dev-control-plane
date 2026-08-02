@@ -2,6 +2,7 @@ import https from 'node:https';
 import { getSecret } from '../config/secrets.js';
 import { getPriorityRank } from './queueOrdering.js';
 import { isTerminalState, isHoldState, isChildComplete, classifyIssueMeaningState } from './issueState.js';
+import { loadAutoAcceptConfig, shouldHoldForHuman, markAutoAccepted } from './autoAccept.js';
 import * as appEnv from '../config/env.js';
 import type { IssueQueueMetadata } from '../runner.js';
 
@@ -686,6 +687,112 @@ export async function repairPrematureDone(issueId: string): Promise<boolean> {
   }
 }
 
+export interface AutoAcceptResult {
+  accepted: boolean;
+  reason: string;
+}
+
+/**
+ * Autonomous acceptance (design/README.md §37): promote a verified run's In Review terminal to Done.
+ *
+ * Called from processCompletedRun ONLY for a TASK_COMPLETED / COMPLETED_NO_PR outcome, i.e. after the
+ * completion contract AND the Linear state were both verified. Promotion is refused (issue stays in
+ * In Review, the pre-autonomy behavior) when:
+ *   - auto-accept is disabled by config (config/auto_accept.json; unparseable config fails closed),
+ *   - the issue is held for a human (hold label / hold title prefix / `review=human` directive —
+ *     see shouldHoldForHuman),
+ *   - the issue still has incomplete children (a decomposition terminal: the parent must stay
+ *     resumable until its children finish and its own aggregation run completes),
+ *   - the issue is not currently in In Review (only the verified terminal is promotable; a worker
+ *     or human choosing Blocked/On Hold is always preserved).
+ *
+ * markAutoAccepted() is recorded BEFORE the mutation so the webhook's premature-Done repair never
+ * reverts our own promotion (the inflight entry is still present at this point). Fail-open: any
+ * error leaves the issue in In Review and returns accepted=false.
+ */
+export async function autoAcceptIssueDone(issueId: string): Promise<AutoAcceptResult> {
+  const { log } = requireDeps();
+  try {
+    const config = loadAutoAcceptConfig();
+    if (!config.enabled) return { accepted: false, reason: 'auto-accept disabled by config' };
+
+    const data: any = await linearQuery(
+      `query($id: String!) {
+        issue(id: $id) {
+          id
+          identifier
+          title
+          description
+          state { name type }
+          team { id }
+          labels { nodes { name } }
+          children(first: 100) { nodes { identifier state { name type } } }
+          comments(first: 50) { nodes { body createdAt } }
+        }
+      }`,
+      { id: issueId }
+    );
+    const issue = data.issue;
+    if (!issue) return { accepted: false, reason: 'issue not found' };
+    if ((issue.state?.name || '').toLowerCase() !== 'in review') {
+      return { accepted: false, reason: `state is "${issue.state?.name}" (only In Review is promotable)` };
+    }
+
+    const pendingChildren = (issue.children?.nodes || []).filter((child: any) => !isChildComplete(child.state));
+    if (pendingChildren.length > 0) {
+      return {
+        accepted: false,
+        reason: `children still active: ${pendingChildren.map((c: any) => c.identifier).join(', ')}`,
+      };
+    }
+
+    const comments = [...(issue.comments?.nodes || [])]
+      .sort((a: any, b: any) => Date.parse(a.createdAt || 0) - Date.parse(b.createdAt || 0))
+      .map((c: any) => c.body);
+    const hold = shouldHoldForHuman(config, {
+      title: issue.title,
+      labels: (issue.labels?.nodes || []).map((l: any) => l.name),
+      directiveTexts: [issue.description, ...comments],
+    });
+    if (hold.hold) {
+      log('ACCEPT', `autoAcceptIssueDone: ${issueId} held for human review (${hold.reason})`, { issue: issueId });
+      return { accepted: false, reason: hold.reason };
+    }
+
+    const statesData: any = await linearQuery(
+      'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
+      { teamId: issue.team.id }
+    );
+    const doneState = (statesData.workflowStates?.nodes || []).find(
+      (s: any) => (s.name || '').toLowerCase() === 'done'
+    );
+    if (!doneState) {
+      return { accepted: false, reason: `no Done state for team ${issue.team.id}` };
+    }
+
+    // Mark BOTH ids the webhook may carry (identifier for webhook events, the id we were called with).
+    markAutoAccepted(issueId);
+    if (issue.identifier) markAutoAccepted(issue.identifier);
+
+    await linearQuery(
+      'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
+      { id: issue.id, stateId: doneState.id }
+    );
+    await linearQuery(
+      'mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }',
+      {
+        issueId: issue.id,
+        body: '## Auto-Acceptance\n検証済みの完了を自動受け入れし、Done に設定しました（完了契約 + 品質ゲート通過を確認済み）。\n差し戻す場合は状態を戻し、コメントに `review=human` を記載してください。',
+      }
+    ).catch(() => { /* comment is best-effort; the state transition is the contract */ });
+    log('ACCEPT', `autoAcceptIssueDone: ${issueId} In Review -> Done (autonomous acceptance)`, { issue: issueId });
+    return { accepted: true, reason: 'verified completion auto-accepted' };
+  } catch (err: any) {
+    log('ERROR', `autoAcceptIssueDone failed: ${err.message}`, { issue: issueId });
+    return { accepted: false, reason: `error: ${err.message}` };
+  }
+}
+
 /**
  * SOT-1560 — move an issue to **On Hold** (circuit-breaker halt). Unlike In Review (human review), On
  * Hold marks a pipeline stopped by a safety stop-condition; every scanner (`fetchActiveIssues`
@@ -888,13 +995,23 @@ ${childList}` : `${PARENT_FINALIZED_MARKER}
 ### 子Issue
 ${childList}
 
-人間のレビュー後に Done へ移行してください。`;
+検証済みの完了は自動受け入れ（auto-accept）で Done へ遷移します。保留条件（human-review ラベル /
+[PLAN]・[QUESTION] プレフィックス / review=human）に該当する場合のみ人間レビュー待ちで停止します。`;
     await linearQuery(
       'mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }',
       { issueId: parent.id, body }
     );
 
     log('WEBHOOK', `finalizeParent: ${parent.identifier} -> ${resumeParent ? 'Todo (resume)' : 'In Review'} (all ${children.length} children complete, trigger ${childIdentifier})`, { issue: parent.identifier });
+
+    // Autonomous acceptance (design §37): an ordinary finalized parent's children WERE its
+    // deliverables and each was individually verified, so completion propagates one level up
+    // (design §12) without a human. Hold conditions (PLAN prefix / label / review=human) are
+    // enforced inside autoAcceptIssueDone. Kaggle improvement parents are excluded here — they
+    // resumed to Todo for their aggregation/submission phase and are accepted after that run.
+    if (!resumeParent) {
+      await autoAcceptIssueDone(parent.identifier || parent.id).catch(() => { /* stays In Review */ });
+    }
     return true;
   } catch (err: any) {
     log('ERROR', `finalizeParentIfChildrenComplete failed: ${err.message}`, { issue: parentId || '' });

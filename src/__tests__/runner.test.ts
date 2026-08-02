@@ -816,7 +816,7 @@ describe('runner', () => {
       expect(https.request).not.toHaveBeenCalled();
     });
 
-    it('moves parent to In Review and comments when all children are terminal', async () => {
+    it('moves parent to In Review, comments, then auto-accepts it to Done (design §37)', async () => {
       setupLinearMocks([
         { issue: { id: 'parent-uuid', identifier: 'SOT-829', state: startedState, team: { id: 'team-1' },
           children: { nodes: [
@@ -829,19 +829,36 @@ describe('runner', () => {
           { id: 'state-review', name: 'In Review', type: 'started' }
         ] } },
         { issueUpdate: { success: true } },
+        { commentCreate: { success: true } },
+        // autonomous acceptance follow-up: re-query (now In Review) → Done state → update → comment
+        { issue: { id: 'parent-uuid', identifier: 'SOT-829', title: 'feature parent', description: '',
+          state: reviewState, team: { id: 'team-1' },
+          labels: { nodes: [] },
+          children: { nodes: [
+            { identifier: 'SOT-831', state: doneState },
+            { identifier: 'SOT-832', state: doneState }
+          ] },
+          comments: { nodes: [] } } },
+        { workflowStates: { nodes: [
+          { id: 'state-review', name: 'In Review', type: 'started' },
+          { id: 'state-done', name: 'Done', type: 'completed' }
+        ] } },
+        { issueUpdate: { success: true } },
         { commentCreate: { success: true } }
       ]);
 
       const result = await runner.finalizeParentIfChildrenComplete('SOT-832', 'SOT-829');
 
       expect(result).toBe(true);
-      expect(https.request).toHaveBeenCalledTimes(5);
+      expect(https.request).toHaveBeenCalledTimes(9);
       const written = writeSpy.mock.calls.map((c: any) => c[0]);
       expect(written.some((b: any) => b.includes('issueUpdate') && b.includes('state-review'))).toBe(true);
       expect(written.some((b: any) => b.includes('commentCreate') && b.includes('auto-parent-finalized'))).toBe(true);
+      expect(written.some((b: any) => b.includes('issueUpdate') && b.includes('state-done'))).toBe(true);
+      expect(written.some((b: any) => b.includes('commentCreate') && b.includes('Auto-Acceptance'))).toBe(true);
     });
 
-    it('moves parent to In Review when all children are In Review (hold, not terminal) (SOT-1551)', async () => {
+    it('moves parent to In Review when all children are In Review (hold, not terminal) (SOT-1551) and holds a [PLAN] parent for a human', async () => {
       setupLinearMocks([
         { issue: { id: 'parent-uuid', identifier: 'SOT-829', state: startedState, team: { id: 'team-1' },
           children: { nodes: [
@@ -854,16 +871,27 @@ describe('runner', () => {
           { id: 'state-review', name: 'In Review', type: 'started' }
         ] } },
         { issueUpdate: { success: true } },
-        { commentCreate: { success: true } }
+        { commentCreate: { success: true } },
+        // autonomous acceptance follow-up: a [PLAN] parent is a hold condition — stays In Review
+        { issue: { id: 'parent-uuid', identifier: 'SOT-829', title: '[PLAN] design parent', description: '',
+          state: reviewState, team: { id: 'team-1' },
+          labels: { nodes: [] },
+          children: { nodes: [
+            { identifier: 'SOT-831', state: reviewState },
+            { identifier: 'SOT-832', state: reviewState }
+          ] },
+          comments: { nodes: [] } } }
       ]);
 
       const result = await runner.finalizeParentIfChildrenComplete('SOT-832', 'SOT-829');
 
       expect(result).toBe(true);
-      expect(https.request).toHaveBeenCalledTimes(5);
+      expect(https.request).toHaveBeenCalledTimes(6);
       const written = writeSpy.mock.calls.map((c: any) => c[0]);
       expect(written.some((b: any) => b.includes('issueUpdate') && b.includes('state-review'))).toBe(true);
       expect(written.some((b: any) => b.includes('commentCreate') && b.includes('auto-parent-finalized'))).toBe(true);
+      // held: no Done transition was attempted
+      expect(written.some((b: any) => b.includes('state-done'))).toBe(false);
     });
 
     it('moves parent to In Review when children are a mix of Done and In Review (SOT-1551)', async () => {
