@@ -13,6 +13,8 @@
  * 呼び出し側が収集して渡す。engine は「どのターゲットを起案するか + 起案本文」を決める。
  */
 
+import { parseAllocationConfig, type AllocationConfig } from './resourceAllocation.js';
+
 /** 系統。claude = 旧 fable、gpt = 旧 sol(Codex)。 */
 export type Lineage = 'claude' | 'gpt';
 
@@ -164,6 +166,8 @@ export interface TargetsRegistry {
   rotation: RotationEntry[];
   issueCapGuard: number;
   competitions: ImprovementCompetition[];
+  /** 適応的資源配分（design §50）。未設定は static（従来の rotation）。 */
+  allocation: AllocationConfig;
 }
 
 const VALID_HOUR = (h: unknown): h is number =>
@@ -237,7 +241,9 @@ export function parseTargetsRegistry(raw: unknown): TargetsRegistry {
     }
   }
 
-  return { enabled, scheduleHoursJst, rotation, issueCapGuard: capGuardRaw, competitions };
+  const allocation = parseAllocationConfig(obj.allocation);
+
+  return { enabled, scheduleHoursJst, rotation, issueCapGuard: capGuardRaw, competitions, allocation };
 }
 
 function parseCompetition(c: unknown, i: number, seen: Set<string>): ImprovementCompetition {
@@ -548,6 +554,11 @@ export interface CycleInput {
   material?: Record<string, ImprovementMaterial>;
   /** 現在時刻（UTC ISO）。締切位相の判定に使う。未指定は現在時刻。 */
   nowUtc?: string;
+  /**
+   * 動的資源配分（design §50）が選んだコンペ key。指定時は hour→rotation 解決を上書きする。
+   * 未指定なら従来どおり rotation 表で hourJst から当番コンペを解決する（後方互換）。
+   */
+  competitionKeyOverride?: string;
 }
 
 /** 1ターゲットの起案結果。 */
@@ -967,7 +978,8 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
   const material = input.material ?? {};
   const active = registry.enabled && envEnabled;
 
-  const competitionKey = resolveCompetitionForHour(registry, hourJst);
+  // 動的配分（§50）が選んだコンペを優先。未指定なら従来の rotation 表で hour から解決。
+  const competitionKey = input.competitionKeyOverride ?? resolveCompetitionForHour(registry, hourJst);
 
   if (!active) {
     return {

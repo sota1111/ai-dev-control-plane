@@ -68,6 +68,20 @@ describe('kaggle autonomy — registry schema additions', () => {
     expect(comp.targets[0].mode).toBe('maintain');
   });
 
+  it('defaults allocation to static (legacy rotation) when the block is absent', () => {
+    const reg = parseTargetsRegistry(rawRegistry());
+    expect(reg.allocation.mode).toBe('static');
+    expect(reg.allocation.autoMaintainThreshold).toBe(0);
+  });
+
+  it('parses a dynamic allocation block', () => {
+    const raw = rawRegistry();
+    (raw as any).allocation = { mode: 'dynamic', auto_maintain_threshold: 6 };
+    const reg = parseTargetsRegistry(raw);
+    expect(reg.allocation.mode).toBe('dynamic');
+    expect(reg.allocation.autoMaintainThreshold).toBe(6);
+  });
+
   it('rejects invalid values (fail-loud)', () => {
     expect(() => parseTargetsRegistry(rawRegistry({ deadline_utc: 'not-a-date' }))).toThrow(/deadline_utc/);
     expect(() => parseTargetsRegistry(rawRegistry({ final_window_days: -1 }))).toThrow(/final_window_days/);

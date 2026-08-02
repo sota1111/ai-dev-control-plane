@@ -1,0 +1,142 @@
+import {
+  computeTargetPriority,
+  selectDynamicCompetition,
+  shouldAutoMaintain,
+  parseAllocationConfig,
+  DEFAULT_PRIORITY_WEIGHTS,
+  DEFAULT_ALLOCATION_CONFIG,
+  type TargetPrioritySignals,
+  type CompetitionCandidate,
+} from '../lib/resourceAllocation.js';
+
+const base: TargetPrioritySignals = {
+  mode: 'improve',
+  phase: 'explore',
+  recentlyPromoted: false,
+  consecutiveNonImproving: 0,
+  plateauThreshold: 3,
+  rank: null,
+  totalListed: 0,
+};
+
+describe('resourceAllocation — computeTargetPriority', () => {
+  it('floor-gates maintain mode and closed phase to 0', () => {
+    expect(computeTargetPriority({ ...base, mode: 'maintain', recentlyPromoted: true })).toBe(0);
+    expect(computeTargetPriority({ ...base, phase: 'closed', recentlyPromoted: true })).toBe(0);
+  });
+
+  it('rewards momentum (recent promotion) strongly', () => {
+    const withMomentum = computeTargetPriority({ ...base, recentlyPromoted: true });
+    const without = computeTargetPriority({ ...base, recentlyPromoted: false });
+    expect(withMomentum).toBeGreaterThan(without);
+  });
+
+  it('drops headroom to 0 as the non-improving streak reaches the threshold', () => {
+    const fresh = computeTargetPriority({ ...base, consecutiveNonImproving: 0 });
+    const saturated = computeTargetPriority({ ...base, consecutiveNonImproving: 3, plateauThreshold: 3 });
+    expect(saturated).toBeLessThan(fresh);
+    // headroom fully consumed at/above threshold
+    const beyond = computeTargetPriority({ ...base, consecutiveNonImproving: 10, plateauThreshold: 3 });
+    expect(beyond).toBe(saturated);
+  });
+
+  it('ranks a top-listed position above a 圏外 (null) one', () => {
+    const top = computeTargetPriority({ ...base, rank: 1, totalListed: 20 });
+    const offlist = computeTargetPriority({ ...base, rank: null, totalListed: 20 });
+    const bottom = computeTargetPriority({ ...base, rank: 20, totalListed: 20 });
+    expect(top).toBeGreaterThan(offlist);
+    expect(offlist).toBeGreaterThan(bottom);
+  });
+
+  it('adds deadline pressure in the converge phase', () => {
+    const converge = computeTargetPriority({ ...base, phase: 'converge' });
+    const explore = computeTargetPriority({ ...base, phase: 'explore' });
+    expect(converge).toBeGreaterThan(explore);
+  });
+
+  it('reflects the real fleet: improving kaggriculture > saturated ptcg', () => {
+    const kaggriculture = computeTargetPriority({
+      ...base, recentlyPromoted: true, consecutiveNonImproving: 0, rank: null,
+    });
+    const ptcgSaturated = computeTargetPriority({
+      ...base, mode: 'maintain', // already flipped
+    });
+    const ptcgBeforeFlip = computeTargetPriority({
+      ...base, recentlyPromoted: false, consecutiveNonImproving: 8, plateauThreshold: 3, rank: null,
+    });
+    expect(kaggriculture).toBeGreaterThan(ptcgBeforeFlip);
+    expect(ptcgSaturated).toBe(0);
+  });
+});
+
+describe('resourceAllocation — selectDynamicCompetition', () => {
+  const c = (key: string, priority: number, eligible = true): CompetitionCandidate => ({ key, priority, eligible });
+
+  it('picks the highest-priority eligible competition', () => {
+    expect(selectDynamicCompetition([
+      c('ptcg', 0.0, false),
+      c('kaggriculture', 0.82),
+      c('agent-security', 0.79),
+      c('biohub', 0.61),
+    ])).toBe('kaggriculture');
+  });
+
+  it('skips ineligible (saturated/closed/open-cycle) competitions even if higher priority', () => {
+    expect(selectDynamicCompetition([
+      c('ptcg', 0.9, false),
+      c('biohub', 0.5, true),
+    ])).toBe('biohub');
+  });
+
+  it('returns null when nothing is eligible', () => {
+    expect(selectDynamicCompetition([c('ptcg', 0.9, false), c('biohub', 0.5, false)])).toBeNull();
+    expect(selectDynamicCompetition([])).toBeNull();
+  });
+
+  it('breaks ties by registry order (deterministic)', () => {
+    expect(selectDynamicCompetition([c('a', 0.5), c('b', 0.5), c('c', 0.5)])).toBe('a');
+  });
+});
+
+describe('resourceAllocation — shouldAutoMaintain', () => {
+  it('flips after threshold consecutive non-improving cycles', () => {
+    expect(shouldAutoMaintain(6, false, 6)).toBe(true);
+    expect(shouldAutoMaintain(5, false, 6)).toBe(false);
+  });
+
+  it('never flips a lineage that just promoted', () => {
+    expect(shouldAutoMaintain(10, true, 6)).toBe(false);
+  });
+
+  it('is disabled when threshold <= 0', () => {
+    expect(shouldAutoMaintain(100, false, 0)).toBe(false);
+  });
+});
+
+describe('resourceAllocation — parseAllocationConfig', () => {
+  it('defaults to static/legacy when missing', () => {
+    expect(parseAllocationConfig(undefined)).toEqual(DEFAULT_ALLOCATION_CONFIG);
+    expect(parseAllocationConfig(null).mode).toBe('static');
+  });
+
+  it('parses dynamic mode, threshold, and weights (snake_case)', () => {
+    const cfg = parseAllocationConfig({
+      mode: 'dynamic',
+      auto_maintain_threshold: 6,
+      weights: { momentum: 0.5, headroom: 0.2, rank_gain: 0.2, deadline: 0.1 },
+    });
+    expect(cfg.mode).toBe('dynamic');
+    expect(cfg.autoMaintainThreshold).toBe(6);
+    expect(cfg.weights).toEqual({ momentum: 0.5, headroom: 0.2, rankGain: 0.2, deadline: 0.1 });
+  });
+
+  it('falls back to default weights for missing/invalid fields', () => {
+    const cfg = parseAllocationConfig({ mode: 'dynamic', weights: { momentum: -1 } });
+    expect(cfg.weights.momentum).toBe(DEFAULT_PRIORITY_WEIGHTS.momentum);
+    expect(cfg.weights.headroom).toBe(DEFAULT_PRIORITY_WEIGHTS.headroom);
+  });
+
+  it('treats an unknown mode as static', () => {
+    expect(parseAllocationConfig({ mode: 'weird' }).mode).toBe('static');
+  });
+});

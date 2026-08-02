@@ -246,6 +246,17 @@ usage limit、日次提出枠、GPU、実行時間という有限資源を、com
 （メダル境界との距離、残された改善余地、締切までの残時間）に基づいて適応的に配分する。
 配分判断とその根拠は機械可読に記録し、定期的に再評価する。
 
+最大のボトルネックは Claude の account-global usage limit（同一系統の全 repository が単一の
+cooldown を共有し、並列化してもスループットは上がらない）であり、増やせない compute をいかに
+価値の高い competition へ振り向けるかが配分の本質である。cron の起案枠（compute の入口）を静的な
+ラウンドロビンではなく、各枠で priority 最高の improve competition を選ぶ動的セレクタで配分する。
+priority は momentum（直近の昇格）、headroom（飽和の逆）、rank gain（順位の伸びしろ）、締切圧の
+重み付き合成として、ディスク上の履歴（leaderboard 順位・plateau・実験台帳）だけから決定的に算出し、
+Kaggle CLI や LLM を呼ばずに全 competition を安価に価格付けする（選ばれた1件だけ後段で material を
+収集する）。maintain／締切超過の系統は priority 0 として枠から外れ、空いた枠は他系統へ回る。飽和が
+恒久化した系統は自動で維持モードへ落とす（§49）。static 設定では従来の静的 rotation にフォールバック
+する（後方互換）。
+
 ## 51. 締切と最終提出選定
 
 competition の締切を registry で追跡し、締切接近時は探索から収束へモードを切り替える
