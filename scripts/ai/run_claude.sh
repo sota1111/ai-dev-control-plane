@@ -147,7 +147,8 @@ every step directly: task-check (incl. 分解判断) → implementation → veri
   server, or the runner queue/drain. Do NOT spawn or trigger any other run.
 - In-container background and long-lived commands are allowed. Track their PID/log/output and wait for
   required results before reporting completion. Do not use ScheduleWakeup or end with waiting prose;
-  keep this CLI session alive with repeated bounded polls and always emit the report contract.
+  keep this CLI session alive with repeated bounded polls and always emit the report contract. On a
+  retry, inspect existing PIDs/outputs and never launch a duplicate writer for the same result.
 
 ---
 

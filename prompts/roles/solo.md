@@ -44,6 +44,8 @@ final report.
 - Do not use `ScheduleWakeup`, an external wake notification, or "waiting" prose as a substitute for
   completing this run. Keep the session alive and poll tracked jobs until they finish. If one tool
   call has a duration cap, use repeated bounded foreground polls. Always emit `## Next Action`.
+- On every resume or retry, inspect recorded PIDs and output paths before launching work. Reuse a live
+  job or its completed output; never start a duplicate writer for the same artifact or result file.
 - Never mark an issue Done without verification; never hide failed tests or claim unverified completion.
 - A PR-producing result is incomplete unless the final report contains `## Acceptance: PASS`. A PR URL or
   `READY_FOR_REVIEW` alone is not evidence that implementation and verification completed.

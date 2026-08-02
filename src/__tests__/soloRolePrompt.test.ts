@@ -36,6 +36,7 @@ describe('solo role lifecycle safeguards (SOT-2127)', () => {
     expect(prompt).toContain('Do not use `ScheduleWakeup`');
     expect(prompt).toContain('repeated bounded foreground polls');
     expect(prompt).toContain('Always emit `## Next Action`');
+    expect(prompt).toContain('never start a duplicate writer');
   });
 
   test('in-container solo bypasses worker and tool timeouts', () => {
