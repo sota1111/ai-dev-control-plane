@@ -15,7 +15,7 @@ import {
   leaderboardRankFingerprint,
   type LeaderboardRankEntry,
 } from '../lib/kaggleScoreProgression.js';
-import { parseKaggleLeaderboardScores } from '../lib/kaggleImproveMaterial.js';
+import { parseKaggleLeaderboardScores, bestPublicScoreFromRows } from '../lib/kaggleImproveMaterial.js';
 
 function rawRegistry(overrides: Record<string, unknown> = {}, targetOverrides: Record<string, unknown> = {}) {
   return {
@@ -164,6 +164,31 @@ describe('kaggle autonomy — computePublicRank', () => {
 
   it('handles empty leaderboards', () => {
     expect(computePublicRank([], 100, 'max').rank).toBeNull();
+  });
+});
+
+describe('kaggle autonomy — bestPublicScoreFromRows (LB rank no longer depends on score-progression)', () => {
+  it('takes the max COMPLETE public score from raw submission rows', () => {
+    const rows = [
+      { status: 'complete', publicScore: '410.1' },
+      { status: 'complete', publicScore: '520.7' },
+      { status: 'pending', publicScore: '' },
+      { status: 'error', publicScore: '999' },
+    ];
+    expect(bestPublicScoreFromRows(rows, 'max')).toBe(520.7);
+  });
+
+  it('takes the min for min-direction competitions', () => {
+    const rows = [
+      { status: 'complete', publicScore: '0.30' },
+      { status: 'complete', publicScore: '0.12' },
+    ];
+    expect(bestPublicScoreFromRows(rows, 'min')).toBe(0.12);
+  });
+
+  it('ignores non-COMPLETE and non-numeric rows, returns undefined when none qualify', () => {
+    expect(bestPublicScoreFromRows([{ status: 'pending', publicScore: '' }], 'max')).toBeUndefined();
+    expect(bestPublicScoreFromRows([], 'max')).toBeUndefined();
   });
 });
 
