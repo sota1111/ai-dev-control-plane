@@ -738,6 +738,9 @@ describe('runBootstrapScan', () => {
     // Reset env
     delete process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED;
     delete process.env.LINEAR_API_KEY;
+    // clearAllMocks keeps mockReturnValue, so a prior describe's loadQueue override can leak in.
+    // Default to an empty queue (no due item) unless a test opts into one.
+    runner.loadQueue.mockReturnValue([]);
     // Get fresh reference
     runBootstrapScan = webhookServer.runBootstrapScan;
   });
@@ -820,10 +823,44 @@ describe('runBootstrapScan', () => {
     expect(runner.drainQueue).toHaveBeenCalled();
   });
 
-  it('should not call drainQueue when no new issues were enqueued', async () => {
+  it('should not call drainQueue when no new issues were enqueued and the queue has no due item', async () => {
     process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED = 'true';
     process.env.LINEAR_API_KEY = 'test-key';
     runner.fetchActiveIssues.mockResolvedValue([]);
+    runner.loadQueue.mockReturnValue([]); // empty restored queue → nothing due
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+
+    await runBootstrapScan();
+
+    expect(runner.drainQueue).not.toHaveBeenCalled();
+  });
+
+  it('drains on restart when nothing new is enqueued but the restored queue has a due item', async () => {
+    // Regression: after a webhook-server restart every active issue reads back as "already queued"
+    // (enqueued=0), so the runner used to sit idle until the first periodic drain tick (~5 min).
+    process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED = 'true';
+    process.env.LINEAR_API_KEY = 'test-key';
+    runner.fetchActiveIssues.mockResolvedValue([
+      { identifier: 'SOT-100', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+    ]);
+    runner.isQueued.mockReturnValue(true); // already in the restored queue → no new enqueue
+    runner.loadQueue.mockReturnValue([{ issueId: 'SOT-100', retryAt: null }]); // due now
+    runner.getUsageLimitCooldownUntil.mockReturnValue(null);
+
+    await runBootstrapScan();
+
+    expect(runner.enqueue).not.toHaveBeenCalled();
+    expect(runner.drainQueue).toHaveBeenCalled();
+  });
+
+  it('does not drain on restart when the restored queue item is not yet due (future retryAt)', async () => {
+    process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED = 'true';
+    process.env.LINEAR_API_KEY = 'test-key';
+    runner.fetchActiveIssues.mockResolvedValue([]);
+    runner.isQueued.mockReturnValue(true);
+    runner.loadQueue.mockReturnValue([
+      { issueId: 'SOT-100', retryAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() },
+    ]);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
 
     await runBootstrapScan();
