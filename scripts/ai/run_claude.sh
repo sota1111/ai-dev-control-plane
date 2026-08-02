@@ -145,7 +145,8 @@ every step directly: task-check (incl. 分解判断) → implementation → veri
 (branch/PR/merge) → linear-report. Hard rules:
 - Do NOT run scripts/ai/run_auto.sh, scripts/ai/run_worker.sh, scripts/ai/scheduler.sh, the webhook
   server, or the runner queue/drain. Do NOT spawn or trigger any other run.
-- Do NOT run anything in the background or start long-lived processes.
+- In-container background and long-lived commands are allowed. Track their PID/log/output and wait for
+  required results before reporting completion.
 
 ---
 
@@ -228,7 +229,7 @@ if [ "${WORKER_ROLE:-}" = "solo" ]; then
   # --verbose` emits events as they happen; solo_stream_format.py prints concise LIVE progress to stdout
   # (→ run log/Discord) AND writes the final report text to REPORT_FILE (kept parseable for the
   # `## Acceptance` / `## Next Action` gate). PIPESTATUS[0] stays claude's own exit code (timeout=124…).
-  timeout "${WORKER_TIMEOUT}s" claude \
+  claude \
     --model "$CLAUDE_MODEL" \
     --dangerously-skip-permissions \
     "${SESSION_ARGS[@]}" \

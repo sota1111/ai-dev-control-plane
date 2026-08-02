@@ -184,7 +184,8 @@ fi
 [ -n "${TARGET_REPO:-}" ] && echo "Target repository: $TARGET_REPO"
 
 # Base agy args (shared by fresh + resume). --add-dir only when a target repo is set.
-AGY_ARGS=(-p "$PROMPT_CONTENT" --dangerously-skip-permissions --print-timeout "${WORKER_TIMEOUT}s")
+AGY_ARGS=(-p "$PROMPT_CONTENT" --dangerously-skip-permissions)
+[ "${WORKER_ROLE:-}" != "solo" ] && AGY_ARGS+=(--print-timeout "${WORKER_TIMEOUT}s")
 [ -n "${TARGET_REPO:-}" ] && AGY_ARGS+=(--add-dir "$TARGET_REPO")
 # SOT-1583: a per-issue directive `workers: <role>=agy:<model>` sets AGY_MODEL (via run_worker.sh); pass
 # it to agy as `--model "<model>"`. Model names may contain spaces/parens (e.g. "Gemini 3.5 Flash
@@ -199,10 +200,12 @@ fi
 # WORKER_SESSION_REUSE=0. If resume fails to produce a valid report (and it is not a usage limit), fall
 # back once to a fresh conversation so a stale/broken conversation can never wedge the worker.
 run_agy_cli() {
+  local timeout_prefix=(timeout "${WORKER_TIMEOUT}s")
+  [ "${WORKER_ROLE:-}" = "solo" ] && timeout_prefix=()
   if [ "$1" = "resume" ]; then
-    timeout "${WORKER_TIMEOUT}s" agy "${AGY_ARGS[@]}" --continue 2>&1 | tee "$REPORT_FILE"
+    "${timeout_prefix[@]}" agy "${AGY_ARGS[@]}" --continue 2>&1 | tee "$REPORT_FILE"
   else
-    timeout "${WORKER_TIMEOUT}s" agy "${AGY_ARGS[@]}" 2>&1 | tee "$REPORT_FILE"
+    "${timeout_prefix[@]}" agy "${AGY_ARGS[@]}" 2>&1 | tee "$REPORT_FILE"
   fi
   return "${PIPESTATUS[0]}"
 }

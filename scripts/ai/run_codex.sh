@@ -189,7 +189,8 @@ every step directly: task-check (incl. 分解判断) → implementation → veri
 (branch/PR/merge) → linear-report. Hard rules:
 - Do NOT run scripts/ai/run_auto.sh, scripts/ai/run_worker.sh, scripts/ai/scheduler.sh, the webhook
   server, or the runner queue/drain. Do NOT spawn or trigger any other run.
-- Do NOT run anything in the background or start long-lived processes."
+- In-container background and long-lived commands are allowed. Track their PID/log/output and wait for
+  required results before reporting completion."
   else
     CODEX_PREAMBLE="# YOU ARE A CONSTRAINED WORKER — NOT THE ORCHESTRATOR
 
@@ -278,10 +279,12 @@ if [ -n "${CODEX_REASONING_EFFORT:-}" ]; then
 fi
 
 run_codex_cli() {
+  local timeout_prefix=(timeout "${WORKER_TIMEOUT}s")
+  [ "${WORKER_ROLE:-}" = "solo" ] && timeout_prefix=()
   if [ "$1" = "resume" ]; then
-    timeout "${WORKER_TIMEOUT}s" codex --sandbox danger-full-access exec resume --last "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
+    "${timeout_prefix[@]}" codex --sandbox danger-full-access exec resume --last "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
   else
-    timeout "${WORKER_TIMEOUT}s" codex --sandbox danger-full-access exec "${CODEX_MODEL_ARGS[@]}" "${CODEX_REASONING_ARGS[@]}" "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
+    "${timeout_prefix[@]}" codex --sandbox danger-full-access exec "${CODEX_MODEL_ARGS[@]}" "${CODEX_REASONING_ARGS[@]}" "$PROMPT_CONTENT" 2>&1 | tee "$REPORT_FILE"
   fi
   return "${PIPESTATUS[0]}"
 }

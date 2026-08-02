@@ -184,6 +184,9 @@ the normal per-role dispatch pipeline. A single Linear issue can override this b
 directive (`solo=<worker>` / `solo=off`, see the per-issue override section above). Resolver:
 `resolveSoloWorker`/`loadSoloWorker` (`src/lib/workerRoles.ts`); the orchestrator queries
 `runner-cli solo-worker`. Prompt: `prompts/roles/solo.md`. **Current setting: `claude`.**
+In-container solo has no harness wall-clock/tool timeout and may use background or long-lived commands;
+the worker must track them and cannot claim completion before required results are verified. Non-solo
+worker timeout and nested-run restrictions remain unchanged.
 
 ---
 
