@@ -382,8 +382,11 @@ Related autonomous-operation machinery: stall watchdog for detached runs
 (`runDetachedWatchdog`, env `RUNNER_WATCHDOG_STALL_MS` / `RUNNER_WATCHDOG_KILL_MS`; design §34), and
 the Kaggle strategy layer — leaderboard rank as primary KPI (`docs/ai/kaggle/leaderboard-rank.jsonl`),
 per-repo experiment ledger (`<target repo>/docs/ai/experiment_ledger.jsonl`), registry
-`deadline_utc`/`final_window_days`/`score_direction`/target `mode: maintain` (design §42-51;
-see `prompts/roles/solo.md` and `scripts/ai/kaggle_targets_registry.json` `__fields__`).
+`deadline_utc`/`final_window_days`/`score_direction`/target `mode: maintain`, and adaptive compute
+allocation (registry `allocation` block, `src/lib/resourceAllocation.ts`; `mode: dynamic` picks the
+highest-priority improve competition per cron slot from on-disk history, `auto_maintain_threshold`
+auto-retires saturated lineages — design §42-51; see `prompts/roles/solo.md` and
+`scripts/ai/kaggle_targets_registry.json` `__fields__`).
 
 ### Progress Comments
 

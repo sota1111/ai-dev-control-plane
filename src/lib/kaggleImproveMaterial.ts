@@ -20,7 +20,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import type { GuardSignals, ImprovementMaterial, TargetsRegistry } from './kaggleImprovement.js';
-import { getCompetition } from './kaggleImprovement.js';
+import { getCompetition, resolveCompetitionPhase } from './kaggleImprovement.js';
+import {
+  computeTargetPriority,
+  type CompetitionCandidate,
+  type PriorityWeights,
+} from './resourceAllocation.js';
 import { findOpenAutoImproveIssue, linearQuery } from './linearApi.js';
 import {
   appendNewScoreProgression,
@@ -610,4 +615,126 @@ export async function collectImproveContext(
   }
 
   return { signals, material };
+}
+
+/** collectAllocationSignals が返す per-target 詳細（自動 maintain 判定に使う）。 */
+export interface AllocationTargetSignal {
+  competition: string;
+  repo: string;
+  lineage: 'claude' | 'gpt';
+  mode: 'improve' | 'maintain';
+  priority: number;
+  consecutiveNonImproving: number;
+  recentlyPromoted: boolean;
+  rank: number | null;
+  eligible: boolean;
+}
+
+export interface AllocationSignals {
+  candidates: CompetitionCandidate[];
+  targets: AllocationTargetSignal[];
+}
+
+/**
+ * 全コンペの priority シグナルを履歴ファイルだけから決定的に収集する（design §50 資源配分）。
+ * Kaggle CLI / LLM は呼ばない（動的セレクタは全コンペを安価に価格付けし、勝者だけ後で material 収集
+ * する）。唯一の外部呼び出しは Linear の hasOpenCycle 判定（重複起案防止）。全て best-effort。
+ */
+export async function collectAllocationSignals(
+  registry: TargetsRegistry,
+  opts: {
+    label?: string;
+    scoreProgressionPath?: string;
+    leaderboardRankPath?: string;
+    targetsRoot?: string;
+    nowUtc?: string;
+    weights?: PriorityWeights;
+    plateauThreshold?: number;
+    log?: (m: string) => void;
+  } = {}
+): Promise<AllocationSignals> {
+  const label = opts.label || 'auto-improve';
+  const log = opts.log || (() => { /* noop */ });
+  const nowUtc = opts.nowUtc || new Date().toISOString();
+  const threshold = opts.plateauThreshold ?? 3;
+  const scoreProgressionPath = opts.scoreProgressionPath
+    || path.join(__dirname, '..', '..', 'docs', 'ai', 'kaggle', 'score-progression.jsonl');
+  const leaderboardRankPath = opts.leaderboardRankPath
+    || path.join(__dirname, '..', '..', 'docs', 'ai', 'kaggle', 'leaderboard-rank.jsonl');
+  const targetsRoot = opts.targetsRoot || '/workspaces';
+
+  const progression = readScoreProgression(scoreProgressionPath);
+  const rankHistory = readLeaderboardRankHistory(leaderboardRankPath);
+
+  const candidates: CompetitionCandidate[] = [];
+  const targets: AllocationTargetSignal[] = [];
+  for (const comp of registry.competitions) {
+    const phase = resolveCompetitionPhase(comp, nowUtc).phase;
+    let compPriority = 0;
+    let compEligible = false;
+    for (const t of comp.targets) {
+      const plateau = detectScorePlateau(progression, t.repo, threshold);
+      // 直近の順位（repo の最新 leaderboard-rank エントリ）。
+      const repoRanks = rankHistory
+        .filter((h) => h.repo === t.repo)
+        .sort((a, b) => Date.parse(a.observedAt || '') - Date.parse(b.observedAt || ''));
+      const latestRank = repoRanks[repoRanks.length - 1];
+      // recentlyPromoted: 実験台帳の最新が promoted、または直近スコアが best を更新（streak=0）。
+      let ledgerPromoted = false;
+      try {
+        const entries = readExperimentLedger(
+          defaultExperimentLedgerPath(path.join(targetsRoot, t.repo))
+        );
+        if (entries.length > 0) {
+          const latest = entries.reduce((a, b) =>
+            Date.parse(b.recordedAt || '') >= Date.parse(a.recordedAt || '') ? b : a
+          );
+          ledgerPromoted = latest.result === 'promoted';
+        }
+      } catch (err: any) {
+        log(`allocation ledger read failed for ${t.repo}: ${err?.message || err}`);
+      }
+      const recentlyPromoted =
+        ledgerPromoted ||
+        (plateau.consecutiveNonImproving === 0 && plateau.latestScore !== undefined);
+
+      let hasOpenCycle = false;
+      try {
+        hasOpenCycle = !!(await findOpenAutoImproveIssue(t.project, label));
+      } catch (err: any) {
+        log(`allocation open-cycle check failed for ${t.project}: ${err?.message || err}`);
+      }
+
+      const priority = computeTargetPriority(
+        {
+          mode: t.mode,
+          phase,
+          recentlyPromoted,
+          consecutiveNonImproving: plateau.consecutiveNonImproving,
+          plateauThreshold: threshold,
+          rank: latestRank?.rank ?? null,
+          totalListed: latestRank?.totalListed ?? 0,
+        },
+        opts.weights
+      );
+      const targetEligible = t.mode === 'improve' && phase !== 'closed' && !hasOpenCycle;
+      if (targetEligible) {
+        compEligible = true;
+        if (priority > compPriority) compPriority = priority;
+      }
+      targets.push({
+        competition: comp.key,
+        repo: t.repo,
+        lineage: t.lineage,
+        mode: t.mode,
+        priority,
+        consecutiveNonImproving: plateau.consecutiveNonImproving,
+        recentlyPromoted,
+        rank: latestRank?.rank ?? null,
+        eligible: targetEligible,
+      });
+    }
+    candidates.push({ key: comp.key, priority: compPriority, eligible: compEligible });
+  }
+  return { candidates, targets };
 }

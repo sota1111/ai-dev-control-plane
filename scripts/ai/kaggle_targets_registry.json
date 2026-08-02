@@ -23,7 +23,8 @@
     "competitions[].targets[].submit.candidate_id": "任意。提出する実験candidateの識別子。",
     "competitions[].targets[].submit.message": "提出メッセージ。",
     "competitions[].targets[].next_cycle": "次に起案する改善サイクル番号（第N次）。起案の度に子Issue(SOT-1933)側でインクリメント。",
-    "state": "cron が更新する実行状態（last_run_at / created_today / last_submitted_date）。"
+    "state": "cron が更新する実行状態（last_run_at / created_today / last_submitted_date）。",
+    "allocation": "適応的資源配分（design §50）。mode=dynamic で各cron枠は履歴から算出したpriority最高のimproveコンペを動的選択（静的rotationは無視、未設定/staticなら従来通り）。auto_maintain_threshold=連続非昇格がこの回数以上の系統を自動でmode:maintainへ落として枠を再配分（design §49、0で無効）。weightsはpriority合成係数（momentum/headroom/rank_gain/deadline）。"
   },
   "enabled": true,
   "schedule_hours_jst": [
@@ -343,6 +344,16 @@
       ]
     }
   ],
+  "allocation": {
+    "mode": "dynamic",
+    "auto_maintain_threshold": 6,
+    "weights": {
+      "momentum": 0.35,
+      "headroom": 0.3,
+      "rank_gain": 0.2,
+      "deadline": 0.15
+    }
+  },
   "state": {
     "last_run_at": null,
     "created_today": 4,

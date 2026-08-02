@@ -50,8 +50,9 @@ import {
   type GuardSignals,
   type ImprovementMaterial,
 } from './lib/kaggleImprovement.js';
-import { collectImproveContext } from './lib/kaggleImproveMaterial.js';
+import { collectImproveContext, collectAllocationSignals } from './lib/kaggleImproveMaterial.js';
 import { parseKaggleSubmissionsCsv } from './lib/kaggleImproveMaterial.js';
+import { selectDynamicCompetition, shouldAutoMaintain } from './lib/resourceAllocation.js';
 import {
   appendNewScoreProgression,
   progressionEntriesFromRows,
@@ -86,12 +87,14 @@ async function maybeCollectImproveContext(o: {
   haveSignals: boolean;
   haveMaterial: boolean;
   kaggle: boolean;
+  /** 動的配分が選んだコンペ。指定時は hour→rotation 解決より優先（design §50）。 */
+  competitionKeyOverride?: string;
 }): Promise<{
   signals: Record<string, GuardSignals>;
   material: Record<string, ImprovementMaterial>;
 } | null> {
   if (o.noCollect || !o.active || (o.haveSignals && o.haveMaterial)) return null;
-  const competitionKey = resolveCompetitionForHour(o.registry, o.hourJst);
+  const competitionKey = o.competitionKeyOverride ?? resolveCompetitionForHour(o.registry, o.hourJst);
   if (!competitionKey) return null;
   try {
     return await collectImproveContext(o.registry, competitionKey, {
@@ -1111,6 +1114,57 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
           : truthy(process.env.KAGGLE_IMPROVE_ENABLED);
       let signals = parseJsonFlag<Record<string, GuardSignals>>('signals');
       let material = parseJsonFlag<Record<string, ImprovementMaterial>>('material');
+      const runLabel = flags.label || 'auto-improve';
+
+      // 適応的資源配分（design §50）: dynamic モードなら全コンペを履歴ファイルから安価に価格付けし、
+      // この枠で priority 最高の improve コンペを選ぶ。静的モード（既定）は従来の hour→rotation。
+      // 同時に自動 maintain（design §49）: 連続非昇格が閾値を超えた系統を maintain へ落として枠を再配分。
+      let competitionKeyOverride: string | undefined;
+      const autoMaintained: Array<{ repo: string; reason: string }> = [];
+      const dynamicActive = registry.allocation.mode === 'dynamic' && registry.enabled && envEnabled;
+      if (dynamicActive) {
+        try {
+          const alloc = await collectAllocationSignals(registry, {
+            label: runLabel,
+            weights: registry.allocation.weights,
+            log: (m) => process.stderr.write(`[allocation] ${m}\n`),
+          });
+          // 自動 maintain: 閾値超過の improve 系統を registry で maintain に落とす（永続化は execute 時）。
+          const thr = registry.allocation.autoMaintainThreshold;
+          if (thr > 0) {
+            for (const ts of alloc.targets) {
+              if (
+                ts.mode === 'improve' &&
+                shouldAutoMaintain(ts.consecutiveNonImproving, ts.recentlyPromoted, thr)
+              ) {
+                autoMaintained.push({
+                  repo: ts.repo,
+                  reason: `auto-maintain: ${ts.consecutiveNonImproving} consecutive non-improving cycles (>= ${thr})`,
+                });
+              }
+            }
+          }
+          // maintain へ落とした系統は候補から除外して再選択（当枠での再配分）。
+          const maintainedRepos = new Set(autoMaintained.map((m) => m.repo));
+          const candidates = alloc.candidates.map((c) => {
+            const compTargets = alloc.targets.filter((t) => t.competition === c.key);
+            const stillEligible = compTargets.some(
+              (t) => t.eligible && !maintainedRepos.has(t.repo)
+            );
+            return { ...c, eligible: stillEligible };
+          });
+          const selected = selectDynamicCompetition(candidates);
+          competitionKeyOverride = selected ?? '';
+          process.stderr.write(
+            `[allocation] slot=${hourJst} selected=${selected ?? '(none — all saturated/closed/open)'} ` +
+              `candidates=${JSON.stringify(candidates)}\n`
+          );
+        } catch (err: any) {
+          // Fail-open: 配分計算が失敗したら静的 rotation に戻す（override 未設定）。
+          process.stderr.write(`[allocation] failed (fallback to static rotation): ${err?.message || err}\n`);
+        }
+      }
+
       // 材料/シグナルは cron が自動収集する（未指定かつ active な当番枠のみ・best-effort）。
       const collected = await maybeCollectImproveContext({
         registry,
@@ -1121,6 +1175,7 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         haveSignals: signals !== undefined,
         haveMaterial: material !== undefined,
         kaggle: flags['no-kaggle'] !== '1',
+        competitionKeyOverride,
       });
       if (collected) {
         if (signals === undefined) signals = collected.signals;
@@ -1132,10 +1187,11 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         envEnabled,
         signals,
         material,
+        competitionKeyOverride,
       });
 
       const execute = bare.has('execute');
-      const label = flags.label || 'auto-improve';
+      const label = runLabel;
       const created: Array<{ project: string; identifier: string; url: string }> = [];
       const skipped: Array<{ project: string; reason: string }> = [];
       if (execute && plan.active) {
@@ -1177,7 +1233,18 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
             skipped.push({ project: t.project, reason: `create failed: ${err?.message || err}` });
           }
         }
-        // Persist next_cycle bumps + last_run_at (best-effort; keeps doc keys intact).
+        // 自動 maintain（design §49）: 閾値超過の系統を registry で maintain に落とす（枠再配分）。
+        for (const m of autoMaintained) {
+          for (const comp of raw.competitions ?? []) {
+            for (const tgt of comp.targets ?? []) {
+              if (tgt.repo === m.repo && tgt.mode !== 'maintain') {
+                tgt.mode = 'maintain';
+                process.stderr.write(`[allocation] ${m.repo} -> mode:maintain (${m.reason})\n`);
+              }
+            }
+          }
+        }
+        // Persist next_cycle bumps + maintain flips + last_run_at (best-effort; keeps doc keys intact).
         try {
           raw.state = raw.state && typeof raw.state === 'object' ? raw.state : {};
           raw.state.created_today = (Number(raw.state.created_today) || 0) + created.length;
@@ -1189,7 +1256,9 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         }
       }
 
-      process.stdout.write(JSON.stringify({ plan, executed: execute, created, skipped }) + '\n');
+      process.stdout.write(
+        JSON.stringify({ plan, executed: execute, created, skipped, autoMaintained }) + '\n'
+      );
       process.exit(0);
       break;
     }
