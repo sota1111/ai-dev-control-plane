@@ -1,0 +1,6 @@
+{
+  "__doc__": "Autonomous acceptance (design/README.md §37). enabled=true: a verified successful run's In Review is auto-promoted to Done by the control plane. Exceptions stay in In Review for a human: hold_labels on the issue, hold_title_prefixes at the start of the title, or a `review=human` directive in the description/comments (newest wins; `review=auto` overrides labels/prefixes for one issue). Unparseable config fails closed (auto-accept disabled).",
+  "enabled": true,
+  "hold_labels": ["human-review"],
+  "hold_title_prefixes": ["[PLAN]", "[QUESTION]"]
+}

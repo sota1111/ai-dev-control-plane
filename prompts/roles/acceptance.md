@@ -46,7 +46,9 @@ List each criterion as `- [x]` (met) / `- [ ]` (not met) with evidence directly 
   and `## Next Action: READY_FOR_REVIEW`.
 - One or more criteria NOT met, or required E2E/screenshot failed → `## Acceptance: FAIL` and
   `## Next Action: NEEDS_DEBUG` (the pipeline loops back to implementation).
-- Genuinely ambiguous / needs human decision → `## Next Action: NEEDS_USER_INPUT` or `BLOCKED`.
+- Genuinely ambiguous / needs human decision AND no safe default exists → `## Next Action:
+  NEEDS_USER_INPUT` or `BLOCKED`. When a safe default reading exists, judge against it and disclose
+  the interpretation instead of stopping (design §2/§66).
 
 ## Output
 List each criterion with met/not-met + evidence, then the real-action evidence (E2E result +

@@ -13,10 +13,12 @@ Sync the final state back to Linear (the only human-facing report channel in aut
 1. Post a Completion Report comment on the target issue (Summary / Changed Files / Verification /
    Remaining Issues / Human Check Needed), including the PR link if one was merged.
 2. Set the issue status:
-   - Implementation tasks (IMPLEMENT/FIX/DEBUG/DOC) that reached PR→merge → `In Review` (await human;
-     do NOT auto-set `Done`).
-   - PLAN tasks that produced deliverables → `In Review`.
-   - Blocked / needs-input → `Blocked` with the reason.
+   - Implementation tasks (IMPLEMENT/FIX/DEBUG/DOC) that reached PR→merge → `In Review`. Do NOT set
+     `Done` yourself: after the run, the control plane auto-accepts a verified completion to Done
+     (design §37) unless the issue is held for a human (`human-review` label / `[PLAN]`・`[QUESTION]`
+     title prefix / `review=human` directive).
+   - PLAN tasks that produced deliverables → `In Review` (held for a human by the `[PLAN]` prefix).
+   - Blocked / needs-input → `Blocked` with the reason (only when no safe default exists).
 3. Do NOT expose internal worker/dispatcher mechanics in the Linear comment — report only the outcome.
 
 ## Output

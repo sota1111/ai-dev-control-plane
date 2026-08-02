@@ -24,10 +24,20 @@ import { getCompetition } from './kaggleImprovement.js';
 import { findOpenAutoImproveIssue, linearQuery } from './linearApi.js';
 import {
   appendNewScoreProgression,
+  appendLeaderboardRank,
+  computePublicRank,
   detectScorePlateau,
+  leaderboardRankFingerprint,
   progressionEntriesFromRows,
+  readLeaderboardRankHistory,
   readScoreProgression,
+  type LeaderboardRankEntry,
 } from './kaggleScoreProgression.js';
+import {
+  defaultExperimentLedgerPath,
+  readExperimentLedger,
+  summarizeExperimentLedger,
+} from './experimentLedger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -129,6 +139,29 @@ export function parseKaggleSubmissionsCsv(csv: string): KaggleSubmissionRow[] {
     if (row.fileName || row.date || row.status || row.publicScore) rows.push(row);
   }
   return rows;
+}
+
+/**
+ * `kaggle competitions leaderboard <slug> --show --csv` の出力から score 列を数値配列で返す。
+ * ヘッダ名で列を解決し、CSV 前後の警告行は無視する（design §42 LB順位が一次KPI）。
+ */
+export function parseKaggleLeaderboardScores(csv: string): number[] {
+  const lines = (csv || '').split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.length > 0);
+  const headerIdx = lines.findIndex((l) => {
+    const lower = l.toLowerCase();
+    return lower.includes('score') && (lower.includes('teamid') || lower.includes('teamname'));
+  });
+  if (headerIdx < 0) return [];
+  const header = splitCsvLine(lines[headerIdx]).map((h) => h.trim().toLowerCase());
+  const scoreCol = header.indexOf('score');
+  if (scoreCol < 0) return [];
+  const scores: number[] = [];
+  for (let i = headerIdx + 1; i < lines.length; i += 1) {
+    const cells = splitCsvLine(lines[i]);
+    const score = Number((cells[scoreCol] ?? '').trim());
+    if (Number.isFinite(score)) scores.push(score);
+  }
+  return scores;
 }
 
 /**
@@ -304,6 +337,22 @@ function collectSubmissionRows(slug: string, log: (m: string) => void): KaggleSu
   }
 }
 
+/** 公開LBのスコア列を取得する（best-effort・コンペ単位1回）。失敗時は空配列。 */
+function collectLeaderboardScores(slug: string, log: (m: string) => void): number[] {
+  if (!slug) return [];
+  try {
+    const out = execFileSync('kaggle', ['competitions', 'leaderboard', slug, '--show', '--csv'], {
+      encoding: 'utf8',
+      timeout: 25000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return parseKaggleLeaderboardScores(out);
+  } catch (err: any) {
+    log(`kaggle leaderboard failed for ${slug}: ${err?.message || err}`);
+    return [];
+  }
+}
+
 function readFailureLog(explicitPath: string | undefined, log: (m: string) => void): string | undefined {
   const file = explicitPath || path.join(__dirname, '..', '..', 'docs', 'ai', 'failure-log.md');
   try {
@@ -383,6 +432,10 @@ export async function collectImproveContext(
     log?: (m: string) => void;
     /** score progression JSONL。既定 docs/ai/kaggle/score-progression.jsonl。 */
     scoreProgressionPath?: string;
+    /** LB順位履歴 JSONL。既定 docs/ai/kaggle/leaderboard-rank.jsonl。 */
+    leaderboardRankPath?: string;
+    /** target repo 群の親ディレクトリ（実験台帳の解決に使う）。既定 /workspaces。 */
+    targetsRoot?: string;
     /** 同一方式の連続非改善をescalateする回数。既定3。 */
     plateauThreshold?: number;
   } = {}
@@ -410,6 +463,15 @@ export async function collectImproveContext(
     if (appended > 0) log(`score progression: appended ${appended} result(s) to ${scoreProgressionPath}`);
   }
   const progression = readScoreProgression(scoreProgressionPath);
+
+  // LB順位（一次KPI, design §42）: コンペ単位で1回だけ取得し、repo ごとに順位を計算・履歴化する。
+  const leaderboardScores = opts.kaggle === false
+    ? []
+    : collectLeaderboardScores(comp.kaggleCompetition, log);
+  const leaderboardRankPath = opts.leaderboardRankPath
+    || path.join(__dirname, '..', '..', 'docs', 'ai', 'kaggle', 'leaderboard-rank.jsonl');
+  const targetsRoot = opts.targetsRoot || '/workspaces';
+  const observedAt = new Date().toISOString();
 
   // failure-log も1回だけ読む。
   const failureContent = readFailureLog(opts.failureLogPath, log);
@@ -443,6 +505,66 @@ export async function collectImproveContext(
       : undefined;
 
     const plateau = detectScorePlateau(progression, t.repo, opts.plateauThreshold ?? 3);
+
+    // LB順位サマリ + 順位履歴（best-effort）。ローカル評価は代理指標、順位が一次KPI。
+    let leaderboardSummary: string | undefined;
+    try {
+      const repoScores = progression
+        .filter((entry) => entry.repo === t.repo)
+        .map((entry) => entry.publicScore);
+      const direction = comp.scoreDirection;
+      const bestPublicScore = repoScores.length > 0
+        ? repoScores.reduce((best, s) =>
+            (direction === 'max' ? s > best : s < best) ? s : best, repoScores[0])
+        : undefined;
+      if (bestPublicScore !== undefined && leaderboardScores.length > 0) {
+        const standing = computePublicRank(leaderboardScores, bestPublicScore, direction);
+        const entry: LeaderboardRankEntry = {
+          observedAt,
+          competition: comp.key,
+          kaggleCompetition: comp.kaggleCompetition,
+          repo: t.repo,
+          lineage: t.lineage,
+          bestPublicScore,
+          rank: standing.rank,
+          totalListed: standing.totalListed,
+          ...(standing.topScore !== undefined ? { topScore: standing.topScore } : {}),
+          ...(standing.gapToTop !== undefined ? { gapToTop: standing.gapToTop } : {}),
+          fingerprint: leaderboardRankFingerprint(comp.key, t.repo, observedAt),
+        };
+        appendLeaderboardRank(leaderboardRankPath, [entry]);
+        const history = readLeaderboardRankHistory(leaderboardRankPath)
+          .filter((h) => h.repo === t.repo)
+          .slice(-5);
+        const trend = history
+          .map((h) => (h.rank === null ? `圏外(top${h.totalListed})` : `${h.rank}位`))
+          .join(' → ');
+        const rankLabel = standing.rank === null
+          ? `圏外（表示中の top${standing.totalListed} 未満）`
+          : `${standing.rank}位 / 表示${standing.totalListed}チーム`;
+        leaderboardSummary = [
+          `- best public score: ${bestPublicScore} (${direction === 'max' ? '高いほど良い' : '低いほど良い'})`,
+          `- 現在順位(公開LB): ${rankLabel}`,
+          ...(standing.topScore !== undefined
+            ? [`- LB首位: ${standing.topScore}（差: ${standing.gapToTop}）`]
+            : []),
+          ...(trend ? [`- 順位推移(直近${history.length}観測): ${trend}`] : []),
+        ].join('\n');
+      }
+    } catch (err: any) {
+      log(`leaderboard summary failed for ${t.repo}: ${err?.message || err}`);
+    }
+
+    // 実験台帳ダイジェスト（design §48）: target repo の docs/ai/experiment_ledger.jsonl を読む。
+    let experimentLedgerDigest: string | undefined;
+    try {
+      const ledgerPath = defaultExperimentLedgerPath(path.join(targetsRoot, t.repo));
+      const entries = readExperimentLedger(ledgerPath);
+      if (entries.length > 0) experimentLedgerDigest = summarizeExperimentLedger(entries);
+    } catch (err: any) {
+      log(`experiment ledger read failed for ${t.repo}: ${err?.message || err}`);
+    }
+
     signals[t.project] = {
       hasUnfinishedCycle,
       hasNewMaterial,
@@ -451,7 +573,13 @@ export async function collectImproveContext(
         : {}),
       ...(plateau.plateau && plateau.reason ? { plateauReason: plateau.reason } : {}),
     };
-    material[t.project] = { previousSubmission, recentIssuesDigest: digest, failureKpiExcerpt };
+    material[t.project] = {
+      previousSubmission,
+      recentIssuesDigest: digest,
+      failureKpiExcerpt,
+      ...(leaderboardSummary ? { leaderboardSummary } : {}),
+      ...(experimentLedgerDigest ? { experimentLedgerDigest } : {}),
+    };
   }
 
   return { signals, material };

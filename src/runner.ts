@@ -73,6 +73,7 @@ import {
   setIssueInProgress,
   setIssueInReview,
   repairPrematureDone,
+  autoAcceptIssueDone,
   setIssueOnHold,
   setIssueBlocked,
   finalizeParentIfChildrenComplete,
@@ -1187,6 +1188,21 @@ async function runItem(item: QueueItem, options: TriggerOptions = {}): Promise<R
   return { lockConflict, detached: false };
 }
 
+// Autonomous acceptance (design/README.md §37): after a VERIFIED successful run, promote the issue's
+// In Review terminal to Done so no human is required to close routine work. All exception handling
+// (hold label / PLAN prefix / review=human directive / pending children / disabled config) lives in
+// autoAcceptIssueDone. Best-effort: a refusal or error just leaves the issue in In Review.
+async function maybeAutoAcceptIssue(issueId: string): Promise<void> {
+  try {
+    const result = await autoAcceptIssueDone(issueId);
+    if (!result.accepted) {
+      log('ACCEPT', `auto-accept skipped: ${result.reason}`, { issue: issueId });
+    }
+  } catch (err: any) {
+    log('ERROR', `maybeAutoAcceptIssue failed: ${err.message}`, { issue: issueId });
+  }
+}
+
 // Post-process a finished run: verify completion, classify the result, and apply the matching
 // side effects (success cleanup / usage-limit cooldown+resume re-enqueue / failure logging).
 // Extracted from runItem so both the synchronous path AND the detached-completion reaper
@@ -1215,6 +1231,7 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
       // SOT-1547: a real completion clears any prior human-wait suppression for this issue.
       clearHumanWaitSuppression(issueId);
       await removeUsageLimitLabel(issueId).catch(() => {});
+      await maybeAutoAcceptIssue(issueId);
       break;
 
     case RUN_RESULT.COMPLETED_NO_PR:
@@ -1226,6 +1243,10 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
       clearUsageLimitCooldown();
       clearHumanWaitSuppression(issueId);
       await removeUsageLimitLabel(issueId).catch(() => {});
+      // A decomposition terminal is protected inside autoAcceptIssueDone by the pending-children
+      // guard; a PLAN deliverable by its hold title prefix. Everything else (no-op task-check,
+      // completed aggregation parents) is a verified terminal and gets promoted.
+      await maybeAutoAcceptIssue(issueId);
       break;
 
     case RUN_RESULT.COMPLETION_UNVERIFIED:
@@ -1800,6 +1821,7 @@ export {
   setIssueInProgress,
   setIssueInReview,
   repairPrematureDone,
+  autoAcceptIssueDone,
   setIssueOnHold,
   setIssueBlocked,
   finalizeParentIfChildrenComplete,

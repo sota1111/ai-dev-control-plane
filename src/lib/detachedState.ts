@@ -287,6 +287,107 @@ export async function reapCompletedDetachedRuns(): Promise<string[]> {
   return processed;
 }
 
+// --- Stall watchdog (design/README.md §34 停滞検出と Watchdog) --------------------------------
+// Long runs have no wall-clock timeout; the substitute is activity-based stall detection. A live
+// detached run whose per-issue log has not grown/been touched for RUNNER_WATCHDOG_STALL_MS is
+// "alive but not progressing": warn (the log line is mirrored to Discord by the webhook server).
+// Past RUNNER_WATCHDOG_KILL_MS the run is presumed hung and is killed; the existing reapers then
+// recover it without a human (dead sentinel → sentinel+inflight cleared → the stranded-issue rescan
+// re-enqueues the issue for a fresh attempt). kill=0 disables the kill escalation.
+
+export interface StalledDetachedRun {
+  issueId: string;
+  pid: number;
+  lastActivityAt: string;
+  stalledForMs: number;
+  killed: boolean;
+}
+
+const DEFAULT_WATCHDOG_STALL_MS = 2 * 60 * 60 * 1000; // 2h without output → warn
+const DEFAULT_WATCHDOG_KILL_MS = 12 * 60 * 60 * 1000; // 12h without output → presume hung, kill
+
+function watchdogEnvMs(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw >= 0 ? raw : fallback;
+}
+
+// Re-warn at most once per stall window per issue so the reaper tick does not spam.
+const lastStallWarnAt = new Map<string, number>();
+
+/** Test helper. */
+export function clearStallWarnings(): void {
+  lastStallWarnAt.clear();
+}
+
+export function runDetachedWatchdog(
+  opts: { stallMs?: number; killMs?: number; now?: number } = {}
+): StalledDetachedRun[] {
+  const { detachedDir, log } = requireDeps();
+  const now = opts.now ?? Date.now();
+  const stallMs = opts.stallMs ?? watchdogEnvMs('RUNNER_WATCHDOG_STALL_MS', DEFAULT_WATCHDOG_STALL_MS);
+  const killMs = opts.killMs ?? watchdogEnvMs('RUNNER_WATCHDOG_KILL_MS', DEFAULT_WATCHDOG_KILL_MS);
+  const stalled: StalledDetachedRun[] = [];
+  if (stallMs <= 0) return stalled; // watchdog disabled
+  try {
+    if (!fs.existsSync(detachedDir)) return stalled;
+    for (const file of fs.readdirSync(detachedDir)) {
+      if (!file.endsWith('.json') || file.endsWith('.done.json')) continue;
+      let sentinel: DetachedSentinel | null = null;
+      try {
+        sentinel = JSON.parse(fs.readFileSync(path.join(detachedDir, file), 'utf8'));
+      } catch {
+        continue;
+      }
+      if (!sentinel?.issueId || sentinel.pid == null) continue;
+      try {
+        process.kill(sentinel.pid, 0);
+      } catch {
+        continue; // dead PID: reapDeadDetachedSentinels owns that path
+      }
+
+      let lastActivityMs = Date.parse(sentinel.startedAt || '') || 0;
+      try {
+        const logStat = fs.statSync(detachedLogFile(sentinel.issueId));
+        lastActivityMs = Math.max(lastActivityMs, logStat.mtimeMs);
+      } catch { /* no log yet — fall back to startedAt */ }
+      if (!lastActivityMs) continue;
+
+      const stalledForMs = now - lastActivityMs;
+      if (stalledForMs < stallMs) {
+        lastStallWarnAt.delete(sentinel.issueId);
+        continue;
+      }
+
+      let killed = false;
+      if (killMs > 0 && stalledForMs >= killMs) {
+        try {
+          process.kill(sentinel.pid, 'SIGTERM');
+          killed = true;
+          log('WATCHDOG', `stalled detached run presumed hung — killed pid=${sentinel.pid} after ${Math.round(stalledForMs / 60000)}min without output (reapers will recover and re-enqueue)`, { issue: sentinel.issueId });
+        } catch (err: any) {
+          log('WATCHDOG', `stalled detached run kill failed: ${err.message}`, { issue: sentinel.issueId });
+        }
+      } else {
+        const lastWarn = lastStallWarnAt.get(sentinel.issueId) ?? 0;
+        if (now - lastWarn >= stallMs) {
+          lastStallWarnAt.set(sentinel.issueId, now);
+          log('WATCHDOG', `detached run alive (pid=${sentinel.pid}) but no output for ${Math.round(stalledForMs / 60000)}min — possible stall (kill after ${killMs > 0 ? Math.round(killMs / 60000) + 'min' : 'disabled'})`, { issue: sentinel.issueId });
+        }
+      }
+      stalled.push({
+        issueId: sentinel.issueId,
+        pid: sentinel.pid,
+        lastActivityAt: new Date(lastActivityMs).toISOString(),
+        stalledForMs,
+        killed,
+      });
+    }
+  } catch (err: any) {
+    log('WATCHDOG', `runDetachedWatchdog ERROR: ${err.message}`);
+  }
+  return stalled;
+}
+
 export function addInflight(issueId: string): void {
   const records = loadInflightRecords();
   if (!records.some(r => r.issueId === issueId)) {

@@ -118,6 +118,97 @@ export function appendNewScoreProgression(
   return fresh.length;
 }
 
+// --- Leaderboard rank tracking (design/README.md §42 Leaderboard フィードバック) -----------------
+// The primary KPI is the leaderboard rank, not the local score. Rank is computed from the public
+// leaderboard listing (best-effort: the Kaggle CLI lists the top of the leaderboard; when our score
+// is below the listed range the rank is unknown — reported as 圏外 with the gap to the top score).
+
+export type ScoreDirection = 'max' | 'min';
+
+export interface LeaderboardStanding {
+  /** 1-based public rank; null when our score is outside the listed (top-N) range. */
+  rank: number | null;
+  /** Number of leaderboard rows the standing was computed against. */
+  totalListed: number;
+  topScore?: number;
+  gapToTop?: number;
+}
+
+export function computePublicRank(
+  leaderboardScores: number[],
+  ourScore: number,
+  direction: ScoreDirection = 'max'
+): LeaderboardStanding {
+  const scores = leaderboardScores.filter((s) => Number.isFinite(s));
+  if (scores.length === 0 || !Number.isFinite(ourScore)) {
+    return { rank: null, totalListed: scores.length };
+  }
+  const better = (a: number, b: number): boolean => (direction === 'max' ? a > b : a < b);
+  const topScore = scores.reduce((best, s) => (better(s, best) ? s : best), scores[0]);
+  const worstListed = scores.reduce((worst, s) => (better(worst, s) ? s : worst), scores[0]);
+  const gapToTop = Math.abs(topScore - ourScore);
+  if (better(worstListed, ourScore)) {
+    // Below every listed row: the listing is typically truncated (top-N), so the true rank is unknown.
+    return { rank: null, totalListed: scores.length, topScore, gapToTop };
+  }
+  const rank = 1 + scores.filter((s) => better(s, ourScore)).length;
+  return { rank, totalListed: scores.length, topScore, gapToTop };
+}
+
+export interface LeaderboardRankEntry {
+  observedAt: string;
+  competition: string;
+  kaggleCompetition: string;
+  repo: string;
+  lineage: 'claude' | 'gpt';
+  bestPublicScore: number;
+  rank: number | null;
+  totalListed: number;
+  topScore?: number;
+  gapToTop?: number;
+  /** Dedup key: one observation per repo per UTC day. */
+  fingerprint: string;
+}
+
+export function readLeaderboardRankHistory(file: string): LeaderboardRankEntry[] {
+  try {
+    return fs.readFileSync(file, 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .flatMap((line) => {
+        try {
+          const entry = JSON.parse(line) as LeaderboardRankEntry;
+          return entry && typeof entry.fingerprint === 'string' ? [entry] : [];
+        } catch {
+          return [];
+        }
+      });
+  } catch {
+    return [];
+  }
+}
+
+/** Idempotent append: at most one rank observation per repo per UTC day. */
+export function appendLeaderboardRank(
+  file: string,
+  entries: LeaderboardRankEntry[]
+): number {
+  const known = new Set(readLeaderboardRankHistory(file).map((entry) => entry.fingerprint));
+  const fresh = entries.filter((entry) => !known.has(entry.fingerprint));
+  if (fresh.length === 0) return 0;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, fresh.map((entry) => JSON.stringify(entry)).join('\n') + '\n');
+  return fresh.length;
+}
+
+export function leaderboardRankFingerprint(
+  competitionKey: string,
+  repo: string,
+  observedAt: string
+): string {
+  return [competitionKey, repo, observedAt.slice(0, 10)].join('|');
+}
+
 export function detectScorePlateau(
   entries: ScoreProgressionEntry[],
   repo: string,

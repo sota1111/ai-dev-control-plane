@@ -352,10 +352,38 @@ status; post progress comments; link notes to local files; decide worker interna
 - **Backlog** — not yet processed by Claude.
 - **Todo** — recognized, awaiting start.
 - **In Progress** — Claude is working on it.
-- **In Review** — implementation/verification done, awaiting human review; OR a PLAN task has produced
-  its deliverable and stopped for human review/selection.
+- **In Review** — acceptance-judgment state. A verified successful run finishes here (worker-side
+  terminal); the control plane then AUTO-ACCEPTS it to `Done` (see Autonomous Acceptance below) unless
+  the issue is held for a human. Issues that remain in In Review are the held exceptions: PLAN
+  deliverables awaiting human selection, `human-review`-labeled issues, or `review=human` directives.
 - **Blocked** — stopped on missing info, external factors, or awaiting approval.
 - **Done** — complete and reported.
+
+### Autonomous Acceptance (auto-accept; design/README.md §37)
+
+The system runs without a human in the loop: a verified successful run's `In Review` terminal is
+promoted to `Done` automatically by the runner's post-processing (`autoAcceptIssueDone`), so routine
+work closes itself. Mechanics:
+
+- Promotion happens only for a run classified TASK_COMPLETED / COMPLETED_NO_PR (completion contract +
+  Linear state verified), only from `In Review`, and only when all children are complete.
+- **Hold conditions** keep an issue in `In Review` for a human: a `human-review` label; a `[PLAN]` /
+  `[QUESTION]` title prefix; a `review=human` directive in the description or a comment (newest wins;
+  `review=auto` re-enables promotion for one issue). Config: `config/auto_accept.json`
+  (`enabled` / `hold_labels` / `hold_title_prefixes`; an unparseable config fails closed = no
+  auto-accept).
+- Workers never set `Done` themselves — `In Review` remains the worker-side terminal. Human `Done` /
+  `Canceled` / `Duplicate` decisions are still never overridden. The webhook's premature-Done repair
+  ignores Dones marked by auto-accept (`wasRecentlyAutoAccepted`).
+- Blocked / NEEDS_USER_INPUT are reserved for cases with NO safe default; when a safe default exists,
+  proceed on it and disclose (design §2/§66).
+
+Related autonomous-operation machinery: stall watchdog for detached runs
+(`runDetachedWatchdog`, env `RUNNER_WATCHDOG_STALL_MS` / `RUNNER_WATCHDOG_KILL_MS`; design §34), and
+the Kaggle strategy layer — leaderboard rank as primary KPI (`docs/ai/kaggle/leaderboard-rank.jsonl`),
+per-repo experiment ledger (`<target repo>/docs/ai/experiment_ledger.jsonl`), registry
+`deadline_utc`/`final_window_days`/`score_direction`/target `mode: maintain` (design §42-51;
+see `prompts/roles/solo.md` and `scripts/ai/kaggle_targets_registry.json` `__fields__`).
 
 ### Progress Comments
 
@@ -542,8 +570,9 @@ classification as a Linear comment at the start:
 | `SECURITY` | Permission/secret/env/devcontainer check | Codex (scan) → Claude (judge) |
 
 **PLAN terminal state:** a PLAN task produces its deliverable, then stops at `In Review` for human
-review — no PR/merge/`Done`. Implementation tasks (IMPLEMENT/FIX/DEBUG) go through PR→merge, then sit at
-`In Review` (not auto-`Done`).
+review — no PR/merge/`Done` (the `[PLAN]` title prefix is an auto-accept hold condition). Implementation
+tasks (IMPLEMENT/FIX/DEBUG) go through PR→merge to `In Review`, from which the control plane
+auto-accepts verified completions to `Done` (Autonomous Acceptance).
 
 ### Worker Failure Re-Delegation
 
@@ -635,7 +664,8 @@ Merge when: PR created and gate passed; no conflict with `main`. If so, Claude m
 gh pr merge <PR> --merge --delete-branch
 git -C <repo-path> pull origin main
 ```
-After merge: set the parent to `In Review` (awaiting human review — never auto-`Done`); comment the
+After merge: set the parent to `In Review` (worker-side terminal; the control plane then auto-accepts a
+verified completion to `Done` per Autonomous Acceptance — do not set `Done` yourself); comment the
 Completion Report; delete the feature branch. **Auto-redeploy (best-effort, SOT-1421 / P6):** call
 `scripts/ai/redeploy_after_merge.sh <repo-or-project> [localPath]`. Default off (runs only when
 `REDEPLOY_ENABLED` is truthy); command from `REDEPLOY_CMD` or `config/deploy_commands.json`. Always

@@ -32,9 +32,29 @@ final report.
    PLAN/REVIEW tasks skip the PR and stop at In Review.
 6. **linear-report.** Sync Linear state (PR link / In Progress → In Review), then ALWAYS post a
    `## Completion Report` comment on the target Linear issue for implemented work. The comment must
-   summarize the implementation, changed files, verification results, remaining issues, and human check.
+   summarize the implementation, changed files, verification results, and remaining issues.
    Only after the Linear comment succeeds, emit `## Linear Report: POSTED` in the final worker report.
    If posting fails, do not claim completion; use `BLOCKED`.
+   In Review is the worker-side terminal only: after this run the control plane AUTO-ACCEPTS a verified
+   completion to Done (design §37) unless the issue is held for a human (`human-review` label,
+   `[PLAN]`/`[QUESTION]` title prefix, or a `review=human` directive). Do NOT set Done yourself.
+
+## Kaggle improvement cycles (autonomous strategy layer)
+When the issue is a Kaggle improvement-cycle issue (design §41-51):
+- **Leaderboard rank is the primary KPI**; local evaluation is a proxy. If local A/B looks saturated
+  while the LB rank stagnates or drops, suspect oracle drift and pick re-anchoring (holdout/GT rebuild,
+  evaluation overhaul) as the axis instead of more local tuning.
+- **Consult the experiment ledger first** (`docs/ai/experiment_ledger.jsonl` in the target repo, and
+  the digest embedded in the issue body). Never retry a rejected axis without new evidence. **Append a
+  JSONL entry for every axis you evaluate**: `{"recordedAt": ISO, "axis": "...", "result":
+  "promoted|rejected|inconclusive", "cycle": N, "hypothesis": "...", "evidence": "..."}`.
+- **Saturation is not a blocker** — never stop for a human because improvement stalled. Walk the
+  escalation ladder instead: local tuning → data/oracle rebuilding → architecture change → external
+  knowledge (papers, public notebooks). When the whole ladder is exhausted across cycles, set the
+  target's `mode` to `"maintain"` in `scripts/ai/kaggle_targets_registry.json` (via the normal PR flow)
+  so future cycles reallocate resources to other competitions, and record why in the ledger.
+- **Deadline awareness**: in converge mode (issue body section) do not start new axes; finalize
+  verified candidates and select final submissions with recorded reasoning.
 
 ## Constraints
 - Do NOT run `scripts/ai/run_auto.sh`, `scripts/ai/run_worker.sh`, `scripts/ai/scheduler.sh`, the webhook
@@ -59,4 +79,6 @@ Write ONE final report ending with these lines:
 - `## Next Action: READY_FOR_REVIEW | NEEDS_DEBUG | NEEDS_USER_INPUT | BLOCKED`
 
 Use READY_FOR_REVIEW when you finished the work (PR created/merged, or a PLAN/no-op/decomposition terminal
-reached). Use NEEDS_USER_INPUT / BLOCKED only when a human is genuinely required.
+reached). Use NEEDS_USER_INPUT / BLOCKED only when a human is genuinely required AND no safe default
+exists (design §2/§66): when a safe default reading of an ambiguous requirement exists, proceed on it
+and disclose the interpretation in the Linear comment instead of stopping.
