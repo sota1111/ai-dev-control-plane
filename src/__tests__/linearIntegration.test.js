@@ -395,6 +395,33 @@ describe('Linear Integration', () => {
     });
   });
 
+  describe('reconcileReadyKaggleParents', () => {
+    it('resumes a held auto-improve parent through the idempotent finalizer', async () => {
+      linearMock.enqueue({ data: { issues: { nodes: [{
+        id: 'parent-uuid', identifier: 'SOT-2000',
+        children: { nodes: [{ identifier: 'SOT-2001' }] },
+      }] } } });
+      linearMock.enqueue({ data: { issue: {
+        id: 'parent-uuid', identifier: 'SOT-2000',
+        title: '[demo-gpt] Kaggle順位向上サイクル第2次 — 改善方針の立案と実施',
+        description: '## 入力材料（cronが自動収集・要約なし）',
+        state: { name: 'In Review', type: 'started' }, team: { id: 't1' },
+        children: { nodes: [{ identifier: 'SOT-2001', state: { name: 'In Review', type: 'started' } }] },
+        relations: { nodes: [] }, inverseRelations: { nodes: [] },
+      } } });
+      linearMock.enqueue({ data: { issue: { comments: { nodes: [] } } } });
+      linearMock.enqueue({ data: { workflowStates: { nodes: [
+        { id: 'todo', name: 'Todo', type: 'unstarted' },
+      ] } } });
+      linearMock.enqueue({ data: { issueUpdate: { success: true } } });
+      linearMock.enqueue({ data: { commentCreate: { success: true } } });
+
+      expect(await runner.reconcileReadyKaggleParents()).toBe(1);
+      const update = linearMock.calls.find((call) => call.query.includes('issueUpdate'));
+      expect(update.variables).toEqual({ id: 'parent-uuid', stateId: 'todo' });
+    });
+  });
+
   describe('setIssueInProgress (early pipeline-start transition, SOT-1590)', () => {
     it('moves a Todo issue to In Progress via the started workflow state', async () => {
       linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'Todo', type: 'unstarted' }, team: { id: 't1' } } } });

@@ -234,6 +234,14 @@ async function runReaperTick(): Promise<void> {
   if (cooldownActive) return;           // cooldown中はスキップ（明けてから回収）
   if (!getSecret('LINEAR_API_KEY')) return; // APIキー未設定ならスキップ
 
+  // Child webhooks are only a fast path. Converge from Linear state as well so an event lost while
+  // this server was down cannot strand a completed Kaggle parent before aggregation/submission.
+  try {
+    await runner.reconcileReadyKaggleParents();
+  } catch (err: any) {
+    runner.log('REAPER', `ready-parent reconciliation error (non-fatal): ${err.message}`);
+  }
+
   // トリガー: cooldown明け、またはアイドル（dueなキュー項目なし）時のセーフティネット。
   // アイドル時に限定することで Linear API 呼び出しを稼働中に多発させない。
   //

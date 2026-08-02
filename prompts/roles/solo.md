@@ -41,6 +41,9 @@ final report.
   server, or the runner queue/drain. Do NOT spawn or trigger any other AI run.
 - In-container background and long-lived commands are allowed when needed. Record their PID/log/output,
   monitor them, and do not report completion while required work is still running or unverified.
+- Do not use `ScheduleWakeup`, an external wake notification, or "waiting" prose as a substitute for
+  completing this run. Keep the session alive and poll tracked jobs until they finish. If one tool
+  call has a duration cap, use repeated bounded foreground polls. Always emit `## Next Action`.
 - Never mark an issue Done without verification; never hide failed tests or claim unverified completion.
 - A PR-producing result is incomplete unless the final report contains `## Acceptance: PASS`. A PR URL or
   `READY_FOR_REVIEW` alone is not evidence that implementation and verification completed.

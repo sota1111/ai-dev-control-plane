@@ -902,6 +902,33 @@ ${childList}
   }
 }
 
+/** Reconcile Kaggle parents when the final child-state webhook was missed or delivered offline. */
+export async function reconcileReadyKaggleParents(): Promise<number> {
+  const { log } = requireDeps();
+  try {
+    const data: any = await linearQuery(
+      `query {
+        issues(first: 100, filter: {
+          state: { name: { eq: "In Review" } }
+          labels: { some: { name: { eq: "auto-improve" } } }
+        }) {
+          nodes { id identifier children(first: 1) { nodes { identifier } } }
+        }
+      }`
+    );
+    let resumed = 0;
+    for (const parent of data.issues?.nodes || []) {
+      if (!parent.children?.nodes?.length) continue;
+      if (await finalizeParentIfChildrenComplete('reaper-reconciliation', parent.id)) resumed++;
+    }
+    if (resumed > 0) log('REAPER', `reconciled ${resumed} ready Kaggle parent(s)`);
+    return resumed;
+  } catch (err: any) {
+    log('ERROR', `reconcileReadyKaggleParents failed: ${err.message}`);
+    return 0;
+  }
+}
+
 export async function getIssueExecutionEligibility(issueId: string): Promise<EligibilityResult> {
   const { log, longRunLabel, removeFromQueue } = requireDeps();
   try {

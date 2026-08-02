@@ -76,6 +76,7 @@ import {
   setIssueOnHold,
   setIssueBlocked,
   finalizeParentIfChildrenComplete,
+  reconcileReadyKaggleParents,
   getIssueExecutionEligibility,
 } from './lib/linearApi.js';
 import {
@@ -1802,6 +1803,7 @@ export {
   setIssueOnHold,
   setIssueBlocked,
   finalizeParentIfChildrenComplete,
+  reconcileReadyKaggleParents,
   getIssueExecutionEligibility,
   getIssueProjectName,
   buildRunEnv,

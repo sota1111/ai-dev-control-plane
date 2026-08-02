@@ -32,6 +32,12 @@ describe('solo role lifecycle safeguards (SOT-2127)', () => {
     expect(prompt).not.toContain('No background/long-lived processes');
   });
 
+  test('long-running solo work must keep the session alive and emit its contract', () => {
+    expect(prompt).toContain('Do not use `ScheduleWakeup`');
+    expect(prompt).toContain('repeated bounded foreground polls');
+    expect(prompt).toContain('Always emit `## Next Action`');
+  });
+
   test('in-container solo bypasses worker and tool timeouts', () => {
     expect(codex).toContain('[ "${WORKER_ROLE:-}" = "solo" ] && timeout_prefix=()');
     const soloBranch = claude.slice(claude.indexOf('set +e'));

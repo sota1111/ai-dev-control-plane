@@ -17,6 +17,7 @@ const mockRunner = {
   postUsageLimitComment: (jest.fn() as any).mockResolvedValue(undefined),
   addUsageLimitLabel: (jest.fn() as any).mockResolvedValue(undefined),
   finalizeParentIfChildrenComplete: (jest.fn() as any).mockResolvedValue(false),
+  reconcileReadyKaggleParents: (jest.fn() as any).mockResolvedValue(0),
   notifyUsageLimitToAllActiveIssues: (jest.fn() as any).mockResolvedValue(undefined),
   removeUsageLimitLabel: (jest.fn() as any).mockResolvedValue(undefined),
   setUsageLimitCooldownUntil: jest.fn(),
@@ -869,6 +870,7 @@ describe('reaper (runReaperTick)', () => {
     runner.fetchActiveIssues.mockResolvedValue([]);
     runner.drainQueue.mockResolvedValue(undefined);
     runner.syncQueueWithLinear.mockResolvedValue(undefined);
+    runner.reconcileReadyKaggleParents.mockResolvedValue(0);
     // 各テストを独立させるため _prevReaperCooldownActive を false に正規化する
     // （cooldown=null のまま lock で早期returnさせ、前回状態だけ更新する）
     runner.isLocked.mockReturnValue(true);
@@ -908,6 +910,11 @@ describe('reaper (runReaperTick)', () => {
   it('should reap stale inflight entries on each tick (even when nothing to scan)', async () => {
     await runReaperTick();
     expect(runner.reapStaleInflight).toHaveBeenCalled();
+  });
+
+  it('reconciles ready Kaggle parents even when their child webhook was missed', async () => {
+    await runReaperTick();
+    expect(runner.reconcileReadyKaggleParents).toHaveBeenCalledTimes(1);
   });
 
   it('should scan and enqueue stranded active issues when idle, then drain', async () => {
