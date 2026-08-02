@@ -780,8 +780,16 @@ async function runBootstrapScan(): Promise<void> {
 
   runner.log('BOOTSTRAP', `startup scan complete: enqueued=${enqueuedCount}`);
 
-  if (enqueuedCount > 0) {
-    runner.log('BOOTSTRAP', 'startup scan: running syncQueueWithLinear before drain');
+  // Drain when the scan enqueued something OR the persisted queue already carries a due item. On a
+  // restart the queue is restored from disk, so every active issue reads back as "already queued"
+  // (enqueued=0) even though due work is waiting — without the hasDueQueueItem() branch the runner
+  // sat idle until the first periodic drain tick (up to QUEUE_DRAIN_INTERVAL_MS ≈ 5 min) after every
+  // restart. drainQueue is idempotent and lock-guarded, so draining here is safe if a run is active.
+  if (enqueuedCount > 0 || hasDueQueueItem()) {
+    const why = enqueuedCount > 0
+      ? `enqueued ${enqueuedCount} new item(s)`
+      : 'no new items, but the restored queue has a due item';
+    runner.log('BOOTSTRAP', `startup scan: ${why} — running syncQueueWithLinear before drain`);
     try {
       await runner.syncQueueWithLinear();
     } catch (err: any) {
@@ -795,7 +803,7 @@ async function runBootstrapScan(): Promise<void> {
       runner.log('BOOTSTRAP', `startup scan: drainQueue error: ${err.message}`);
     }
   } else {
-    runner.log('BOOTSTRAP', 'startup scan: no new items enqueued, drain skipped');
+    runner.log('BOOTSTRAP', 'startup scan: no new items enqueued and no due queue item, drain skipped');
   }
 }
 
