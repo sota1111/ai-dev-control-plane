@@ -640,6 +640,53 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
 }
 
 /**
+ * Repair a premature `Done` transition that occurs while the autonomous runner still owns the issue.
+ *
+ * Linear's GitHub automation can move an issue to Done as soon as its PR is merged. That is earlier
+ * than this control plane's lifecycle boundary: the worker must still aggregate results, submit any
+ * required artifact, post its completion report, and leave the issue in In Review for a human. Keep
+ * this escape hatch separate from setIssueInReview so ordinary callers can never reopen a terminal
+ * issue accidentally. The webhook calls it only after proving the issue is currently queued/running.
+ *
+ * Only Done/completed is repairable. Canceled and Duplicate remain terminal user decisions.
+ */
+export async function repairPrematureDone(issueId: string): Promise<boolean> {
+  const { log } = requireDeps();
+  try {
+    const data: any = await linearQuery(
+      'query($id: String!) { issue(id: $id) { id state { name type } team { id } } }',
+      { id: issueId }
+    );
+    const issue = data.issue;
+    if (!issue) return false;
+    const stateName = (issue.state?.name || '').toLowerCase();
+    if (stateName !== 'done') return false;
+
+    const statesData: any = await linearQuery(
+      'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
+      { teamId: issue.team.id }
+    );
+    const reviewState = (statesData.workflowStates?.nodes || []).find(
+      (state: any) => (state.name || '').toLowerCase() === 'in review'
+    );
+    if (!reviewState) {
+      log('WEBHOOK', `repairPrematureDone: no In Review state for team ${issue.team.id}, skip`, { issue: issueId });
+      return false;
+    }
+
+    await linearQuery(
+      'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
+      { id: issue.id, stateId: reviewState.id }
+    );
+    log('WEBHOOK', `repairPrematureDone: ${issueId} Done -> In Review (autonomous run still active)`, { issue: issueId });
+    return true;
+  } catch (err: any) {
+    log('ERROR', `repairPrematureDone failed: ${err.message}`, { issue: issueId });
+    return false;
+  }
+}
+
+/**
  * SOT-1560 — move an issue to **On Hold** (circuit-breaker halt). Unlike In Review (human review), On
  * Hold marks a pipeline stopped by a safety stop-condition; every scanner (`fetchActiveIssues`
  * excludeHold / reaper / `/recover` re-scan) treats On Hold as a hold state (see `isHoldState`) and

@@ -13,6 +13,7 @@ const mockRunner = {
   hasPendingIssues: (jest.fn() as any).mockResolvedValue(true),
   fetchActiveIssues: (jest.fn() as any).mockResolvedValue([]),
   setIssueInProgress: (jest.fn() as any).mockResolvedValue(undefined),
+  repairPrematureDone: (jest.fn() as any).mockResolvedValue(true),
   postUsageLimitComment: (jest.fn() as any).mockResolvedValue(undefined),
   addUsageLimitLabel: (jest.fn() as any).mockResolvedValue(undefined),
   finalizeParentIfChildrenComplete: (jest.fn() as any).mockResolvedValue(false),
@@ -198,6 +199,30 @@ describe('webhook usage limit retry', () => {
     expect(res.body.reason).toBe("terminal state: Done");
     expect(runner.enqueue).not.toHaveBeenCalled();
     expect(runner.runItem).not.toHaveBeenCalled();
+  });
+
+  test('repairs GitHub-driven Done while the autonomous run still owns the issue', async () => {
+    const runner: any = mockRunner;
+    runner.isQueuedOrRunning.mockReturnValue(true);
+    const payload = {
+      type: 'Issue',
+      action: 'update',
+      updatedFrom: { stateId: 'in-progress-state' },
+      data: {
+        identifier: 'SOT-ACTIVE',
+        state: { name: 'Done', type: 'completed' },
+        labels: [],
+      },
+    };
+
+    const res = await request(app).post('/webhooks/linear').send(payload);
+    await new Promise(resolve => originalSetTimeout(resolve, 20));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: 'accepted', reason: 'premature Done repair scheduled' });
+    expect(runner.repairPrematureDone).toHaveBeenCalledWith('SOT-ACTIVE');
+    expect(runner.removeFromQueue).not.toHaveBeenCalled();
+    expect(runner.wakeDependencyBlocked).not.toHaveBeenCalled();
   });
 
   test('does not call setIssueInProgress (Claude Code handles In Progress)', async () => {

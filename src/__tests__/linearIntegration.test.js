@@ -363,6 +363,38 @@ describe('Linear Integration', () => {
     });
   });
 
+  describe('repairPrematureDone', () => {
+    it('reopens only a Done issue into In Review', async () => {
+      linearMock.enqueue({ data: { issue: {
+        id: 'u1', state: { name: 'Done', type: 'completed' }, team: { id: 't1' },
+      } } });
+      linearMock.enqueue({ data: { workflowStates: { nodes: [
+        { id: 'sr', name: 'In Review', type: 'started' },
+      ] } } });
+      linearMock.enqueue({ data: { issueUpdate: { success: true } } });
+
+      const repaired = await runner.repairPrematureDone('SOT-1');
+
+      expect(repaired).toBe(true);
+      const update = linearMock.calls.find((call) => call.query.includes('issueUpdate'));
+      expect(update.variables).toEqual({ id: 'u1', stateId: 'sr' });
+    });
+
+    it.each([
+      ['Canceled', 'canceled'],
+      ['Duplicate', 'duplicate'],
+      ['On Hold', 'completed'],
+      ['In Review', 'started'],
+    ])('does not reopen %s', async (name, type) => {
+      linearMock.enqueue({ data: { issue: {
+        id: 'u1', state: { name, type }, team: { id: 't1' },
+      } } });
+
+      expect(await runner.repairPrematureDone('SOT-1')).toBe(false);
+      expect(linearMock.calls).toHaveLength(1);
+    });
+  });
+
   describe('setIssueInProgress (early pipeline-start transition, SOT-1590)', () => {
     it('moves a Todo issue to In Progress via the started workflow state', async () => {
       linearMock.enqueue({ data: { issue: { id: 'u1', state: { name: 'Todo', type: 'unstarted' }, team: { id: 't1' } } } });

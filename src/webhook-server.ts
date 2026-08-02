@@ -446,6 +446,23 @@ app.post('/webhooks/linear', (req: any, res: any) => {
   }
 
   if (isTerminalState({ type: stateType, name: stateName })) {
+    // GitHub's Linear integration may set Done immediately on PR merge while the autonomous run is
+    // still performing post-merge acceptance, artifact submission, or reporting. Done is therefore
+    // not authoritative while this runner still owns the issue. Repair it to In Review immediately;
+    // after the run releases ownership, a human Done transition remains untouched. Never repair
+    // Canceled/Duplicate, which are explicit terminal decisions.
+    const isPrematureDone = stateName.toLowerCase() === 'done'
+      && runner.isQueuedOrRunning(issueId);
+    if (isPrematureDone) {
+      runner.log('WEBHOOK', `premature Done detected while autonomous run is active; restoring In Review`, { issue: issueId });
+      setImmediate(async () => {
+        const repaired = await runner.repairPrematureDone(issueId);
+        if (!repaired) {
+          runner.log('WEBHOOK', `premature Done repair was not applied`, { issue: issueId });
+        }
+      });
+      return res.status(200).json({ status: 'accepted', reason: 'premature Done repair scheduled' });
+    }
     runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=terminal state`, { issue: issueId });
     runner.removeFromQueue(issueId);
     wakeDependentsAfterTerminal(issueId);
