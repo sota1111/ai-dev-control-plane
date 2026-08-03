@@ -1,5 +1,5 @@
 {
-  "__doc__": "Kaggle改善・提出サイクルの対象は PTCG / Kaggriculture / Agent Security / Biohub の4コンペ×Claude/GPT＝8ターゲット。各コンペを1日2枠処理し、Claude/GPTを各2回（計4回）提出する。",
+  "__doc__": "Kaggle改善・提出サイクルの対象は PTCG / Kaggriculture / Agent Security / Biohub の4コンペ×Claude/GPT＝8ターゲット。各コンペを1日2枠処理し、Claude/GPTを各2回（計4回）提出する。加えて締切接近の ROGII は claude 系統のみ固定枠（pinned）で5時間ごと（JST 1/6/11/16/21）に改善提出サイクルを回す。",
   "__fields__": {
     "enabled": "レジストリ側 kill switch。false の間は起案しない（env KAGGLE_IMPROVE_ENABLED と AND）。",
     "schedule_hours_jst": "単一スケジュール。改善サイクル cron を起動する JST の時刻(hour)。",
@@ -24,16 +24,21 @@
     "competitions[].targets[].submit.message": "提出メッセージ。",
     "competitions[].targets[].next_cycle": "次に起案する改善サイクル番号（第N次）。起案の度に子Issue(SOT-1933)側でインクリメント。",
     "state": "cron が更新する実行状態（last_run_at / created_today / last_submitted_date）。",
-    "allocation": "適応的資源配分（design §50）。mode=dynamic で各cron枠は履歴から算出したpriority最高のimproveコンペを動的選択（静的rotationは無視、未設定/staticなら従来通り）。auto_maintain_threshold=連続非昇格がこの回数以上の系統を自動でmode:maintainへ落として枠を再配分（design §49、0で無効）。weightsはpriority合成係数（momentum/headroom/rank_gain/deadline）。 cooldown_window/cooldown_factor=直近起案コンペのpriority減衰(多様性補正・momentum独占防止)。window枠内の各出現ごとにfactor(0<f<=1)を乗算、factor=1で無効。"
+    "allocation": "適応的資源配分（design §50）。mode=dynamic で各cron枠は履歴から算出したpriority最高のimproveコンペを動的選択（静的rotationは無視、未設定/staticなら従来通り）。auto_maintain_threshold=連続非昇格がこの回数以上の系統を自動でmode:maintainへ落として枠を再配分（design §49、0で無効）。weightsはpriority合成係数（momentum/headroom/rank_gain/deadline）。 cooldown_window/cooldown_factor=直近起案コンペのpriority減衰(多様性補正・momentum独占防止)。window枠内の各出現ごとにfactor(0<f<=1)を乗算、factor=1で無効。",
+    "competitions[].pinned_hours_jst": "任意。固定枠。このJST hourの枠は動的配分(allocation)・rotationを無視してこのコンペが確定当番になる（締切接近コンペの一定間隔サイクル保証用）。schedule_hours_jstに含めること。コンペ間で重複不可。固定枠の起案はrecent_competitionsに記録されず、動的枠のcooldownへ影響しない。",
+    "competitions[].pinned_lineage": "任意。固定枠で起案する系統を1つに限定（claude/gpt）。未設定は両系統。pinned_hours_jstが必須。"
   },
   "enabled": true,
   "schedule_hours_jst": [
     0,
+    1,
     3,
     6,
     9,
+    11,
     12,
     15,
+    16,
     18,
     21
   ],
@@ -103,7 +108,8 @@
           },
           "next_cycle": 1
         }
-      ]
+      ],
+      "deadline_utc": "2026-08-16T23:59:00Z"
     },
     {
       "key": "kaggriculture",
@@ -134,7 +140,8 @@
           },
           "next_cycle": 1
         }
-      ]
+      ],
+      "deadline_utc": "2026-09-30T23:59:00Z"
     },
     {
       "key": "arc-agi-2",
@@ -172,7 +179,8 @@
           },
           "next_cycle": 1
         }
-      ]
+      ],
+      "deadline_utc": "2026-11-02T23:59:00Z"
     },
     {
       "key": "arc-agi-3",
@@ -234,7 +242,8 @@
           },
           "next_cycle": 6
         }
-      ]
+      ],
+      "deadline_utc": "2026-11-02T23:59:00Z"
     },
     {
       "key": "agent-security",
@@ -271,7 +280,8 @@
           },
           "next_cycle": 2
         }
-      ]
+      ],
+      "deadline_utc": "2026-09-01T23:59:00Z"
     },
     {
       "key": "rogii",
@@ -304,7 +314,17 @@
           },
           "next_cycle": 1
         }
-      ]
+      ],
+      "deadline_utc": "2026-08-05T23:59:00Z",
+      "pinned_hours_jst": [
+        1,
+        6,
+        11,
+        16,
+        21
+      ],
+      "pinned_lineage": "claude",
+      "daily_submissions_per_lineage": 5
     },
     {
       "key": "biohub",
@@ -341,7 +361,8 @@
           },
           "next_cycle": 2
         }
-      ]
+      ],
+      "deadline_utc": "2026-09-29T23:59:00Z"
     }
   ],
   "allocation": {

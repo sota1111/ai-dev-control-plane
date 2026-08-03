@@ -87,6 +87,33 @@ export function upsertProjectRepoEntry(
   return next;
 }
 
+/**
+ * 自動導出した mapping を `config/project_repos.json` へ best-effort で永続化する（SOT-2128）。
+ * すでに同名 project が存在する場合は何もしない（明示設定を上書きしない・冪等・書き込み最小化）。
+ * 書き込んだら true、既存/失敗なら false。例外は投げない（呼び出し側は fail-open）。
+ */
+export function persistProjectRepoMapping(
+  entry: ProjectRepo,
+  configPath: string = DEFAULT_CONFIG_PATH
+): boolean {
+  const key = entry.project.trim().toLowerCase();
+  if (!key) return false;
+  try {
+    let current: ProjectRepo[];
+    try {
+      current = loadProjectRepoConfig(configPath);
+    } catch {
+      current = [];
+    }
+    if (current.some((e) => e.project.trim().toLowerCase() === key)) return false;
+    const next = upsertProjectRepoEntry(current, entry);
+    fs.writeFileSync(configPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // 注入可能なコマンド実行インターフェース（テストでは gh/git を呼ばずモックする）。
 export interface RunResult {
   code: number;

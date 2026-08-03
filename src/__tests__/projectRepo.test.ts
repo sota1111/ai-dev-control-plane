@@ -1,5 +1,6 @@
 import {
   resolveRepoForProject,
+  deriveRepoForProject,
   loadProjectRepoConfig,
   ProjectRepo,
 } from '../lib/projectRepo.js';
@@ -107,5 +108,51 @@ describe('resolveRepoForProject (default config load)', () => {
   test('resolves a real project from the on-disk config', () => {
     const r = resolveRepoForProject('ai-dev-control-plane');
     expect(r?.localPath).toBe('/workspaces/ai-dev-control-plane');
+  });
+});
+
+describe('deriveRepoForProject (auto-linking by naming convention)', () => {
+  test('derives a mapping when the checkout exists', () => {
+    const r = deriveRepoForProject('ptcg-agent-obo', { exists: () => true });
+    expect(r).toEqual({
+      project: 'ptcg-agent-obo',
+      repo: 'sota1111/ptcg-agent-obo',
+      localPath: '/workspaces/ptcg-agent-obo',
+    });
+  });
+
+  test('returns null when the checkout does not exist (fail-closed)', () => {
+    expect(deriveRepoForProject('ptcg-agent-obo', { exists: () => false })).toBeNull();
+  });
+
+  test('slugifies the project name and honors overrides', () => {
+    const r = deriveRepoForProject('  My Cool Project  ', {
+      exists: (p) => p === '/repos/my-cool-project',
+      workspaceRoot: '/repos',
+      owner: 'acme',
+    });
+    expect(r).toEqual({
+      project: 'My Cool Project',
+      repo: 'acme/my-cool-project',
+      localPath: '/repos/my-cool-project',
+    });
+  });
+
+  test('returns null for empty / whitespace-only names', () => {
+    expect(deriveRepoForProject('', { exists: () => true })).toBeNull();
+    expect(deriveRepoForProject('   ', { exists: () => true })).toBeNull();
+  });
+
+  test('auto-links via resolveRepoForProject only on the default-config path', () => {
+    // Explicit config is passed → no auto-derive, unknown project stays null (deterministic).
+    expect(resolveRepoForProject('ptcg-agent-obo', fixture)).toBeNull();
+    // Default on-disk config path: ptcg-agent-obo is unmapped but its checkout exists → auto-linked.
+    const hasCheckout = fs.existsSync('/workspaces/ptcg-agent-obo/.git');
+    const r = resolveRepoForProject('ptcg-agent-obo');
+    if (hasCheckout) {
+      expect(r?.localPath).toBe('/workspaces/ptcg-agent-obo');
+    } else {
+      expect(r).toBeNull();
+    }
   });
 });

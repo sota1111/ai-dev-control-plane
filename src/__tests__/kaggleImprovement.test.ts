@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import {
   parseTargetsRegistry,
   resolveCompetitionForHour,
+  resolvePinnedSlotForHour,
   getCompetition,
   isScheduledHour,
   buildIssueTitle,
@@ -221,6 +222,71 @@ describe('kaggleImprovement', () => {
     });
   });
 
+  describe('pinned slots', () => {
+    const pinnedRaw = () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.enabled = true;
+      raw.competitions[1].pinned_hours_jst = [8, 20];
+      raw.competitions[1].pinned_lineage = 'claude';
+      return raw;
+    };
+
+    test('parses pinned fields (dedupe + sort)', () => {
+      const raw = pinnedRaw();
+      raw.competitions[1].pinned_hours_jst = [20, 8, 20];
+      const c = parseTargetsRegistry(raw).competitions[1];
+      expect(c.pinnedHoursJst).toEqual([8, 20]);
+      expect(c.pinnedLineage).toBe('claude');
+    });
+
+    test('rejects a pinned hour missing from schedule_hours_jst', () => {
+      const raw = pinnedRaw();
+      raw.competitions[1].pinned_hours_jst = [5];
+      expect(() => parseTargetsRegistry(raw)).toThrow(/schedule_hours_jst/);
+    });
+
+    test('rejects the same pinned hour on two competitions', () => {
+      const raw = pinnedRaw();
+      raw.competitions[0].pinned_hours_jst = [8];
+      expect(() => parseTargetsRegistry(raw)).toThrow(/claimed by both/);
+    });
+
+    test('rejects pinned_lineage without pinned_hours_jst', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].pinned_lineage = 'claude';
+      expect(() => parseTargetsRegistry(raw)).toThrow(/requires pinned_hours_jst/);
+    });
+
+    test('resolvePinnedSlotForHour returns the pinned competition and lineage', () => {
+      const r = parseTargetsRegistry(pinnedRaw());
+      expect(resolvePinnedSlotForHour(r, 8)).toEqual({ competition: 'arc-agi-2', lineage: 'claude' });
+      expect(resolvePinnedSlotForHour(r, 0)).toBeNull();
+    });
+
+    test('planImprovementCycle: pinned slot wins over rotation and dynamic override', () => {
+      const r = parseTargetsRegistry(pinnedRaw());
+      // hour 20 は rotation 未定義かつ override=ptcg でも pinned の arc-agi-2 が当番になる。
+      const plan = planImprovementCycle({
+        registry: r,
+        hourJst: 20,
+        envEnabled: true,
+        competitionKeyOverride: 'ptcg',
+      });
+      expect(plan.competition).toBe('arc-agi-2');
+      const byLineage = Object.fromEntries(plan.targets.map((t) => [t.lineage, t]));
+      expect(byLineage.claude.action).toBe('draft');
+      expect(byLineage.gpt.action).toBe('skip');
+      expect(byLineage.gpt.reason).toMatch(/pinned slot: claude lineage only/);
+    });
+
+    test('planImprovementCycle: non-pinned hours are unaffected', () => {
+      const r = parseTargetsRegistry(pinnedRaw());
+      const plan = planImprovementCycle({ registry: r, hourJst: 0, envEnabled: true });
+      expect(plan.competition).toBe('ptcg');
+      expect(plan.targets.every((t) => t.action === 'draft')).toBe(true);
+    });
+  });
+
   describe('issue body/title', () => {
     test('buildIssueTitle is feature-first with cycle number', () => {
       const t = reg().competitions[0].targets[0];
@@ -240,7 +306,8 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('rank 42 / score 571.8');
       expect(body).toContain('SOT-1866 champion 収束');
       expect(body).toContain('改善の実装・学習・検証では GPU の使用を許可する。');
-      expect(body).toContain('改善方針の検討では Kaggle の公開ノートブック等を参考にしてよい。');
+      expect(body).toContain('必ず web 検索を行い');
+      expect(body).toContain('Kaggle の上位ノートブック');
       expect(body).toContain('子IssueはKaggle提出を実行してはならない');
       expect(body).toContain('auto-parent-resumed');
       expect(body).toContain('この親Issueだけが提出契約を通過した最新');
