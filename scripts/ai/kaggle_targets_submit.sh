@@ -89,6 +89,23 @@ for repo in "${REPOS[@]}"; do today_count["$repo"]=0; done
 for repo in "${REPOS[@]}"; do
   submit_spec="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);const t=(c?c.targets:[]).find(x=>x.repo===process.argv[3]);process.stdout.write(JSON.stringify(t&&t.submit||{}))' "$REGISTRY" "$COMP_KEY" "$repo")"
   submit_file="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).file||"")' "$submit_spec")"
+  # 提出物が gitignore されたビルド成果物のことがある（例: ptcg の submission.tar.gz は
+  # scripts/build_submission.sh が現在の champion checkout から生成する）。submit は成果物を参照する
+  # だけでビルドしないので、診断のみの run 後などは成果物が checkout に無く、提出が skip されて
+  # champion が反映されない（PTCG Claude 低下の実因）。file が未生成でリポジトリに build スクリプトが
+  # あれば、ここで champion を fresh build してから fingerprint / 提出へ進む（best-effort）。
+  if [[ -n "$submit_file" && ! -f "$submit_file" ]]; then
+    build_script="$(dirname "$submit_file")/scripts/build_submission.sh"
+    if [[ -f "$build_script" ]]; then
+      echo "  → 提出物未生成: $submit_file — $build_script で champion をビルド ($repo)"
+      if bash "$build_script" >&2; then
+        echo "    build 完了: $submit_file"
+      else
+        echo "  → WARNING: build_submission.sh 失敗 ($repo)。提出は skip されます。" >&2
+        bash "$SCRIPT_DIR/notify_discord.sh" "kaggle提出 build失敗 $repo ($COMP_KEY)" >/dev/null 2>&1 || true
+      fi
+    fi
+  fi
   if [[ -n "$submit_file" && -f "$submit_file" ]]; then
     current_fingerprint["$repo"]="sha256:$(sha256sum "$submit_file" | awk '{print $1}')"
   else
