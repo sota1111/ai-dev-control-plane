@@ -119,6 +119,14 @@ export interface ImprovementCompetition {
   finalWindowDays: number;
   /** LB スコアの方向。max=大きいほど良い（既定）/ min=小さいほど良い。順位計算に使う。 */
   scoreDirection: 'max' | 'min';
+  /**
+   * 固定枠（pinned slot）: この JST hour の枠はこのコンペが確定当番になる（動的配分・rotation より
+   * 優先）。締切接近コンペへ一定間隔の改善提出サイクルを保証するために使う（例: rogii=6時間ごと）。
+   * schedule_hours_jst に含まれる hour だけ有効（parse 時に検証）。
+   */
+  pinnedHoursJst?: number[];
+  /** 固定枠で起案する系統を1つに限定する（例 claude）。未設定なら両系統を起案対象にする。 */
+  pinnedLineage?: Lineage;
   targets: ImprovementTarget[];
 }
 
@@ -238,6 +246,26 @@ export function parseTargetsRegistry(raw: unknown): TargetsRegistry {
   for (const rot of rotation) {
     if (!compKeys.has(rot.competition)) {
       throw new Error(`registry.rotation references unknown competition "${rot.competition}"`);
+    }
+  }
+
+  // pinned 枠の整合性: コンペ間で hour が重複せず、schedule_hours_jst に含まれること
+  // （含まれない hour は --only-scheduled で捨てられ、固定枠が黙って動かなくなる）。
+  const pinnedSeen = new Map<number, string>();
+  for (const comp of competitions) {
+    for (const h of comp.pinnedHoursJst ?? []) {
+      const prev = pinnedSeen.get(h);
+      if (prev !== undefined) {
+        throw new Error(
+          `registry pinned_hours_jst ${h} is claimed by both "${prev}" and "${comp.key}"`
+        );
+      }
+      pinnedSeen.set(h, comp.key);
+      if (!scheduleHoursJst.includes(h)) {
+        throw new Error(
+          `registry.competitions "${comp.key}" pinned_hours_jst ${h} must be included in schedule_hours_jst`
+        );
+      }
     }
   }
 
@@ -399,6 +427,32 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
     throw new Error(`registry.competitions[${i}].score_direction must be "max" or "min"`);
   }
 
+  const pinnedHoursRaw = co.pinned_hours_jst ?? co.pinnedHoursJst;
+  let pinnedHoursJst: number[] | undefined;
+  if (pinnedHoursRaw !== undefined) {
+    if (
+      !Array.isArray(pinnedHoursRaw) ||
+      pinnedHoursRaw.length === 0 ||
+      !pinnedHoursRaw.every(VALID_HOUR)
+    ) {
+      throw new Error(
+        `registry.competitions[${i}].pinned_hours_jst must be a non-empty array of hours (0-23)`
+      );
+    }
+    pinnedHoursJst = Array.from(new Set(pinnedHoursRaw as number[])).sort((a, b) => a - b);
+  }
+  const pinnedLineageRaw = co.pinned_lineage ?? co.pinnedLineage;
+  let pinnedLineage: Lineage | undefined;
+  if (pinnedLineageRaw !== undefined) {
+    if (pinnedLineageRaw !== 'claude' && pinnedLineageRaw !== 'gpt') {
+      throw new Error(`registry.competitions[${i}].pinned_lineage must be "claude" or "gpt"`);
+    }
+    if (!pinnedHoursJst) {
+      throw new Error(`registry.competitions[${i}].pinned_lineage requires pinned_hours_jst`);
+    }
+    pinnedLineage = pinnedLineageRaw;
+  }
+
   return {
     key,
     kaggleCompetition,
@@ -412,6 +466,8 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
     deadlineUtc,
     finalWindowDays: finalWindowDaysRaw,
     scoreDirection: scoreDirectionRaw,
+    pinnedHoursJst,
+    pinnedLineage,
     targets,
   };
 }
@@ -505,6 +561,29 @@ export function resolveCompetitionForHour(
 ): string | null {
   const entry = registry.rotation.find((r) => r.hourJst === hourJst);
   return entry ? entry.competition : null;
+}
+
+/** pinned 枠の解決結果。 */
+export interface PinnedSlot {
+  competition: string;
+  /** 起案対象を1系統に限定する場合の系統（未設定なら両系統）。 */
+  lineage?: Lineage;
+}
+
+/**
+ * 指定 hour(JST) が固定枠（pinned_hours_jst）なら、その確定当番コンペ（と系統限定）を返す。
+ * 動的資源配分・rotation より優先される（締切接近コンペの一定間隔サイクル保証用）。
+ */
+export function resolvePinnedSlotForHour(
+  registry: TargetsRegistry,
+  hourJst: number
+): PinnedSlot | null {
+  for (const c of registry.competitions) {
+    if (c.pinnedHoursJst?.includes(hourJst)) {
+      return { competition: c.key, lineage: c.pinnedLineage };
+    }
+  }
+  return null;
 }
 
 /** コンペ key から定義を引く。 */
@@ -673,7 +752,9 @@ ${securityEvaluationContract}
 ${convergeMode}
 
 ## 実施内容
-1. 上記材料から未着手の改善軸を選定（実験台帳を必ず参照し、非昇格済み軸の再試行は新しい根拠を明示。
+1. 上記材料から未着手の改善軸を選定する。軸の選定にあたっては必ず web 検索を行い、Kaggle の上位
+   ノートブック（公開 kernel・上位解法の write-up・discussion）を積極的に調査して、外部の有効な手法を
+   改善軸の候補に含める（実験台帳を必ず参照し、非昇格済み軸の再試行は新しい根拠を明示。
    ローカル評価が飽和しているのにLB順位が停滞/低下している場合は oracle ドリフトを疑い、局所A/Bを
    続けず再アンカリング（holdout/GT再整備・評価系再構築）を軸に選ぶ。連続非昇格が続く場合は
    escalation ladder（局所チューニング → データ/oracle整備 → アーキテクチャ変更 → 外部知識取り込み）
@@ -699,7 +780,10 @@ ${childWorkers}
 
 ## 実行リソース
 - 改善の実装・学習・検証では GPU の使用を許可する。
-- 改善方針の検討では Kaggle の公開ノートブック等を参考にしてよい。
+- 改善方針の検討では必ず web 検索を行い、Kaggle の上位ノートブック（公開 kernel・上位解法の
+  write-up・discussion）を積極的に調査・活用する。有効な手法は本 repo の実行制約（オフライン提出・
+  依存関係等）の下で移植する。スコア源が可搬（ロジック/データ蒸留）か非可搬（GPU weights 等）かを
+  見極めてから取り込むこと。
 
 ## 受け入れ条件
 - [ ] 改善方針と選定理由がコメントに記録されている
@@ -978,8 +1062,12 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
   const material = input.material ?? {};
   const active = registry.enabled && envEnabled;
 
-  // 動的配分（§50）が選んだコンペを優先。未指定なら従来の rotation 表で hour から解決。
-  const competitionKey = input.competitionKeyOverride ?? resolveCompetitionForHour(registry, hourJst);
+  // 固定枠（pinned slot）＞動的配分（§50）＞rotation 表の優先順で当番コンペを解決する。
+  const pinned = resolvePinnedSlotForHour(registry, hourJst);
+  const competitionKey =
+    pinned?.competition ??
+    input.competitionKeyOverride ??
+    resolveCompetitionForHour(registry, hourJst);
 
   if (!active) {
     return {
@@ -1025,6 +1113,15 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
       competition: competition.key,
       cycleNumber: t.nextCycle,
     };
+
+    // 固定枠の系統限定: pinned_lineage が設定された枠では、その系統だけを起案対象にする。
+    if (pinned?.lineage && t.lineage !== pinned.lineage) {
+      return {
+        ...common,
+        action: 'skip' as const,
+        reason: `pinned slot: ${pinned.lineage} lineage only`,
+      };
+    }
 
     // 締切超過コンペには起案しない（design §51）。提出も締切後は意味を持たない。
     if (phase.phase === 'closed') {

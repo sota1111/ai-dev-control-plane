@@ -40,6 +40,19 @@ claude/gpt を両方、`alternate`（ARC）は日替わりで交互に1系統（
 ローテーション表・コンペ定義・提出物パスは `scripts/ai/kaggle_targets_registry.json`。
 （`config/` は harness 保護下のため `scripts/ai/` に同居。）
 
+### 固定枠（pinned slot）— 締切接近コンペの一定間隔サイクル保証
+
+コンペ定義に `pinned_hours_jst`（＋任意 `pinned_lineage`）を設定すると、その JST hour の枠は動的資源
+配分（allocation）・rotation を無視して**そのコンペが確定当番**になる。`pinned_lineage` を設定すると
+起案対象をその1系統に限定する（もう一方は `pinned slot: <lineage> lineage only` で skip）。pinned 枠の
+起案は `state.recent_competitions`（動的配分のクールダウン履歴）に記録されないため、既存の動的8枠の
+挙動には影響しない。pinned hour は `schedule_hours_jst` に含めること（`--only-scheduled` で捨てられる
+のを防ぐため parse 時に fail-loud で検証）。コンペ間の hour 重複も不可。
+
+現在の設定: **rogii は締切接近のため JST 1/7/13/19（6時間ごと）を claude 系統専用の固定枠**とし、
+改善→提出サイクルを1日4回転させる（`daily_submissions_per_lineage: 4`）。他コンペは従来どおり
+JST 0/3/6/9/12/15/18/21 の8枠を動的配分で回す。
+
 ## 提出は「取り組み完了時」（コンペ内選定機構なし）
 
 - 提出対象はregistryの`submit`が指す **検証済みartifact**。candidateでもよく、champion昇格は不要。

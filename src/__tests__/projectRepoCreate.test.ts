@@ -6,6 +6,7 @@ import {
   slugify,
   deriveNewRepoName,
   upsertProjectRepoEntry,
+  persistProjectRepoMapping,
   ensureRepoForNewProject,
   RunResult,
 } from '../lib/projectRepoCreate.js';
@@ -80,6 +81,58 @@ describe('upsertProjectRepoEntry', () => {
     expect(next[0].localPath).toBe('/new/path');
     // input untouched
     expect(base[0].localPath).toBe('/workspaces/booking-monitor');
+  });
+});
+
+describe('persistProjectRepoMapping', () => {
+  let tmpDir: string;
+  let configPath: string;
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prm-'));
+    configPath = path.join(tmpDir, 'project_repos.json');
+  });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('appends a new mapping and returns true', () => {
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify([{ project: 'existing', repo: 'sota1111/existing', localPath: '/workspaces/existing' }]),
+    );
+    const wrote = persistProjectRepoMapping(
+      { project: 'ptcg-agent-obo', repo: 'sota1111/ptcg-agent-obo', localPath: '/workspaces/ptcg-agent-obo' },
+      configPath,
+    );
+    expect(wrote).toBe(true);
+    const saved = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(saved.find((e: ProjectRepo) => e.project === 'ptcg-agent-obo')?.localPath).toBe(
+      '/workspaces/ptcg-agent-obo',
+    );
+  });
+
+  test('does not overwrite an existing project and returns false', () => {
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify([{ project: 'Ptcg-Agent-Obo', repo: 'sota1111/x', localPath: '/keep' }]),
+    );
+    const wrote = persistProjectRepoMapping(
+      { project: 'ptcg-agent-obo', repo: 'sota1111/ptcg-agent-obo', localPath: '/new' },
+      configPath,
+    );
+    expect(wrote).toBe(false);
+    const saved = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(saved).toHaveLength(1);
+    expect(saved[0].localPath).toBe('/keep');
+  });
+
+  test('creates the config when it does not exist yet', () => {
+    const wrote = persistProjectRepoMapping(
+      { project: 'brand-new', repo: 'sota1111/brand-new', localPath: '/workspaces/brand-new' },
+      configPath,
+    );
+    expect(wrote).toBe(true);
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf8'))).toHaveLength(1);
   });
 });
 

@@ -47,6 +47,7 @@ import {
   planImprovementCycle,
   planCompetitionSubmission,
   resolveCompetitionForHour,
+  resolvePinnedSlotForHour,
   type GuardSignals,
   type ImprovementMaterial,
 } from './lib/kaggleImprovement.js';
@@ -1122,7 +1123,18 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       let competitionKeyOverride: string | undefined;
       let selectedCompetition: string | null = null;
       const autoMaintained: Array<{ repo: string; reason: string }> = [];
-      const dynamicActive = registry.allocation.mode === 'dynamic' && registry.enabled && envEnabled;
+      // 固定枠（pinned slot）: この hour が pinned なら動的配分をスキップし、その確定当番を使う。
+      // recent_competitions（動的配分のクールダウン履歴）には記録せず、動的枠側の挙動を変えない。
+      const pinnedSlot = resolvePinnedSlotForHour(registry, hourJst);
+      const dynamicActive =
+        !pinnedSlot && registry.allocation.mode === 'dynamic' && registry.enabled && envEnabled;
+      if (pinnedSlot) {
+        competitionKeyOverride = pinnedSlot.competition;
+        process.stderr.write(
+          `[allocation] slot=${hourJst} pinned=${pinnedSlot.competition}` +
+            `${pinnedSlot.lineage ? ` lineage=${pinnedSlot.lineage}` : ''} (dynamic selection skipped)\n`
+        );
+      }
       if (dynamicActive) {
         try {
           const alloc = await collectAllocationSignals(registry, {

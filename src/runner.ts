@@ -17,6 +17,7 @@ import {
   isNewProject,
   deriveNewRepoName,
   ensureRepoForNewProject,
+  persistProjectRepoMapping,
 } from './lib/projectRepoCreate.js';
 import {
   configureRunnerLock,
@@ -851,6 +852,11 @@ async function buildRunEnv(
         env.WEBHOOK_PROJECT_NAME = resolved.project;
         env.WEBHOOK_TARGET_REPO = resolved.localPath;
         log('RUNNER', `resolved target repo: project="${projectName}" -> ${resolved.localPath}`, { issue: issueId });
+        // 自動導出（明示マッピング未登録）で解決した場合、次回以降のために config へ永続化する。
+        // すでに登録済みなら no-op（best-effort・失敗しても実行は継続）。
+        if (persistProjectRepoMapping(resolved)) {
+          log('RUNNER', `auto-linked project="${resolved.project}" -> ${resolved.repo} (persisted to config/project_repos.json)`, { issue: issueId });
+        }
       } else if (isNewProject(projectName)) {
         // 「New」プロジェクト: 新規レポジトリを作成して開発対象にする。
         // 失敗時は内側 catch で fail-closed marker を設定する。
