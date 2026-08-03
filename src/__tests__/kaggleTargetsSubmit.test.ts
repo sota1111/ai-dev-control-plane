@@ -163,4 +163,106 @@ exit 0
     expect(output).toContain('daily slot already completed');
     expect(fs.readFileSync(calls, 'utf8')).not.toContain('competitions submit -c');
   });
+
+  test('builds a missing artifact via scripts/build_submission.sh before submitting', () => {
+    // Regression (PTCG Claude): submission.tar.gz is a gitignored build artifact. When a diagnostic-only
+    // run leaves the checkout without it, the submit must build it from the champion checkout rather than
+    // skip — otherwise the champion never reaches Kaggle.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kaggle-build-'));
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    // Repo checkout with a build script but NO artifact yet.
+    const repo = path.join(dir, 'demo-claude');
+    fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
+    const artifact = path.join(repo, 'submission.tar.gz');
+    fs.writeFileSync(
+      path.join(repo, 'scripts', 'build_submission.sh'),
+      `#!/usr/bin/env bash\nset -euo pipefail\nprintf 'champion-artifact' > "${artifact}"\necho "submission archive: ${artifact}"\n`
+    );
+    fs.chmodSync(path.join(repo, 'scripts', 'build_submission.sh'), 0o755);
+    expect(fs.existsSync(artifact)).toBe(false);
+
+    const registry = path.join(dir, 'registry.json');
+    fs.writeFileSync(
+      registry,
+      JSON.stringify({
+        enabled: true,
+        schedule_hours_jst: [0],
+        rotation: [{ hour_jst: 0, competition: 'demo' }],
+        issue_cap_guard: 240,
+        competitions: [
+          {
+            key: 'demo',
+            kaggle_competition: 'demo-comp',
+            daily_submission_cap: 5,
+            daily_submissions_per_lineage: 2,
+            submission_mode: 'both',
+            targets: [
+              {
+                lineage: 'claude',
+                repo: 'demo-claude',
+                project: 'demo-claude',
+                workers_directive: 'solo=claude',
+                submit: { file: artifact, message: 'demo-claude' },
+                next_cycle: 1,
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    const calls = path.join(dir, 'calls');
+    // Stub kaggle: empty submissions history (no dedup block) → proceed to submit.
+    fs.writeFileSync(
+      path.join(bin, 'kaggle'),
+      `#!/usr/bin/env bash\necho "$*" >> "${calls}"\nif [[ "$*" == *"competitions submissions"* ]]; then\n  echo "ref  fileName  date  description  status  publicScore"\nfi\nexit 0\n`
+    );
+    fs.chmodSync(path.join(bin, 'kaggle'), 0o755);
+
+    const output = execFileSync(
+      'bash',
+      [script, '--registry', registry, '--competition', 'demo', '--repo', 'demo-claude', '--hour', '0', '--execute'],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, KAGGLE_SUBMISSION_HISTORY: path.join(dir, 'history.jsonl') },
+        encoding: 'utf8',
+      }
+    );
+
+    // The build ran, the artifact now exists, and a real submit happened for it.
+    expect(output).toContain('build 完了');
+    expect(fs.existsSync(artifact)).toBe(true);
+    expect(fs.readFileSync(calls, 'utf8')).toContain('competitions submit -c demo-comp');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('still skips (no build) when the artifact is missing and there is no build script', () => {
+    const { dir, bin, registry } = fixture();
+    // Point submit.file at a missing path with no build script alongside it.
+    const reg = JSON.parse(fs.readFileSync(registry, 'utf8'));
+    const missing = path.join(dir, 'nope', 'submission.csv');
+    reg.competitions[0].targets[0].submit.file = missing;
+    reg.competitions[0].targets[1].submit.file = missing;
+    fs.writeFileSync(registry, JSON.stringify(reg));
+    const calls = path.join(dir, 'calls');
+    fs.writeFileSync(
+      path.join(bin, 'kaggle'),
+      `#!/usr/bin/env bash\necho "$*" >> "${calls}"\nif [[ "$*" == *"competitions submissions"* ]]; then\n  echo "ref  fileName  date  description  status  publicScore"\nfi\nexit 0\n`
+    );
+    fs.chmodSync(path.join(bin, 'kaggle'), 0o755);
+
+    const output = execFileSync(
+      'bash',
+      [script, '--registry', registry, '--competition', 'demo', '--hour', '0', '--execute'],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, KAGGLE_SUBMISSION_HISTORY: path.join(dir, 'history.jsonl') },
+        encoding: 'utf8',
+      }
+    );
+    // The "提出物が見つかりません" NOTICE is on stderr; the safety property is that NO submit happened.
+    void output;
+    expect(fs.readFileSync(calls, 'utf8')).not.toContain('competitions submit -c');
+  });
 });
