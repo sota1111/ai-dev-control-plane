@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   parseKaggleSubmissionsCsv,
   formatPreviousSubmission,
@@ -7,6 +10,16 @@ import {
   hasSubmissionSince,
   submissionRowsForRepo,
   classifyKaggleCliFailure,
+  parseCvReport,
+  readCvReport,
+  formatCvSummary,
+  computeCvPublicGap,
+  formatCvPublicGapSummary,
+  referenceOverfitWarning,
+  formatCvGapTrend,
+  parseCvGapHistory,
+  CV_PUBLIC_GAP_RELATIVE_WARN,
+  REFERENCE_OVERFIT_RELATIVE_MARGIN,
   type CompletedIssue,
 } from '../lib/kaggleImproveMaterial.js';
 
@@ -239,6 +252,185 @@ describe('kaggleImproveMaterial', () => {
       const lines = (r.digest || '').split('\n');
       expect(lines[0]).toContain('SOT-9'); // newest first
       expect(r.digest).toContain('他 7 件');
+    });
+  });
+
+  // SOT-2514: leak-free CV レポート → cvSummary / CV↔public gap / 参照実装スコア警告。
+  describe('parseCvReport', () => {
+    const valid = {
+      cv_scheme: 'group-kfold',
+      entity_unit: 'well',
+      folds: 5,
+      score: 8.31,
+      per_entity_scores: [7.2, 9.1, 8.3, 11.4, 5.6],
+    };
+
+    test('accepts an entity-unit hold-out report and keeps per-entity scores', () => {
+      const r = parseCvReport(valid);
+      expect(r.violation).toBeUndefined();
+      expect(r.report).toMatchObject({
+        cvScheme: 'group-kfold',
+        entityUnit: 'well',
+        folds: 5,
+        score: 8.31,
+      });
+      expect(r.report?.perEntityScores).toEqual([7.2, 9.1, 8.3, 11.4, 5.6]);
+    });
+
+    test('camelCase keys are accepted and per_entity_scores is optional', () => {
+      const r = parseCvReport({ cvScheme: 'time-split', entityUnit: 'series', folds: 3, score: 0.42 });
+      expect(r.report).toMatchObject({ cvScheme: 'time-split', entityUnit: 'series', score: 0.42 });
+      expect(r.report?.perEntityScores).toBeUndefined();
+    });
+
+    test('a non-object or missing/invalid fields are a CV contract violation, never a throw', () => {
+      expect(parseCvReport(null).violation).toContain('CV契約違反');
+      expect(parseCvReport([1, 2]).violation).toContain('CV契約違反');
+      const missing = parseCvReport({ cv_scheme: 'kfold', folds: 5 });
+      expect(missing.report).toBeUndefined();
+      expect(missing.violation).toContain('entity_unit');
+      expect(missing.violation).toContain('score');
+    });
+
+    test('row-level CV (entity_unit=row/record/…) is flagged as a leak contract violation', () => {
+      for (const unit of ['row', 'record', 'sample', '行', 'per-row']) {
+        const r = parseCvReport({ cv_scheme: 'kfold', entity_unit: unit, folds: 5, score: 1 });
+        expect(r.report).toBeUndefined();
+        expect(r.violation).toContain('行単位CV');
+        expect(r.violation).toContain('P1');
+      }
+    });
+
+    test('drops per_entity_scores when it contains non-finite values', () => {
+      const r = parseCvReport({ ...valid, per_entity_scores: [1, 'x', 3] });
+      expect(r.report?.perEntityScores).toBeUndefined();
+    });
+  });
+
+  describe('readCvReport', () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cvreport-'));
+    });
+    afterEach(() => {
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    test('missing file returns an empty result (→ SOT-2513 fail-safe path), no throw', () => {
+      const r = readCvReport(path.join(dir, 'nope.json'));
+      expect(r.report).toBeUndefined();
+      expect(r.violation).toBeUndefined();
+    });
+
+    test('malformed JSON is a contract violation, not a crash', () => {
+      const f = path.join(dir, 'cv_report.json');
+      fs.writeFileSync(f, '{not json');
+      expect(readCvReport(f).violation).toContain('CV契約違反');
+    });
+
+    test('a valid report file round-trips to a report', () => {
+      const f = path.join(dir, 'cv_report.json');
+      fs.writeFileSync(f, JSON.stringify({ cv_scheme: 'group', entity_unit: 'well', folds: 4, score: 2.5 }));
+      expect(readCvReport(f).report).toMatchObject({ entityUnit: 'well', score: 2.5 });
+    });
+  });
+
+  describe('formatCvSummary', () => {
+    test('renders scheme/entity/folds and a per-entity range when present', () => {
+      const s = formatCvSummary({
+        cvScheme: 'group-kfold',
+        entityUnit: 'well',
+        folds: 5,
+        score: 8.31,
+        perEntityScores: [5.6, 11.4, 8.3],
+      });
+      expect(s).toContain('CV score 8.31');
+      expect(s).toContain('well単位hold-out');
+      expect(s).toContain('5-fold');
+      expect(s).toContain('per-entity(3)');
+      expect(s).toContain('range [5.6, 11.4]');
+    });
+
+    test('omits the per-entity line when absent', () => {
+      const s = formatCvSummary({ cvScheme: 'time', entityUnit: 'series', folds: 3, score: 0.4 });
+      expect(s).not.toContain('per-entity');
+    });
+  });
+
+  describe('computeCvPublicGap / formatCvPublicGapSummary', () => {
+    test('relative gap is normalized by |public| and drives the ⚠ threshold', () => {
+      // CV 8.3 vs public 6.4 → ~30% relative gap, over the 10% warn threshold.
+      const gap = computeCvPublicGap(8.3, 6.4);
+      expect(gap.absolute).toBeCloseTo(1.9, 6);
+      expect(gap.relative).toBeGreaterThan(CV_PUBLIC_GAP_RELATIVE_WARN);
+      const summary = formatCvPublicGapSummary(gap);
+      expect(summary).toContain('CV最良 8.3');
+      expect(summary).toContain('public最良 6.4');
+      expect(summary).toContain('悲観側(CV)を信じ');
+    });
+
+    test('a small divergence stays below the warn threshold', () => {
+      const gap = computeCvPublicGap(6.45, 6.4);
+      expect(gap.relative).toBeLessThan(CV_PUBLIC_GAP_RELATIVE_WARN);
+    });
+  });
+
+  describe('referenceOverfitWarning (playbook P5)', () => {
+    test('min-direction: beating the reference by more than the margin warns', () => {
+      // rogii: reference 7.872, our port 6.477 (lower is better) → beat by ~18%.
+      const w = referenceOverfitWarning(6.477, 7.872, 'min');
+      expect(w).toContain('過学習疑い');
+      expect(w).toContain('P5');
+      expect(w).toContain('6.477');
+      expect(w).toContain('7.872');
+    });
+
+    test('max-direction: beating the reference upward warns; matching it does not', () => {
+      expect(referenceOverfitWarning(0.95, 0.9, 'max')).toContain('過学習疑い');
+      expect(referenceOverfitWarning(0.9, 0.9, 'max')).toBeUndefined();
+    });
+
+    test('being at or worse than the reference does not warn', () => {
+      expect(referenceOverfitWarning(7.9, 7.872, 'min')).toBeUndefined(); // worse (higher) in min
+      expect(referenceOverfitWarning(0.85, 0.9, 'max')).toBeUndefined(); // worse (lower) in max
+    });
+
+    test('a within-margin overshoot is not significant', () => {
+      const within = 0.9 * (1 + REFERENCE_OVERFIT_RELATIVE_MARGIN / 2);
+      expect(referenceOverfitWarning(within, 0.9, 'max')).toBeUndefined();
+    });
+  });
+
+  describe('formatCvGapTrend / parseCvGapHistory', () => {
+    test('a widening gap history flags 汎化リスク増大', () => {
+      const out = formatCvGapTrend([0.05, 0.12, 0.3]);
+      expect(out).toContain('gap 推移');
+      expect(out).toContain('汎化リスク増大');
+      expect(out).toContain('拡大傾向');
+    });
+
+    test('a stable/narrowing history shows the trend without a warning', () => {
+      const out = formatCvGapTrend([0.3, 0.2, 0.1]);
+      expect(out).toContain('gap 推移');
+      expect(out).not.toContain('汎化リスク増大');
+    });
+
+    test('fewer than two points has no trend', () => {
+      expect(formatCvGapTrend([])).toBeUndefined();
+      expect(formatCvGapTrend([0.2])).toBeUndefined();
+    });
+
+    test('parseCvGapHistory reads relativeGap or derives it from score/publicScore, skipping junk', () => {
+      const jsonl = [
+        '{"relativeGap": 0.05}',
+        'not-json',
+        '{"score": 8.3, "publicScore": 6.4}',
+        '{"unrelated": true}',
+      ].join('\n');
+      const gaps = parseCvGapHistory(jsonl);
+      expect(gaps).toHaveLength(2);
+      expect(gaps[0]).toBeCloseTo(0.05, 6);
+      expect(gaps[1]).toBeCloseTo(computeCvPublicGap(8.3, 6.4).relative, 6);
     });
   });
 });

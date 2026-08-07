@@ -199,6 +199,65 @@ describe('kaggleImprovement', () => {
         trialsPerGame: 3,
       });
     });
+
+    // SOT-2514 — validation ブロック（一次KPI / cv_report / 参照スコア）。
+    test('validation defaults to fail-safe primary:"cv" when absent', () => {
+      const c = reg().competitions[0];
+      expect(c.validation).toEqual({ primary: 'cv' });
+    });
+
+    test('validation parses primary/cv_report_path/tail_heavy_metric/reference_public_score', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].validation = {
+        primary: 'cv',
+        cv_report_path: 'docs/ai/my_cv.json',
+        tail_heavy_metric: 'pooled_rmse',
+        reference_public_score: 7.872,
+      };
+      expect(parseTargetsRegistry(raw).competitions[0].validation).toEqual({
+        primary: 'cv',
+        cvReportPath: 'docs/ai/my_cv.json',
+        tailHeavyMetric: 'pooled_rmse',
+        referencePublicScore: 7.872,
+      });
+    });
+
+    test('validation accepts the lb exception and camelCase keys', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].validation = { primary: 'lb', cvReportPath: 'x/cv.json' };
+      const v = parseTargetsRegistry(raw).competitions[0].validation;
+      expect(v.primary).toBe('lb');
+      expect(v.cvReportPath).toBe('x/cv.json');
+    });
+
+    test('validation fails loud on an invalid primary or field type', () => {
+      const badPrimary = JSON.parse(JSON.stringify(rawRegistry));
+      badPrimary.competitions[0].validation = { primary: 'oof' };
+      expect(() => parseTargetsRegistry(badPrimary)).toThrow(/validation\.primary/);
+
+      const badRef = JSON.parse(JSON.stringify(rawRegistry));
+      badRef.competitions[0].validation = { reference_public_score: 'high' };
+      expect(() => parseTargetsRegistry(badRef)).toThrow(/reference_public_score/);
+
+      const badPath = JSON.parse(JSON.stringify(rawRegistry));
+      badPath.competitions[0].validation = { cv_report_path: '' };
+      expect(() => parseTargetsRegistry(badPath)).toThrow(/cv_report_path/);
+    });
+
+    test('the live registry parses and every competition has a validation primary', () => {
+      const here = path.dirname(fileURLToPath(import.meta.url));
+      const raw = JSON.parse(
+        fs.readFileSync(
+          path.join(here, '..', '..', 'scripts', 'ai', 'kaggle_targets_registry.json'),
+          'utf8'
+        )
+      );
+      const r = parseTargetsRegistry(raw);
+      expect(r.competitions.length).toBeGreaterThan(0);
+      for (const comp of r.competitions) {
+        expect(['cv', 'lb']).toContain(comp.validation.primary);
+      }
+    });
   });
 
   describe('rotation resolution', () => {
@@ -369,6 +428,26 @@ describe('kaggleImprovement', () => {
         cvPublicGapWarnThreshold: 1,
       });
       expect(small).not.toContain('⚠ 乖離警告');
+    });
+
+    // SOT-2514 — 参照実装スコア超過(P5)の過学習疑い警告 / gap 推移 digest を本文へ挿入する。
+    test('reference-overfit warning and gap-trend digest are injected into the gap section', () => {
+      const c = reg().competitions[0];
+      const none = buildIssueBody(c.targets[0], c, 3, {});
+      expect(none).not.toContain('過学習疑い(playbook P5)');
+      const withWarn = buildIssueBody(c.targets[0], c, 3, {
+        referenceOverfitWarning:
+          '⚠ 過学習疑い(playbook P5): 自 best public 6.477 が参照 public 7.872 を 17.7% 上回っている。',
+        cvPublicGapTrend: 'gap 推移(相対): 5.0% → 12.0% — ⚠ 乖離が拡大傾向。汎化リスク増大',
+      });
+      expect(withWarn).toContain('過学習疑い(playbook P5)');
+      expect(withWarn).toContain('参照 public 7.872');
+      expect(withWarn).toContain('gap 推移(相対)');
+      expect(withWarn).toContain('汎化リスク増大');
+      // 乖離監視セクション内に入っていること。
+      const section = withWarn.split('### CV↔public gap（乖離監視）')[1] ?? '';
+      expect(section).toContain('過学習疑い(playbook P5)');
+      expect(section).toContain('gap 推移(相対)');
     });
 
     test('embeds A/B telemetry, chain isolation and automatic continuation', () => {

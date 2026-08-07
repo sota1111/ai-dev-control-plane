@@ -267,6 +267,238 @@ export function bestPublicScoreFromRows(
   return best;
 }
 
+/* ============================================================================
+ * SOT-2514: leak-free CV レポート → cvSummary / CV↔public gap / 参照実装スコア警告
+ * ========================================================================== */
+
+/** target repo 内 cv_report.json の既定相対パス。 */
+export const DEFAULT_CV_REPORT_PATH = 'docs/ai/cv_report.json';
+
+/** CV↔public 相対乖離で `⚠ 乖離警告` を出す既定閾値（相対 10%、SOT-2514）。 */
+export const CV_PUBLIC_GAP_RELATIVE_WARN = 0.1;
+
+/** 自 best public が参照 public を「有意に上回った」と判定する既定相対マージン（2%、SOT-2514・P5）。 */
+export const REFERENCE_OVERFIT_RELATIVE_MARGIN = 0.02;
+
+/** entity_unit が行単位CV（リーク源）を示す語。エンティティ単位hold-out必須（playbook P1）。 */
+const ROW_LEVEL_UNIT_TOKENS = [
+  'row',
+  'record',
+  'sample',
+  'instance',
+  'index',
+  '行',
+  'レコード',
+  'サンプル',
+];
+
+/**
+ * target repo の cv_report.json のスキーマ（エンティティ単位 hold-out 必須）。
+ * `{cv_scheme, entity_unit, folds, score, per_entity_scores?}`。
+ */
+export interface CvReport {
+  cvScheme: string;
+  entityUnit: string;
+  folds: number;
+  score: number;
+  perEntityScores?: number[];
+}
+
+/** parseCvReport / readCvReport の結果。violation があれば cvSummary としてそのまま供給する警告文。 */
+export interface CvReportResult {
+  report?: CvReport;
+  /** スキーマ不正/行単位CV 等の「CV契約違反」警告文。 */
+  violation?: string;
+}
+
+function round4(n: number): number {
+  return Math.round(n * 1e4) / 1e4;
+}
+
+/**
+ * cv_report.json の生 JSON を検証する（snake/camel 両受け）。**throw しない**。
+ *  - オブジェクトでない / 必須フィールド欠落・型不正 → CV契約違反 warning。
+ *  - entity_unit が行単位（row/record/…）→ CV契約違反 warning（リーク源）。
+ *  - 正常 → report を返す。
+ */
+export function parseCvReport(raw: unknown): CvReportResult {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {
+      violation:
+        'CV契約違反: cv_report.json が JSON オブジェクトでない。最初の子Issueで leak-free CV（エンティティ単位hold-out）を整備する(playbook P1)',
+    };
+  }
+  const o = raw as Record<string, unknown>;
+  const cvScheme = o.cv_scheme ?? o.cvScheme;
+  const entityUnit = o.entity_unit ?? o.entityUnit;
+  const folds = o.folds;
+  const score = o.score;
+  const perEntityRaw = o.per_entity_scores ?? o.perEntityScores;
+
+  const missing: string[] = [];
+  if (typeof cvScheme !== 'string' || !cvScheme.trim()) missing.push('cv_scheme');
+  if (typeof entityUnit !== 'string' || !entityUnit.trim()) missing.push('entity_unit');
+  if (typeof folds !== 'number' || !Number.isFinite(folds) || folds < 1) missing.push('folds');
+  if (typeof score !== 'number' || !Number.isFinite(score)) missing.push('score');
+  if (missing.length > 0) {
+    return {
+      violation: `CV契約違反: cv_report.json のスキーマが不正（欠落/型不正: ${missing.join(', ')}）。エンティティ単位hold-outの leak-free CV を整備する(playbook P1)`,
+    };
+  }
+
+  const unitLower = (entityUnit as string).trim().toLowerCase();
+  if (ROW_LEVEL_UNIT_TOKENS.some((tok) => unitLower === tok || unitLower.includes(tok))) {
+    return {
+      violation: `CV契約違反: entity_unit="${(entityUnit as string).trim()}" は行単位CVの疑い。同一エンティティが train/val に跨ってリークする。坑井/ユーザー/系列などエンティティ単位の hold-out にする(playbook P1)`,
+    };
+  }
+
+  const report: CvReport = {
+    cvScheme: (cvScheme as string).trim(),
+    entityUnit: (entityUnit as string).trim(),
+    folds: folds as number,
+    score: score as number,
+  };
+  if (
+    Array.isArray(perEntityRaw) &&
+    perEntityRaw.length > 0 &&
+    perEntityRaw.every((n) => typeof n === 'number' && Number.isFinite(n))
+  ) {
+    report.perEntityScores = perEntityRaw as number[];
+  }
+  return { report };
+}
+
+/**
+ * cv_report.json を読む（best-effort・**throw しない**）。無ければ `{}`（→ 本文は SOT-2513 fail-safe
+ * 経路に落ちる）。読めたが不正なら violation を返す。
+ */
+export function readCvReport(
+  file: string,
+  log: (m: string) => void = () => {
+    /* noop */
+  }
+): CvReportResult {
+  let content: string;
+  try {
+    content = fs.readFileSync(file, 'utf8');
+  } catch (err: any) {
+    log(`cv_report read skipped (${file}): ${err?.message || err}`);
+    return {};
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(content);
+  } catch (err: any) {
+    log(`cv_report parse failed (${file}): ${err?.message || err}`);
+    return {
+      violation:
+        'CV契約違反: cv_report.json が不正なJSON。leak-free CV（エンティティ単位hold-out）を整備し直す(playbook P1)',
+    };
+  }
+  return parseCvReport(json);
+}
+
+/** 正常な CvReport → 人間可読の cvSummary（本文の「一次 leak-free CV」行に載る）。 */
+export function formatCvSummary(report: CvReport): string {
+  const parts = [
+    `CV score ${report.score} (${report.cvScheme} / ${report.entityUnit}単位hold-out / ${report.folds}-fold)`,
+  ];
+  const arr = report.perEntityScores;
+  if (arr && arr.length > 0) {
+    const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+    const min = Math.min(...arr);
+    const max = Math.max(...arr);
+    parts.push(
+      `per-entity(${arr.length}): mean ${round4(mean)} / range [${round4(min)}, ${round4(max)}]（重い裾は playbook P3 頑健受容で診断）`
+    );
+  }
+  return parts.join('\n');
+}
+
+/** CV↔public の乖離量。relative = |cv - public| / max(|public|, ε)。 */
+export interface CvPublicGap {
+  cvScore: number;
+  publicScore: number;
+  absolute: number;
+  relative: number;
+}
+
+export function computeCvPublicGap(cvScore: number, publicScore: number): CvPublicGap {
+  const absolute = Math.abs(cvScore - publicScore);
+  const denom = Math.max(Math.abs(publicScore), 1e-9);
+  return { cvScore, publicScore, absolute, relative: absolute / denom };
+}
+
+/** CV↔public gap の本文サマリ。CV最良 / public最良 / 相対乖離% を明示し、悲観側(CV)を信じる旨を添える。 */
+export function formatCvPublicGapSummary(gap: CvPublicGap): string {
+  const pct = (gap.relative * 100).toFixed(1);
+  return `CV最良 ${gap.cvScore} / public最良 ${gap.publicScore} / 相対乖離 ${pct}%（絶対差 ${round4(gap.absolute)}）— 乖離時は悲観側(CV)を信じ、public 追い禁止(playbook P2)`;
+}
+
+/**
+ * 参照実装/公開NBの公称 public を自 best public が有意に上回ったら過学習疑い警告（playbook P5）。
+ * direction=max は「大きいほど良い」、min は「小さいほど良い」。上回っていなければ undefined。
+ */
+export function referenceOverfitWarning(
+  bestPublic: number,
+  referencePublic: number,
+  direction: 'max' | 'min' = 'max',
+  margin = REFERENCE_OVERFIT_RELATIVE_MARGIN
+): string | undefined {
+  if (!Number.isFinite(bestPublic) || !Number.isFinite(referencePublic)) return undefined;
+  const denom = Math.max(Math.abs(referencePublic), 1e-9);
+  const rel = (bestPublic - referencePublic) / denom; // >0: best が ref を上回る（max 方向）
+  const beats = direction === 'max' ? rel > margin : -rel > margin;
+  if (!beats) return undefined;
+  const pct = (Math.abs(rel) * 100).toFixed(1);
+  return `⚠ 過学習疑い(playbook P5): 自 best public ${bestPublic} が参照 public ${referencePublic} を ${pct}% 上回っている。忠実な移植は参照近傍に着地するはず。この上振れは後付け較正の過学習を疑い、必ず leak-free CV で裏取りする`;
+}
+
+/**
+ * gap 履歴（時系列の相対乖離）から推移 digest を作る。拡大傾向なら「汎化リスク増大」を含める。
+ * 2点未満なら undefined（推移を語れない）。
+ */
+export function formatCvGapTrend(relativeGaps: number[]): string | undefined {
+  const gaps = relativeGaps.filter((g) => Number.isFinite(g));
+  if (gaps.length < 2) return undefined;
+  const trend = gaps.map((g) => `${(g * 100).toFixed(1)}%`).join(' → ');
+  const widening = gaps[gaps.length - 1] > gaps[0];
+  return widening
+    ? `gap 推移(相対): ${trend} — ⚠ 乖離が拡大傾向。汎化リスク増大、CV再アンカリング/汎化ギャップ診断を優先(playbook P2)`
+    : `gap 推移(相対): ${trend}`;
+}
+
+/**
+ * cv_report_history.jsonl の各行から相対 gap を抽出する。行は `{relativeGap}` か
+ * `{score, publicScore}` を受け付け、不正行は握りつぶす。
+ */
+export function parseCvGapHistory(content: string): number[] {
+  const out: number[] = [];
+  for (const line of (content || '').split(/\r?\n/)) {
+    const s = line.trim();
+    if (!s) continue;
+    let obj: any;
+    try {
+      obj = JSON.parse(s);
+    } catch {
+      continue;
+    }
+    if (!obj || typeof obj !== 'object') continue;
+    if (typeof obj.relativeGap === 'number' && Number.isFinite(obj.relativeGap)) {
+      out.push(Math.abs(obj.relativeGap));
+    } else if (
+      typeof obj.score === 'number' &&
+      Number.isFinite(obj.score) &&
+      typeof obj.publicScore === 'number' &&
+      Number.isFinite(obj.publicScore)
+    ) {
+      out.push(computeCvPublicGap(obj.score, obj.publicScore).relative);
+    }
+  }
+  return out;
+}
+
 /**
  * failure-log.md 本文から、指定キー（repo名・コンペkey 等）を含む行だけを抜粋する。
  * 1行も一致しなければ undefined。長すぎる場合は maxLines で打ち切り、省略を明示する。
@@ -549,22 +781,23 @@ export async function collectImproveContext(
 
     const plateau = detectScorePlateau(progression, t.repo, opts.plateauThreshold ?? 3);
 
-    // LB順位サマリ + 順位履歴（best-effort）。ローカル評価は代理指標、順位が一次KPI。
+    // 自分の best public score を submission 履歴の生行から直接取る（score-progression.jsonl は
+    // `[repo:...]` 帰属マーカーが無いと空になり順位を出せないため、そこに依存しない）。生行から
+    // 取れない場合のみ score-progression にフォールバックする。LB順位・CV↔public gap の両方で使う。
+    const direction = comp.scoreDirection;
+    const repoScores = progression
+      .filter((entry) => entry.repo === t.repo)
+      .map((entry) => entry.publicScore);
+    const progressionBest = repoScores.length > 0
+      ? repoScores.reduce((best, s) =>
+          (direction === 'max' ? s > best : s < best) ? s : best, repoScores[0])
+      : undefined;
+    const bestPublicScore =
+      bestPublicScoreFromRows(targetSubmissionRows, direction) ?? progressionBest;
+
+    // LB順位サマリ + 順位履歴（best-effort）。ローカル評価は代理指標、順位は二次sanity（SOT-2513）。
     let leaderboardSummary: string | undefined;
     try {
-      const direction = comp.scoreDirection;
-      // 自分の best public score を submission 履歴の生行から直接取る（score-progression.jsonl は
-      // `[repo:...]` 帰属マーカーが無いと空になり順位を出せないため、そこに依存しない）。生行から
-      // 取れない場合のみ score-progression にフォールバックする。
-      const repoScores = progression
-        .filter((entry) => entry.repo === t.repo)
-        .map((entry) => entry.publicScore);
-      const progressionBest = repoScores.length > 0
-        ? repoScores.reduce((best, s) =>
-            (direction === 'max' ? s > best : s < best) ? s : best, repoScores[0])
-        : undefined;
-      const bestPublicScore =
-        bestPublicScoreFromRows(targetSubmissionRows, direction) ?? progressionBest;
       if (bestPublicScore !== undefined && leaderboardScores.length > 0) {
         const standing = computePublicRank(leaderboardScores, bestPublicScore, direction);
         const entry: LeaderboardRankEntry = {
@@ -603,6 +836,48 @@ export async function collectImproveContext(
       log(`leaderboard summary failed for ${t.repo}: ${err?.message || err}`);
     }
 
+    // SOT-2514: leak-free CV レポート → cvSummary / CV↔public gap / 参照超過(P5) / gap 推移。
+    // 全て best-effort。cv_report が無ければ本文は SOT-2513 の fail-safe（「CV未整備…」）に落ちる。
+    let cvSummary: string | undefined;
+    let cvPublicGap: number | undefined;
+    let cvPublicGapSummary: string | undefined;
+    let cvPublicGapWarnThreshold: number | undefined;
+    let referenceOverfitWarn: string | undefined;
+    let cvPublicGapTrend: string | undefined;
+    try {
+      const repoDir = path.join(targetsRoot, t.repo);
+      const cvReportRel = comp.validation.cvReportPath || DEFAULT_CV_REPORT_PATH;
+      const cvResult = readCvReport(path.join(repoDir, cvReportRel), log);
+      if (cvResult.violation) {
+        // スキーマ不正/行単位CV → 契約違反警告を cvSummary に載せる（本文の一次CV行に表示）。
+        cvSummary = cvResult.violation;
+      } else if (cvResult.report) {
+        cvSummary = formatCvSummary(cvResult.report);
+        if (bestPublicScore !== undefined) {
+          const gap = computeCvPublicGap(cvResult.report.score, bestPublicScore);
+          cvPublicGap = gap.relative;
+          cvPublicGapWarnThreshold = CV_PUBLIC_GAP_RELATIVE_WARN;
+          cvPublicGapSummary = formatCvPublicGapSummary(gap);
+        }
+        // gap 推移（cv_report_history.jsonl があれば拡大傾向を診断）。
+        const historyRel = cvReportRel.replace(/\.json$/i, '_history.jsonl');
+        try {
+          cvPublicGapTrend = formatCvGapTrend(
+            parseCvGapHistory(fs.readFileSync(path.join(repoDir, historyRel), 'utf8'))
+          );
+        } catch {
+          /* 履歴なし — 推移は出さない */
+        }
+      }
+      // 参照実装 public 超過（P5）: registry validation の reference_public_score を基準にする。
+      const ref = comp.validation.referencePublicScore;
+      if (ref !== undefined && bestPublicScore !== undefined) {
+        referenceOverfitWarn = referenceOverfitWarning(bestPublicScore, ref, direction);
+      }
+    } catch (err: any) {
+      log(`cv report/gap collection failed for ${t.repo}: ${err?.message || err}`);
+    }
+
     // 実験台帳ダイジェスト（design §48）: target repo の docs/ai/experiment_ledger.jsonl を読む。
     let experimentLedgerDigest: string | undefined;
     try {
@@ -626,6 +901,12 @@ export async function collectImproveContext(
       recentIssuesDigest: digest,
       failureKpiExcerpt,
       ...(leaderboardSummary ? { leaderboardSummary } : {}),
+      ...(cvSummary ? { cvSummary } : {}),
+      ...(cvPublicGap !== undefined ? { cvPublicGap } : {}),
+      ...(cvPublicGapWarnThreshold !== undefined ? { cvPublicGapWarnThreshold } : {}),
+      ...(cvPublicGapSummary ? { cvPublicGapSummary } : {}),
+      ...(referenceOverfitWarn ? { referenceOverfitWarning: referenceOverfitWarn } : {}),
+      ...(cvPublicGapTrend ? { cvPublicGapTrend } : {}),
       ...(experimentLedgerDigest ? { experimentLedgerDigest } : {}),
     };
   }

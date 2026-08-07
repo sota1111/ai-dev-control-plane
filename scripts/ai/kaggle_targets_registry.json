@@ -26,7 +26,8 @@
     "state": "cron が更新する実行状態（last_run_at / created_today / last_submitted_date）。",
     "allocation": "適応的資源配分（design §50）。mode=dynamic で各cron枠は履歴から算出したpriority最高のimproveコンペを動的選択（静的rotationは無視、未設定/staticなら従来通り）。auto_maintain_threshold=連続非昇格がこの回数以上の系統を自動でmode:maintainへ落として枠を再配分（design §49、0で無効）。weightsはpriority合成係数（momentum/headroom/rank_gain/deadline）。 cooldown_window/cooldown_factor=直近起案コンペのpriority減衰(多様性補正・momentum独占防止)。window枠内の各出現ごとにfactor(0<f<=1)を乗算、factor=1で無効。",
     "competitions[].pinned_hours_jst": "任意。固定枠。このJST hourの枠は動的配分(allocation)・rotationを無視してこのコンペが確定当番になる（締切接近コンペの一定間隔サイクル保証用）。schedule_hours_jstに含めること。コンペ間で重複不可。固定枠の起案はrecent_competitionsに記録されず、動的枠のcooldownへ影響しない。",
-    "competitions[].pinned_lineage": "任意。固定枠で起案する系統を1つに限定（claude/gpt）。未設定は両系統。pinned_hours_jstが必須。"
+    "competitions[].pinned_lineage": "任意。固定枠で起案する系統を1つに限定（claude/gpt）。未設定は両系統。pinned_hours_jstが必須。",
+    "competitions[].validation": "SOT-2514 検証設定。欠落時は fail-safe で {primary:'cv'} 扱い。primary=一次KPI（cv=leak-free CVを一次に信じる[既定・hidden private splitのコンペは必ずcv] / lb=public==privateなどリークの無い例外構成でのみpublic LBを一次にできる）。cv_report_path=target repo内 cv_report.json の相対パス（既定 docs/ai/cv_report.json。{cv_scheme, entity_unit, folds, score, per_entity_scores?}、entity単位hold-out必須。行単位CVは契約違反警告）。tail_heavy_metric=重い裾metric名（playbook P3頑健受容の対象・説明メタ）。reference_public_score=参照実装/公開NBの公称public。自best publicが有意（既定2%）に上回ったら後付け較正の過学習を疑う警告を本文へ挿入（playbook P5）。既存コンペへの値設定は別途。"
   },
   "enabled": true,
   "schedule_hours_jst": [
