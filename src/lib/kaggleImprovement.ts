@@ -602,8 +602,24 @@ export interface ImprovementMaterial {
   recentIssuesDigest?: string;
   /** failure-log / KPI 抜粋。 */
   failureKpiExcerpt?: string;
-  /** LB 順位サマリ（design §42 一次KPI）: best score / rank / top との差 / 順位推移。 */
+  /**
+   * leak-free CV サマリ（SOT-2513 一次KPI）: エンティティ単位/時系列で hold out した leak-free
+   * 検証の CV スコア。未提供なら本文は「CV未整備」fail-safe を表示する。
+   */
+  cvSummary?: string;
+  /** public LB サマリ（design §42 → SOT-2513 で二次sanityへ降格）: best score / rank / top との差 / 順位推移。 */
   leaderboardSummary?: string;
+  /**
+   * CV↔public 乖離の説明枠（SOT-2513）。gap 値の実供給は次サイクル。本Issueはテンプレ/インターフェース。
+   */
+  cvPublicGapSummary?: string;
+  /**
+   * CV と public の乖離量（正規化した絶対値）。閾値超で本文に `⚠ 乖離警告` を挿入する。
+   * 実供給は次Issue（本Issueはインターフェースのみ）。
+   */
+  cvPublicGap?: number;
+  /** `⚠ 乖離警告` を出す gap 閾値の上書き（既定 DEFAULT_CV_PUBLIC_GAP_WARN_THRESHOLD）。 */
+  cvPublicGapWarnThreshold?: number;
   /** 実験台帳ダイジェスト（design §48）: 試行済み軸と非昇格軸（再試行禁止リスト）。 */
   experimentLedgerDigest?: string;
 }
@@ -667,6 +683,12 @@ export interface CyclePlan {
   reason: string;
 }
 
+/**
+ * CV↔public 乖離で `⚠ 乖離警告` を挿入する既定閾値（正規化ギャップの絶対値）。
+ * material.cvPublicGapWarnThreshold で上書き可。gap 値の実供給は次サイクル（SOT-2513）。
+ */
+export const DEFAULT_CV_PUBLIC_GAP_WARN_THRESHOLD = 1;
+
 /** 起案Issueのタイトル（§6・process 名を避け feature/outcome 起点）。 */
 export function buildIssueTitle(target: ImprovementTarget, cycleNumber: number): string {
   return `[${target.repo}] Kaggle順位向上サイクル第${cycleNumber}次 — 改善方針の立案と実施`;
@@ -687,8 +709,24 @@ export function buildIssueBody(
     material.previousSubmission?.trim() || '(前回提出の記録なし — 初回サイクル、または取得できず)';
   const recent = material.recentIssuesDigest?.trim() || '(新規の完了Issueなし)';
   const failure = material.failureKpiExcerpt?.trim() || '(該当なし)';
+  // 一次KPI = leak-free CV。未整備なら fail-safe（最初の子IssueでCV構築を必須にする）。
+  const cv =
+    material.cvSummary?.trim() ||
+    'CV未整備 — 最初の子Issueでleak-freeなCV（エンティティ単位/時系列 holdout）構築を必須とする。CVを作るまで昇格判断しない';
   const leaderboard =
-    material.leaderboardSummary?.trim() || '(LB順位を取得できず — CLI疎通/認証を確認。順位が一次KPI)';
+    material.leaderboardSummary?.trim() ||
+    '(public LB を取得できず — CLI疎通/認証を確認。public は二次sanity)';
+  // CV↔public gap 表示枠（SOT-2513）。gap 値の実供給は次サイクル。閾値超なら乖離警告を前置。
+  const gapSummary =
+    material.cvPublicGapSummary?.trim() ||
+    '(gap 値は次サイクルで供給予定 — CVとpublicを突き合わせ、乖離時はCVを信じる)';
+  const gapThreshold = material.cvPublicGapWarnThreshold ?? DEFAULT_CV_PUBLIC_GAP_WARN_THRESHOLD;
+  const gapWarn =
+    typeof material.cvPublicGap === 'number' &&
+    Number.isFinite(material.cvPublicGap) &&
+    Math.abs(material.cvPublicGap) >= gapThreshold
+      ? '⚠ 乖離警告: CV↔public が大きく乖離。public 追いを止め、悲観側(CV)を信じる。escalation ladder の「汎化ギャップ診断」を優先する。\n'
+      : '';
   const ledger = material.experimentLedgerDigest?.trim()
     || '(実験台帳なし — 初回サイクル、または未整備。今回から docs/ai/experiment_ledger.jsonl へ記録すること)';
   const convergeMode = phase?.phase === 'converge'
@@ -733,8 +771,14 @@ Kaggleコンペ \`${competition.kaggleCompetition}\`（repo: ${target.repo} / �
 順位を向上させる次の改善方針を決定し、子Issueに分解して実施する。
 
 ## 入力材料（cronが自動収集・要約なし）
-### Leaderboard 順位（一次KPI）
-${leaderboard}
+### 検証階層（一次=leak-free CV / 二次=public LB）
+一次KPI = **leak-free CV**（エンティティ単位・時系列で hold out した leak-free 検証）。public LB は
+**二次 sanity** に過ぎない。**CVと public が乖離したら悲観側(CV)を信じる。public 追い（public best 選抜）禁止。**
+- 一次（信じる指標）leak-free CV: ${cv}
+- 二次（sanity のみ）public LB: ${leaderboard}
+
+### CV↔public gap（乖離監視）
+${gapWarn}${gapSummary}
 
 ### 前回提出結果（順位/スコア）
 ${prev}
@@ -752,13 +796,19 @@ ${securityEvaluationContract}
 ${convergeMode}
 
 ## 実施内容
+**提出前チェックリスト必須**: 提出前に必ず \`docs/kaggle-playbook/README.md\` の「提出前チェックリスト」を
+通過する（leak-free CV の有無・CVとpublicのオーダー一致・乖離時はCVを信じる・重い裾metricの頑健受容・
+最終2枠を CV最良×hedge で分散）。未整備の項目があれば最初の子Issueで整備する。
 1. 上記材料から未着手の改善軸を選定する。軸の選定にあたっては必ず web 検索を行い、Kaggle の上位
    ノートブック（公開 kernel・上位解法の write-up・discussion）を積極的に調査して、外部の有効な手法を
    改善軸の候補に含める（実験台帳を必ず参照し、非昇格済み軸の再試行は新しい根拠を明示。
-   ローカル評価が飽和しているのにLB順位が停滞/低下している場合は oracle ドリフトを疑い、局所A/Bを
-   続けず再アンカリング（holdout/GT再整備・評価系再構築）を軸に選ぶ。連続非昇格が続く場合は
-   escalation ladder（局所チューニング → データ/oracle整備 → アーキテクチャ変更 → 外部知識取り込み）
-   の次の段へ強制的に進む）。
+   ローカルCVが飽和しているのに public LB が乖離/低下している場合は oracle ドリフト・汎化ギャップを疑い、
+   局所A/Bを続けず再アンカリング（holdout/GT再整備・評価系再構築）を軸に選ぶ。CVと乖離した public は
+   追わない。連続非昇格が続く場合は escalation ladder の次の段へ強制的に進む:
+   (1) 局所チューニング → (2) データ/oracle整備(CV再アンカリング)
+   → (3) 汎化ギャップ診断(local↔public gapを作る層の特定・除去)
+   → (4) 問題定式化の見直し(点推定vs条件付き分布/恒等式/合成データ — playbook 03参照)
+   → (5) アーキテクチャ変更 → (6) 外部知識取り込み(portが参照publicを上回ったら過学習疑い)）。
    選定した軸・仮説・結果は target repo の \`docs/ai/experiment_ledger.jsonl\` へ JSONL で追記する
    （fields: recordedAt, axis, result=promoted|rejected|inconclusive, cycle, hypothesis, evidence）。
 2. 2〜5個の実装・検証子Issueに分解して登録（子Issue記述テンプレ・screen→confirmゲート・

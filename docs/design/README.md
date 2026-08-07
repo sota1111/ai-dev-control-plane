@@ -199,11 +199,14 @@ feature branch、意味のある commit、PR、CI、merge、Linear 同期の順�
 改善起案は leaderboard フィードバック（次節）と実験台帳（後述)を入力とし、何を最適化しているかを
 サイクルごとに明示する。
 
-## 42. Leaderboard フィードバック
+## 42. 検証階層（leak-free CV 一次 / public LB 二次）
 
-Kaggle の一次 KPI は leaderboard スコアと順位であり、提出後に自動取得して lineage ごとに履歴化する。
-ローカル評価はあくまで代理指標として扱い、順位の推移（絶対スコアと相対順位の両方）を次周期の
-改善起案と資源配分の入力にする。
+Kaggle の一次 KPI は **leak-free CV**（エンティティ単位・時系列で hold out した検証）であり、public LB は
+**二次の sanity** に過ぎない。leaderboard スコアと順位は提出後に自動取得して lineage ごとに履歴化するが、
+昇格・最終提出選定の判断は CV を信じて行う。CV と public が乖離したら悲観側（CV）を採り、public 追い
+（public best の選抜）はしない（rogii 事後分析: public 銅圏→private 圏外の敗因は public 過学習）。
+順位は最終的な目的関数だが、過学習しやすい public を直接最適化せず、leak-free CV の改善を代理目標に
+据える。CV と public の gap は乖離監視の入力として履歴化する。
 
 ## 43. Oracle ドリフト検出と再アンカリング
 
@@ -236,8 +239,10 @@ lineage ごとに、試した改善軸、評価結果、昇格可否、飽和状
 ## 49. 飽和時の戦略転換
 
 改善軸の飽和は障害ではなく、戦略転換の契機として扱う。連続 N 回の非昇格が確定した lineage では、
-探索軸のクラスを段階的に強制切替する（局所チューニング → データ／oracle 整備 → アーキテクチャ変更
-→ 外部知識の取り込み）。全段階を尽くしても進まない場合は、人間を待って停止するのではなく、
+探索軸のクラスを段階的に強制切替する（局所チューニング → データ／oracle 整備（CV 再アンカリング）
+→ 汎化ギャップ診断（local↔public gap を作る層の特定・除去）→ 問題定式化の見直し（点推定 vs 条件付き
+分布・物理恒等式・合成データ）→ アーキテクチャ変更 → 外部知識の取り込み（port が参照 public を上回ったら
+過学習を疑う））。全段階を尽くしても進まない場合は、人間を待って停止するのではなく、
 計算資源を他の competition／lineage へ再配分し、当該 lineage は維持提出に縮退する。
 
 ## 50. 資源配分
@@ -383,7 +388,7 @@ webhook 起動、health check、cron、queue、cooldown、親再開、提出履�
 - 無進捗の run は watchdog が検出し、無期限に放置しない。
 - retry／resume は冪等であり、同じ出力への重複 writer を作らない。
 - Kaggle 提出は最上位改善サイクル親だけが行う。
-- Kaggle の一次 KPI は leaderboard スコアと順位であり、ローカル評価は代理指標として乖離を監視する。
+- Kaggle の一次 KPI は leak-free CV であり、public LB は二次 sanity として乖離を監視する（乖離時は CV を信じ public 追い禁止）。
 - 非昇格が確定した改善軸は実験台帳に記録し、新しい根拠なしに再試行しない。
 - 改善が飽和した lineage で人間を待って停止せず、戦略転換または資源再配分を先に行う。
 - repository／lineage ごとの score、artifact、fingerprint を混同しない。

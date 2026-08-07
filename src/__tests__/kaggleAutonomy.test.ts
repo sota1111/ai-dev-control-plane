@@ -146,7 +146,9 @@ describe('kaggle autonomy — planImprovementCycle strategy gates', () => {
     });
     const body = plan.targets[0].issueBody!;
     expect(plan.targets[0].action).toBe('draft');
-    expect(body).toContain('### Leaderboard 順位（一次KPI）');
+    // SOT-2513: 一次=leak-free CV / 二次=public LB(sanity)。旧「一次KPI=LB順位」ヘッダは廃止。
+    expect(body).not.toContain('### Leaderboard 順位（一次KPI）');
+    expect(body).toContain('### 検証階層（一次=leak-free CV / 二次=public LB）');
     expect(body).toContain('12位 / 表示50チーム');
     expect(body).toContain('### 実験台帳ダイジェスト');
     expect(body).toContain('belief-width');
