@@ -127,7 +127,30 @@ export interface ImprovementCompetition {
   pinnedHoursJst?: number[];
   /** 固定枠で起案する系統を1つに限定する（例 claude）。未設定なら両系統を起案対象にする。 */
   pinnedLineage?: Lineage;
+  /** 検証設定（SOT-2514）。欠落時は fail-safe に `{ primary: 'cv' }`。 */
+  validation: CompetitionValidation;
   targets: ImprovementTarget[];
+}
+
+/**
+ * コンペの検証設定（SOT-2514）。一次KPIの選択と、材料収集が読む leak-free CV レポートの所在、
+ * 参照実装スコア（過学習検知の基準）を宣言する。欠落時は fail-safe に `{ primary: 'cv' }`。
+ */
+export interface CompetitionValidation {
+  /**
+   * 一次KPI。`cv`=leak-free CV を一次に信じる（既定・hidden private split のコンペは必ず `cv`）／
+   * `lb`=public LB を一次にできる例外（public==private 等、リークの無い構成）だけに使う。
+   */
+  primary: 'cv' | 'lb';
+  /** target repo 内の cv_report.json 相対パス（既定 docs/ai/cv_report.json）。 */
+  cvReportPath?: string;
+  /** 重い裾 metric 名（playbook P3 の頑健受容が診断する対象。説明メタ）。 */
+  tailHeavyMetric?: string;
+  /**
+   * 参照実装/公開NB の公称 public score。自 best public が有意に上回ったら「後付け較正の過学習」を
+   * 疑う（playbook P5）。registry 側に置く基準値。
+   */
+  referencePublicScore?: number;
 }
 
 /**
@@ -453,6 +476,8 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
     pinnedLineage = pinnedLineageRaw;
   }
 
+  const validation = parseCompetitionValidation(co.validation, i);
+
   return {
     key,
     kaggleCompetition,
@@ -468,8 +493,58 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
     scoreDirection: scoreDirectionRaw,
     pinnedHoursJst,
     pinnedLineage,
+    validation,
     targets,
   };
+}
+
+/**
+ * `validation` ブロック（SOT-2514）を検証する。欠落/null は fail-safe に `{ primary: 'cv' }`。
+ * 値が存在するのに型不正なら fail-loud（他フィールド同様）。
+ */
+function parseCompetitionValidation(raw: unknown, i: number): CompetitionValidation {
+  if (raw === undefined || raw === null) return { primary: 'cv' };
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`registry.competitions[${i}].validation must be an object`);
+  }
+  const v = raw as Record<string, unknown>;
+  const primaryRaw = v.primary ?? 'cv';
+  if (primaryRaw !== 'cv' && primaryRaw !== 'lb') {
+    throw new Error(`registry.competitions[${i}].validation.primary must be "cv" or "lb"`);
+  }
+  const validation: CompetitionValidation = { primary: primaryRaw };
+
+  const cvReportPath = v.cv_report_path ?? v.cvReportPath;
+  if (cvReportPath !== undefined) {
+    if (typeof cvReportPath !== 'string' || !cvReportPath.trim()) {
+      throw new Error(
+        `registry.competitions[${i}].validation.cv_report_path must be a non-empty string`
+      );
+    }
+    validation.cvReportPath = cvReportPath.trim();
+  }
+
+  const tailHeavyMetric = v.tail_heavy_metric ?? v.tailHeavyMetric;
+  if (tailHeavyMetric !== undefined) {
+    if (typeof tailHeavyMetric !== 'string' || !tailHeavyMetric.trim()) {
+      throw new Error(
+        `registry.competitions[${i}].validation.tail_heavy_metric must be a non-empty string`
+      );
+    }
+    validation.tailHeavyMetric = tailHeavyMetric.trim();
+  }
+
+  const referencePublicScore = v.reference_public_score ?? v.referencePublicScore;
+  if (referencePublicScore !== undefined) {
+    if (typeof referencePublicScore !== 'number' || !Number.isFinite(referencePublicScore)) {
+      throw new Error(
+        `registry.competitions[${i}].validation.reference_public_score must be a finite number`
+      );
+    }
+    validation.referencePublicScore = referencePublicScore;
+  }
+
+  return validation;
 }
 
 function parseTarget(t: unknown, ci: number, ti: number, linSeen: Set<string>): ImprovementTarget {
@@ -620,6 +695,15 @@ export interface ImprovementMaterial {
   cvPublicGap?: number;
   /** `⚠ 乖離警告` を出す gap 閾値の上書き（既定 DEFAULT_CV_PUBLIC_GAP_WARN_THRESHOLD）。 */
   cvPublicGapWarnThreshold?: number;
+  /**
+   * SOT-2514: 自 best public が参照実装/公開NBの public を有意に上回った場合の過学習疑い警告
+   * （playbook P5）。CV↔public gap セクションへ挿入する。
+   */
+  referenceOverfitWarning?: string;
+  /**
+   * SOT-2514: cv_report 履歴から算出した gap 推移 digest。拡大傾向なら「汎化リスク増大」を含む。
+   */
+  cvPublicGapTrend?: string;
   /** 実験台帳ダイジェスト（design §48）: 試行済み軸と非昇格軸（再試行禁止リスト）。 */
   experimentLedgerDigest?: string;
 }
@@ -727,6 +811,13 @@ export function buildIssueBody(
     Math.abs(material.cvPublicGap) >= gapThreshold
       ? '⚠ 乖離警告: CV↔public が大きく乖離。public 追いを止め、悲観側(CV)を信じる。escalation ladder の「汎化ギャップ診断」を優先する。\n'
       : '';
+  // SOT-2514: 参照実装 public 超過（P5）の過学習疑い警告 / gap 推移。
+  const refWarn = material.referenceOverfitWarning?.trim()
+    ? `${material.referenceOverfitWarning.trim()}\n`
+    : '';
+  const gapTrend = material.cvPublicGapTrend?.trim()
+    ? `\n${material.cvPublicGapTrend.trim()}`
+    : '';
   const ledger = material.experimentLedgerDigest?.trim()
     || '(実験台帳なし — 初回サイクル、または未整備。今回から docs/ai/experiment_ledger.jsonl へ記録すること)';
   const convergeMode = phase?.phase === 'converge'
@@ -778,7 +869,7 @@ Kaggleコンペ \`${competition.kaggleCompetition}\`（repo: ${target.repo} / �
 - 二次（sanity のみ）public LB: ${leaderboard}
 
 ### CV↔public gap（乖離監視）
-${gapWarn}${gapSummary}
+${gapWarn}${refWarn}${gapSummary}${gapTrend}
 
 ### 前回提出結果（順位/スコア）
 ${prev}
