@@ -23,6 +23,7 @@ cd "$CONTROL_PLANE_DIR"
 
 WORKER_NONRESPONSE_EXIT=75
 WORKER_POLICY_BLOCKED_EXIT=76
+WORKER_USAGE_LIMIT_EXIT=77
 
 ROLE=""
 DRY_RUN=false
@@ -324,6 +325,13 @@ PROGRESS_NOTIFY
   if [ "$RC" -eq "$WORKER_POLICY_BLOCKED_EXIT" ]; then
     echo "WORKER_DISPATCH_POLICY_BLOCKED role=$ROLE worker=$WORKER exit=$RC" >&2
     exit "$WORKER_POLICY_BLOCKED_EXIT"
+  fi
+
+  # A worker usage limit pauses work assigned to that worker. Never transfer the same issue to the
+  # next provider; let the runner schedule its retry and continue with other providers' issues.
+  if [ "$RC" -eq "$WORKER_USAGE_LIMIT_EXIT" ]; then
+    echo "WORKER_DISPATCH_USAGE_LIMIT role=$ROLE worker=$WORKER exit=$RC -> no handoff" >&2
+    exit "$WORKER_NONRESPONSE_EXIT"
   fi
 
   # Non-response (75) or any other non-zero exit → hand off to the next worker in the chain.

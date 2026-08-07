@@ -2404,22 +2404,30 @@ describe('runner', () => {
       expect(result.classification.retryAt).toBeDefined();
     });
 
-    it('returns WORKER_UNAVAILABLE_RETRY (NOT global cooldown) when ONLY codex hit the usage limit (SOT-1587)', () => {
+    it('returns WORKER_USAGE_LIMIT_RETRY (NOT global cooldown) when codex hit the usage limit', () => {
       // codex hit its usage limit and handed off to Claude. This must NOT set the global (Claude-gating)
       // cooldown — codex has its own per-worker cooldown. Separates codex/claude cooldowns.
       const output = "ERROR: You've hit your usage limit. try again at Jul 8th, 2026 5:42 AM.\n"
         + 'CODEX_USAGE_LIMIT: cooldown set until epoch 1783437029, delegating to Claude';
       const result = classifyRunResult({ code: 1, output, completion: null });
-      expect(result.kind).toBe(RUN_RESULT.WORKER_UNAVAILABLE_RETRY);
+      expect(result.kind).toBe(RUN_RESULT.WORKER_USAGE_LIMIT_RETRY);
       expect(result.kind).not.toBe(RUN_RESULT.USAGE_LIMIT_RETRY);
     });
 
-    it('returns USAGE_LIMIT_RETRY (global cooldown) when Claude also hit the usage limit (SOT-1587)', () => {
+    it('returns WORKER_USAGE_LIMIT_RETRY when Claude hit the usage limit so GPT issues can continue', () => {
       const output = "ERROR: You've hit your usage limit. try again at Jul 8th, 2026 5:42 AM.\n"
         + 'CODEX_USAGE_LIMIT: cooldown set until epoch 1783437029, delegating to Claude\n'
         + 'CLAUDE_USAGE_LIMIT: cooldown set until epoch 1783437033, delegating';
       const result = classifyRunResult({ code: 1, output, completion: null });
-      expect(result.kind).toBe(RUN_RESULT.USAGE_LIMIT_RETRY);
+      expect(result.kind).toBe(RUN_RESULT.WORKER_USAGE_LIMIT_RETRY);
+    });
+
+    it('keeps a handoff-off Claude limit worker-scoped when run_auto surfaces exit 71', () => {
+      const output = "ERROR: You've hit your usage limit. try again at Jul 8th, 2026 5:42 AM.\n"
+        + 'CLAUDE_USAGE_LIMIT: cooldown set until epoch 1783437033';
+      const result = classifyRunResult({ code: 71, output, completion: null });
+      expect(result.kind).toBe(RUN_RESULT.WORKER_USAGE_LIMIT_RETRY);
+      expect(result.classification.retryAt).toBeDefined();
     });
 
     it('returns NON_RETRYABLE_LIMIT for non-retryable limit output', () => {

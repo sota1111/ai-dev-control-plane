@@ -15,12 +15,12 @@ describe('isWorkerOnlyUsageLimit (SOT-1587 codex/claude cooldown separation)', (
     expect(isWorkerOnlyUsageLimit('ANTIGRAVITY_USAGE_LIMIT: cooldown set until epoch 123, delegating to Claude')).toBe(true);
   });
 
-  it('false when Claude also hit a usage limit (global cooldown must still apply)', () => {
-    expect(isWorkerOnlyUsageLimit(CODEX_LIMIT + '\nCLAUDE_USAGE_LIMIT: cooldown set until epoch 123, delegating')).toBe(false);
+  it('true when Claude also hit a usage limit so GPT work can continue independently', () => {
+    expect(isWorkerOnlyUsageLimit(CODEX_LIMIT + '\nCLAUDE_USAGE_LIMIT: cooldown set until epoch 123, delegating')).toBe(true);
   });
 
-  it('false when Claude is the one limited (CLAUDE_COOLDOWN_ACTIVE)', () => {
-    expect(isWorkerOnlyUsageLimit('CLAUDE_COOLDOWN_ACTIVE: claude usage limit until epoch 123, delegating')).toBe(false);
+  it('true when Claude is the one limited (CLAUDE_COOLDOWN_ACTIVE)', () => {
+    expect(isWorkerOnlyUsageLimit('CLAUDE_COOLDOWN_ACTIVE: claude usage limit until epoch 123, delegating')).toBe(true);
   });
 
   it('false when no worker marker is present (bare usage-limit text stays global — backward compatible)', () => {

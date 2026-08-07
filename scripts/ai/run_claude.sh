@@ -73,6 +73,9 @@ else
   WORKER_TIMEOUT="$DEFAULT_WORKER_TIMEOUT"
 fi
 WORKER_NONRESPONSE_EXIT=75
+# Usage limit is distinct from a crash/non-response: the dispatcher must not hand this Claude issue
+# to GPT. It bubbles the marker up so the runner can park this issue and continue the GPT queue.
+WORKER_USAGE_LIMIT_EXIT=77
 
 # --- Per-role gate (only for DIRECT invocation) ---
 # The dispatcher (run_worker.sh) sets RUN_WORKER_DISPATCH=1 and owns chain selection, so we skip the
@@ -116,7 +119,7 @@ if [ -f "$CLAUDE_COOLDOWN_FILE" ]; then
     rm -f "$CLAUDE_COOLDOWN_FILE"
   elif [ "$RESUME_AT" -gt 0 ] && [ "$NOW_EPOCH" -lt "$RESUME_AT" ]; then
     echo "CLAUDE_COOLDOWN_ACTIVE: claude usage limit until epoch $RESUME_AT (now $NOW_EPOCH), delegating" >&2
-    exit "$WORKER_NONRESPONSE_EXIT"
+    exit "$WORKER_USAGE_LIMIT_EXIT"
   else
     echo "Claude cooldown expired (now $NOW_EPOCH >= resumeAt $RESUME_AT), clearing and resuming" >&2
     rm -f "$CLAUDE_COOLDOWN_FILE"
@@ -265,7 +268,7 @@ if [ "$EXIT_CODE" -ne 0 ] \
     echo "CLAUDE_USAGE_LIMIT: detected but reset time unparseable, notifying without cooldown" >&2
     run_cli notify-usage-limit-unknown claude >/dev/null 2>&1 || true
   fi
-  exit "$WORKER_NONRESPONSE_EXIT"
+  exit "$WORKER_USAGE_LIMIT_EXIT"
 fi
 
 # Validation logic (same contract as run_codex.sh / run_antigravity.sh).
