@@ -113,5 +113,15 @@
     "project": "toddler-private-rag",
     "repo": "sota1111/toddler-private-rag",
     "localPath": "/workspaces/toddler-private-rag"
+  },
+  {
+    "project": "ptcg-agent-obo",
+    "repo": "sota1111/ptcg-agent-obo",
+    "localPath": "/workspaces/ptcg-agent-obo"
+  },
+  {
+    "project": "signate-messy-drive-rag",
+    "repo": "sota1111/signate-messy-drive-rag",
+    "localPath": "/workspaces/signate-messy-drive-rag"
   }
 ]

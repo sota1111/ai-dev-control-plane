@@ -6,6 +6,7 @@ FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 ARG NODE_MAJOR=20
 ARG FLUTTER_VERSION=3.44.4
 ARG KAGGLE_VERSION=2.2.3
+ARG SIGNATE_VERSION=0.12.0
 # GPU/ML スタック（value net 学習など）。TORCH_INDEX_URL を PyPI の CUDA 同梱 wheel
 # 配信元に向けることで、NVIDIA GPU 搭載ホストで起動すると torch.cuda.is_available()
 # が True になる。GPU 非搭載ホストでは同じ wheel が CPU で動作する（ビルドは壊れない）。
@@ -73,6 +74,16 @@ RUN curl -LsSf https://astral.sh/uv/install.sh \
 ENV PATH="/home/vscode/.local/bin:${PATH}"
 RUN su vscode -c "pipx install kaggle==${KAGGLE_VERSION}" \
     && kaggle --version
+
+# ---------------------------------------------------------------------------
+# SIGNATE CLI
+#   Kaggle CLI と同様に Python アプリを隔離して導入するため pipx を使う。
+#   ENV で設定済みの /home/vscode/.local/bin にコマンドを配置し、全シェルから
+#   `signate` を利用可能にする。認証情報はイメージに含めず、コンテナ起動後に
+#   `signate token -e <email>` で取得する。
+# ---------------------------------------------------------------------------
+RUN su vscode -c "pipx install signate==${SIGNATE_VERSION}" \
+    && signate --version
 
 # ---------------------------------------------------------------------------
 # tmux + tmuxinator

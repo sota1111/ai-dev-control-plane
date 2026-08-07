@@ -109,6 +109,7 @@ interface RunResultType {
   COMPLETED_NO_PR: string;
   COMPLETION_UNVERIFIED: string;
   WORKER_UNAVAILABLE_RETRY: string;
+  WORKER_USAGE_LIMIT_RETRY: string;
   LOCK_CONFLICT: string;
   USAGE_LIMIT_RETRY: string;
   NON_RETRYABLE_LIMIT: string;
@@ -134,6 +135,7 @@ const RUN_RESULT: RunResultType = {
   // SOT-1584: transient worker-chain exhaustion (dispatcher exit 75 surfaced as run_auto.sh exit 71).
   // Retryable: re-enqueue with backoff, do not move to In Review, do not record human-wait.
   WORKER_UNAVAILABLE_RETRY: 'WORKER_UNAVAILABLE_RETRY',
+  WORKER_USAGE_LIMIT_RETRY: 'WORKER_USAGE_LIMIT_RETRY',
   LOCK_CONFLICT: 'LOCK_CONFLICT',
   USAGE_LIMIT_RETRY: 'USAGE_LIMIT_RETRY',
   NON_RETRYABLE_LIMIT: 'NON_RETRYABLE_LIMIT',
@@ -1067,21 +1069,20 @@ function classifyRunResult({ code, output, completion }: ClassifyRunArgs): Class
   if (code === SKIPPED_LOCKED) {
     return { kind: RUN_RESULT.LOCK_CONFLICT, code };
   }
-  // SOT-1584: transient worker-chain exhaustion → retryable, distinct from a genuine unverified stop.
-  if (code === WORKER_UNAVAILABLE) {
-    return { kind: RUN_RESULT.WORKER_UNAVAILABLE_RETRY, code };
-  }
   const classification = classifyUsageLimit(output);
   if (classification.retryable && classification.retryAt) {
-    // SOT-1587: separate codex/antigravity cooldown from Claude cooldown. A usage limit hit ONLY by a
-    // fallback worker (codex/antigravity) is already handled by its per-worker cooldown + dispatcher
-    // handoff, so it must NOT set the GLOBAL runner cooldown (which gates Claude-primary work and would
-    // wrongly halt Claude just because codex is limited). Treat it as transient worker unavailability
-    // (retry with backoff); the dispatcher skips the limited worker on retry and runs Claude instead.
+    // An explicitly identified worker limit is scoped to that worker. Preserve its real reset time,
+    // but do not gate unrelated workers through the global runner cooldown.
     if (isWorkerOnlyUsageLimit(output)) {
-      return { kind: RUN_RESULT.WORKER_UNAVAILABLE_RETRY, code };
+      return { kind: RUN_RESULT.WORKER_USAGE_LIMIT_RETRY, code, classification };
     }
     return { kind: RUN_RESULT.USAGE_LIMIT_RETRY, code, classification };
+  }
+  // SOT-1584: transient worker-chain exhaustion → retryable, distinct from a genuine unverified stop.
+  // Check this after usage-limit classification: handoff=off surfaces a limited primary as exit 71,
+  // but its worker marker still makes it a scoped retry that must not stop other workers' issues.
+  if (code === WORKER_UNAVAILABLE) {
+    return { kind: RUN_RESULT.WORKER_UNAVAILABLE_RETRY, code };
   }
   if (classification.type !== 'unknown') {
     return { kind: RUN_RESULT.NON_RETRYABLE_LIMIT, code, classification };
@@ -1287,6 +1288,27 @@ async function processCompletedRun(item: QueueItem, code: number, output: string
       return { lockConflict: true, resultKind: result.kind }; // signal drainQueue to stop this pass
     }
 
+    case RUN_RESULT.WORKER_USAGE_LIMIT_RETRY: {
+      const { classification } = result;
+      log('RUN', `worker-scoped limit detected: ${classification.type}; continuing other workers`, {
+        trigger: item.trigger || 'queue', issue: issueId
+      });
+      enqueue(issueId, item.trigger || 'queue', classification.retryAt, {
+        issueIdentifier: item.issueIdentifier || null,
+        reason: 'worker_usage_limit',
+        priority: item.priority ?? null,
+        priorityLabel: item.priorityLabel ?? null,
+        parentIssueId: item.parentIssueId ?? null,
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null,
+        queueGroup: item.queueGroup ?? null,
+        queueGroupOrder: item.queueGroupOrder ?? null
+      });
+      log('RETRY', 'worker-scoped retry scheduled; queue drain continues', {
+        trigger: item.trigger || 'queue', issue: issueId, retryAt: classification.retryAt
+      });
+      break;
+    }
+
     case RUN_RESULT.LOCK_CONFLICT: {
       // Another run_auto.sh holds the global OS flock. Re-enqueue with a short
       // backoff (not null) so drainQueue's future-retryAt guard stops the pass
@@ -1388,6 +1410,7 @@ function detachedOutcomeForKind(kind: string): DetachedOutcome {
     case RUN_RESULT.COMPLETION_UNVERIFIED:
       return 'unverified';
     case RUN_RESULT.USAGE_LIMIT_RETRY:
+    case RUN_RESULT.WORKER_USAGE_LIMIT_RETRY:
       return 'usage_limit';
     default:
       return 'failed';

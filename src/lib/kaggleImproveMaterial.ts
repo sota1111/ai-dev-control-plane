@@ -70,16 +70,30 @@ export interface KaggleSubmissionRow {
  * Kaggle のコンペ履歴を1つの repo/lineage に帰属させる。
  * 新形式の `[repo:...]` を優先し、移行前のメッセージに含まれる repo 名も受け付ける。
  * 帰属を確認できない履歴は別 lineage の改善Issueを誤起案しないため除外する。
+ *
+ * `singleTarget`（コンペに target が1つだけ）のときは、その Kaggle コンペへの提出は必ず
+ * その唯一の repo に属する。よって帰属マーカーの無い提出（control-plane 経由でなく直接
+ * `kaggle competitions submit` した提出など）も採用する。ただし別 repo が明示された
+ * `[repo:other]` の履歴（移行前の別 lineage 提出）は誤帰属を避けるため除外する。
  */
 export function submissionRowsForRepo(
   rows: KaggleSubmissionRow[],
-  repo: string
+  repo: string,
+  opts: { singleTarget?: boolean } = {}
 ): KaggleSubmissionRow[] {
   const expected = repo.trim().toLowerCase();
   if (!expected) return [];
   return rows.filter((row) => {
     const description = (row.description || '').toLowerCase();
-    return description.includes(`[repo:${expected}]`) || description.includes(expected);
+    if (description.includes(`[repo:${expected}]`) || description.includes(expected)) {
+      return true;
+    }
+    if (opts.singleTarget) {
+      // 単一 target: 別 repo が明示されていない限り、この唯一の repo に帰属させる。
+      const otherRepoMarked = /\[repo:([a-z0-9-]+)\]/.exec(description);
+      return !otherRepoMarked || otherRepoMarked[1] === expected;
+    }
+    return false;
   });
 }
 
@@ -504,7 +518,9 @@ export async function collectImproveContext(
   const failureContent = readFailureLog(opts.failureLogPath, log);
 
   for (const t of comp.targets) {
-    const targetSubmissionRows = submissionRowsForRepo(submissionRows, t.repo);
+    const targetSubmissionRows = submissionRowsForRepo(submissionRows, t.repo, {
+      singleTarget: comp.targets.length === 1,
+    });
     const previousSubmission = formatPreviousSubmission(targetSubmissionRows);
     // guard 4: 前サイクル未完了。失敗時は安全側で false（＝ブロックしない）に倒す。
     let hasUnfinishedCycle = false;

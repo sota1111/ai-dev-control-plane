@@ -135,6 +135,23 @@ describe('kaggleImproveMaterial', () => {
       expect(submissionRowsForRepo([rows[2]], 'biohub-claude')).toEqual([]);
       expect(submissionRowsForRepo([rows[2]], 'biohub-gpt')).toEqual([]);
     });
+
+    test('single-target competition credits unmarked submissions to its only repo', () => {
+      // A single-target competition (e.g. rogii, claude-only) means every
+      // submission to that Kaggle competition belongs to the one repo, even
+      // direct `kaggle competitions submit` runs whose message lacks a marker.
+      const singleTargetRows = [
+        { description: 'cycle-3 champion [repo:rogii-claude]', status: 'COMPLETE', publicScore: '8.739' },
+        { description: 'medal push: full reference pipeline port', status: 'COMPLETE', publicScore: '6.477' },
+        { description: 'auto-improve submit: rogii-gpt champion [repo:rogii-gpt]', status: 'COMPLETE', publicScore: '11551.955' },
+      ];
+      const credited = submissionRowsForRepo(singleTargetRows, 'rogii-claude', { singleTarget: true });
+      // includes the marked own-repo row and the unmarked direct submission,
+      // excludes the row explicitly marked for the other (historical) repo.
+      expect(credited.map((r) => r.publicScore)).toEqual(['8.739', '6.477']);
+      // Without the single-target flag the unmarked 6.477 is dropped (multi-target behaviour).
+      expect(submissionRowsForRepo(singleTargetRows, 'rogii-claude').map((r) => r.publicScore)).toEqual(['8.739']);
+    });
   });
 
   describe('classifyKaggleCliFailure', () => {

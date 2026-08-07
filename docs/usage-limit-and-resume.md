@@ -16,7 +16,7 @@ usage-limit 検知時の cooldown / 自動再実行、および中断タスク�
    - `context_limit`: コンテキスト長制限（リトライ不可・要要約）
    - `unknown`: 分類不能（デフォルトはリトライ不可）
 2. **通知**: Linear の対象 Issue にコメントを投稿（次回実行予定時刻 JST 付き）。同一 Issue・同一 retry 時刻のコメントが既に存在する場合は投稿しない（重複防止）。対象 Issue に `usage-limit` ラベルを付与します。
-3. **Cooldown**: リセット時刻 +10分後を Claude Code 全体の cooldown として `runner.cooldown.json` に永続化します。ここには `reason` や `limitType` も記録されます。
+3. **Cooldown**: workerを識別できる場合はClaude/Codex等のworker別cooldownとして保持し、対象Issueだけを待機させます。workerを識別できない旧形式のエラーのみ、リセット時刻 +10分後を全体cooldownとして `runner.cooldown.json` に永続化します。
 4. **自動リトライ**: リトライ可能なタイプの場合、cooldown 解除時刻を `retryAt` としてキューに再投入します。この際 `reason=usage_limit` が付与され、再開モードで実行されます。
 5. **解除**: 成功した場合は cooldown と `usage-limit` ラベルを除去します。
 
@@ -63,7 +63,7 @@ usage-limit 検知時の cooldown / 自動再実行、および中断タスク�
 
 ### 概要
 
-webhook 経由で起動した Claude Code が usage limit に達した場合、usage 復活時刻 + 10分後まで Claude Code 全体を cooldown にします。`529 Overloaded` 等の過負荷エラーは1時間後に再開します。cooldown 中に届いた webhook は新規実行せず、同じ retry 時刻でキューに追加します。
+webhook 経由で起動したClaude Codeがusage limitに達した場合、そのClaude向けIssueだけをusage復活時刻 + 10分後まで待機させます。GPT/Codex向けIssueは同じキューで実行を継続し、Claude向けIssueを引き継ぎません。`529 Overloaded` 等の過負荷エラーは1時間後に再開します。workerを識別できない旧形式のcooldown中だけ、届いたwebhookを同じretry時刻でキューに追加します。
 
 ### 環境変数
 

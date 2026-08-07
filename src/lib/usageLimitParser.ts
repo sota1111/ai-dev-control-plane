@@ -127,19 +127,15 @@ const CLAUDE_LIMIT_MARKER = /CLAUDE_USAGE_LIMIT|CLAUDE_COOLDOWN_ACTIVE/i;
 const WORKER_LIMIT_MARKER = /CODEX_USAGE_LIMIT|CODEX_COOLDOWN_ACTIVE|ANTIGRAVITY_USAGE_LIMIT|ANTIGRAVITY_COOLDOWN_ACTIVE/i;
 
 /**
- * SOT-1587: true when the ONLY worker that hit a usage limit in this run is a fallback worker
- * (codex / antigravity), NOT Claude. Such a limit is already handled by that worker's own per-worker
- * cooldown file + dispatcher handoff, so it must NOT drive the GLOBAL runner cooldown (which represents
- * "Claude — the account-global primary — is unavailable" and gates the whole pipeline). Separating the
- * two keeps a codex cooldown from wrongly halting Claude-primary work.
+ * True when the output identifies the worker whose usage limit was reached. Explicit worker limits
+ * are handled by that worker's cooldown and must not become a global runner cooldown: unrelated
+ * workers can continue draining their own issues.
  *
- * Returns false when Claude also hit a limit (global cooldown applies) or when there is no worker
- * marker at all (backward compatible: a bare usage-limit classification still gates globally).
+ * Bare legacy limit text remains global because its worker cannot be identified safely.
  */
 export function isWorkerOnlyUsageLimit(output: string): boolean {
   if (!output) return false;
-  if (CLAUDE_LIMIT_MARKER.test(output)) return false; // Claude also limited → global cooldown is correct
-  return WORKER_LIMIT_MARKER.test(output);            // only codex/antigravity limited → per-worker only
+  return CLAUDE_LIMIT_MARKER.test(output) || WORKER_LIMIT_MARKER.test(output);
 }
 
 // HTTP ステータスを示す文脈語。裸の数字一致による誤検知を抑えるため、
