@@ -132,7 +132,9 @@ workers: <claude系: solo=claude:fable | gpt系: solo=codex:sol>, handoff=off
 reasoning: <gpt系のみ: solo=ultra>
 
 ## 目的         Kaggleコンペ <slug>（repo/系統）の順位を向上させる方針を決定し子Issueに分解して実施
-## 入力材料     ### 前回提出結果（順位/スコア） / ### 直近の完了Issueダイジェスト / ### 失敗ログ・KPI抜粋
+## 入力材料     ### 検証階層（一次=leak-free CV / 二次=public LB(sanity)。乖離時はCVを信じ public追い禁止） /
+               ### CV↔public gap（乖離監視・大乖離で ⚠乖離警告） / ### 前回提出結果 / ### 直近の完了Issueダイジェスト / ### 失敗ログ・KPI抜粋
+## 昇格判断     leak-free CV が一次。public LB は二次sanity（過学習しやすい hidden subset）。提出前に docs/kaggle-playbook/README.md のチェックリストを通す
 ## 実施内容     1. 未着手の改善軸を選定 2. 2〜5子Issueへ分解（screen→confirm・非昇格revert・昇格時exec互換）
                3. 全子完了後に親をTodoへ再開 4. 親が集約・提出して In Review にて完了報告
 ## 受け入れ条件  改善方針の記録 / 子Issue全て終端 / 昇格判定と champion 整合 / 完了時提出

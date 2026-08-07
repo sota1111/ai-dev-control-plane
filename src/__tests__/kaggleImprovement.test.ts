@@ -315,6 +315,62 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('(該当なし)');
     });
 
+    // SOT-2513 — KPI 階層を leak-free CV 一次へ再定義。
+    test('KPI hierarchy is leak-free-CV-first; no "primary KPI = LB rank" phrasing remains', () => {
+      const c = reg().competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, {
+        cvSummary: 'CV RMSE 8.31 (entity holdout)',
+        leaderboardSummary: 'public rank 42 / 6.40',
+      });
+      // 「一次KPI=LB順位」の文言が残らない（旧ヘッダ / 順位=一次KPI 系）。
+      expect(body).not.toContain('Leaderboard 順位（一次KPI）');
+      expect(body).not.toContain('順位が一次KPI');
+      expect(body).not.toMatch(/一次KPI\s*=\s*LB順位/);
+      // 一次=CV / 二次=public sanity。
+      expect(body).toContain('検証階層（一次=leak-free CV / 二次=public LB）');
+      expect(body).toContain('一次KPI = **leak-free CV**');
+      expect(body).toContain('public 追い（public best 選抜）禁止');
+      expect(body).toContain('悲観側(CV)を信じる');
+      expect(body).toContain('CV RMSE 8.31 (entity holdout)');
+      expect(body).toContain('public rank 42 / 6.40');
+      // playbook 提出前チェックリスト参照。
+      expect(body).toContain('docs/kaggle-playbook/README.md');
+      expect(body).toContain('提出前チェックリスト');
+      // escalation ladder 6段（新規2段 + port 過学習疑い）。
+      expect(body).toContain('汎化ギャップ診断');
+      expect(body).toContain('問題定式化の見直し');
+      expect(body).toContain('playbook 03参照');
+      expect(body).toContain('portが参照publicを上回ったら過学習疑い');
+    });
+
+    test('cvSummary missing renders the fail-safe; present renders the value', () => {
+      const c = reg().competitions[0];
+      const failsafe = buildIssueBody(c.targets[0], c, 3, {});
+      expect(failsafe).toContain('CV未整備 — 最初の子Issue');
+      const provided = buildIssueBody(c.targets[0], c, 3, { cvSummary: 'CV AUC 0.912' });
+      expect(provided).toContain('CV AUC 0.912');
+      expect(provided).not.toContain('CV未整備 — 最初の子Issue');
+    });
+
+    test('CV↔public gap frame is always present; ⚠ warning only when the gap exceeds threshold', () => {
+      const c = reg().competitions[0];
+      const noGap = buildIssueBody(c.targets[0], c, 3, {});
+      expect(noGap).toContain('CV↔public gap（乖離監視）');
+      expect(noGap).not.toContain('⚠ 乖離警告');
+      // 大きな gap を供給すると警告が挿入される（実供給は次Issue、ここはインターフェース確認）。
+      const warned = buildIssueBody(c.targets[0], c, 3, {
+        cvPublicGap: 3,
+        cvPublicGapWarnThreshold: 1,
+      });
+      expect(warned).toContain('⚠ 乖離警告');
+      // 閾値未満の gap は警告を出さない。
+      const small = buildIssueBody(c.targets[0], c, 3, {
+        cvPublicGap: 0.2,
+        cvPublicGapWarnThreshold: 1,
+      });
+      expect(small).not.toContain('⚠ 乖離警告');
+    });
+
     test('embeds A/B telemetry, chain isolation and automatic continuation', () => {
       const raw = JSON.parse(JSON.stringify(rawRegistry));
       raw.competitions[0].ab_evaluation = {
