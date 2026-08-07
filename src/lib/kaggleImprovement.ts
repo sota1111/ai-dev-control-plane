@@ -824,10 +824,20 @@ export function buildIssueBody(
     ? `
 
 ## 収束モード（締切まで残り約${Math.max(0, Math.floor(phase.daysToDeadline ?? 0))}日）
-締切接近のため探索から収束へ切り替える（design/README.md §51）:
+締切接近のため探索から収束へ切り替える（design/README.md §51 / SOT-2516）:
 - 新規の改善軸は起案しない。検証済み candidate の確定・最終化を優先する。
-- 最終提出枠の選定（LB実績・ローカル評価・性質の異なる候補でのリスク分散）を行い、選定理由を記録する。
-- リスクの高い大規模変更（アーキテクチャ変更・学習やり直し）は開始しない。`
+- リスクの高い大規模変更（アーキテクチャ変更・学習やり直し）は開始しない。
+- **最終2枠の分散契約（CV最良×hedge）**: 最終提出2枠は「① leak-free CV 最良」×「② 性質の異なる hedge 候補
+  （手法/前提が①と独立なもの）」で必ず分散する。**両方を public 最良で選抜することは禁止**（public↔private が
+  逆転して全滅した rogii パターンの再発防止 — [[rogii-final-submission-w030-perwell-adaptive]]）。選抜理由を記録する。
+- **ノイズ幅追い禁止**: 候補と cutoff（メダル境界等）の差が LB のノイズ幅未満のとき、その差を埋めることを目標にした
+  子Issue を起案しない（測定不能な差の最適化に枠を使わない）。
+- **drop-dead 運用**: 日次提出上限の1枠を温存し、締切2.5時間前の drop-dead 時刻で、検証済み最良 artifact を
+  無条件に提出する（未提出のまま締切を跨がない）。
+- **締切間際の採点ラグ**: 締切2.5h前以降の提出は採点が締切後になり、Kaggle の自動最終選抜に入らない可能性がある。
+  その場合は親Issueへ「Web で手動最終選抜を依頼」する定型コメントを残す（返答は待たず、安全側デフォルトで進む）。
+- **final-selection report 契約**: 提出直前に親Issueへ \`CV最良=X / public最良=Y / gap=Z / 選抜=[...] / 理由\`
+  の定型コメントを投稿する。これは人間の介入機会であり、承認待ちでブロックはしない（返答が無ければ安全側で提出）。`
     : '';
   const abEvaluation = competition.abEvaluation
     ? `
@@ -887,6 +897,16 @@ ${securityEvaluationContract}
 ${convergeMode}
 
 ## 実施内容
+**人間コメント尊重契約（newest-wins・SOT-2516）**: 人間の承認待ちでブロックはしないが、人がこのIssueに
+コメントしたら必ず読まれ・反映される。次の3つの意思決定ポイントで **その直前に Issue コメントを再取得** し、
+新しい人間コメントがあれば最新指示を優先する（newest-wins）:
+- (a) 改善軸を選定する時、
+- (b) 親の再開run で全子Issueの結果を集約する時、
+- (c) 提出直前。
+また、コメント先頭行の軽量 directive を尊重する（既存 \`workers:\` directive と同系・newest-wins・大文字小文字非依存）:
+\`cycle=pause\` / \`cycle=stop\`（サイクル続行判定に接続）・\`submit=hold\`（提出をスキップし理由を親へ記録。
+再開は \`submit=auto\`）。これらは**コメントの先頭行**でのみ有効で、長文コメント中への埋め込みは検出しない
+（auto-accept の \`review=human\` と同じ既知の罠を避けるための仕様）。
 **提出前チェックリスト必須**: 提出前に必ず \`docs/kaggle-playbook/README.md\` の「提出前チェックリスト」を
 通過する（leak-free CV の有無・CVとpublicのオーダー一致・乖離時はCVを信じる・重い裾metricの頑健受容・
 最終2枠を CV最良×hedge で分散）。未整備の項目があれば最初の子Issueで整備する。

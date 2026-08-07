@@ -30,6 +30,10 @@ EXECUTE=0
 COMP_KEY=""
 HOUR_OVERRIDE=""
 REPO_FILTER=""
+# SOT-2516: issue whose `submit=hold` control directive gates this submission. Defaults to the current
+# pipeline's target issue (WEBHOOK_ISSUE_ID) so a human `submit=hold` comment on the parent Kaggle issue
+# skips the automated submission without a blocking approval gate. Override with --issue.
+SUBMIT_ISSUE="${SUBMIT_ISSUE:-${WEBHOOK_ISSUE_ID:-}}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --execute) EXECUTE=1 ;;
@@ -39,6 +43,8 @@ while [[ $# -gt 0 ]]; do
     --hour=*) HOUR_OVERRIDE="${1#*=}" ;;
     --repo) REPO_FILTER="$2"; shift ;;
     --repo=*) REPO_FILTER="${1#*=}" ;;
+    --issue) SUBMIT_ISSUE="$2"; shift ;;
+    --issue=*) SUBMIT_ISSUE="${1#*=}" ;;
     --registry) REGISTRY="$2"; shift ;;
     --registry=*) REGISTRY="${1#*=}" ;;
     -h|--help) sed -n '2,28p' "${BASH_SOURCE[0]}"; exit 0 ;;
@@ -288,6 +294,24 @@ node -e '
 if [[ "$EXECUTE" != "1" ]]; then
   echo "  → ドライラン。実提出するには --execute を付けてください。"
   exit 0
+fi
+
+# SOT-2516: human-comment-respect gate. If the target issue carries a `submit=hold` control directive
+# (first line of a comment/description; newest-wins), skip this automated submission and record the
+# reason on the issue. This is NOT a blocking approval gate — the run proceeds and only the submission
+# is held; a later `submit=auto` comment re-enables it. Fail-open: any check error → submit proceeds.
+if [[ -n "$SUBMIT_ISSUE" ]]; then
+  hold_json="$(cd "$REPO_ROOT" && npx --no-install tsx src/runner-cli.ts kaggle-submit-hold-check \
+    --issue "$SUBMIT_ISSUE" --competition "$COMP_KEY" --record 2>/dev/null)"
+  [[ -z "$hold_json" ]] && hold_json="$(cd "$REPO_ROOT" && npx tsx src/runner-cli.ts kaggle-submit-hold-check \
+    --issue "$SUBMIT_ISSUE" --competition "$COMP_KEY" --record 2>/dev/null)"
+  hold="$(node -e 'try{process.stdout.write(String(JSON.parse(process.argv[1]).hold===true))}catch{process.stdout.write("false")}' "$hold_json")"
+  if [[ "$hold" == "true" ]]; then
+    echo "  → SUBMIT HOLD: submit=hold on $SUBMIT_ISSUE — 提出をスキップし理由を親へ記録しました。"
+    bash "$SCRIPT_DIR/notify_discord.sh" \
+      "kaggle提出 hold $COMP_KEY slot=$slot_id: submit=hold on $SUBMIT_ISSUE" >/dev/null 2>&1 || true
+    exit 0
+  fi
 fi
 
 if [[ "$HISTORY_OK" != "1" ]]; then

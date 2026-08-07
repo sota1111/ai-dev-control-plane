@@ -484,6 +484,54 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('新しい攻撃手順、認可回避');
       expect(body).toContain('ID・SHA・評価条件が固定済み');
     });
+
+    // SOT-2516 — 収束モードの最終提出選抜分散を契約化する。
+    test('converge mode encodes CV-best×hedge diversification and forbids both-public-best', () => {
+      const c = reg().competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, {}, { phase: 'converge', daysToDeadline: 3 });
+      expect(body).toContain('収束モード');
+      // 最終2枠 = CV最良 × hedge の分散。
+      expect(body).toContain('最終2枠の分散契約（CV最良×hedge）');
+      // both-public-best 禁止（rogii 全滅パターン）。
+      expect(body).toContain('両方を public 最良で選抜することは禁止');
+      // drop-dead 運用（締切2.5h前 無条件提出）。
+      expect(body).toContain('drop-dead');
+      expect(body).toContain('締切2.5時間前');
+      // ノイズ幅追い禁止。
+      expect(body).toContain('ノイズ幅追い禁止');
+      // final-selection report 契約（承認待ちでブロックしない）。
+      expect(body).toContain('final-selection report 契約');
+      expect(body).toContain('CV最良=X / public最良=Y / gap=Z');
+      expect(body).toContain('承認待ちでブロックはしない');
+      // 締切間際は Web 手動選抜の依頼コメントを残す。
+      expect(body).toContain('Web で手動最終選抜を依頼');
+    });
+
+    test('explore-phase body carries no converge selection contract', () => {
+      const c = reg().competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, {}, { phase: 'explore', daysToDeadline: 30 });
+      expect(body).not.toContain('最終2枠の分散契約（CV最良×hedge）');
+      expect(body).not.toContain('drop-dead');
+    });
+
+    // SOT-2516 — 人間コメント尊重契約（3点での最新コメント再取得 + 軽量 directive）。
+    test('human-comment-respect contract: refetch at 3 decision points + lightweight directives', () => {
+      const c = reg().competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, {});
+      expect(body).toContain('人間コメント尊重契約');
+      expect(body).toContain('newest-wins');
+      // 3つの意思決定ポイント。
+      expect(body).toContain('改善軸を選定する時');
+      expect(body).toContain('親の再開run');
+      expect(body).toContain('提出直前');
+      // 軽量 directive の説明（先頭行のみ・長文埋込は検出しない）。
+      expect(body).toContain('cycle=pause');
+      expect(body).toContain('submit=hold');
+      expect(body).toContain('コメントの先頭行');
+      expect(body).toContain('埋め込みは検出しない');
+      // ブロッキング承認ゲートは無い（自動性維持）。
+      expect(body).toContain('人間の承認待ちでブロックはしない');
+    });
   });
 
   describe('planImprovementCycle guards', () => {

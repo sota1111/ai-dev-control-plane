@@ -38,10 +38,11 @@ import {
   parseReasoningDirectives,
   mergeWorkerRoleOverrides,
   parseGraphDirective,
+  parseControlDirectives,
 } from './lib/workerRoleDirective.js';
 import { buildDelegationPreflight } from './lib/delegationPreflight.js';
 import { parseRegistry, planSubmission, type RecentSubmission } from './lib/kaggleSubmission.js';
-import { createDraftIssue, findOpenAutoImproveIssue } from './lib/linearApi.js';
+import { createDraftIssue, findOpenAutoImproveIssue, postIssueComment } from './lib/linearApi.js';
 import {
   parseTargetsRegistry,
   planImprovementCycle,
@@ -335,6 +336,72 @@ async function main() {
       runner.log('WORKER_ROLES', `${issueId} per-issue override: ${summary}`, { issue: issueId });
       process.stdout.write(outPath);
       process.exit(0);
+      break;
+    }
+    case 'kaggle-submit-hold-check': {
+      // SOT-2516: evaluate the lightweight `submit=hold` / `cycle=` control directives on an issue's
+      // description + comments and print the decision as JSON `{hold, cycle, reason}`. The Kaggle submit
+      // path (scripts/ai/kaggle_targets_submit.sh) calls this before an --execute submission: when hold
+      // is true it skips the submission (no blocking human gate — automaticity is preserved) and, with
+      // `--record`, this command posts the reason comment on the parent so the human intervention is
+      // logged. Fail-OPEN: any fetch/parse error → hold=false so a transient Linear hiccup never blocks
+      // an otherwise-valid automated submission.
+      const flags = args.filter((a) => a.startsWith('--'));
+      const positional = args.filter((a) => !a.startsWith('--'));
+      const getFlag = (name: string): string | undefined => {
+        const eq = flags.find((f) => f.startsWith(`${name}=`));
+        if (eq) return eq.slice(name.length + 1);
+        const idx = args.indexOf(name);
+        return idx >= 0 && args[idx + 1] && !args[idx + 1].startsWith('--') ? args[idx + 1] : undefined;
+      };
+      const issueId = getFlag('--issue') || positional[0];
+      const competition = getFlag('--competition') || '';
+      const record = flags.includes('--record');
+      const emit = (hold: boolean, cycle: string | null, reason: string) => {
+        process.stdout.write(JSON.stringify({ hold, cycle, reason }));
+        process.exit(0);
+      };
+      if (!issueId) {
+        process.stderr.write(
+          'Usage: runner-cli.js kaggle-submit-hold-check --issue <id> [--competition <key>] [--record]\n'
+        );
+        emit(false, null, 'no issue id');
+        break;
+      }
+      let blocks: string[] = [];
+      try {
+        const data: any = await runner.linearQuery(
+          'query($id: String!) { issue(id: $id) { description comments(first: 50) { nodes { body } } } }',
+          { id: issueId }
+        );
+        const description: string =
+          typeof data?.issue?.description === 'string' ? data.issue.description : '';
+        const comments: string[] = (data?.issue?.comments?.nodes || []).map((n: any) =>
+          typeof n?.body === 'string' ? n.body : ''
+        );
+        // Description first, then comments oldest→newest so the newest directive wins.
+        blocks = [description, ...comments];
+      } catch (err: any) {
+        process.stderr.write(
+          `kaggle-submit-hold-check: could not fetch issue ${issueId}: ${err?.message || err}\n`
+        );
+        // Fail-open: proceed with the submission rather than stranding it on a transient fetch error.
+        emit(false, null, `fetch error (fail-open): ${err?.message || err}`);
+        break;
+      }
+      const control = parseControlDirectives(blocks);
+      for (const w of control.warnings) process.stderr.write(`kaggle-submit-hold-check: ${w}\n`);
+      const cycle = control.cycle ?? null;
+      if (control.submitHold === true) {
+        const reason = `submit=hold directive on ${issueId}${competition ? ` (${competition})` : ''}`;
+        if (record) {
+          const body = `## 提出保留 (submit=hold)\n最新の人間 directive \`submit=hold\` を検出したため、この自動提出をスキップしました${competition ? `（コンペ: ${competition}）` : ''}。\n提出を再開するには、独立した短いコメントの先頭行に \`submit=auto\` を記載してください（承認待ちでブロックはしません）。`;
+          await postIssueComment(issueId, body);
+        }
+        emit(true, cycle, reason);
+        break;
+      }
+      emit(false, cycle, control.submitHold === false ? 'submit=auto directive' : 'no submit=hold directive');
       break;
     }
     case 'resolve-pipeline-graph': {
