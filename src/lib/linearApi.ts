@@ -641,6 +641,25 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
 }
 
 /**
+ * SOT-2516: post a plain comment on an issue (no state change). Used by the Kaggle submit path to
+ * record on the parent why an automated submission was skipped (`submit=hold` directive). Best-effort:
+ * returns false on any failure without throwing, so a Linear hiccup never breaks the submit script.
+ */
+export async function postIssueComment(issueId: string, body: string): Promise<boolean> {
+  const { log } = requireDeps();
+  try {
+    await linearQuery(
+      'mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }',
+      { issueId, body }
+    );
+    return true;
+  } catch (err: any) {
+    log('ERROR', `postIssueComment failed: ${err.message}`, { issue: issueId });
+    return false;
+  }
+}
+
+/**
  * Repair a premature `Done` transition that occurs while the autonomous runner still owns the issue.
  *
  * Linear's GitHub automation can move an issue to Done as soon as its PR is merged. That is earlier

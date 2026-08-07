@@ -101,6 +101,75 @@ export function parseReasoningDirectives(text: string | null | undefined): {
 }
 
 /**
+ * SOT-2516: lightweight per-issue CONTROL directives for the Kaggle autonomous strategy layer.
+ *
+ * Two token families, honoring the "human comment is always read & respected" contract without adding
+ * a blocking human-approval gate:
+ *   cycle=pause     → pause this competition's improvement cycles (do not start new axes)
+ *   cycle=stop      → stop this competition's cycles entirely
+ *   cycle=continue  → (also resume / on / go) explicitly clear a prior pause/stop
+ *   submit=hold     → skip the next automated submission (submit path records the reason on the parent)
+ *   submit=auto     → (also go / on / release / off) explicitly clear a prior hold
+ *
+ * UNLIKE the `workers:` directive (which matches on ANY line), these are honored ONLY when they appear
+ * on the FIRST non-empty line of a comment/description block. A directive buried deeper in a long
+ * comment (e.g. inside a Completion Report body) is deliberately IGNORED — the same trap that bit
+ * `review=human` in auto-accept, where a hold hidden in a long comment is silently dropped. A human
+ * hold must therefore be its own short comment whose first line is the directive.
+ *
+ * Pass `blocks` oldest→newest (description first, then comments oldest→newest); the newest block that
+ * carries a given token wins per token family (newest-wins). Pure, never throws.
+ */
+export type CycleDirective = 'pause' | 'stop' | 'continue';
+
+export interface ControlDirectiveResult {
+  /** Newest `cycle=` token found on a block's first line (undefined = no cycle directive). */
+  cycle?: CycleDirective;
+  /** Newest `submit=` token resolved to a hold boolean (undefined = no submit directive). */
+  submitHold?: boolean;
+  /** Human-readable notes about ignored/invalid tokens (never throws). */
+  warnings: string[];
+}
+
+const CYCLE_VALUES: Record<string, CycleDirective> = {
+  pause: 'pause',
+  stop: 'stop',
+  continue: 'continue',
+  resume: 'continue',
+  on: 'continue',
+  go: 'continue',
+};
+const SUBMIT_HOLD_CLEAR = new Set(['auto', 'go', 'on', 'release', 'off']);
+
+export function parseControlDirectives(
+  blocks: Array<string | null | undefined>,
+): ControlDirectiveResult {
+  const warnings: string[] = [];
+  let cycle: CycleDirective | undefined;
+  let submitHold: boolean | undefined;
+  for (const block of blocks) {
+    if (!block) continue;
+    // Only the FIRST non-empty line of the block is inspected (long-text embedding is ignored by
+    // design — see the doc comment above).
+    const firstLine = block.split(/\r?\n/).find((l) => l.trim().length > 0);
+    if (!firstLine) continue;
+    // A block's first line may carry both a cycle and a submit token; scan for each independently.
+    for (const m of firstLine.matchAll(/\bcycle\s*=\s*([a-z]+)\b/gi)) {
+      const v = m[1].toLowerCase();
+      if (v in CYCLE_VALUES) cycle = CYCLE_VALUES[v];
+      else warnings.push(`invalid cycle value "${v}" (valid: pause, stop, continue)`);
+    }
+    for (const m of firstLine.matchAll(/\bsubmit\s*=\s*([a-z]+)\b/gi)) {
+      const v = m[1].toLowerCase();
+      if (v === 'hold') submitHold = true;
+      else if (SUBMIT_HOLD_CLEAR.has(v)) submitHold = false;
+      else warnings.push(`invalid submit value "${v}" (valid: hold, auto)`);
+    }
+  }
+  return { cycle, submitHold, warnings };
+}
+
+/**
  * SOT-1591: per-issue SOLO override parsed from a `solo=` directive token.
  * - `{ disabled: true }`  ← `solo=off` (also `none` / `false` / `0`): force NORMAL per-role mode for
  *   this issue, even when the base config sets `__solo__`.

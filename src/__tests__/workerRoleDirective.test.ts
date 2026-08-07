@@ -3,8 +3,72 @@ import {
   mergeWorkerRoleOverrides,
   parseGraphDirective,
   parseReasoningDirectives,
+  parseControlDirectives,
 } from '../lib/workerRoleDirective.js';
 import type { WorkerRoleConfig } from '../lib/workerRoles.js';
+
+describe('parseControlDirectives (SOT-2516)', () => {
+  test('parses submit=hold and cycle=pause from a comment first line', () => {
+    const r = parseControlDirectives(['submit=hold 締切調整のため']);
+    expect(r.submitHold).toBe(true);
+    const c = parseControlDirectives(['cycle=pause']);
+    expect(c.cycle).toBe('pause');
+  });
+
+  test('cycle newest-wins across blocks (pause then stop)', () => {
+    // Blocks are oldest→newest; the newest block carrying a cycle token wins.
+    expect(parseControlDirectives(['cycle=pause', 'cycle=stop']).cycle).toBe('stop');
+    expect(parseControlDirectives(['cycle=stop', 'cycle=pause']).cycle).toBe('pause');
+  });
+
+  test('submit newest-wins: a later submit=auto clears an earlier hold', () => {
+    expect(parseControlDirectives(['submit=hold', 'submit=auto']).submitHold).toBe(false);
+    expect(parseControlDirectives(['submit=auto', 'submit=hold']).submitHold).toBe(true);
+  });
+
+  test('is case-insensitive', () => {
+    const r = parseControlDirectives(['SUBMIT=HOLD', 'Cycle=Stop']);
+    expect(r.submitHold).toBe(true);
+    expect(r.cycle).toBe('stop');
+  });
+
+  test('ignores directives embedded below the first line of a block (auto-accept trap)', () => {
+    const longComment = '## Completion Report\nStatus: In Review\n本文中に submit=hold と書いても無視される\ncycle=stop';
+    const r = parseControlDirectives([longComment]);
+    expect(r.submitHold).toBeUndefined();
+    expect(r.cycle).toBeUndefined();
+  });
+
+  test('honors a directive on the first non-empty line even after leading blank lines', () => {
+    expect(parseControlDirectives(['\n\nsubmit=hold']).submitHold).toBe(true);
+  });
+
+  test('a first line may carry both a cycle and a submit token', () => {
+    const r = parseControlDirectives(['cycle=pause submit=hold']);
+    expect(r.cycle).toBe('pause');
+    expect(r.submitHold).toBe(true);
+  });
+
+  test('per-token newest-wins is independent (newer block without submit keeps earlier hold)', () => {
+    const r = parseControlDirectives(['submit=hold', 'cycle=stop']);
+    expect(r.submitHold).toBe(true);
+    expect(r.cycle).toBe('stop');
+  });
+
+  test('empty / nullish blocks and no-directive text yield no decision', () => {
+    const r = parseControlDirectives([null, undefined, '', 'ただの進捗コメントです']);
+    expect(r.submitHold).toBeUndefined();
+    expect(r.cycle).toBeUndefined();
+    expect(r.warnings).toEqual([]);
+  });
+
+  test('unknown values are reported as warnings, not honored', () => {
+    const r = parseControlDirectives(['cycle=maybe', 'submit=perhaps']);
+    expect(r.cycle).toBeUndefined();
+    expect(r.submitHold).toBeUndefined();
+    expect(r.warnings.length).toBe(2);
+  });
+});
 
 describe('parseGraphDirective', () => {
   test('newest graph directive wins', () => {
