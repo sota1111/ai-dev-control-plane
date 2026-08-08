@@ -779,6 +779,12 @@ export interface ImprovementMaterial {
    * `relative_rating` のコンペで「維持=後退」を検知する一次材料。低下傾向なら ⚠ を含む。
    */
   rankTrend?: string;
+  /**
+   * SOT-2520: 実LB順位トレンドの構造化 direction（`computeRankTrend` の direction）。本文が文字列を
+   * sniff せず「順位低下」を判定するために使う。`relative_rating` かつ `declining` のときだけ
+   * 本文へ「維持=後退・前進軸必須」の強調警告を挿入する。
+   */
+  rankTrendDirection?: 'improving' | 'declining' | 'flat' | 'new' | 'unknown';
 }
 
 /** ガードの各シグナル（cron が Linear/cooldown を見て渡す）。 */
@@ -964,10 +970,15 @@ export function buildIssueBody(
   const leaderboard =
     material.leaderboardSummary?.trim() ||
     '(public LB を取得できず — CLI疎通/認証を確認。public は二次sanity)';
-  // SOT-2518 P9: 実LB順位トレンド（低下傾向なら ⚠ 付き）を二次 public LB 行に添える。
-  const rankTrendLine = material.rankTrend?.trim()
-    ? `\n- 順位トレンド: ${material.rankTrend.trim()}`
-    : '';
+  // SOT-2520: 実LB順位トレンドは専用セクション（### 実LB順位トレンド）で提示する（順位/総数/推移）。
+  const rankTrendBody = material.rankTrend?.trim()
+    || '(順位トレンド未取得 — 2観測以上で供給。public LB の CLI 疎通/認証を確認。実LB順位が一次材料)';
+  // SOT-2520: 相対 rating コンペ かつ 実LB順位が低下傾向のときだけ、maintain=後退の強調警告を挿入する。
+  const maintainRegressWarn =
+    competition.validation.metricKind === 'relative_rating' &&
+    material.rankTrendDirection === 'declining'
+      ? '\n\n⚠ 相対rating comp: champion維持は field改善下で後退。順位低下傾向のため maintain を昇格根拠にせず、必ず前進軸を選べ。opponent field に上位公開解法を取り込み評価fieldを更新せよ。'
+      : '';
   // SOT-2518 P9: 相対 rating コンペでは「維持=後退」の順位契約を挿入する（regression は挿入しない）。
   const relativeContract = competition.validation.metricKind === 'relative_rating'
     ? `
@@ -1056,7 +1067,10 @@ Kaggleコンペ \`${competition.kaggleCompetition}\`（repo: ${target.repo} / �
 一次KPI = **leak-free CV**（エンティティ単位・時系列で hold out した leak-free 検証）。public LB は
 **二次 sanity** に過ぎない。**CVと public が乖離したら悲観側(CV)を信じる。public 追い（public best 選抜）禁止。**
 - 一次（信じる指標）leak-free CV: ${cv}
-- 二次（sanity のみ）public LB: ${leaderboard}${rankTrendLine}${relativeContract}
+- 二次（sanity のみ）public LB: ${leaderboard}${relativeContract}
+
+### 実LB順位トレンド（実LB順位が一次材料・SOT-2518 P9/SOT-2520）
+${rankTrendBody}${maintainRegressWarn}
 
 ### CV↔public gap（乖離監視）
 ${gapWarn}${refWarn}${gapSummary}${gapTrend}
