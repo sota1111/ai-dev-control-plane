@@ -72,6 +72,15 @@ JST 0/3/6/9/12/15/18/21 の8枠を動的配分で回す。
 - `both` モードの2枠目は全コンペで新しいartifactだけを提出する。ファイルは内容SHA-256、Notebookは
   immutableな `kernel/version/output` のSHA-256を提出メッセージへ記録し、同一lineageで当日提出済みならskipする。
   過去提出のfingerprintを確認できない場合も、安全側にskipする。
+- **kernelソースhash fingerprint（SOT-2517, Code コンペ）**: `submit.kind: "kernel"` を付けたターゲットは、
+  dedup の同一性単位を可視 `submission.csv` の sha256 ではなく **「実行される計算」= notebook code cells の連結
+  + pinned dataset ソース一覧 + kernel version** の sha256（prefix `kernel:sha256:`）にする。可視出力を全上書き
+  する層があっても hidden 挙動が変われば別 fingerprint になり、(a) 新レバー提出の誤 dedup と (b) byte 同一を
+  根拠にしたレバー誤 CLOSE（rogii cycle11「blend inert」実事故）を根絶する。registry の submit ブロックに
+  `kind: "kernel"` / `notebook: <.ipynb path>` / `dataset_sources: [...]`（任意）/ `version` を足すと opt-in。
+  純粋関数は `src/lib/kaggleKernelFingerprint.ts`、算出は `runner-cli kernel-fingerprint`。CSV 直接提出
+  （`kind` 未指定）は従来の artifact sha256 を維持し、旧 `sha256:` 履歴行とは prefix で区別するため後方互換。
+  **レバー生死は hidden LB スコア差でのみ判定し、可視 CSV の byte 一致を同一性の根拠にしない。**
 - 提出結果とスコア改善トリガは `[repo:<repo>]` によりlineage別に帰属させる。Claudeの確定スコアはClaude側だけ、
   GPTの確定スコアはGPT側だけの新材料となり、帰属不能な履歴から改善Issueは起案しない。
 - 定期枠の間隔を採点待機時間として扱い、lineageの最新提出がまだ`PENDING`でも次の改善サイクルを起案する。

@@ -112,7 +112,27 @@ for repo in "${REPOS[@]}"; do
       fi
     fi
   fi
-  if [[ -n "$submit_file" && -f "$submit_file" ]]; then
+  # SOT-2517: for a code-competition kernel target (submit.kind=="kernel"), dedup on the EXECUTED
+  # computation (notebook code cells + pinned dataset sources + kernel version) instead of the visible
+  # submission.csv sha256. A visible-CSV override layer can make byte-identical outputs hide a different
+  # hidden-run behavior, which (a) wrongly drops a new lever submission and (b) falsely CLOSEs a lever on
+  # byte identity (rogii cycle11 "blend inert"). The `kernel:sha256:` prefix keeps these fingerprints in
+  # a separate namespace from the legacy `sha256:` artifact hashes so mixed history never false-dedups.
+  submit_kind="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).kind||"")' "$submit_spec")"
+  kernel_fp=""
+  if [[ "$submit_kind" == "kernel" ]]; then
+    notebook_path="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).notebook||"")' "$submit_spec")"
+    dataset_sources_json="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(JSON.stringify(Array.isArray(s.dataset_sources)?s.dataset_sources:[]))' "$submit_spec")"
+    kernel_version="$(node -e 'const v=JSON.parse(process.argv[1]).version;process.stdout.write(v==null?"":String(v))' "$submit_spec")"
+    kernel_fp="$(cd "$REPO_ROOT" && npx --no-install tsx src/runner-cli.ts kernel-fingerprint \
+      --notebook "$notebook_path" --dataset-sources "$dataset_sources_json" --version "$kernel_version" 2>/dev/null)"
+    [[ -z "$kernel_fp" ]] && kernel_fp="$(cd "$REPO_ROOT" && npx tsx src/runner-cli.ts kernel-fingerprint \
+      --notebook "$notebook_path" --dataset-sources "$dataset_sources_json" --version "$kernel_version" 2>/dev/null)"
+    kernel_fp="${kernel_fp//$'\n'/}"
+  fi
+  if [[ -n "$kernel_fp" ]]; then
+    current_fingerprint["$repo"]="$kernel_fp"
+  elif [[ -n "$submit_file" && -f "$submit_file" ]]; then
     current_fingerprint["$repo"]="sha256:$(sha256sum "$submit_file" | awk '{print $1}')"
   else
     # Kaggle Notebook version は immutable。kernel/version/output の組を artifact identity とする。
@@ -171,7 +191,10 @@ if [[ "$HISTORY_OK" == "1" ]]; then
       for repo in "${REPOS[@]}"; do
         if grep -Fq "$repo" <<<"$line"; then
           today_count["$repo"]=$(( ${today_count["$repo"]} + 1 ))
-          line_fingerprint="$(grep -oE '\[artifact:sha256:[0-9a-f]{64}\]' <<<"$line" | head -1 | sed -E 's/^\[artifact:|\]$//g')"
+          # SOT-2517: match both the legacy visible-artifact hash `[artifact:sha256:…]` and the new
+          # kernel-source hash `[artifact:kernel:sha256:…]`; the captured value keeps its prefix so the
+          # two namespaces never collide when a repo's history mixes old and new submission rows.
+          line_fingerprint="$(grep -oE '\[artifact:(kernel:)?sha256:[0-9a-f]{64}\]' <<<"$line" | head -1 | sed -E 's/^\[artifact:|\]$//g')"
           if [[ -n "$line_fingerprint" ]]; then
             submitted_fingerprints["$repo"]+="${line_fingerprint}"$'\n'
           fi
@@ -334,6 +357,11 @@ for ((i=0; i<n_targets; i++)); do
   if [[ "$action" != "submit" ]]; then
     reason="$(node -e 'process.stdout.write((JSON.parse(process.argv[1]).targets[Number(process.argv[2])].reason)||"")' "$plan_json" "$i")"
     echo "  → skip $repo: $reason"
+    # SOT-2517: dedup is on the executed computation, not the visible output. Remind that a lever's
+    # life/death must be decided by the hidden-LB score delta, never by a visible-CSV byte match.
+    if [[ "$reason" == *"fingerprint"* || "$reason" == *"already submitted today"* ]]; then
+      echo "     note: レバー生死は hidden LB スコア差でのみ判定（可視CSV byte一致は同一性の根拠にしない）。kernelターゲットはkernelソースhashでdedupします。"
+    fi
     bash "$SCRIPT_DIR/notify_discord.sh" "kaggle提出 skip $repo ($COMP_KEY): $reason" >/dev/null 2>&1 || true
     continue
   fi
