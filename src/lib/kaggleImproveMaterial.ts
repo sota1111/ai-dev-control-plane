@@ -268,6 +268,148 @@ export function bestPublicScoreFromRows(
 }
 
 /* ============================================================================
+ * SOT-2518 P8: 提出アウトカム preflight（submissionHealth = broken 検出）
+ * ========================================================================== */
+
+/** 直近提出が壊れている（有効スコアを得ていない）と判定する既定の連続回数（SOT-2518 P8）。 */
+export const SUBMISSION_BROKEN_CONSECUTIVE = 3;
+
+/** 1提出行の状態。healthy=COMPLETE かつ非ゼロ有効スコア / unhealthy=ERROR・0.000・未スコア / pending=採点待ち等。 */
+export type SubmissionRowState = 'healthy' | 'unhealthy' | 'pending';
+
+/**
+ * 1提出行を healthy / unhealthy / pending に分類する。
+ *  - status に PENDING を含む・status 空 → pending（判定材料にしない）。
+ *  - status に ERROR / FAIL を含む → unhealthy。
+ *  - status が COMPLETE で終わる → publicScore が欠落/非数値/0 なら unhealthy（0.000/未スコア＝LB非掲載相当）、
+ *    非ゼロ有効スコアなら healthy。
+ *  - それ以外の未知 status → pending（安全側。broken を誤って立てない）。
+ */
+export function submissionRowState(row: KaggleSubmissionRow): SubmissionRowState {
+  const status = (row.status || '').trim().toUpperCase();
+  if (!status || status.includes('PENDING')) return 'pending';
+  if (status.includes('ERROR') || status.includes('FAIL')) return 'unhealthy';
+  if (status.endsWith('COMPLETE')) {
+    if (row.publicScore === undefined || row.publicScore.trim() === '') return 'unhealthy';
+    const score = Number(row.publicScore);
+    if (!Number.isFinite(score) || score === 0) return 'unhealthy';
+    return 'healthy';
+  }
+  return 'pending';
+}
+
+/** detectSubmissionHealth の結果。 */
+export interface SubmissionHealth {
+  status: 'ok' | 'broken' | 'unknown';
+  /** 最新（先頭）から連続する unhealthy の件数。 */
+  consecutiveBroken: number;
+  /** 人間向け理由（本文に載せる）。ok のときは undefined。 */
+  reason?: string;
+}
+
+/**
+ * 提出履歴（最新が先頭）の健全性を判定する（SOT-2518 P8）。pending 行は無視し、非 pending 行を
+ * 先頭から見る:
+ *  - 先頭から連続する unhealthy が `consecutive`（既定3）以上 → `broken`（提出パイプライン破損の疑い）。
+ *  - 先頭の非 pending が healthy → `ok`。
+ *  - 非 pending 行が無い（全て採点待ち等）→ `unknown`。
+ *  - それ以外（連続 unhealthy が閾値未満で healthy が続く）→ `unknown`（まだ broken ではない）。
+ */
+export function detectSubmissionHealth(
+  rows: KaggleSubmissionRow[],
+  consecutive = SUBMISSION_BROKEN_CONSECUTIVE
+): SubmissionHealth {
+  let consecutiveBroken = 0;
+  let sawNonPending = false;
+  for (const row of rows) {
+    const state = submissionRowState(row);
+    if (state === 'pending') continue;
+    sawNonPending = true;
+    if (state === 'unhealthy') {
+      consecutiveBroken += 1;
+    } else {
+      break; // 先頭の非 pending が healthy → これ以上さかのぼらない
+    }
+  }
+  if (!sawNonPending) {
+    return { status: 'unknown', consecutiveBroken: 0, reason: 'スコア確定済みの提出がまだ無い（採点待ち/履歴なし）' };
+  }
+  if (consecutiveBroken >= consecutive) {
+    return {
+      status: 'broken',
+      consecutiveBroken,
+      reason: `直近 ${consecutiveBroken} 回連続で有効スコア無し（ERROR/0.000/未スコア）— 提出パイプラインが壊れている疑い。新規改善軸より提出復旧を最優先にする`,
+    };
+  }
+  if (consecutiveBroken === 0) {
+    return { status: 'ok', consecutiveBroken: 0 };
+  }
+  return {
+    status: 'unknown',
+    consecutiveBroken,
+    reason: `直近 ${consecutiveBroken} 回が無効提出（broken 閾値 ${consecutive} 未満）`,
+  };
+}
+
+/* ============================================================================
+ * SOT-2518 P9: 実LB順位トレンド（相対/rating コンペの「維持=後退」検知）
+ * ========================================================================== */
+
+/** 順位トレンド算出に渡す1観測（rank は 圏外＝null）。 */
+export interface RankObservation {
+  rank: number | null;
+  totalListed?: number;
+  observedAt?: string;
+}
+
+/** computeRankTrend の結果。 */
+export interface RankTrend {
+  direction: 'improving' | 'declining' | 'flat' | 'new' | 'unknown';
+  summary: string;
+}
+
+/** rank を「小さいほど良い」順序値に正規化する（圏外=null は最悪＝Infinity）。 */
+function rankValue(rank: number | null): number {
+  return rank === null || !Number.isFinite(rank) ? Number.POSITIVE_INFINITY : rank;
+}
+
+function formatRank(o: RankObservation): string {
+  if (o.rank === null || !Number.isFinite(o.rank)) {
+    return o.totalListed ? `圏外(top${o.totalListed})` : '圏外';
+  }
+  return `${o.rank}位`;
+}
+
+/**
+ * 実LB順位の時系列（古い→新しい順）からトレンドを算出する（SOT-2518 P9）。順位は小さいほど良い。
+ *  - 0件 → unknown。1件 → new（現在順位のみ）。
+ *  - 最新が最古より悪い（順位が大きい/圏外化）→ declining（⚠ 低下傾向）。
+ *  - 最新が最古より良い → improving。等しい → flat。
+ * relative_rating コンペでは declining が「維持=後退」の一次シグナルになる。
+ */
+export function computeRankTrend(history: RankObservation[]): RankTrend {
+  const obs = (history || []).filter((o) => o && (o.rank === null || typeof o.rank === 'number'));
+  if (obs.length === 0) return { direction: 'unknown', summary: '順位観測なし' };
+  const path = obs.map(formatRank).join(' → ');
+  if (obs.length === 1) {
+    return { direction: 'new', summary: `順位トレンド(新規観測): ${path}` };
+  }
+  const firstV = rankValue(obs[0].rank);
+  const lastV = rankValue(obs[obs.length - 1].rank);
+  const base = `順位トレンド(直近${obs.length}観測): ${path}`;
+  if (lastV > firstV) {
+    return {
+      direction: 'declining',
+      summary: `${base} — ⚠ 低下傾向（field が上げてきている可能性。相対競技では維持=後退を疑え）`,
+    };
+  }
+  if (lastV < firstV) {
+    return { direction: 'improving', summary: `${base} — 上昇傾向` };
+  }
+  return { direction: 'flat', summary: `${base} — 横ばい` };
+}
+
+/* ============================================================================
  * SOT-2514: leak-free CV レポート → cvSummary / CV↔public gap / 参照実装スコア警告
  * ========================================================================== */
 
@@ -754,6 +896,8 @@ export async function collectImproveContext(
       singleTarget: comp.targets.length === 1,
     });
     const previousSubmission = formatPreviousSubmission(targetSubmissionRows);
+    // SOT-2518 P8: 提出健全性（broken=ERROR/0.000/未スコア連続）。本文の submit-repair 切替に使う。
+    const submissionHealth = detectSubmissionHealth(targetSubmissionRows);
     // guard 4: 前サイクル未完了。失敗時は安全側で false（＝ブロックしない）に倒す。
     let hasUnfinishedCycle = false;
     try {
@@ -797,6 +941,8 @@ export async function collectImproveContext(
 
     // LB順位サマリ + 順位履歴（best-effort）。ローカル評価は代理指標、順位は二次sanity（SOT-2513）。
     let leaderboardSummary: string | undefined;
+    // SOT-2518 P9: 実LB順位トレンド（低下傾向で相対 rating コンペの「維持=後退」を検知）。
+    let rankTrendSummary: string | undefined;
     try {
       if (bestPublicScore !== undefined && leaderboardScores.length > 0) {
         const standing = computePublicRank(leaderboardScores, bestPublicScore, direction);
@@ -820,6 +966,13 @@ export async function collectImproveContext(
         const trend = history
           .map((h) => (h.rank === null ? `圏外(top${h.totalListed})` : `${h.rank}位`))
           .join(' → ');
+        // 2観測以上あるときだけトレンド（維持=後退検知）を材料に供給する。
+        if (history.length >= 2) {
+          const rt = computeRankTrend(
+            history.map((h) => ({ rank: h.rank, totalListed: h.totalListed, observedAt: h.observedAt }))
+          );
+          rankTrendSummary = rt.summary;
+        }
         const rankLabel = standing.rank === null
           ? `圏外（表示中の top${standing.totalListed} 未満）`
           : `${standing.rank}位 / 表示${standing.totalListed}チーム`;
@@ -908,6 +1061,9 @@ export async function collectImproveContext(
       ...(referenceOverfitWarn ? { referenceOverfitWarning: referenceOverfitWarn } : {}),
       ...(cvPublicGapTrend ? { cvPublicGapTrend } : {}),
       ...(experimentLedgerDigest ? { experimentLedgerDigest } : {}),
+      submissionHealth: submissionHealth.status,
+      ...(submissionHealth.reason ? { submissionHealthReason: submissionHealth.reason } : {}),
+      ...(rankTrendSummary ? { rankTrend: rankTrendSummary } : {}),
     };
   }
 
