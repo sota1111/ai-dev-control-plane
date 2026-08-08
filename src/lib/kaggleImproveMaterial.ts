@@ -947,6 +947,8 @@ export async function collectImproveContext(
     let leaderboardSummary: string | undefined;
     // SOT-2518 P9: 実LB順位トレンド（低下傾向で相対 rating コンペの「維持=後退」を検知）。
     let rankTrendSummary: string | undefined;
+    // SOT-2520: 構造化 direction（本文が declining を文字列 sniff せず判定するため）。
+    let rankTrendDirection: RankTrend['direction'] | undefined;
     try {
       if (bestPublicScore !== undefined && leaderboardScores.length > 0) {
         const standing = computePublicRank(leaderboardScores, bestPublicScore, direction);
@@ -976,6 +978,7 @@ export async function collectImproveContext(
             history.map((h) => ({ rank: h.rank, totalListed: h.totalListed, observedAt: h.observedAt }))
           );
           rankTrendSummary = rt.summary;
+          rankTrendDirection = rt.direction;
         }
         const rankLabel = standing.rank === null
           ? `圏外（表示中の top${standing.totalListed} 未満）`
@@ -1071,6 +1074,7 @@ export async function collectImproveContext(
         ? { submissionHealthConsecutive: submissionHealth.consecutiveBroken }
         : {}),
       ...(rankTrendSummary ? { rankTrend: rankTrendSummary } : {}),
+      ...(rankTrendDirection ? { rankTrendDirection } : {}),
     };
   }
 

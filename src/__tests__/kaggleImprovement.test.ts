@@ -654,18 +654,51 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('維持を昇格根拠にしない');
       expect(body).toContain('前進軸');
       expect(body).toContain('実LB順位の非劣化を昇格の必須条件');
-      // rankTrend material is rendered on the public-LB line.
-      expect(body).toContain('順位トレンド');
+      // rankTrend material is rendered in the dedicated section (SOT-2520).
+      expect(body).toContain('### 実LB順位トレンド');
       expect(body).toContain('⚠ 低下傾向');
     });
 
-    test('regression (non-relative) competitions get no rank contract', () => {
+    // SOT-2520 — declining-gated maintain=regress warning.
+    test('relative_rating + declining rank inserts the SOT-2520 maintain=regress warning', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].validation = { primary: 'cv', metric_kind: 'relative_rating' };
+      const c = parseTargetsRegistry(raw).competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, {
+        rankTrend: '順位トレンド(直近3観測): 42位 → 55位 → 70位 — ⚠ 低下傾向',
+        rankTrendDirection: 'declining',
+      });
+      expect(body).toContain('⚠ 相対rating comp: champion維持は field改善下で後退');
+      expect(body).toContain('maintain を昇格根拠にせず');
+      expect(body).toContain('opponent field に上位公開解法を取り込み評価fieldを更新せよ');
+    });
+
+    test('relative_rating without declining trend keeps the general contract but omits the warning', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].validation = { primary: 'cv', metric_kind: 'relative_rating' };
+      const c = parseTargetsRegistry(raw).competitions[0];
+      for (const dir of ['improving', 'flat', 'new', undefined] as const) {
+        const body = buildIssueBody(c.targets[0], c, 3, {
+          rankTrend: '順位トレンド(直近2観測): 70位 → 42位 — 上昇傾向',
+          ...(dir ? { rankTrendDirection: dir } : {}),
+        });
+        // general relative contract stays…
+        expect(body).toContain('相対競技の順位契約（維持=後退');
+        // …but the declining-gated warning must not fire.
+        expect(body).not.toContain('⚠ 相対rating comp: champion維持は field改善下で後退');
+      }
+    });
+
+    test('regression (non-relative) competitions get no rank contract nor warning', () => {
       const c = reg().competitions[0]; // no metric_kind → regression default
       const body = buildIssueBody(c.targets[0], c, 3, {
         rankTrend: '順位トレンド(直近2観測): 40位 → 42位 — ⚠ 低下傾向',
+        rankTrendDirection: 'declining',
       });
       expect(body).not.toContain('相対競技の順位契約');
-      // the neutral rank-trend material line is still shown.
+      expect(body).not.toContain('⚠ 相対rating comp: champion維持は field改善下で後退');
+      // the neutral rank-trend material is still shown in its dedicated section.
+      expect(body).toContain('### 実LB順位トレンド');
       expect(body).toContain('順位トレンド');
     });
   });
