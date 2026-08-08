@@ -53,6 +53,7 @@ import {
   type ImprovementMaterial,
 } from './lib/kaggleImprovement.js';
 import { collectImproveContext, collectAllocationSignals } from './lib/kaggleImproveMaterial.js';
+import { computeKernelFingerprint } from './lib/kaggleKernelFingerprint.js';
 import { parseKaggleSubmissionsCsv } from './lib/kaggleImproveMaterial.js';
 import { selectDynamicCompetition, shouldAutoMaintain } from './lib/resourceAllocation.js';
 import {
@@ -1513,6 +1514,60 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         process.exit(1);
       }
       process.stdout.write(JSON.stringify(plan) + '\n');
+      process.exit(0);
+      break;
+    }
+    case 'kernel-fingerprint': {
+      // SOT-2517: compute the *executed-computation* fingerprint for a code-competition kernel target.
+      // The visible submission.csv is intentionally NOT part of identity: a code competition can have a
+      // layer that overwrites the visible output, so byte-identical CSVs can hide a different hidden-run
+      // behavior — deduping on the CSV (a) wrongly drops a genuinely-new lever submission and (b) lets a
+      // byte-identical output falsely CLOSE a lever (rogii cycle11 "blend inert" real incident). Instead
+      // we hash the notebook code cells + pinned dataset sources + kernel version. Prints
+      // `kernel:sha256:<hex>` on stdout. scripts/ai/kaggle_targets_submit.sh calls this for
+      // submit.kind == "kernel" targets. Fail-loud (exit 1) on unreadable inputs so the caller can fall
+      // back to the visible-artifact hash rather than silently deduping on an empty fingerprint.
+      const flags: Record<string, string> = {};
+      for (let i = 0; i < args.length; i += 1) {
+        const a = args[i];
+        if (a && a.startsWith('--')) {
+          flags[a.slice(2)] = args[i + 1] ?? '';
+          i += 1;
+        }
+      }
+      let notebookJson: unknown;
+      if (flags.notebook) {
+        try {
+          notebookJson = JSON.parse(fs.readFileSync(flags.notebook, 'utf8'));
+        } catch (err: any) {
+          process.stderr.write(
+            `kernel-fingerprint: cannot read notebook ${flags.notebook}: ${err?.message || err}\n`
+          );
+          process.exit(1);
+        }
+      }
+      let datasetSources: string[] = [];
+      if (flags['dataset-sources']) {
+        try {
+          const parsed = JSON.parse(flags['dataset-sources']);
+          if (!Array.isArray(parsed) || !parsed.every((v) => typeof v === 'string')) {
+            throw new Error('expected a JSON string array');
+          }
+          datasetSources = parsed;
+        } catch (err: any) {
+          process.stderr.write(
+            `kernel-fingerprint: invalid --dataset-sources JSON: ${err?.message || err}\n`
+          );
+          process.exit(1);
+        }
+      }
+      const fingerprint = computeKernelFingerprint({
+        notebookJson,
+        codeSource: flags['code-source'] || undefined,
+        datasetSources,
+        version: flags.version || null,
+      });
+      process.stdout.write(fingerprint + '\n');
       process.exit(0);
       break;
     }
