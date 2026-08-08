@@ -158,6 +158,12 @@ export interface CompetitionValidation {
    */
   requireScoredSubmission?: boolean;
   /**
+   * SOT-2519: `submissionHealth=broken` と判定する「先頭から連続する無効提出」の回数（既定
+   * `SUBMISSION_BROKEN_CONSECUTIVE`=3）。壊れやすい/提出頻度の低いコンペで感度を上げ下げするための
+   * registry 上書き。1 以上の整数。欠落時は fail-safe に既定値。
+   */
+  brokenSubmissionConsecutive?: number;
+  /**
    * SOT-2518 P9: metric の性質。`regression`=絶対スコアが実態（従来挙動）／`relative_rating`=相対
    * rating（field が動くため絶対スコア維持は後退。順位を一次実態とみなす）／`attack`=攻撃系（スコア
    * 成立自体が壊れやすい）。`relative_rating` のとき本文に「維持=後退・前進軸必須」の順位契約を挿入する。
@@ -567,6 +573,21 @@ function parseCompetitionValidation(raw: unknown, i: number): CompetitionValidat
     validation.requireScoredSubmission = requireScoredSubmission;
   }
 
+  // SOT-2519: submissionHealth=broken の連続回数閾値（欠落時は既定3）。
+  const brokenSubmissionConsecutive = v.broken_submission_consecutive ?? v.brokenSubmissionConsecutive;
+  if (brokenSubmissionConsecutive !== undefined) {
+    if (
+      typeof brokenSubmissionConsecutive !== 'number' ||
+      !Number.isInteger(brokenSubmissionConsecutive) ||
+      brokenSubmissionConsecutive < 1
+    ) {
+      throw new Error(
+        `registry.competitions[${i}].validation.broken_submission_consecutive must be an integer >= 1`
+      );
+    }
+    validation.brokenSubmissionConsecutive = brokenSubmissionConsecutive;
+  }
+
   // SOT-2518 P9: metric の性質（relative_rating で順位契約を挿入）。
   const metricKind = v.metric_kind ?? v.metricKind;
   if (metricKind !== undefined) {
@@ -749,6 +770,11 @@ export interface ImprovementMaterial {
   /** SOT-2518 P8: submissionHealth の人間向け理由（本文に表示する）。 */
   submissionHealthReason?: string;
   /**
+   * SOT-2519: 先頭から連続した無効提出（ERROR/0.000/未掲載）の件数。submit-repair 本文先頭の
+   * `🔴 提出が壊れています（直近N回…）` マーカーに使う。
+   */
+  submissionHealthConsecutive?: number;
+  /**
    * SOT-2518 P9: 実LB順位のトレンド digest（上昇/低下/新規）。`validation.metric_kind` が
    * `relative_rating` のコンペで「維持=後退」を検知する一次材料。低下傾向なら ⚠ を含む。
    */
@@ -851,7 +877,15 @@ export function buildSubmitRepairBody(
   const prev =
     material.previousSubmission?.trim() || '(前回提出の記録なし — 取得できずまたは提出履歴が空)';
   const failure = material.failureKpiExcerpt?.trim() || '(該当なし)';
+  // SOT-2519: 材料先頭に置く「壊れている」マーカー（連続回数が分かれば直近N回を明記する）。
+  const brokenCount = material.submissionHealthConsecutive;
+  const brokenHeader =
+    typeof brokenCount === 'number' && brokenCount > 0
+      ? `🔴 提出が壊れています（直近${brokenCount}回 ERROR/0.000/未掲載）`
+      : '🔴 提出が壊れています（直近提出が ERROR/0.000/未掲載）';
   return `workers: ${target.workersDirective}
+
+${brokenHeader}
 
 ## 目的（submit-repair モード）
 Kaggleコンペ \`${competition.kaggleCompetition}\`（repo: ${target.repo} / 系統: ${target.lineage}）への
