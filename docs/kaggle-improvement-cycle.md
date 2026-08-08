@@ -225,6 +225,29 @@ done
 
 - 改善サイクル: `docs/ai/auto_logs/kaggle_improve.jsonl`（枠/当番コンペ/active/起案 identifier）。
 - 提出: `docs/ai/kaggle/submission-history.jsonl`。
+- 実験台帳（target repo 側）: `<target repo>/docs/ai/experiment_ledger.jsonl`。評価した軸ごとに1行 append。
+
+## 実験台帳スキーマ（SOT-2515）
+
+`experiment_ledger.jsonl` の各行は評価した改善軸1件を表す。基本フィールドに加え、
+昇格判断（leak-free CV 一次・頑健受容ゲート）を後から監査できるよう検証スコアを記録する。
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `recordedAt` | ISO8601 | 記録時刻 |
+| `axis` | string | 改善軸の識別名 |
+| `result` | `promoted`｜`rejected`｜`inconclusive` | 昇格判定 |
+| `cycle` | number | サイクル番号 |
+| `hypothesis` | string | 仮説 |
+| `evidence` | string | 根拠（A/B結果など） |
+| `cv_score` | number | leak-free CV スコア（**一次KPI**） |
+| `public_score` | number | public LB スコア（二次 sanity） |
+| `gap` | number | `public_score − cv_score`（大乖離は過学習の赤信号） |
+| `k_star` | number | 頑健受容テストの `k*`（`scripts/ai/robust_acceptance.py` 出力） |
+
+- `cv_score` / `public_score` / `gap` は全コンペで推奨、`k_star` は **`tail_heavy_metric` のコンペでは必須**
+  （裾の重い pooled RMSE/SSE 系。少数エンティティの運による見かけ改善を弾く）。
+- `k_star` は昇格ゲートで `k* > |public|` を満たすときのみ改善を採用する（[playbook P3](kaggle-playbook/01-validation-and-selection.md#p3-metric-の裾を診断する) の頑健受容テスト）。参照実装＝`scripts/ai/robust_acceptance.py`。
 
 ## 関連コマンド / ファイル
 
