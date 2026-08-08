@@ -277,6 +277,28 @@ describe('kaggleImprovement', () => {
       expect(() => parseTargetsRegistry(badKind)).toThrow(/metric_kind/);
     });
 
+    // SOT-2519 — validation.broken_submission_consecutive（broken 判定の連続回数上書き）。
+    test('validation parses broken_submission_consecutive (snake + camel), missing = undefined', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].validation = { primary: 'cv', broken_submission_consecutive: 5 };
+      raw.competitions[1].validation = { primary: 'cv', brokenSubmissionConsecutive: 2 };
+      const parsed = parseTargetsRegistry(raw);
+      expect(parsed.competitions[0].validation.brokenSubmissionConsecutive).toBe(5);
+      expect(parsed.competitions[1].validation.brokenSubmissionConsecutive).toBe(2);
+      // 欠落時は undefined（材料側で既定3に fail-safe）。
+      expect(reg().competitions[0].validation.brokenSubmissionConsecutive).toBeUndefined();
+    });
+
+    test('validation fails loud on a non-integer/<1 broken_submission_consecutive', () => {
+      const badFloat = JSON.parse(JSON.stringify(rawRegistry));
+      badFloat.competitions[0].validation = { broken_submission_consecutive: 2.5 };
+      expect(() => parseTargetsRegistry(badFloat)).toThrow(/broken_submission_consecutive/);
+
+      const badZero = JSON.parse(JSON.stringify(rawRegistry));
+      badZero.competitions[0].validation = { broken_submission_consecutive: 0 };
+      expect(() => parseTargetsRegistry(badZero)).toThrow(/broken_submission_consecutive/);
+    });
+
     test('the live registry parses and every competition has a validation primary', () => {
       const here = path.dirname(fileURLToPath(import.meta.url));
       const raw = JSON.parse(
@@ -585,10 +607,22 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('有効な（非ゼロ・スコア確定）提出を1本');
       expect(body).toContain('直近 3 回連続で有効スコア無し');
       expect(body).toContain('kaggle_targets_submit.sh');
+      // SOT-2519: 材料先頭の 🔴 マーカー（連続回数不明時は総称文言）。
+      expect(body).toContain('🔴 提出が壊れています');
       // repair mode drops normal axis-selection framing.
       expect(body).not.toContain('検証階層（一次=leak-free CV / 二次=public LB）');
       // child directive is still pinned to the lineage model.
       expect(body).toContain('workers: solo=claude:opus, handoff=off');
+    });
+
+    test('submit-repair header shows the concrete broken run count when known (SOT-2519)', () => {
+      const c = repairComp();
+      const body = buildIssueBody(c.targets[0], c, 3, {
+        submissionHealth: 'broken',
+        submissionHealthReason: '直近 4 回連続で有効スコア無し（ERROR/0.000/未スコア）',
+        submissionHealthConsecutive: 4,
+      });
+      expect(body).toContain('🔴 提出が壊れています（直近4回 ERROR/0.000/未掲載）');
     });
 
     test('broken submissions do NOT switch modes unless require_scored_submission is set', () => {

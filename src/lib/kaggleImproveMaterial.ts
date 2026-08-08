@@ -897,7 +897,11 @@ export async function collectImproveContext(
     });
     const previousSubmission = formatPreviousSubmission(targetSubmissionRows);
     // SOT-2518 P8: 提出健全性（broken=ERROR/0.000/未スコア連続）。本文の submit-repair 切替に使う。
-    const submissionHealth = detectSubmissionHealth(targetSubmissionRows);
+    // SOT-2519: broken 判定の連続回数閾値は registry で上書き可（欠落時は既定 SUBMISSION_BROKEN_CONSECUTIVE）。
+    const submissionHealth = detectSubmissionHealth(
+      targetSubmissionRows,
+      comp.validation.brokenSubmissionConsecutive ?? SUBMISSION_BROKEN_CONSECUTIVE
+    );
     // guard 4: 前サイクル未完了。失敗時は安全側で false（＝ブロックしない）に倒す。
     let hasUnfinishedCycle = false;
     try {
@@ -1063,6 +1067,9 @@ export async function collectImproveContext(
       ...(experimentLedgerDigest ? { experimentLedgerDigest } : {}),
       submissionHealth: submissionHealth.status,
       ...(submissionHealth.reason ? { submissionHealthReason: submissionHealth.reason } : {}),
+      ...(submissionHealth.consecutiveBroken > 0
+        ? { submissionHealthConsecutive: submissionHealth.consecutiveBroken }
+        : {}),
       ...(rankTrendSummary ? { rankTrend: rankTrendSummary } : {}),
     };
   }
