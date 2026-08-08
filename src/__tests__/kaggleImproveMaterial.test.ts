@@ -18,6 +18,10 @@ import {
   referenceOverfitWarning,
   formatCvGapTrend,
   parseCvGapHistory,
+  detectSubmissionHealth,
+  submissionRowState,
+  computeRankTrend,
+  SUBMISSION_BROKEN_CONSECUTIVE,
   CV_PUBLIC_GAP_RELATIVE_WARN,
   REFERENCE_OVERFIT_RELATIVE_MARGIN,
   type CompletedIssue,
@@ -431,6 +435,105 @@ describe('kaggleImproveMaterial', () => {
       expect(gaps).toHaveLength(2);
       expect(gaps[0]).toBeCloseTo(0.05, 6);
       expect(gaps[1]).toBeCloseTo(computeCvPublicGap(8.3, 6.4).relative, 6);
+    });
+  });
+
+  // SOT-2518 P8: 提出アウトカム preflight（submissionHealth = broken 検出）。
+  describe('submissionRowState', () => {
+    test('classifies pending / error / scored-zero / healthy rows', () => {
+      expect(submissionRowState({ status: 'SubmissionStatus.PENDING' })).toBe('pending');
+      expect(submissionRowState({ status: '' })).toBe('pending');
+      expect(submissionRowState({ status: 'SubmissionStatus.ERROR' })).toBe('unhealthy');
+      expect(submissionRowState({ status: 'COMPLETE', publicScore: '0.000' })).toBe('unhealthy');
+      expect(submissionRowState({ status: 'COMPLETE' })).toBe('unhealthy'); // missing score
+      expect(submissionRowState({ status: 'SubmissionStatus.COMPLETE', publicScore: '0.512' })).toBe('healthy');
+    });
+  });
+
+  describe('detectSubmissionHealth', () => {
+    const broken = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        date: `2026-08-0${i + 1} 09:00:00`,
+        status: 'SubmissionStatus.ERROR',
+      }));
+
+    test('flags broken when the last N (default 3) non-pending rows are all unhealthy', () => {
+      const h = detectSubmissionHealth(broken(3));
+      expect(h.status).toBe('broken');
+      expect(h.consecutiveBroken).toBe(3);
+      expect(h.reason).toContain('提出パイプライン');
+    });
+
+    test('a run of scored-zero submissions is also broken', () => {
+      const rows = Array.from({ length: 3 }, (_, i) => ({
+        date: `2026-08-0${i + 1} 09:00:00`,
+        status: 'SubmissionStatus.COMPLETE',
+        publicScore: '0.000',
+      }));
+      expect(detectSubmissionHealth(rows).status).toBe('broken');
+    });
+
+    test('pending rows at the top are ignored, not counted as broken', () => {
+      const rows = [
+        { date: '2026-08-05 09:00:00', status: 'SubmissionStatus.PENDING' },
+        ...broken(3),
+      ];
+      expect(detectSubmissionHealth(rows).status).toBe('broken');
+    });
+
+    test('a recent healthy submission makes it ok even if older ones failed', () => {
+      const rows = [
+        { date: '2026-08-05 09:00:00', status: 'COMPLETE', publicScore: '0.51' },
+        ...broken(3),
+      ];
+      const h = detectSubmissionHealth(rows);
+      expect(h.status).toBe('ok');
+      expect(h.consecutiveBroken).toBe(0);
+    });
+
+    test('fewer consecutive failures than the threshold is unknown, not broken', () => {
+      const h = detectSubmissionHealth(broken(2));
+      expect(h.status).toBe('unknown');
+      expect(h.consecutiveBroken).toBe(2);
+    });
+
+    test('no scored/failed rows at all (empty or all pending) is unknown', () => {
+      expect(detectSubmissionHealth([]).status).toBe('unknown');
+      expect(
+        detectSubmissionHealth([{ status: 'SubmissionStatus.PENDING' }]).status
+      ).toBe('unknown');
+    });
+
+    test('the consecutive threshold is configurable', () => {
+      expect(detectSubmissionHealth(broken(2), 2).status).toBe('broken');
+      expect(SUBMISSION_BROKEN_CONSECUTIVE).toBe(3);
+    });
+  });
+
+  // SOT-2518 P9: 実LB順位トレンド（維持=後退検知）。順位は小さいほど良い（rank 1 = 首位）。
+  describe('computeRankTrend', () => {
+    test('rising rank number over time is a declining trend with a ⚠', () => {
+      const t = computeRankTrend([{ rank: 42 }, { rank: 55 }, { rank: 70 }]);
+      expect(t.direction).toBe('declining');
+      expect(t.summary).toContain('低下傾向');
+      expect(t.summary).toContain('42位');
+      expect(t.summary).toContain('70位');
+    });
+
+    test('falling off the leaderboard (null last) counts as declining', () => {
+      const t = computeRankTrend([{ rank: 300, totalListed: 599 }, { rank: null, totalListed: 599 }]);
+      expect(t.direction).toBe('declining');
+      expect(t.summary).toContain('圏外');
+    });
+
+    test('improving and flat trends', () => {
+      expect(computeRankTrend([{ rank: 80 }, { rank: 40 }]).direction).toBe('improving');
+      expect(computeRankTrend([{ rank: 50 }, { rank: 50 }]).direction).toBe('flat');
+    });
+
+    test('a single observation is "new"; empty is "unknown"', () => {
+      expect(computeRankTrend([{ rank: 42 }]).direction).toBe('new');
+      expect(computeRankTrend([]).direction).toBe('unknown');
     });
   });
 });

@@ -151,6 +151,18 @@ export interface CompetitionValidation {
    * 疑う（playbook P5）。registry 側に置く基準値。
    */
   referencePublicScore?: number;
+  /**
+   * SOT-2518 P8: このコンペは「有効な（非ゼロ・スコア確定）提出」を成立の前提にする（agent/kernel
+   * コンペ既定 true）。true のとき、直近提出が ERROR/0.000/未スコアを連続したら起案本文を
+   * submit-repair モードへ切り替える（新規改善軸を止めて提出パイプラインの復旧を最優先にする）。
+   */
+  requireScoredSubmission?: boolean;
+  /**
+   * SOT-2518 P9: metric の性質。`regression`=絶対スコアが実態（従来挙動）／`relative_rating`=相対
+   * rating（field が動くため絶対スコア維持は後退。順位を一次実態とみなす）／`attack`=攻撃系（スコア
+   * 成立自体が壊れやすい）。`relative_rating` のとき本文に「維持=後退・前進軸必須」の順位契約を挿入する。
+   */
+  metricKind?: 'regression' | 'relative_rating' | 'attack';
 }
 
 /**
@@ -544,6 +556,28 @@ function parseCompetitionValidation(raw: unknown, i: number): CompetitionValidat
     validation.referencePublicScore = referencePublicScore;
   }
 
+  // SOT-2518 P8: 有効提出を前提にするか（submit-repair モードのゲート）。
+  const requireScoredSubmission = v.require_scored_submission ?? v.requireScoredSubmission;
+  if (requireScoredSubmission !== undefined) {
+    if (typeof requireScoredSubmission !== 'boolean') {
+      throw new Error(
+        `registry.competitions[${i}].validation.require_scored_submission must be a boolean`
+      );
+    }
+    validation.requireScoredSubmission = requireScoredSubmission;
+  }
+
+  // SOT-2518 P9: metric の性質（relative_rating で順位契約を挿入）。
+  const metricKind = v.metric_kind ?? v.metricKind;
+  if (metricKind !== undefined) {
+    if (metricKind !== 'regression' && metricKind !== 'relative_rating' && metricKind !== 'attack') {
+      throw new Error(
+        `registry.competitions[${i}].validation.metric_kind must be "regression", "relative_rating", or "attack"`
+      );
+    }
+    validation.metricKind = metricKind;
+  }
+
   return validation;
 }
 
@@ -706,6 +740,19 @@ export interface ImprovementMaterial {
   cvPublicGapTrend?: string;
   /** 実験台帳ダイジェスト（design §48）: 試行済み軸と非昇格軸（再試行禁止リスト）。 */
   experimentLedgerDigest?: string;
+  /**
+   * SOT-2518 P8: 直近提出の健全性。`broken`=ERROR/0.000/未スコアが閾値回連続（提出パイプライン破損の
+   * 疑い）／`ok`=直近に有効スコア／`unknown`=判定材料不足。`validation.require_scored_submission` の
+   * コンペで `broken` のとき、buildIssueBody は submit-repair モードへ切り替える。
+   */
+  submissionHealth?: 'ok' | 'broken' | 'unknown';
+  /** SOT-2518 P8: submissionHealth の人間向け理由（本文に表示する）。 */
+  submissionHealthReason?: string;
+  /**
+   * SOT-2518 P9: 実LB順位のトレンド digest（上昇/低下/新規）。`validation.metric_kind` が
+   * `relative_rating` のコンペで「維持=後退」を検知する一次材料。低下傾向なら ⚠ を含む。
+   */
+  rankTrend?: string;
 }
 
 /** ガードの各シグナル（cron が Linear/cooldown を見て渡す）。 */
@@ -773,9 +820,86 @@ export interface CyclePlan {
  */
 export const DEFAULT_CV_PUBLIC_GAP_WARN_THRESHOLD = 1;
 
+/** 子Issue本文先頭に固定する worker/reasoning directive（系統ごとに Opus / Sol へ固定）。 */
+function childWorkersDirective(target: ImprovementTarget): string {
+  return target.lineage === 'claude'
+    ? 'workers: solo=claude:opus, handoff=off'
+    : 'workers: solo=codex:gpt-5.6-sol, handoff=off\nreasoning: solo=low';
+}
+
 /** 起案Issueのタイトル（§6・process 名を避け feature/outcome 起点）。 */
 export function buildIssueTitle(target: ImprovementTarget, cycleNumber: number): string {
   return `[${target.repo}] Kaggle順位向上サイクル第${cycleNumber}次 — 改善方針の立案と実施`;
+}
+
+/**
+ * SOT-2518 P8 — submit-repair モードの起案本文。直近提出が ERROR/0.000/未スコアを連続し、コンペが
+ * 有効提出を前提にする（`validation.require_scored_submission`）とき、`buildIssueBody` はこの本文へ
+ * 切り替える。新規の改善軸は起案せず、「有効な非ゼロ提出を1本出す」ことだけをゴールに、提出パイプライン
+ * （kernel実行・出力パス・exec互換・SDK依存・fingerprint gate）をデバッグする。escalation ladder より優先。
+ */
+export function buildSubmitRepairBody(
+  target: ImprovementTarget,
+  competition: ImprovementCompetition,
+  cycleNumber: number,
+  material: ImprovementMaterial
+): string {
+  const childWorkers = childWorkersDirective(target);
+  const reason =
+    material.submissionHealthReason?.trim() ||
+    '直近提出が連続して有効スコアを得ていない（ERROR/0.000/未スコア）。';
+  const prev =
+    material.previousSubmission?.trim() || '(前回提出の記録なし — 取得できずまたは提出履歴が空)';
+  const failure = material.failureKpiExcerpt?.trim() || '(該当なし)';
+  return `workers: ${target.workersDirective}
+
+## 目的（submit-repair モード）
+Kaggleコンペ \`${competition.kaggleCompetition}\`（repo: ${target.repo} / 系統: ${target.lineage}）への
+提出が壊れている。**新規の改善軸は起案しない。** 唯一のゴールは **有効な（非ゼロ・スコア確定）提出を1本
+成立させる**こと。提出が生存するまで、ローカル oracle での軸探索・昇格判断は一切行わない
+（提出が LB に載らないまま非昇格判定を積む「空回り」を止める — SOT-2518 P8）。
+
+## 提出健全性シグナル（cronが自動検出）
+⚠ ${reason}
+- 直近提出（履歴）:
+${prev}
+
+## 実施内容（提出パイプラインのデバッグを最優先）
+escalation ladder より優先する。次を順に切り分け、**有効な非ゼロ提出が1本 LB に載るまで**繰り返す:
+1. **kernel/実行**: 提出 kernel（notebook）がエラーなく最後まで実行され、期待どおりの出力ファイルを
+   生成するか（例外・タイムアウト・OOM・依存欠落を潰す）。
+2. **出力パス/フォーマット**: 提出物のパス・列・行数・dtypes が sample_submission と一致するか。
+3. **exec互換**: \`exec\`/\`__file__\` 非依存・cwd 不定でも動くか（[[kaggle-exec-runtime-gate]]）。
+4. **SDK/依存**: 競技 SDK（例 \`aicomp_sdk\`）が serving/exec 環境で import 可能か。system Python でなく
+   repo の \`.venv/bin/python\` で確認する。
+5. **提出経路**: 必ず control-plane の
+   \`bash scripts/ai/kaggle_targets_submit.sh --competition ${competition.key} --repo ${target.repo} --execute\`
+   を使う。Kaggle CLI/API を直接呼んで fingerprint gate を迂回しない。提出後、Kaggle 上で status が
+   COMPLETE かつ publicScore が非ゼロ（＝ LB 掲載）になったことを**必ず実測で確認**する。
+
+## 失敗ログ・KPI抜粋
+${failure}
+
+## 実行リソース
+- 改善の実装・学習・検証では GPU の使用を許可する。web 検索で公開 kernel/discussion の提出エラー
+  事例を調査してよいが、目的は「有効提出の成立」に限定する（スコア改善ではない）。
+
+## 子Issueへの委譲
+提出復旧の作業を 1〜3個の子Issueに分解して登録してよい（各子は Kaggle 提出を実行しない — 提出は親のみ）。
+各子Issueの本文先頭には必ず次の directive を記載する:
+
+\`\`\`
+${childWorkers}
+\`\`\`
+
+## 受け入れ条件
+- [ ] 提出が壊れていた根本原因（kernel/出力/exec/SDK/経路のいずれか）が特定され、記録されている
+- [ ] control-plane の提出スクリプト経由で提出し、Kaggle 上で status=COMPLETE かつ publicScore が
+      非ゼロ（LB 掲載）になったことを実測で確認した、または未解決の残課題が具体的に記録されている
+- [ ] 有効提出が成立するまで新規の改善軸を起案していない
+
+## 関連
+- 親（改善サイクル設計）: SOT-1913 / このサイクル自動起案の起点（第${cycleNumber}次・submit-repair）`;
 }
 
 /** 起案Issue本文テンプレート（§6・材料 digest を埋め込む。要約はしない）。 */
@@ -786,9 +910,15 @@ export function buildIssueBody(
   material: ImprovementMaterial,
   phase?: CompetitionPhaseResult
 ): string {
-  const childWorkers = target.lineage === 'claude'
-    ? 'workers: solo=claude:opus, handoff=off'
-    : 'workers: solo=codex:gpt-5.6-sol, handoff=off\nreasoning: solo=low';
+  // SOT-2518 P8: 提出が壊れていて（broken）かつコンペが有効提出を前提にする（require_scored_submission）
+  // なら、新規改善軸を止めて提出復旧を最優先にする submit-repair モードへ切り替える。
+  if (
+    material.submissionHealth === 'broken' &&
+    competition.validation.requireScoredSubmission === true
+  ) {
+    return buildSubmitRepairBody(target, competition, cycleNumber, material);
+  }
+  const childWorkers = childWorkersDirective(target);
   const prev =
     material.previousSubmission?.trim() || '(前回提出の記録なし — 初回サイクル、または取得できず)';
   const recent = material.recentIssuesDigest?.trim() || '(新規の完了Issueなし)';
@@ -800,6 +930,22 @@ export function buildIssueBody(
   const leaderboard =
     material.leaderboardSummary?.trim() ||
     '(public LB を取得できず — CLI疎通/認証を確認。public は二次sanity)';
+  // SOT-2518 P9: 実LB順位トレンド（低下傾向なら ⚠ 付き）を二次 public LB 行に添える。
+  const rankTrendLine = material.rankTrend?.trim()
+    ? `\n- 順位トレンド: ${material.rankTrend.trim()}`
+    : '';
+  // SOT-2518 P9: 相対 rating コンペでは「維持=後退」の順位契約を挿入する（regression は挿入しない）。
+  const relativeContract = competition.validation.metricKind === 'relative_rating'
+    ? `
+
+### 相対競技の順位契約（維持=後退・SOT-2518 P9）
+このコンペは **relative_rating**（対戦 rating / 相対採点）。field（対戦相手・他チーム）が改善し続けるため、
+**ローカル固定 field の R\\* 非劣化＝「champion 維持」は、実LBでは後退**でありうる。したがって:
+- **維持を昇格根拠にしない。** 実LB順位が低下傾向のときは maintain（現状維持）を成果として扱わず、
+  **必ず前進軸（勝率/rating を上げる実質改善）を選ぶ。**
+- opponent field に**上位の公開解法・強い相手を取り込み**、固定 field への過適合を避ける。
+- **実LB順位の非劣化を昇格の必須条件**にする（ローカル固定 field の R\\* 非劣化だけでは不十分）。`
+    : '';
   // CV↔public gap 表示枠（SOT-2513）。gap 値の実供給は次サイクル。閾値超なら乖離警告を前置。
   const gapSummary =
     material.cvPublicGapSummary?.trim() ||
@@ -876,7 +1022,7 @@ Kaggleコンペ \`${competition.kaggleCompetition}\`（repo: ${target.repo} / �
 一次KPI = **leak-free CV**（エンティティ単位・時系列で hold out した leak-free 検証）。public LB は
 **二次 sanity** に過ぎない。**CVと public が乖離したら悲観側(CV)を信じる。public 追い（public best 選抜）禁止。**
 - 一次（信じる指標）leak-free CV: ${cv}
-- 二次（sanity のみ）public LB: ${leaderboard}
+- 二次（sanity のみ）public LB: ${leaderboard}${rankTrendLine}${relativeContract}
 
 ### CV↔public gap（乖離監視）
 ${gapWarn}${refWarn}${gapSummary}${gapTrend}

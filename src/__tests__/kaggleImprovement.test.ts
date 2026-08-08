@@ -244,6 +244,39 @@ describe('kaggleImprovement', () => {
       expect(() => parseTargetsRegistry(badPath)).toThrow(/cv_report_path/);
     });
 
+    // SOT-2518 — validation.require_scored_submission (P8) / metric_kind (P9)。
+    test('validation parses require_scored_submission and metric_kind (snake + camel)', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].validation = {
+        primary: 'cv',
+        require_scored_submission: true,
+        metric_kind: 'attack',
+      };
+      raw.competitions[1].validation = { requireScoredSubmission: false, metricKind: 'relative_rating' };
+      const parsed = parseTargetsRegistry(raw);
+      expect(parsed.competitions[0].validation).toMatchObject({
+        requireScoredSubmission: true,
+        metricKind: 'attack',
+      });
+      expect(parsed.competitions[1].validation).toMatchObject({
+        requireScoredSubmission: false,
+        metricKind: 'relative_rating',
+      });
+      // 欠落時は両フィールドとも undefined（後方互換）。
+      expect(reg().competitions[0].validation.requireScoredSubmission).toBeUndefined();
+      expect(reg().competitions[0].validation.metricKind).toBeUndefined();
+    });
+
+    test('validation fails loud on a bad require_scored_submission or metric_kind', () => {
+      const badBool = JSON.parse(JSON.stringify(rawRegistry));
+      badBool.competitions[0].validation = { require_scored_submission: 'yes' };
+      expect(() => parseTargetsRegistry(badBool)).toThrow(/require_scored_submission/);
+
+      const badKind = JSON.parse(JSON.stringify(rawRegistry));
+      badKind.competitions[0].validation = { metric_kind: 'ranking' };
+      expect(() => parseTargetsRegistry(badKind)).toThrow(/metric_kind/);
+    });
+
     test('the live registry parses and every competition has a validation primary', () => {
       const here = path.dirname(fileURLToPath(import.meta.url));
       const raw = JSON.parse(
@@ -531,6 +564,75 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('埋め込みは検出しない');
       // ブロッキング承認ゲートは無い（自動性維持）。
       expect(body).toContain('人間の承認待ちでブロックはしない');
+    });
+
+    // SOT-2518 P8 — submit-repair モード。
+    const repairComp = () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].validation = { primary: 'cv', require_scored_submission: true };
+      return parseTargetsRegistry(raw).competitions[0];
+    };
+
+    test('broken submissions + require_scored_submission switches to submit-repair mode', () => {
+      const c = repairComp();
+      const body = buildIssueBody(c.targets[0], c, 3, {
+        submissionHealth: 'broken',
+        submissionHealthReason: '直近 3 回連続で有効スコア無し（ERROR/0.000/未スコア）',
+        previousSubmission: '- 2026-08-08 status=ERROR',
+      });
+      expect(body).toContain('submit-repair モード');
+      expect(body).toContain('新規の改善軸は起案しない');
+      expect(body).toContain('有効な（非ゼロ・スコア確定）提出を1本');
+      expect(body).toContain('直近 3 回連続で有効スコア無し');
+      expect(body).toContain('kaggle_targets_submit.sh');
+      // repair mode drops normal axis-selection framing.
+      expect(body).not.toContain('検証階層（一次=leak-free CV / 二次=public LB）');
+      // child directive is still pinned to the lineage model.
+      expect(body).toContain('workers: solo=claude:opus, handoff=off');
+    });
+
+    test('broken submissions do NOT switch modes unless require_scored_submission is set', () => {
+      const c = reg().competitions[0]; // no validation.require_scored_submission
+      const body = buildIssueBody(c.targets[0], c, 3, {
+        submissionHealth: 'broken',
+        submissionHealthReason: 'x',
+      });
+      expect(body).not.toContain('submit-repair モード');
+      expect(body).toContain('検証階層（一次=leak-free CV / 二次=public LB）');
+    });
+
+    test('ok/unknown submissionHealth keeps the normal body even when gated', () => {
+      const c = repairComp();
+      const ok = buildIssueBody(c.targets[0], c, 3, { submissionHealth: 'ok' });
+      expect(ok).not.toContain('submit-repair モード');
+      expect(ok).toContain('検証階層（一次=leak-free CV / 二次=public LB）');
+    });
+
+    // SOT-2518 P9 — relative_rating の順位契約（維持=後退）。
+    test('relative_rating competitions inject the rank contract (maintain = regress)', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].validation = { primary: 'cv', metric_kind: 'relative_rating' };
+      const c = parseTargetsRegistry(raw).competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, {
+        rankTrend: '順位トレンド(直近3観測): 42位 → 55位 → 70位 — ⚠ 低下傾向（相対競技では維持=後退を疑え）',
+      });
+      expect(body).toContain('相対競技の順位契約（維持=後退');
+      expect(body).toContain('維持を昇格根拠にしない');
+      expect(body).toContain('前進軸');
+      expect(body).toContain('実LB順位の非劣化を昇格の必須条件');
+      // rankTrend material is rendered on the public-LB line.
+      expect(body).toContain('順位トレンド');
+      expect(body).toContain('⚠ 低下傾向');
+    });
+
+    test('regression (non-relative) competitions get no rank contract', () => {
+      const c = reg().competitions[0]; // no metric_kind → regression default
+      const body = buildIssueBody(c.targets[0], c, 3, {
+        rankTrend: '順位トレンド(直近2観測): 40位 → 42位 — ⚠ 低下傾向',
+      });
+      expect(body).not.toContain('相対競技の順位契約');
+      // the neutral rank-trend material line is still shown.
+      expect(body).toContain('順位トレンド');
     });
   });
 
@@ -950,6 +1052,14 @@ describe('kaggleImprovement', () => {
         expect(gptBody).toContain('workers: solo=codex:gpt-5.6-sol, handoff=off');
         expect(gptBody).toContain('reasoning: solo=low');
       }
+      // SOT-2518: agent-security は有効提出を前提(P8)＋attack、ptcg は relative_rating(P9)。
+      expect(r.competitions.find((c) => c.key === 'agent-security')!.validation).toMatchObject({
+        requireScoredSubmission: true,
+        metricKind: 'attack',
+      });
+      expect(r.competitions.find((c) => c.key === 'ptcg')!.validation).toMatchObject({
+        metricKind: 'relative_rating',
+      });
       // SOT-1913 提出cap補正: ARC=1/day & alternate、他=5/day & both。
       for (const c of r.competitions) {
         const isArc = c.key === 'arc-agi-2' || c.key === 'arc-agi-3';
