@@ -115,7 +115,8 @@ describe('SOT-1966 champion submission audit', () => {
     ]);
     // kernel version は提出のたびに運用で bump される — 値そのものは断言しない（正の整数のみ）。
     for (const t of competition?.targets ?? []) {
-      expect(Number.isInteger(t.submit.version) && t.submit.version > 0).toBe(true);
+      const version = t.submit?.version;
+      expect(Number.isInteger(version) && (version as number) > 0).toBe(true);
     }
   });
 });

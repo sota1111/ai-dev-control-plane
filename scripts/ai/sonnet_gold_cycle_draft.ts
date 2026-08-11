@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import {
   configureLinearApi,
   createDraftIssue,
-  findOpenAutoImproveIssue,
+  linearQuery,
 } from '../../src/lib/linearApi.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -58,6 +58,32 @@ function jstHour(): number {
   return (new Date().getUTCHours() + 9) % 24;
 }
 
+/**
+ * 直列ガード: 同ラベル（親サイクル＋その子issue）の未完了 issue を返す（無ければ null）。
+ * findOpenAutoImproveIssue と違い In Review も未完了扱いにする — 親は子issue群の完了を
+ * In Review で待つ設計のため（完了親は auto-accept が Done へ促進する）。
+ */
+async function findOpenCycleIssue(projectName: string, labelName: string): Promise<string | null> {
+  try {
+    const data: any = await linearQuery(
+      `query($name: String!, $label: String!) {
+        issues(filter: {
+          project: { name: { eq: $name } },
+          labels: { name: { eq: $label } },
+          state: { name: { in: ["Todo", "In Progress", "In Review"] } }
+        }, first: 1) { nodes { identifier } }
+      }`,
+      { name: projectName, label: labelName }
+    );
+    const id = data?.issues?.nodes?.[0]?.identifier;
+    return typeof id === 'string' && id ? id : null;
+  } catch (err) {
+    console.error(`findOpenCycleIssue failed: ${(err as any)?.message || err}`);
+    // ガード照会の失敗は安全側（起票しない）に倒す。
+    return 'guard-query-failed';
+  }
+}
+
 function buildDescription(cycle: number, state: State, history: string | null): string {
   const prevRef = state.lastIssue
     ? `前回サイクル: ${state.lastIssue}（申し送りコメントを必ず読むこと）`
@@ -90,14 +116,27 @@ ${historyBlock}
    - **無理な回答化はしない**: 証拠をストアに用意できない問いは棄権のまま残す（precision 崩壊の既知失敗: cycle2 net28 / Sonnet wrong28）。
 2. **wrong の削減（abstain ≤ 5 到達後）**: commit_gate（SOT-2637/2640 実装済み）の締め直し・書式契約（括弧内付加情報クラス等）・codex judge の3回多数決化・per-idx focused 修正。
 
-## 【1サイクルの手順】
+## 【1サイクルの手順】（親=分析・分解・統合 / 子=並列実装 — 1サイクルで複数の改善を進める）
 
-1. 台帳・前回サイクル issue の申し送り・\`docs/ai/champion_abstain_wrong_classification.md\` を読む
-2. 上位の棄権 2〜4 件を対象に、コミット単位で実装（前処理ストア拡張＋lookup 配線が主軸）
-3. focused 検証: \`scripts/run_focused_gate.py --dev\`（Sonnet 番兵つき・official:false 刻印）で対象改善＋番兵回帰ゼロを確認
-4. **Sonnet dev gold100 を1回実行**（claude-mcp・並列1・resume 対応）。usage limit 逼迫を検知したら gold100 はスキップし前処理のみで完了とし、その旨を申し送りに記録
+1. **前回結果の詳細分析（必須・成果物化）**: 台帳・前回サイクルの申し送り・直近 Sonnet gold100 の
+   details/abstain_ledger を読み、**abstain/wrong を per-idx で全数分類**する（state code × 契約型 ×
+   欠落証拠の特定 × 過去実測での到達実績のクロス）。分析結果を
+   \`docs/ai/sonnet_cycle_analysis/cycle${cycle}.md\` に保存する（次サイクルの一次入力になる）
+2. **子issueを 3〜6 件起票（必須）**: 分類から**互いに独立な改善クラスタを 3〜6 件**選び、
+   コミット単位の子issueへ分解して登録する（合計で 8〜15 idx を対象にする — 1サイクルの改善量を
+   最大化する）。各子issueには必ず:
+   - 冒頭に \`workers: solo=claude:opus, handoff=on\`
+   - ラベル \`sonnet-gold-cycle\` を付与（直列ガードが子の完了を待つために必須）
+   - TARGET_REPO / 対象 idx / 欠落証拠と実装方針 / focused 検証（\`run_focused_gate.py --dev\`＋Sonnet番兵）/
+     Gemini 禁止 / gold値ハードコード禁止 を明記（子は gold100 全量を回さない）
+3. 子issue登録後、親はこの issue を **In Review にして待機**する（全子が完了すると webhook が親を
+   再開する — 再開まで gold100 は実行しない）
+4. **再開後（全子完了を確認してから）**: 統合 focused（全子の対象idx＋番兵）→ **Sonnet dev gold100 を
+   1回実行**（claude-mcp・並列1・resume 対応・Gemini $0 確認）。usage limit 逼迫時は gold100 をスキップし
+   その旨を記録
 5. \`docs/ai/sonnet_gold_history.jsonl\` へ追記: \`{"cycle":${cycle},"ts":"<UTC>","match":N,"abstain":N,"wrong":N,"net":N,"gemini_cost_usd":0,"changes":["..."],"skipped_gold":false,"next":["..."]}\`
-6. 本 issue に結果サマリと**次サイクルへの申し送り**をコメントし、通常ライフサイクル（PR→merge→In Review）で完了する
+6. 本 issue に結果サマリと**次サイクルへの申し送り**（子ごとの成果 / 閉じた軸と証拠 / 未検証仮説 /
+   次の候補クラスタ）をコメントし、完了する
 
 ## 【初回タスク】（台帳が未作成の場合のみ）
 
@@ -111,8 +150,9 @@ ${historyBlock}
 - gold 値のハードコード禁止。事前計算は**質問を見ない網羅計算**のみ（全案件×全属性/全ID/全標準メトリクス/全版ペア）
 - serve path 変更はフラグゲート・既定OFF（dev 構成で ON にして測る）。OFF時 byte-identical
 - 官式資産（flash champion 構成・公式 history・LB 提出・SIGNATE CLI）に触れない
-- **担当の役割分担**: 本サイクル親issueは Fable（\`solo=claude:fable\`）が処理する。作業を分割して**子issueを起票する場合は、子issueの説明冒頭に必ず \`workers: solo=claude:opus, handoff=on\` を記載**する（親=Fable が判断と統合、子=opus が実装）。子issueには TARGET_REPO・focused検証（番兵つき）・Gemini禁止の制約を継承させること
-- 1サイクル1issue・直列（本サイクル未完了中は次の自動起票が抑止される）
+- **担当の役割分担**: 親issue（本issue）= Fable（\`solo=claude:fable\`）が分析・分解・統合を担当。**子issue = opus**（説明冒頭に必ず \`workers: solo=claude:opus, handoff=on\`）が実装を並列に担当。子issueには TARGET_REPO・focused検証（番兵つき）・Gemini禁止の制約を継承させ、**ラベル \`sonnet-gold-cycle\` を必ず付与**する
+- 1サイクル直列（親と全子が完了するまで次の自動起票は抑止される）。gold100 全量はサイクル末の親の1回のみ（子は focused のみ）
+- **人間コメント尊重（newest-wins）**: (a) 子issue分解の直前、(b) 再開後の統合測定の直前に、本 issue のコメントを再取得し、人間の新しい指示があれば最新を優先する
 - 停止方法: \`docs/ai/auto_logs/sonnet_gold_cycle.stop\` を作成（control-plane 側）
 
 ## 受け入れ条件
@@ -151,8 +191,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  // 直列ガード: 未完了（Todo / In Progress）の同ラベル issue があれば起票しない。
-  const open = await findOpenAutoImproveIssue(PROJECT, LABEL);
+  // 直列ガード: 未完了の同ラベル issue（親またはその子）があれば起票しない。親が子待ちで
+  // In Review に滞在する設計（複数子issue並列実装）のため、In Review も「未完了」に含める
+  // （完了した親は auto-accept が Done へ促進するので、In Review 滞留は原則一時的）。
+  const open = await findOpenCycleIssue(PROJECT, LABEL);
   if (open) {
     console.log(JSON.stringify({ ...result, action: 'skip', reason: `open cycle issue: ${open}` }));
     return;
