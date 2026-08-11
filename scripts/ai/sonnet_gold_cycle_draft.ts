@@ -168,6 +168,8 @@ async function main(): Promise<void> {
   const onlyScheduled = args.has('--only-scheduled');
   const force = args.has('--force');
   const dryRun = args.has('--dry-run');
+  // 手動ブートストラップ用: 直列ガードを明示的に無視して起票する（cron では使わない）。
+  const skipGuard = args.has('--skip-guard');
 
   configureLinearApi({
     log: (tag, message) => console.error(`[${tag}] ${message}`),
@@ -195,9 +197,12 @@ async function main(): Promise<void> {
   // In Review に滞在する設計（複数子issue並列実装）のため、In Review も「未完了」に含める
   // （完了した親は auto-accept が Done へ促進するので、In Review 滞留は原則一時的）。
   const open = await findOpenCycleIssue(PROJECT, LABEL);
-  if (open) {
+  if (open && !skipGuard) {
     console.log(JSON.stringify({ ...result, action: 'skip', reason: `open cycle issue: ${open}` }));
     return;
+  }
+  if (open && skipGuard) {
+    console.error(`WARNING: serial guard bypassed (--skip-guard); open cycle issue: ${open}`);
   }
 
   const state = readState();
