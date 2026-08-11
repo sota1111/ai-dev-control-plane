@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import type { GuardSignals, ImprovementMaterial, TargetsRegistry } from './kaggleImprovement.js';
+import type { GuardSignals, ImprovementMaterial, Lineage, TargetsRegistry } from './kaggleImprovement.js';
 import { getCompetition, resolveCompetitionPhase } from './kaggleImprovement.js';
 import {
   computeTargetPriority,
@@ -832,6 +832,48 @@ async function fetchCompletedIssues(project: string, label: string): Promise<Com
   }));
 }
 
+/** 申し送りコメントの本文へ載せる最大文字数（材料は生 digest だが Issue 本文の肥大は避ける）。 */
+const HANDOFF_MAX_CHARS = 1600;
+
+/**
+ * 前回サイクル親Issue（同 project・auto-improve ラベルの最新 Issue）の申し送りコメントを返す。
+ * `## 申し送り` を含む最新コメントの本文（先頭 HANDOFF_MAX_CHARS 文字）。無ければ undefined。
+ * signate Sonnet サイクルの申し送りループの移植 — 前任の判断・閉じた軸・次の軸候補を次サイクルへ渡す。
+ */
+async function latestCycleHandoff(project: string, label: string): Promise<string | undefined> {
+  const data: any = await linearQuery(
+    `query($name: String!, $label: String!) {
+      issues(filter: {
+        project: { name: { eq: $name } },
+        labels: { name: { eq: $label } }
+      }, first: 20) {
+        nodes {
+          identifier
+          createdAt
+          comments(first: 50) { nodes { body createdAt } }
+        }
+      }
+    }`,
+    { name: project, label }
+  );
+  const nodes: any[] = data?.issues?.nodes ?? [];
+  if (nodes.length === 0) return undefined;
+  const latestIssue = nodes.reduce((best, n) => {
+    const bm = best?.createdAt ? Date.parse(best.createdAt) : -1;
+    const nm = n?.createdAt ? Date.parse(n.createdAt) : -1;
+    return nm > bm ? n : best;
+  }, nodes[0]);
+  const comments: any[] = latestIssue?.comments?.nodes ?? [];
+  const handoffs = comments
+    .filter((c) => typeof c?.body === 'string' && c.body.includes('## 申し送り'))
+    .sort((a, b) => Date.parse(a?.createdAt ?? 0) - Date.parse(b?.createdAt ?? 0));
+  const latest = handoffs.length > 0 ? handoffs[handoffs.length - 1] : null;
+  if (!latest) return undefined;
+  const body: string = latest.body.trim();
+  const clipped = body.length > HANDOFF_MAX_CHARS ? `${body.slice(0, HANDOFF_MAX_CHARS)}\n…(截断)` : body;
+  return `（${latestIssue.identifier} より）\n${clipped}`;
+}
+
 /**
  * 当番コンペの各ターゲット（claude/gpt）ぶんの material と guard signals を収集する。
  * 全て best-effort。個々の失敗は握りつぶし、安全側（従来の空プレースホルダ／fail-open）に倒す。
@@ -890,6 +932,9 @@ export async function collectImproveContext(
 
   // failure-log も1回だけ読む。
   const failureContent = readFailureLog(opts.failureLogPath, log);
+
+  // 系統間 divergence（#5）: 各系統の台帳 digest を控え、後段で相手系統の材料として供給する。
+  const ledgerDigestByLineage: Partial<Record<Lineage, { repo: string; digest: string }>> = {};
 
   for (const t of comp.targets) {
     const targetSubmissionRows = submissionRowsForRepo(submissionRows, t.repo, {
@@ -1047,6 +1092,15 @@ export async function collectImproveContext(
     } catch (err: any) {
       log(`experiment ledger read failed for ${t.repo}: ${err?.message || err}`);
     }
+    if (experimentLedgerDigest) ledgerDigestByLineage[t.lineage] = { repo: t.repo, digest: experimentLedgerDigest };
+
+    // 前回サイクル親Issueの申し送りコメント（best-effort・signate教訓の移植）。
+    let previousCycleHandoff: string | undefined;
+    try {
+      previousCycleHandoff = await latestCycleHandoff(t.project, label);
+    } catch (err: any) {
+      log(`cycle handoff collection failed for ${t.project}: ${err?.message || err}`);
+    }
 
     signals[t.project] = {
       hasUnfinishedCycle,
@@ -1068,6 +1122,7 @@ export async function collectImproveContext(
       ...(referenceOverfitWarn ? { referenceOverfitWarning: referenceOverfitWarn } : {}),
       ...(cvPublicGapTrend ? { cvPublicGapTrend } : {}),
       ...(experimentLedgerDigest ? { experimentLedgerDigest } : {}),
+      ...(previousCycleHandoff ? { previousCycleHandoff } : {}),
       submissionHealth: submissionHealth.status,
       ...(submissionHealth.reason ? { submissionHealthReason: submissionHealth.reason } : {}),
       ...(submissionHealth.consecutiveBroken > 0
@@ -1076,6 +1131,16 @@ export async function collectImproveContext(
       ...(rankTrendSummary ? { rankTrend: rankTrendSummary } : {}),
       ...(rankTrendDirection ? { rankTrendDirection } : {}),
     };
+  }
+
+  // 系統間 divergence（#5）: 相手系統（同一コンペの逆側 lineage）の台帳 digest を各 material に供給する。
+  for (const t of comp.targets) {
+    const other: Lineage = t.lineage === 'claude' ? 'gpt' : 'claude';
+    const counterpart = ledgerDigestByLineage[other];
+    if (counterpart && material[t.project]) {
+      material[t.project].counterpartLedgerDigest =
+        `（${other} 系統 / repo: ${counterpart.repo}）\n${counterpart.digest}`;
+    }
   }
 
   return { signals, material };
