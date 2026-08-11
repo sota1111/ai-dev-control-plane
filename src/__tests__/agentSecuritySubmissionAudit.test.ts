@@ -100,7 +100,6 @@ describe('SOT-1966 champion submission audit', () => {
         submit: {
           file: 'submission.csv',
           kernel: 'sota1111/agent-security-claude-cli-baseline',
-          version: 2,
           output: 'submission.csv',
         },
       },
@@ -110,10 +109,13 @@ describe('SOT-1966 champion submission audit', () => {
         submit: {
           file: 'submission.csv',
           kernel: 'sota1111/agent-security-gpt-champion',
-          version: 2,
           output: 'submission.csv',
         },
       },
     ]);
+    // kernel version は提出のたびに運用で bump される — 値そのものは断言しない（正の整数のみ）。
+    for (const t of competition?.targets ?? []) {
+      expect(Number.isInteger(t.submit.version) && t.submit.version > 0).toBe(true);
+    }
   });
 });

@@ -23,25 +23,19 @@
     "competitions[].targets[].submit.candidate_id": "任意。提出する実験candidateの識別子。",
     "competitions[].targets[].submit.message": "提出メッセージ。",
     "competitions[].targets[].next_cycle": "次に起案する改善サイクル番号（第N次）。起案の度に子Issue(SOT-1933)側でインクリメント。",
+    "competitions[].targets[].stage": "段階目標ステート（signate Sonnetサイクル教訓の移植・省略時 improve）。submit-valid=有効提出が成立するまで改善軸を凍結（submissionHealthに依らずsubmit-repair本文へ固定）／proxy=leak-free CV/ローカルproxy確立が唯一の目標（確立まで改善軸・昇格判断を凍結）／improve=通常の改善サイクル。",
     "state": "cron が更新する実行状態（last_run_at / created_today / last_submitted_date）。",
     "allocation": "適応的資源配分（design §50）。mode=dynamic で各cron枠は履歴から算出したpriority最高のimproveコンペを動的選択（静的rotationは無視、未設定/staticなら従来通り）。auto_maintain_threshold=連続非昇格がこの回数以上の系統を自動でmode:maintainへ落として枠を再配分（design §49、0で無効）。weightsはpriority合成係数（momentum/headroom/rank_gain/deadline）。 cooldown_window/cooldown_factor=直近起案コンペのpriority減衰(多様性補正・momentum独占防止)。window枠内の各出現ごとにfactor(0<f<=1)を乗算、factor=1で無効。",
     "competitions[].pinned_hours_jst": "任意。固定枠。このJST hourの枠は動的配分(allocation)・rotationを無視してこのコンペが確定当番になる（締切接近コンペの一定間隔サイクル保証用）。schedule_hours_jstに含めること。コンペ間で重複不可。固定枠の起案はrecent_competitionsに記録されず、動的枠のcooldownへ影響しない。",
     "competitions[].pinned_lineage": "任意。固定枠で起案する系統を1つに限定（claude/gpt）。未設定は両系統。pinned_hours_jstが必須。",
     "competitions[].validation": "SOT-2514 検証設定。欠落時は fail-safe で {primary:'cv'} 扱い。primary=一次KPI（cv=leak-free CVを一次に信じる[既定・hidden private splitのコンペは必ずcv] / lb=public==privateなどリークの無い例外構成でのみpublic LBを一次にできる）。cv_report_path=target repo内 cv_report.json の相対パス（既定 docs/ai/cv_report.json。{cv_scheme, entity_unit, folds, score, per_entity_scores?}、entity単位hold-out必須。行単位CVは契約違反警告）。tail_heavy_metric=重い裾metric名（playbook P3頑健受容の対象・説明メタ）。reference_public_score=参照実装/公開NBの公称public。自best publicが有意（既定2%）に上回ったら後付け較正の過学習を疑う警告を本文へ挿入（playbook P5）。require_scored_submission(SOT-2518 P8)=trueで有効な非ゼロ提出を成立の前提にする（agent/kernelコンペ既定true）。直近提出がERROR/0.000/未スコアを既定3回連続すると起案本文がsubmit-repairモード（新規改善軸を止め提出パイプライン復旧を最優先）へ切替わり、材料先頭に『🔴 提出が壊れています（直近N回…）』を表示する。broken_submission_consecutive(SOT-2519)=submissionHealth=brokenと判定する連続無効提出回数の上書き（1以上の整数・欠落時は既定3）。metric_kind(SOT-2518 P9)=regression（絶対スコアが実態・従来挙動）/relative_rating（相対rating。field改善下では維持=後退。本文に順位契約「維持を昇格根拠にせず前進軸必須・実LB順位の非劣化を昇格必須条件」を挿入）/attack（攻撃系・スコア成立自体が壊れやすい）。既存コンペへの値設定は別途。"
   },
-  "enabled": true,
+  "enabled": false,
   "schedule_hours_jst": [
     0,
-    1,
-    3,
     6,
-    9,
-    11,
     12,
-    15,
-    16,
-    18,
-    21
+    18
   ],
   "rotation": [
     {
@@ -96,7 +90,7 @@
             "file": "/workspaces/ptcg-agent-claude/submission.tar.gz",
             "message": "auto-improve submit: ptcg-agent-claude champion"
           },
-          "next_cycle": 1
+          "next_cycle": 5
         },
         {
           "lineage": "gpt",
@@ -107,14 +101,18 @@
             "file": "/workspaces/ptcg-agent-gpt/submission.tar.gz",
             "message": "auto-improve submit: ptcg-agent-gpt champion"
           },
-          "next_cycle": 1
+          "next_cycle": 5
         }
       ],
       "deadline_utc": "2026-08-16T23:59:00Z",
       "validation": {
         "primary": "cv",
         "metric_kind": "relative_rating"
-      }
+      },
+      "pinned_hours_jst": [
+        0,
+        12
+      ]
     },
     {
       "key": "kaggriculture",
@@ -265,11 +263,11 @@
           "submit": {
             "file": "submission.csv",
             "kernel": "sota1111/agent-security-claude-cli-baseline",
-            "version": 2,
+            "version": 8,
             "output": "submission.csv",
             "message": "auto-improve submit: agent-security-claude champion"
           },
-          "next_cycle": 2
+          "next_cycle": 5
         },
         {
           "lineage": "gpt",
@@ -283,7 +281,7 @@
             "output": "submission.csv",
             "message": "auto-improve submit: agent-security-gpt champion"
           },
-          "next_cycle": 2
+          "next_cycle": 5
         }
       ],
       "deadline_utc": "2026-09-01T23:59:00Z",
@@ -291,7 +289,11 @@
         "primary": "cv",
         "metric_kind": "attack",
         "require_scored_submission": true
-      }
+      },
+      "pinned_hours_jst": [
+        6,
+        18
+      ]
     },
     {
       "key": "rogii",
@@ -326,14 +328,6 @@
         }
       ],
       "deadline_utc": "2026-08-05T23:59:00Z",
-      "pinned_hours_jst": [
-        1,
-        6,
-        11,
-        16,
-        21
-      ],
-      "pinned_lineage": "claude",
       "daily_submissions_per_lineage": 5
     },
     {
@@ -389,7 +383,7 @@
   },
   "state": {
     "last_run_at": null,
-    "created_today": 4,
+    "created_today": 18,
     "last_submitted_date": {}
   }
 }

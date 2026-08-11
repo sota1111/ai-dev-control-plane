@@ -87,7 +87,17 @@ export interface ImprovementTarget {
   nextCycle: number;
   /** 運用モード。既定 improve。 */
   mode: TargetMode;
+  /**
+   * 段階目標ステート（signate Sonnetサイクル教訓の移植）。省略時 `improve`（従来挙動）。
+   * - `submit-valid`: 有効提出が成立するまで改善軸を凍結（submissionHealth に依らず submit-repair 本文へ固定）。
+   * - `proxy`: leak-free CV/ローカルproxy の確立が唯一の目標（proxy 確立まで改善軸・昇格判断を凍結）。
+   * - `improve`: 通常の改善サイクル（従来どおり）。
+   */
+  stage: TargetStage;
 }
+
+/** 段階目標ステート（agent-security の「全提出ERRORのまま改善サイクル空回り」再発防止）。 */
+export type TargetStage = 'submit-valid' | 'proxy' | 'improve';
 
 /** レジストリの1コンペ（claude/gpt の2ターゲットを持つ）。 */
 export interface ImprovementCompetition {
@@ -647,6 +657,12 @@ function parseTarget(t: unknown, ci: number, ti: number, linSeen: Set<string>): 
       `registry.competitions[${ci}].targets[${ti}].mode must be "improve" or "maintain"`
     );
   }
+  const stageRaw = to.stage ?? 'improve';
+  if (stageRaw !== 'submit-valid' && stageRaw !== 'proxy' && stageRaw !== 'improve') {
+    throw new Error(
+      `registry.competitions[${ci}].targets[${ti}].stage must be "submit-valid", "proxy" or "improve"`
+    );
+  }
   const target: ImprovementTarget = {
     lineage,
     repo,
@@ -654,6 +670,7 @@ function parseTarget(t: unknown, ci: number, ti: number, linSeen: Set<string>): 
     workersDirective,
     nextCycle: nextCycleRaw,
     mode: modeRaw,
+    stage: stageRaw,
   };
   if (to.submit && typeof to.submit === 'object') {
     const so = to.submit as Record<string, unknown>;
@@ -761,6 +778,16 @@ export interface ImprovementMaterial {
   cvPublicGapTrend?: string;
   /** 実験台帳ダイジェスト（design §48）: 試行済み軸と非昇格軸（再試行禁止リスト）。 */
   experimentLedgerDigest?: string;
+  /**
+   * 前回サイクル親Issueの申し送りコメント抜粋（`## 申し送り` を含む最新コメント・signate教訓の移植）。
+   * 未供給なら本文は「申し送りなし」fail-safe を表示する。
+   */
+  previousCycleHandoff?: string;
+  /**
+   * 相手系統（同一コンペの claude↔gpt 逆側）の実験台帳ダイジェスト。系統間 divergence を
+   * 相互移植の材料にする（Sonnet↔flash trace 移植の Kaggle 版）。
+   */
+  counterpartLedgerDigest?: string;
   /**
    * SOT-2518 P8: 直近提出の健全性。`broken`=ERROR/0.000/未スコアが閾値回連続（提出パイプライン破損の
    * 疑い）／`ok`=直近に有効スコア／`unknown`=判定材料不足。`validation.require_scored_submission` の
@@ -952,9 +979,12 @@ export function buildIssueBody(
 ): string {
   // SOT-2518 P8: 提出が壊れていて（broken）かつコンペが有効提出を前提にする（require_scored_submission）
   // なら、新規改善軸を止めて提出復旧を最優先にする submit-repair モードへ切り替える。
+  // stage=submit-valid（段階目標ステート）は submissionHealth に依らず submit-repair 本文へ固定する
+  // （有効提出が成立するまで改善軸を凍結 — agent-security 全提出ERROR空回りの再発防止）。
   if (
-    material.submissionHealth === 'broken' &&
-    competition.validation.requireScoredSubmission === true
+    target.stage === 'submit-valid' ||
+    (material.submissionHealth === 'broken' &&
+      competition.validation.requireScoredSubmission === true)
   ) {
     return buildSubmitRepairBody(target, competition, cycleNumber, material);
   }
@@ -1011,6 +1041,30 @@ export function buildIssueBody(
     : '';
   const ledger = material.experimentLedgerDigest?.trim()
     || '(実験台帳なし — 初回サイクル、または未整備。今回から docs/ai/experiment_ledger.jsonl へ記録すること)';
+  // 申し送りループ（signate Sonnetサイクル教訓）: 前回親Issueの判断・次の軸・閉じた軸を引き継ぐ。
+  const handoff = material.previousCycleHandoff?.trim()
+    || '(前回サイクルの申し送りなし — 初回サイクル、または前回が申し送りコメントを残していない)';
+  // 系統間 divergence 活用: 相手系統（claude↔gpt）の台帳から昇格済み軸の移植候補を提示する。
+  const counterpartLedger = material.counterpartLedgerDigest?.trim()
+    ? `
+
+### 相手系統の実験台帳（系統間divergence — 相互移植候補）
+同一コンペのもう一方の系統（claude↔gpt）の試行状況。**相手系統で promoted（昇格済み）の軸は、
+自系統への移植を新規軸より優先して検討**する（移植時は自系統の台帳へ port 元を記録）。相手系統で
+rejected の軸に自系統で再挑戦する場合は、系統差で結果が変わる根拠を明示すること。
+${material.counterpartLedgerDigest.trim()}`
+    : '';
+  // 段階目標 proxy: leak-free CV/ローカルproxy 確立が唯一の目標（改善軸・昇格判断を凍結）。
+  const proxyStageBanner = target.stage === 'proxy'
+    ? `
+
+## 段階目標: proxy 確立モード（stage=proxy）
+このターゲットの現在の唯一の目標は **leak-free CV / ローカル proxy の確立**である。proxy が確立する
+（cv_report.json がスキーマを満たし、エンティティ単位 hold-out の CV が出る）まで:
+- 新規の改善軸・スコア向上の子Issueを起案しない（proxy 構築・検証の子Issueのみ）
+- 昇格判断・champion 更新を行わない
+- proxy 確立を確認したら、完了報告で registry の \`stage\` を \`improve\` へ進める提案を明記する`
+    : '';
   const convergeMode = phase?.phase === 'converge'
     ? `
 
@@ -1060,9 +1114,11 @@ export function buildIssueBody(
 
 ## 目的
 Kaggleコンペ \`${competition.kaggleCompetition}\`（repo: ${target.repo} / 系統: ${target.lineage}）の
-順位を向上させる次の改善方針を決定し、子Issueに分解して実施する。
+順位を向上させる次の改善方針を決定し、子Issueに分解して実施する。${proxyStageBanner}
 
 ## 入力材料（cronが自動収集・要約なし）
+### 前回サイクルの申し送り（必読 — 前任の判断・次の軸・閉じた軸）
+${handoff}
 ### 検証階層（一次=leak-free CV / 二次=public LB）
 一次KPI = **leak-free CV**（エンティティ単位・時系列で hold out した leak-free 検証）。public LB は
 **二次 sanity** に過ぎない。**CVと public が乖離したら悲観側(CV)を信じる。public 追い（public best 選抜）禁止。**
@@ -1079,7 +1135,7 @@ ${gapWarn}${refWarn}${gapSummary}${gapTrend}
 ${prev}
 
 ### 実験台帳ダイジェスト（試行済み軸 — 非昇格軸の再試行禁止）
-${ledger}
+${ledger}${counterpartLedger}
 
 ### 直近の完了Issueダイジェスト
 ${recent}
@@ -1116,6 +1172,11 @@ ${convergeMode}
    → (5) アーキテクチャ変更 → (6) 外部知識取り込み(portが参照publicを上回ったら過学習疑い)）。
    選定した軸・仮説・結果は target repo の \`docs/ai/experiment_ledger.jsonl\` へ JSONL で追記する
    （fields: recordedAt, axis, result=promoted|rejected|inconclusive, cycle, hypothesis, evidence）。
+   **失敗帰属の証拠要件（rejected/CLOSED 判定の規律）**: 軸を rejected または恒久 CLOSED と記録する場合は、
+   (a) 同一 seed の直接 A/B、または (b) 変更の発火/介入が記録された単独アブレーション、のいずれかを
+   evidence に示すこと。単一の結合実測（複数変更同時ON）や自己申告の推測だけで rejected にしない —
+   証拠が無い場合は **inconclusive 止まり**とし、再検証可能な状態で台帳へ残す（誤REJECTによる有効軸の
+   永久喪失を防ぐ）。
 2. 2〜5個の実装・検証子Issueに分解して登録（子Issue記述テンプレ・screen→confirmゲート・
    非昇格時 revert+docs・昇格時 exec互換を全子に継承）。子IssueはKaggle提出を実行してはならない。
    各子Issueの本文先頭には必ず次のdirectiveを記載し、分解後の全工程を指定モデル・reasoningへ固定する。
@@ -1131,7 +1192,12 @@ ${childWorkers}
    提出は必ず control-plane の
    \`bash scripts/ai/kaggle_targets_submit.sh --competition ${competition.key} --repo ${target.repo} --execute\`
    を使用する。Kaggle CLI/APIを直接呼び出してfingerprint gateを迂回してはならない。
-4. 親による集約・提出判定後、親を In Review にして完了報告。
+   **effective-config fingerprint（提出物と設定の突合）**: 提出する artifact を生成した有効設定
+   （パラメータ・フラグ・モデル/データ版）の要約を \`docs/ai/experiment_ledger.jsonl\` の提出エントリへ
+   記録する（意図した設定と実際に有効だった設定の乖離事故 — 未export フラグ等 — を事後検証可能にする）。
+4. 親による集約・提出判定後、親を In Review にして完了報告。**完了報告とは別に、本Issueへ
+   \`## 申し送り\` コメントを必ず残す**（内容: 次サイクルの軸候補 / 今回 rejected・CLOSED にした軸と証拠 /
+   未検証の仮説 / 運用上の注意）。次サイクルの起案本文に自動転記される。
 
 ## 実行リソース
 - 改善の実装・学習・検証では GPU の使用を許可する。
@@ -1143,8 +1209,10 @@ ${childWorkers}
 ## 受け入れ条件
 - [ ] 改善方針と選定理由がコメントに記録されている
 - [ ] 子Issueが登録され、全て終端状態に達している
-- [ ] 提出した candidate/champion と検証結果の対応が記録されている
+- [ ] 提出した candidate/champion と検証結果の対応が記録されている（提出時は effective-config fingerprint を台帳へ記録）
 - [ ] 親の再開runが全子Issue完了を確認し、新artifactを提出した、または非昇格・新artifactなしを明記した
+- [ ] rejected/CLOSED 判定に証拠（同seed A/B or 発火記録つき単独アブレーション）が付いている（無ければ inconclusive）
+- [ ] 本Issueへ \`## 申し送り\` コメント（次の軸候補 / 閉じた軸と証拠 / 未検証仮説）を残した
 ${
   competition.abEvaluation
     ? '- [ ] 固定4条件の必須KPI artifactと昇格判定が保存され、次回改善Issueが重複なく自動登録されている'

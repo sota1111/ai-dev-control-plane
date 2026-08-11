@@ -1067,7 +1067,8 @@ describe('kaggleImprovement', () => {
       const here = path.dirname(fileURLToPath(import.meta.url));
       const p = path.join(here, '..', '..', 'scripts', 'ai', 'kaggle_targets_registry.json');
       const r = parseTargetsRegistry(JSON.parse(fs.readFileSync(p, 'utf8')));
-      expect(r.enabled).toBe(true);
+      // enabled は運用 kill switch（人間/セッションが随時トグルする）— 値そのものは断言しない。
+      expect(typeof r.enabled).toBe('boolean');
       expect(r.competitions).toHaveLength(7);
       expect(r.rotation).toEqual([
         { hourJst: 0, competition: 'ptcg' },
@@ -1138,6 +1139,66 @@ describe('kaggleImprovement', () => {
           expect(c.submissionMode).toBe('both');
         }
       }
+    });
+  });
+
+  // signate Sonnetサイクル教訓の移植（#1〜#6）: stage / 申し送り / 相手系統台帳 / 証拠要件 / fingerprint。
+  describe('signate-lessons: stage / handoff / counterpart / evidence contracts', () => {
+    test('parseTarget: stage defaults to improve and rejects unknown values', () => {
+      const t = reg().competitions[0].targets[0];
+      expect(t.stage).toBe('improve');
+      const raw: any = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].targets[0].stage = 'bogus';
+      expect(() => parseTargetsRegistry(raw)).toThrow(/stage must be/);
+    });
+
+    test('stage=submit-valid forces the submit-repair body regardless of submission health', () => {
+      const c = reg().competitions[0];
+      const body = buildIssueBody({ ...c.targets[0], stage: 'submit-valid' }, c, 3, {
+        submissionHealth: 'ok',
+      });
+      expect(body).toContain('submit-repair モード');
+      expect(body).toContain('新規の改善軸は起案しない');
+    });
+
+    test('stage=proxy inserts the proxy-freeze banner; default improve does not', () => {
+      const c = reg().competitions[0];
+      const proxy = buildIssueBody({ ...c.targets[0], stage: 'proxy' }, c, 3, {});
+      expect(proxy).toContain('段階目標: proxy 確立モード');
+      expect(proxy).toContain('昇格判断・champion 更新を行わない');
+      const normal = buildIssueBody(c.targets[0], c, 3, {});
+      expect(normal).not.toContain('段階目標: proxy 確立モード');
+    });
+
+    test('previous cycle handoff renders provided text or the fail-safe placeholder', () => {
+      const c = reg().competitions[0];
+      const withHandoff = buildIssueBody(c.targets[0], c, 3, {
+        previousCycleHandoff: '（SOT-9999 より）次はopponent field更新を試す',
+      });
+      expect(withHandoff).toContain('### 前回サイクルの申し送り');
+      expect(withHandoff).toContain('次はopponent field更新を試す');
+      const without = buildIssueBody(c.targets[0], c, 3, {});
+      expect(without).toContain('(前回サイクルの申し送りなし');
+    });
+
+    test('counterpart lineage ledger renders only when provided', () => {
+      const c = reg().competitions[0];
+      const withCounterpart = buildIssueBody(c.targets[0], c, 3, {
+        counterpartLedgerDigest: '（gpt 系統）promoted: leaf-eval軸',
+      });
+      expect(withCounterpart).toContain('相手系統の実験台帳');
+      expect(withCounterpart).toContain('promoted: leaf-eval軸');
+      const without = buildIssueBody(c.targets[0], c, 3, {});
+      expect(without).not.toContain('相手系統の実験台帳');
+    });
+
+    test('body carries evidence-for-reject, config fingerprint and handoff-comment contracts', () => {
+      const c = reg().competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, {});
+      expect(body).toContain('失敗帰属の証拠要件');
+      expect(body).toContain('inconclusive 止まり');
+      expect(body).toContain('effective-config fingerprint');
+      expect(body).toContain('## 申し送り');
     });
   });
 });
