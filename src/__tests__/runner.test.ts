@@ -967,6 +967,35 @@ describe('runner', () => {
       expect(written.some((b: any) => b.includes('issueUpdate'))).toBe(false);
     });
 
+    it('resumes a Sonnet gold cycle parent to Todo after every child completes (2026-08-12 stall fix)', async () => {
+      setupLinearMocks([
+        { issue: {
+          id: 'parent-uuid', identifier: 'SOT-2651',
+          title: '[SONNET-GOLD] sonnet local gold100 改善サイクル第4次（abstain→0を前処理で）',
+          description: 'workers: solo=claude:fable, handoff=on',
+          state: reviewState, team: { id: 'team-1' },
+          children: { nodes: [
+            { identifier: 'SOT-2652', state: doneState },
+            { identifier: 'SOT-2653', state: reviewState }
+          ] }
+        } },
+        { issue: { comments: { nodes: [] } } },
+        { workflowStates: { nodes: [
+          { id: 'state-todo', name: 'Todo', type: 'unstarted' },
+          { id: 'state-review', name: 'In Review', type: 'started' }
+        ] } },
+        { issueUpdate: { success: true } },
+        { commentCreate: { success: true } }
+      ]);
+
+      const result = await runner.finalizeParentIfChildrenComplete('SOT-2653', 'SOT-2651');
+
+      expect(result).toBe(true);
+      const written = writeSpy.mock.calls.map((c: any) => c[0]);
+      expect(written.some((b: any) => b.includes('issueUpdate') && b.includes('state-todo'))).toBe(true);
+      expect(written.some((b: any) => b.includes('auto-parent-resumed'))).toBe(true);
+    });
+
     it('resumes an On Hold parent to Todo when all prerequisite children complete (SOT-1816)', async () => {
       setupLinearMocks([
         { issue: { id: 'parent-uuid', identifier: 'SOT-1813', state: holdState, team: { id: 'team-1' },

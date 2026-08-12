@@ -57,6 +57,15 @@ function isKaggleImprovementParent(issue: any): boolean {
     && (issue?.description || '').includes('## 入力材料（cronが自動収集・要約なし）');
 }
 
+/**
+ * Sonnet gold100 自動改善サイクルの親Issue（scripts/ai/sonnet_gold_cycle_draft.ts が起票）。
+ * kaggle 親と同じ「全子完了→親を Todo へ再開（統合測定フェーズ）」の二段ライフサイクルを持つ。
+ * In Review で子待ちする設計のため、resume 対象に含めないと永久に停滞する（2026-08-12 実障害）。
+ */
+function isSonnetGoldCycleParent(issue: any): boolean {
+  return /^\[SONNET-GOLD\] .*改善サイクル第\d+次/.test(issue?.title || '');
+}
+
 type IssueRelationNode = { id?: string; type?: string };
 
 /** Remove `blocks` edges while preserving related/duplicate links. Linear uses the same relation
@@ -939,7 +948,10 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
       return false;
     }
     const kaggleImprovementParent = isKaggleImprovementParent(parent);
-    if ((parent.state?.name || '').toLowerCase() === 'in review' && !kaggleImprovementParent) {
+    // 二段ライフサイクル親（kaggle 改善サイクル / sonnet gold サイクル）は In Review=子待ちなので
+    // skip せず resume 判定へ進める。それ以外の In Review 親は従来どおり確定済みとして skip。
+    const twoPhaseCycleParent = kaggleImprovementParent || isSonnetGoldCycleParent(parent);
+    if ((parent.state?.name || '').toLowerCase() === 'in review' && !twoPhaseCycleParent) {
       log('WEBHOOK', `finalizeParent: ${parent.identifier} already In Review, skip`, { issue: parent.identifier });
       return false;
     }
@@ -963,7 +975,7 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
     // finished, resume the parent so it can aggregate evidence and own the submission.
     // Ordinary parents keep the historical auto-finalize-to-review behavior.
     const resumeParent = (parent.state?.name || '').toLowerCase() === 'on hold'
-      || kaggleImprovementParent;
+      || twoPhaseCycleParent;
     const marker = resumeParent ? PARENT_RESUMED_MARKER : PARENT_FINALIZED_MARKER;
 
     // Idempotency: bail if we already posted the applicable transition marker.
