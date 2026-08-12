@@ -131,9 +131,13 @@ async function reconcileStalledParent(projectName: string, labelName: string): P
 }
 
 /**
- * 直列ガード: 同ラベル（親サイクル＋その子issue）の未完了 issue を返す（無ければ null）。
- * findOpenAutoImproveIssue と違い In Review も未完了扱いにする — 親は子issue群の完了を
- * In Review で待つ設計のため（完了親は auto-accept が Done へ促進する）。
+ * 直列ガード: 進行中の**サイクル本体（親 issue）**があれば返す（無ければ null）。
+ *
+ * サイクルは「[SONNET-GOLD] 親 issue」で定義される。親が非終端（Todo/In Progress/In Review=子待ち）
+ * の間だけ次サイクルを止める。**子 issue の状態は直接見ない** — 親が Done になった後に残留した
+ * In Review の子（rejected 軸で auto-accept されなかった等）が次サイクルを永久ブロックしていた実障害
+ * （2026-08-12 SOT-2663）の恒久修正。親が Done なら統合測定まで完了済み＝子は全て完了しているので、
+ * 残留子で塞ぐ必要はない。ラベルは親子共通のため、タイトルの [SONNET-GOLD] で親だけに絞る。
  */
 async function findOpenCycleIssue(projectName: string, labelName: string): Promise<string | null> {
   try {
@@ -143,12 +147,13 @@ async function findOpenCycleIssue(projectName: string, labelName: string): Promi
           project: { name: { eq: $name } },
           labels: { name: { eq: $label } },
           state: { name: { in: ["Todo", "In Progress", "In Review"] } }
-        }, first: 1) { nodes { identifier } }
+        }, first: 20) { nodes { identifier title } }
       }`,
       { name: projectName, label: labelName }
     );
-    const id = data?.issues?.nodes?.[0]?.identifier;
-    return typeof id === 'string' && id ? id : null;
+    const nodes: any[] = data?.issues?.nodes ?? [];
+    const openParent = nodes.find((n) => /^\[SONNET-GOLD\] /.test(n?.title || ''));
+    return openParent?.identifier ?? null;
   } catch (err) {
     console.error(`findOpenCycleIssue failed: ${(err as any)?.message || err}`);
     // ガード照会の失敗は安全側（起票しない）に倒す。
