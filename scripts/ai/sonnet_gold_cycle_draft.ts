@@ -1,5 +1,5 @@
 /**
- * Sonnet local gold100 自動改善サイクル — 4時間毎の定期起票ドラフタ。
+ * Sonnet local gold100 自動改善サイクル — 完了駆動の連続起票ドラフタ（前サイクル完了→次を即起票）。
  *
  * 目的: signate-messy-drive-rag の「Sonnet(claude-mcp) dev gold100 の net」を KPI とする改善
  * サイクル Issue を JST 4時間グリッドで起票する。回答実行は Sonnet のみ（Gemini は前処理限定）、
@@ -28,8 +28,13 @@ import {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = 'signate-messy-drive-rag';
 const LABEL = 'sonnet-gold-cycle';
-/** JST 4時間グリッド。kaggle 枠 (0/6/12/18) との同時刻起票を避けてずらしてある。 */
-const SCHEDULE_HOURS_JST = [1, 5, 9, 13, 17, 21];
+/**
+ * 完了駆動の連続サイクル（2026-08-12 ユーザー指示で時刻グリッドから変更）:
+ * cron は高頻度（10分毎）に本ドラフタを叩き、直列ガード（未完了の親/子があれば skip）と
+ * 最小間隔だけで律速する。前サイクル完了後、最初のチェックで次サイクルが起票される。
+ * 最小間隔（既定15分）は即死ループ時の起票スラッシング防止。
+ */
+const MIN_INTERVAL_MIN = Number(process.env.SONNET_GOLD_CYCLE_MIN_INTERVAL_MIN || '15');
 const STATE_FILE = path.join(REPO_ROOT, 'docs/ai/auto_logs/sonnet_gold_cycle_state.json');
 const STOP_FILE = path.join(REPO_ROOT, 'docs/ai/auto_logs/sonnet_gold_cycle.stop');
 const TARGET_REPO = '/workspaces/signate-messy-drive-rag';
@@ -98,7 +103,7 @@ TARGET_REPO=${TARGET_REPO}（\`.venv\` 必須）
 
 ## ミッション（常設・自動起票サイクル第${cycle}次）
 
-**Sonnet local gold100 の net（match−wrong）を最大化する。** 4時間毎に本サイクルが自動起票される。
+**Sonnet local gold100 の net（match−wrong）を最大化する。** 本サイクルは**完了駆動**で連続起票される（前サイクル完了後、自動的に本issueが起票された。本issueが完了すると次サイクルが自動起票される — 改善は連続で回り続ける）。
 ${prevRef}
 
 ${historyBlock}
@@ -118,9 +123,11 @@ ${historyBlock}
 
 ## 【1サイクルの手順】（親=分析・分解・統合 / 子=並列実装 — 1サイクルで複数の改善を進める）
 
-1. **前回結果の詳細分析（必須・成果物化）**: 台帳・前回サイクルの申し送り・直近 Sonnet gold100 の
+1. **前回結果の失敗調査と方針立案（Fable 必須・成果物化）**: 台帳・前回サイクルの申し送り・直近 Sonnet gold100 の
    details/abstain_ledger を読み、**abstain/wrong を per-idx で全数分類**する（state code × 契約型 ×
-   欠落証拠の特定 × 過去実測での到達実績のクロス）。分析結果を
+   欠落証拠の特定 × 過去実測での到達実績のクロス）。**失敗の帰属は証拠つきで行う**（前サイクルの
+   変更が原因と疑う場合はテレメトリ/ツール列で確認し、単発揺らぎと区別する。証拠なき帰属で軸を
+   閉じない）。分析結果と本サイクルの方針を
    \`docs/ai/sonnet_cycle_analysis/cycle${cycle}.md\` に保存する（次サイクルの一次入力になる）
 2. **子issueを 3〜6 件起票（必須）**: 分類から**互いに独立な改善クラスタを 3〜6 件**選び、
    コミット単位の子issueへ分解して登録する（合計で 8〜15 idx を対象にする — 1サイクルの改善量を
@@ -188,9 +195,14 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({ ...result, action: 'skip', reason: 'disabled by env' }));
     return;
   }
-  if (onlyScheduled && !SCHEDULE_HOURS_JST.includes(jstHour())) {
-    console.log(JSON.stringify({ ...result, action: 'skip', reason: 'not a scheduled JST hour' }));
-    return;
+  // 完了駆動モード: 時刻ゲートは廃止。最小間隔（前回起票からの経過）だけを確認する。
+  if (onlyScheduled && !force) {
+    const last = readState().lastCreatedAt ? Date.parse(readState().lastCreatedAt as string) : 0;
+    const elapsedMin = (Date.now() - last) / 60000;
+    if (last > 0 && elapsedMin < MIN_INTERVAL_MIN) {
+      console.log(JSON.stringify({ ...result, action: 'skip', reason: `min interval: ${elapsedMin.toFixed(1)}min < ${MIN_INTERVAL_MIN}min` }));
+      return;
+    }
   }
 
   // 直列ガード: 未完了の同ラベル issue（親またはその子）があれば起票しない。親が子待ちで
