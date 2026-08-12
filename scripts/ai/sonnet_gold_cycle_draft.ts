@@ -63,6 +63,73 @@ function jstHour(): number {
   return (new Date().getUTCHours() + 9) % 24;
 }
 
+const RESUME_MARKER = '<!-- auto-parent-resumed -->';
+
+/**
+ * ポーリング型の親再開リコンサイラ（2026-08-12 追加）:
+ * Linear webhook の HTTP 配信が環境によって届かない（受信ログゼロの実障害 — SOT-2651/2662 が
+ * 子完了後も In Review で停滞）ため、webhook 配信に依存せず、この 10 分毎 tick で
+ * 「In Review の SONNET-GOLD 親 × 全子完了 × 再開マーカー無し」を検知して Todo へ再開する。
+ * webhook 側の finalizeParent と冪等（マーカーで相互にスキップ）。
+ */
+async function reconcileStalledParent(projectName: string, labelName: string): Promise<string | null> {
+  try {
+    const data: any = await linearQuery(
+      `query($name: String!, $label: String!) {
+        issues(filter: {
+          project: { name: { eq: $name } },
+          labels: { name: { eq: $label } },
+          state: { name: { eq: "In Review" } }
+        }, first: 5) {
+          nodes {
+            id identifier title
+            team { id }
+            children(first: 50) { nodes { identifier state { name type } } }
+            comments(first: 50) { nodes { body } }
+          }
+        }
+      }`,
+      { name: projectName, label: labelName }
+    );
+    const nodes: any[] = data?.issues?.nodes ?? [];
+    for (const parent of nodes) {
+      if (!/^\[SONNET-GOLD\] /.test(parent?.title || '')) continue;
+      const children: any[] = parent?.children?.nodes ?? [];
+      if (children.length === 0) continue;
+      const complete = (s: any) =>
+        s?.type === 'completed' || s?.type === 'canceled' || (s?.name || '').toLowerCase() === 'in review';
+      if (!children.every((c) => complete(c.state))) continue;
+      const comments: any[] = parent?.comments?.nodes ?? [];
+      if (comments.some((c) => (c?.body || '').includes(RESUME_MARKER))) continue;
+      // Todo state を解決して再開。
+      const st: any = await linearQuery(
+        'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "unstarted" } }) { nodes { id name } } }',
+        { teamId: parent.team.id }
+      );
+      const states: any[] = st?.workflowStates?.nodes ?? [];
+      const todo = states.find((s) => (s?.name || '').toLowerCase() === 'todo') ?? states[0];
+      if (!todo?.id) continue;
+      await linearQuery(
+        'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
+        { id: parent.id, stateId: todo.id }
+      );
+      const childList = children.map((c) => `- ${c.identifier} (${c.state?.name})`).join('\n');
+      await linearQuery(
+        'mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }',
+        {
+          issueId: parent.id,
+          body: `${RESUME_MARKER}\n## 親Issue自動再開（統合フェーズ・ポーリング検知）\n\n全ての子Issueが完了したため、親を **Todo** に戻しました（cron リコンサイラによる再開 — webhook 配信非依存）。\n子issueを再作成せず、統合 focused → Sonnet dev gold100 ×1 → 台帳追記 → 申し送りコメント → 完了、の統合フェーズを実行してください。\n\n### 子Issue\n${childList}`,
+        }
+      );
+      return parent.identifier;
+    }
+    return null;
+  } catch (err) {
+    console.error(`reconcileStalledParent failed: ${(err as any)?.message || err}`);
+    return null;
+  }
+}
+
 /**
  * 直列ガード: 同ラベル（親サイクル＋その子issue）の未完了 issue を返す（無ければ null）。
  * findOpenAutoImproveIssue と違い In Review も未完了扱いにする — 親は子issue群の完了を
@@ -203,6 +270,13 @@ async function main(): Promise<void> {
       console.log(JSON.stringify({ ...result, action: 'skip', reason: `min interval: ${elapsedMin.toFixed(1)}min < ${MIN_INTERVAL_MIN}min` }));
       return;
     }
+  }
+
+  // ポーリング型リコンサイラ: 子待ち停滞中の親（In Review×全子完了×マーカー無し）を先に再開する。
+  const resumed = await reconcileStalledParent(PROJECT, LABEL);
+  if (resumed) {
+    console.log(JSON.stringify({ ...result, action: 'resumed-parent', issue: resumed }));
+    return; // 再開した親が実行されるのが先 — 起票はしない。
   }
 
   // 直列ガード: 未完了の同ラベル issue（親またはその子）があれば起票しない。親が子待ちで
