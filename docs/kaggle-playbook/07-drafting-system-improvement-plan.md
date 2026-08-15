@@ -1,6 +1,7 @@
 # 7. 定期Kaggle解法起票システム 改善計画（PLAN・人間レビュー待ち）
 
-- 状態: **提案**（2026-08-07 起案。承認後に Linear 親Issue + 子Issue に分解して実施）
+- 状態: **ラウンド1 実装完了**（SOT-2512 / 子 SOT-2513〜2517 全マージ, PR #373-377, 2026-08-08）。
+  **ラウンド2 提案中**（下記「## ラウンド2」— agent-security/PTCG 敵対的レビュー由来の一般化）。
 - 背景: ROGII 敗北の根本原因は個別の実装ミスではなく、**起票システム自体が public 過学習を制度的に
   誘発する構造**だったこと（[事後分析](06-case-rogii-postmortem.md)）。playbook の教訓を「読む知識」から
   「システムが強制する契約」へ昇格させる。
@@ -173,3 +174,62 @@ dedup で弾かれる / (b) byte 同一を根拠にレバーを誤 CLOSE する�
   rogii の敗因。fail-safe として本文に明示する）。
 - kernel-hash fingerprint は notebook の非機能変更（コメント等）でも別物と判定する（過剰提出リスク）
   → 提出は従来通り親Issue の1提出契約でレート制御されるため許容。
+
+---
+
+## ラウンド2（SOT-2512 完了後・agent-security/PTCG 敵対的レビュー由来）
+
+- 状態: **提案**（2026-08-08）。ラウンド1（CV 一次化）は回帰コンペ向けだったが、agent/rating
+  コンペのライブ調査で、ROGII 教訓の**より根源的な一般化**が未実装と判明。
+- 出所: [ケース: PTCG/agent-security 敵対的レビュー](08-case-ptcg-agentsec-adversarial.md)
+  （memory: `ptcg-agentsec-medal-gap-adversarial-review`）。
+
+### 発見（ROGII 教訓の一般化）
+ROGII の真の教訓は「ローカル proxy でなく**実LBの結果**を信じる」。ラウンド1 は「CV を一次 KPI に」
+までは実装したが、**「提出が実際にスコアしたか／順位が動いたか」という実LBの生存確認を改善ループが
+一切ゲートにしていない**。その結果:
+- **agent-security**: 全 Kaggle 提出が `SubmissionStatus.ERROR`／publicScore 0.000。599 team の LB に
+  一度も載らないまま、cycle3-7 で数十子Issueがローカル oracle に非昇格判定を積んだ。**空回り。**
+- **PTCG**（相対 rating comp）: 実 public が 570→468 と単調低下しているのに、全 cycle が
+  「champion maintained」。field が改善する中で「維持」は後退だが、ローカル固定 field の R* 非劣化しか
+  見ておらず退行を検知できない。
+
+### P8. 提出アウトカム preflight（ERROR/未スコアなら軸探索を止めて submit デバッグへ）
+**現状**: cron の材料収集は前回提出の score を読むが、**status=ERROR / publicScore=0.000 / LB未掲載を
+「異常」として扱う分岐が無い**。提出が壊れていても改善ループは新しい軸を起案し続ける。
+
+**変更**:
+1. `kaggleImproveMaterial.ts`: 直近提出の `status` を材料に取り込み（既存 `parseKaggleSubmissionsCsv` を拡張）、
+   **直近 N 回（既定3）連続で ERROR / 0.000 / LB非掲載**なら `submissionHealth: "broken"` を立てる。
+2. `kaggleImprovement.ts`: `submissionHealth==="broken"` のとき起案本文を**「新規改善軸を起案しない。
+   最優先で提出パイプライン（kernel実行/出力パス/exec互換/SDK依存）をデバッグし、有効な非ゼロ提出を
+   1本出すことを唯一のゴールにせよ」**へ切り替える（submit-repair モード）。escalation ladder より優先。
+3. registry `validation` に `require_scored_submission: true`（agent/kernel コンペ既定 true）を追加。
+
+**受け入れ条件**: broken 検出のユニットテスト（ERROR連続・0.000・履歴欠落）。submit-repair 本文の
+スナップショット。既存材料テストの回帰なし。
+
+### P9. 実LB順位トレンドを一次材料に（相対/rating コンペの「維持＝後退」検知）
+**現状**: 材料は score（絶対値）を出すが、**LB 内の順位・順位推移が無い**。相対競技では絶対 score より
+順位が実態。「維持」を安全と誤認する。
+
+**変更**:
+1. `kaggleImproveMaterial.ts`: leaderboard CSV から自チーム順位・総チーム数・直近スロット比の**順位トレンド**を
+   算出（既存 `parseKaggleLeaderboardScores` を順位対応に拡張）。material に `rankTrend` を供給。
+2. registry `validation.metric_kind: "regression" | "relative_rating" | "attack"` を追加。
+   `relative_rating` のコンペでは起案本文に **「champion 維持は field 改善下で後退。順位が低下傾向なら
+   maintain を昇格根拠にせず、必ず前進軸を選べ。opponent field に上位公開解法を取り込め」** を挿入。
+3. 昇格ゲート（台帳）に「**実LB順位の非劣化**」を relative comp の必須条件として明文化（ローカル固定
+   field R* 非劣化だけでは不十分）。
+
+**受け入れ条件**: rankTrend 算出のユニットテスト（上昇/低下/新規）。relative_rating 本文の maintain=regress
+文言テスト。regression コンペでは従来挙動（回帰なし）。
+
+### ラウンド2 子Issue（依存順）
+| # | 子Issue（機能名） | 主対象 | 規模 |
+|---|---|---|---|
+| A | 提出アウトカムpreflightとsubmit-repairモードを追加する（P8） | kaggleImproveMaterial.ts + kaggleImprovement.ts + registry | 中 |
+| B | 実LB順位トレンド材料と維持=後退検知を追加する（P9） | kaggleImproveMaterial.ts + kaggleImprovement.ts + registry | 中 |
+
+全子 Opus 担当（`workers: solo=claude:opus, handoff=off`）。A/B は SOT-2513/2514 の材料・テンプレ基盤に
+乗る独立変更で並行可。人間承認ゲートは置かない（ラウンド1 方針を踏襲）。
