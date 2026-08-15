@@ -60,3 +60,15 @@ docs/ai/pipeline/
 .config/gcloud/
 .config/ngrok/
 __pycache__/
+
+# --- one-off audit/dispatch lane artifacts (per-idx audit lanes; SOT-2717 full-100 codex audit) ---
+docs/ai/60_worker_codex_report.aud*.md
+docs/ai/60_worker_codex_report.idx*.md
+prompts/codex/debug.aud*.md
+prompts/roles/verification.aud*.md
+# runtime worktree / target dirs and transient run logs
+.worktrees/
+.targets/
+artifacts/sot*_pytest.log
+artifacts/sot*_focused.log
+artifacts/sot*.pid
