@@ -226,6 +226,29 @@ emit_leg_metrics() {
 }
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 
+# SOT-2725: move the target issue to In Progress at the very START of the dispatch — at the DISPATCHER
+# level, not left to the worker. MANUAL `run_worker.sh <role>` / `run_worker.sh solo` invocations never
+# go through run_auto.sh's SOT-1590 transition, so a picked-up issue could linger in Backlog/Todo when a
+# simple task's worker skipped the transition and went straight to implementation. Doing it here covers
+# ALL paths (manual + autonomous, solo + role). Reuses the idempotent/fail-open helper
+# (`set-issue-in-progress` → setIssueInProgress), which skips terminal/Blocked/already-started and never
+# throws, so both the duplicate call from run_auto.sh and repeated per-role loop calls are harmless.
+# Real dispatch only (skip on --dry-run — mirror the worker DRY_RUN convention so it stays testable);
+# best-effort / fail-open — a Linear hiccup here must never block the dispatch. Disable with
+# RUN_WORKER_SET_IN_PROGRESS=0.
+if truthy "${RUN_WORKER_SET_IN_PROGRESS:-1}" && [ -n "${LEG_ISSUE:-}" ]; then
+  if [ "$DRY_RUN" = true ]; then
+    echo "DRY_RUN would set-issue-in-progress: $LEG_ISSUE"
+  else
+    if [ -x "$_LEG_TSX_BIN" ]; then
+      "$_LEG_TSX_BIN" "$CONTROL_PLANE_DIR/src/runner-cli.ts" set-issue-in-progress "$LEG_ISSUE" >/dev/null 2>&1 || true
+    else
+      (cd "$CONTROL_PLANE_DIR" && npx tsx src/runner-cli.ts set-issue-in-progress "$LEG_ISSUE" >/dev/null 2>&1) || true
+    fi
+    echo "-- dispatch: ensured issue '$LEG_ISSUE' → In Progress (best-effort) --"
+  fi
+fi
+
 PREV_WORKER=""
 PREV_REPORT=""
 LEG_SEQ=0
