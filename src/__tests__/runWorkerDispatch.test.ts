@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const dispatcher = path.join(repoRoot, 'scripts/ai/run_worker.sh');
 
-function soloDryRun(handoff: boolean): string {
+function soloDryRun(handoff: boolean, extraEnv: Record<string, string> = {}): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-dispatch-'));
   const configPath = path.join(dir, 'worker_roles.json');
   fs.writeFileSync(configPath, JSON.stringify({
@@ -18,7 +18,7 @@ function soloDryRun(handoff: boolean): string {
   try {
     return execFileSync('bash', [dispatcher, 'solo', '--dry-run'], {
       cwd: repoRoot,
-      env: { ...process.env, WORKER_ROLES_FILE: configPath },
+      env: { ...process.env, WORKER_ROLES_FILE: configPath, ...extraEnv },
       encoding: 'utf8',
     });
   } finally {
@@ -41,5 +41,23 @@ describe('run_worker solo handoff policy', () => {
     expect(output).toContain('run_claude.sh');
     expect(output).not.toContain('run_codex.sh');
     expect(output).not.toContain('run_antigravity.sh');
+  });
+});
+
+// SOT-2725: the dispatcher itself moves the target issue to In Progress at dispatch start so manual
+// run_worker.sh (solo/role) invocations — which never traverse run_auto.sh's SOT-1590 transition —
+// still leave Backlog/Todo immediately. Dry-run mode surfaces the intent without hitting Linear.
+describe('run_worker dispatch sets Linear In Progress', () => {
+  test('dry-run surfaces the In Progress transition for the injected issue', () => {
+    const output = soloDryRun(true, { WEBHOOK_ISSUE_ID: 'SOT-9999' });
+    expect(output).toContain('DRY_RUN would set-issue-in-progress: SOT-9999');
+  });
+
+  test('the transition can be disabled with RUN_WORKER_SET_IN_PROGRESS=0', () => {
+    const output = soloDryRun(true, {
+      WEBHOOK_ISSUE_ID: 'SOT-9999',
+      RUN_WORKER_SET_IN_PROGRESS: '0',
+    });
+    expect(output).not.toContain('set-issue-in-progress');
   });
 });
