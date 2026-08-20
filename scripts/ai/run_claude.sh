@@ -131,6 +131,10 @@ fi
 # partial report so this worker continues the work instead of restarting from scratch.
 PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
 
+# Per-issue pipeline context path (run_auto.sh exports PIPELINE_CONTEXT_FILE, absolute, so concurrent
+# drains of different projects never share one context.md). Fall back to the shared file when unset.
+CTX_FILE="${PIPELINE_CONTEXT_FILE:-docs/ai/pipeline/context.md}"
+
 # Constrain the dispatched worker (SOT-1459). This Claude runs in the repo root and auto-loads
 # CLAUDE.md — the ORCHESTRATOR spec (select issues, decompose, run workers, drive the pipeline). A
 # dispatched worker must not launch nested pipeline runs. Pin it to exactly one role and forbid
@@ -142,7 +146,7 @@ if [ "${WORKER_ROLE:-}" = "solo" ]; then
   PROMPT_CONTENT="# YOU ARE THE SOLO WORKER — ONE AI, THE WHOLE LIFECYCLE FOR ONE ISSUE
 
 You were dispatched by scripts/ai/run_worker.sh in SOLO MODE to run the ENTIRE lifecycle for the single
-target issue in docs/ai/pipeline/context.md, yourself, in this one session — with NO per-role script
+target issue in $CTX_FILE, yourself, in this one session — with NO per-role script
 handoff. Follow CLAUDE.md's role specs, quality gates, GitHub policy, and Linear policy, but you perform
 every step directly: task-check (incl. 分解判断) → implementation → verification → acceptance → github
 (branch/PR/merge) → linear-report. Hard rules:
@@ -160,7 +164,7 @@ else
   PROMPT_CONTENT="# YOU ARE A CONSTRAINED WORKER — NOT THE ORCHESTRATOR
 
 You were dispatched by scripts/ai/run_worker.sh to perform EXACTLY ONE role for the single target issue
-described below / in docs/ai/pipeline/context.md. CLAUDE.md in this repo describes the ORCHESTRATOR;
+described below / in $CTX_FILE. CLAUDE.md in this repo describes the ORCHESTRATOR;
 IGNORE its instructions about decomposing or driving the pipeline. Hard rules:
 - Do ONLY the one role task in this prompt. Then write your report and stop.
 - Do NOT run scripts/ai/run_auto.sh, scripts/ai/run_worker.sh, scripts/ai/scheduler.sh, the webhook

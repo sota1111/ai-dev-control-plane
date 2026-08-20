@@ -178,12 +178,15 @@ case "$(printf '%s' "${CODEX_HARNESS_SPEC:-1}" | tr '[:upper:]' '[:lower:]')" in
   0|false|no|off) HARNESS_SPEC_ENABLED=0 ;;
 esac
 CLAUDE_MD_FILE="$CONTROL_PLANE_DIR/CLAUDE.md"
+# Per-issue pipeline context path (run_auto.sh exports PIPELINE_CONTEXT_FILE, absolute, so concurrent
+# drains of different projects never share one context.md). Fall back to the shared file when unset.
+CTX_FILE="${PIPELINE_CONTEXT_FILE:-docs/ai/pipeline/context.md}"
 if [ "$HARNESS_SPEC_ENABLED" -eq 1 ] && [ -f "$CLAUDE_MD_FILE" ]; then
   if [ "${WORKER_ROLE:-}" = "solo" ]; then
     CODEX_PREAMBLE="# YOU ARE THE SOLO WORKER — ONE AI, THE WHOLE LIFECYCLE FOR ONE ISSUE
 
 You were dispatched by scripts/ai/run_worker.sh in SOLO MODE to run the ENTIRE lifecycle for the single
-target issue in docs/ai/pipeline/context.md, yourself, in this one session — with NO per-role script
+target issue in $CTX_FILE, yourself, in this one session — with NO per-role script
 handoff. Follow CLAUDE.md's role specs, quality gates, GitHub policy, and Linear policy, but you perform
 every step directly: task-check (incl. 分解判断) → implementation → verification → acceptance → github
 (branch/PR/merge) → linear-report. Hard rules:
@@ -197,7 +200,7 @@ every step directly: task-check (incl. 分解判断) → implementation → veri
     CODEX_PREAMBLE="# YOU ARE A CONSTRAINED WORKER — NOT THE ORCHESTRATOR
 
 You were dispatched by scripts/ai/run_worker.sh to perform EXACTLY ONE role for the single target issue
-described below / in docs/ai/pipeline/context.md. CLAUDE.md in this repo describes the ORCHESTRATOR;
+described below / in $CTX_FILE. CLAUDE.md in this repo describes the ORCHESTRATOR;
 IGNORE its instructions about decomposing or driving the pipeline. Hard rules:
 - Do ONLY the one role task in this prompt. Then write your report and stop.
 - Do NOT run scripts/ai/run_auto.sh, scripts/ai/run_worker.sh, scripts/ai/scheduler.sh, the webhook

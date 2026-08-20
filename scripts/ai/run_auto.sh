@@ -556,8 +556,13 @@ run_role_pipeline() {
     plog "per-issue worker override active (WORKER_ROLES_FILE=$override_file)"
   fi
 
-  # 各ロールプロンプト（prompts/roles/<role>.md）が読む共有コンテキストを書き出す。
+  # 各ロールプロンプト（prompts/roles/<role>.md）が読む pipeline コンテキストを書き出す。
+  # 並列ドレイン（config/runner.json の maxParallel>1）で別プロジェクトの run が同時に走っても衝突しない
+  # よう、context は **per-issue ファイル**（context.<issue>.md）に書き、その**絶対パス**を
+  # PIPELINE_CONTEXT_FILE で下流（run_worker.sh / worker preamble）へ渡す。共有 context.md も後方互換で
+  # 併記する（PIPELINE_CONTEXT_FILE を持たない単一run/手動経路のフォールバック）。
   mkdir -p docs/ai/pipeline
+  local ctx_file="docs/ai/pipeline/context.$issue.md"
   {
     echo "# Pipeline Context (run $TIMESTAMP)"
     echo ""
@@ -568,7 +573,9 @@ run_role_pipeline() {
     echo "- Resume metadata (if resume): docs/ai/auto_logs/resume/$issue.json"
     echo ""
     echo "Use this issue as the primary target for this pipeline run."
-  } > docs/ai/pipeline/context.md
+  } > "$ctx_file"
+  cp -f "$ctx_file" docs/ai/pipeline/context.md 2>/dev/null || true
+  export PIPELINE_CONTEXT_FILE="$(pwd)/$ctx_file"
 
   # SOT-1590: move the issue to In Progress the moment work starts — BEFORE dispatching task-check —
   # so a picked-up issue leaves Todo immediately instead of only after task-check finishes its

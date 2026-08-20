@@ -167,8 +167,11 @@ LEG_METRICS_DIR="${LEG_METRICS_DIR:-$CONTROL_PLANE_DIR/docs/ai/auto_logs/metrics
 METRICS_REPO="${TARGET_REPO:-$CONTROL_PLANE_DIR}"
 # Issue id for the metrics filename: prefer the injected env, else parse the pipeline context.
 LEG_ISSUE="${WEBHOOK_ISSUE_ID:-}"
-if [ -z "$LEG_ISSUE" ] && [ -f "$CONTROL_PLANE_DIR/docs/ai/pipeline/context.md" ]; then
-  LEG_ISSUE="$(sed -n 's/^- Target Linear issue:[[:space:]]*//p' "$CONTROL_PLANE_DIR/docs/ai/pipeline/context.md" | head -1)"
+# Prefer the per-issue context (PIPELINE_CONTEXT_FILE, set by run_auto.sh) so a concurrent drain of a
+# different project can't have us read the wrong issue via the shared context.md fallback.
+_LEG_CTX="${PIPELINE_CONTEXT_FILE:-$CONTROL_PLANE_DIR/docs/ai/pipeline/context.md}"
+if [ -z "$LEG_ISSUE" ] && [ -f "$_LEG_CTX" ]; then
+  LEG_ISSUE="$(sed -n 's/^- Target Linear issue:[[:space:]]*//p' "$_LEG_CTX" | head -1)"
 fi
 
 _LEG_TSX_BIN="$CONTROL_PLANE_DIR/node_modules/.bin/tsx"

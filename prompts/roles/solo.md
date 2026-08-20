@@ -5,7 +5,7 @@ THIS one session — there is NO per-role script handoff. Do every step yourself
 final report.
 
 ## Context
-- Read `docs/ai/pipeline/context.md` for the target issue id and **target repository** (work there, not
+- Read the per-run pipeline context at `$PIPELINE_CONTEXT_FILE` (resolve with `cat "$PIPELINE_CONTEXT_FILE"`; fallback `docs/ai/pipeline/context.md`) for the target issue id and **target repository** (work there, not
   in the control-plane repo unless the context says so).
 - Follow `CLAUDE.md` for the role specifications, quality gates, GitHub policy, and Linear policy. You
   perform all of it directly (you are not constrained to a single role in solo mode).
