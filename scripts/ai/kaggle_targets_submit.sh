@@ -91,6 +91,7 @@ slot_id="${today_utc}-jst-$(printf '%02d' "$HOUR")"
 declare -A today_count
 declare -A current_fingerprint
 declare -A submitted_fingerprints
+declare -A last_submit_epoch   # repo → 最新提出の epoch ms（spacing 判定用・当日分）
 for repo in "${REPOS[@]}"; do today_count["$repo"]=0; done
 for repo in "${REPOS[@]}"; do
   submit_spec="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=(r.competitions||[]).find(x=>x.key===process.argv[2]);const t=(c?c.targets:[]).find(x=>x.repo===process.argv[3]);process.stdout.write(JSON.stringify(t&&t.submit||{}))' "$REGISTRY" "$COMP_KEY" "$repo")"
@@ -187,10 +188,17 @@ if [[ "$HISTORY_OK" == "1" ]]; then
       grep -qE 'SubmissionStatus\.(ERROR|CANCELLED)' <<<"$line" && continue
       d="$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' <<<"$line" | head -1)"
       [[ "$d" == "$today_utc" ]] || continue
+      # 完全timestamp（spacing 用・Kaggle は UTC 表記として扱う）。
+      ts="$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}' <<<"$line" | head -1)"
       TOTAL_TODAY=$((TOTAL_TODAY + 1))
       for repo in "${REPOS[@]}"; do
         if grep -Fq "$repo" <<<"$line"; then
           today_count["$repo"]=$(( ${today_count["$repo"]} + 1 ))
+          # 最新（履歴は新しい順）を repo ごとに1回だけ epoch ms へ。
+          if [[ -z "${last_submit_epoch[$repo]:-}" && -n "$ts" ]]; then
+            e="$(date -u -d "$ts" +%s 2>/dev/null || echo '')"
+            [[ -n "$e" ]] && last_submit_epoch["$repo"]="${e}000"
+          fi
           # SOT-2517: match both the legacy visible-artifact hash `[artifact:sha256:…]` and the new
           # kernel-source hash `[artifact:kernel:sha256:…]`; the captured value keeps its prefix so the
           # two namespaces never collide when a repo's history mixes old and new submission rows.
@@ -250,6 +258,12 @@ submitted_artifact_fingerprints_json="$(
     while IFS= read -r fp; do [[ -n "$fp" ]] && printf '%s\t%s\n' "$repo" "$fp"; done <<<"${submitted_fingerprints[$repo]}"
   done | node -e 'const rows=require("fs").readFileSync(0,"utf8").trim().split(/\r?\n/).filter(Boolean);const out={};for(const row of rows){const [repo,fp]=row.split("\t");(out[repo]??=[]).push(fp);}process.stdout.write(JSON.stringify(out));'
 )"
+# spacing 用: repo → 最新提出 epoch ms（当日分）と現在時刻。plan 側が submission_policy.min_interval_min で判定。
+last_submit_epoch_json="$(
+  for repo in "${REPOS[@]}"; do printf '%s\t%s\n' "$repo" "${last_submit_epoch[$repo]:-}"; done |
+    node -e 'const rows=require("fs").readFileSync(0,"utf8").trim().split(/\r?\n/).filter(Boolean);const out={};for(const row of rows){const [repo,e]=row.split("\t");const n=Number(e);if(e&&Number.isFinite(n))out[repo]=n;}process.stdout.write(JSON.stringify(out));'
+)"
+now_epoch="$(date -u +%s)000"
 
 # alternate モードのときだけ --last-lineage を付ける（both では engine が無視する）。
 LINEAGE_ARGS=()
@@ -264,6 +278,7 @@ plan_json="$(cd "$REPO_ROOT" && npx --no-install tsx src/runner-cli.ts kaggle-su
   --competition-submitted "$TOTAL_TODAY" \
   --artifact-fingerprints "$artifact_fingerprints_json" \
   --submitted-artifact-fingerprints "$submitted_artifact_fingerprints_json" \
+  --last-submit-epoch "$last_submit_epoch_json" --now-epoch "$now_epoch" \
   "${LINEAGE_ARGS[@]}" 2>/dev/null)"
 if [[ -z "$plan_json" ]]; then
   plan_json="$(cd "$REPO_ROOT" && npx tsx src/runner-cli.ts kaggle-submission-plan \
@@ -272,6 +287,7 @@ if [[ -z "$plan_json" ]]; then
     --competition-submitted "$TOTAL_TODAY" \
     --artifact-fingerprints "$artifact_fingerprints_json" \
     --submitted-artifact-fingerprints "$submitted_artifact_fingerprints_json" \
+    --last-submit-epoch "$last_submit_epoch_json" --now-epoch "$now_epoch" \
     "${LINEAGE_ARGS[@]}" 2>/dev/null)"
 fi
 if [[ -z "$plan_json" ]]; then

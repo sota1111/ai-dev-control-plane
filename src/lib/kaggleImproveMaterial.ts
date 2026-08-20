@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import type { GuardSignals, ImprovementMaterial, Lineage, OracleDriftSignal, TargetsRegistry } from './kaggleImprovement.js';
+import type { GuardSignals, ImprovementMaterial, Lineage, OracleDriftSignal, SubmissionPolicy, TargetsRegistry } from './kaggleImprovement.js';
 import { getCompetition, resolveCompetitionPhase } from './kaggleImprovement.js';
 import {
   computeTargetPriority,
@@ -349,6 +349,59 @@ export function detectSubmissionHealth(
     consecutiveBroken,
     reason: `直近 ${consecutiveBroken} 回が無効提出（broken 閾値 ${consecutive} 未満）`,
   };
+}
+
+/** submission 行の date（"YYYY-MM-DD HH:MM:SS(.fff)"）を epoch ms に。解釈不能なら null。 */
+function submissionRowEpochMs(row: KaggleSubmissionRow): number | null {
+  if (!row.date) return null;
+  const normalized = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(row.date)
+    ? `${row.date.replace(' ', 'T').replace(/(\.\d+)?$/, '')}Z`
+    : /^\d{4}-\d{2}-\d{2}$/.test(row.date)
+      ? `${row.date}T00:00:00Z`
+      : row.date;
+  const ms = Date.parse(normalized);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * 「本日の提出予算」ダイジェスト（日次枠効率化）。改善ゲート＋spacing/reserve を worker が適用する材料。
+ * 提出が枠を消費した行 = ERROR/CANCELLED 以外（shell の TOTAL_TODAY と同じ扱い）。純粋関数（now を注入）。
+ */
+export function buildSubmissionBudgetDigest(
+  rows: KaggleSubmissionRow[],
+  cap: number,
+  policy: SubmissionPolicy | undefined,
+  nowMs: number
+): string {
+  const reserve = Math.max(0, policy?.dailyReserve ?? 0);
+  const minIntervalMin = Math.max(0, policy?.minIntervalMin ?? 0);
+  const effectiveCap = Math.max(1, cap - reserve);
+  const todayUtc = new Date(nowMs).toISOString().slice(0, 10);
+  const consuming = rows.filter((r) => {
+    const s = (r.status || '').toUpperCase();
+    return !s.includes('ERROR') && !s.includes('CANCEL');
+  });
+  const todayCount = consuming.filter((r) => (r.date || '').slice(0, 10) === todayUtc).length;
+  const remaining = Math.max(0, cap - todayCount);
+  const loopRemaining = Math.max(0, effectiveCap - todayCount);
+  const epochs = consuming
+    .map(submissionRowEpochMs)
+    .filter((v): v is number => typeof v === 'number');
+  const lastMs = epochs.length ? Math.max(...epochs) : null;
+  const sinceMin = lastMs != null ? Math.floor((nowMs - lastMs) / 60000) : null;
+  const spacingOk = minIntervalMin === 0 || sinceMin == null || sinceMin >= minIntervalMin;
+  const lastStr =
+    lastMs != null ? `${new Date(lastMs).toISOString().replace('T', ' ').slice(0, 19)}Z（${sinceMin}分前）` : 'なし';
+  const spacingLine =
+    minIntervalMin > 0
+      ? `- spacing: 最小間隔 ${minIntervalMin}分 / 直近提出 ${lastStr} → ${spacingOk ? '提出可（間隔OK）' : `**あと約${Math.max(0, minIntervalMin - (sinceMin ?? 0))}分は見送り**`}`
+      : `- spacing: 無効（最小間隔0）/ 直近提出 ${lastStr}`;
+  return [
+    `- 本日(UTC ${todayUtc})の消費枠: ${todayCount}/${cap}（残 ${remaining}）`,
+    `- 自動ループ実効枠: ${loopRemaining} 残（cap ${cap} − reserve ${reserve}；reserve は終盤の強い候補用に温存）`,
+    spacingLine,
+    `- 提出判断: **leak-free CV が前回*提出*をノイズ幅超えで上回った時のみ**。実効枠0/間隔未経過/小改善なら見送り、局所改善を継続。`,
+  ].join('\n');
 }
 
 /* ============================================================================
@@ -1254,6 +1307,19 @@ export async function collectImproveContext(
       log(`cycle handoff collection failed for ${t.project}: ${err?.message || err}`);
     }
 
+    // 日次提出予算ダイジェスト（改善ゲート＋spacing/reserve の材料）。best-effort。
+    let submissionBudget: string | undefined;
+    try {
+      submissionBudget = buildSubmissionBudgetDigest(
+        targetSubmissionRows,
+        comp.dailySubmissionCap,
+        registry.submissionPolicy,
+        Date.now()
+      );
+    } catch (err: any) {
+      log(`submission budget digest failed for ${t.repo}: ${err?.message || err}`);
+    }
+
     signals[t.project] = {
       hasUnfinishedCycle,
       hasNewMaterial,
@@ -1283,6 +1349,7 @@ export async function collectImproveContext(
       ...(rankTrendSummary ? { rankTrend: rankTrendSummary } : {}),
       ...(rankTrendDirection ? { rankTrendDirection } : {}),
       ...(oracleDrift ? { oracleDrift } : {}),
+      ...(submissionBudget ? { submissionBudget } : {}),
     };
   }
 

@@ -12,6 +12,7 @@ import {
   planImprovementCycle,
   planChampionSubmission,
   planCompetitionSubmission,
+  parseSubmissionPolicy,
   nextAlternateLineage,
   alternateLineageForUtcDate,
   detectOracleDrift,
@@ -429,7 +430,8 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('Kaggle の上位ノートブック');
       expect(body).toContain('子IssueはKaggle提出を実行してはならない');
       expect(body).toContain('auto-parent-resumed');
-      expect(body).toContain('この親Issueだけが提出契約を通過した最新');
+      // 提出は改善ゲート＋日次枠効率化ポリシーに従う（旧「新artifactなら毎回提出」から反転）。
+      expect(body).toContain('提出予算ポリシー');
       // 未指定の材料は安全側のプレースホルダになる。
       expect(body).toContain('(該当なし)');
     });
@@ -1238,6 +1240,88 @@ describe('kaggleImprovement', () => {
       expect(plan.targets.every((target) => target.action === 'skip')).toBe(true);
       expect(plan.targets[0].reason).toContain('competition cap reached');
     });
+
+    // 日次枠効率化: reserve — 自動ループは cap - reserve までしか消費しない。
+    test('reserve holds slots: skip once competitionSubmittedToday >= cap - reserve', () => {
+      const raw: any = JSON.parse(JSON.stringify(rawRegistry));
+      raw.submission_policy = { daily_reserve: 1, min_interval_min: 0 };
+      raw.competitions[0].daily_submission_cap = 5;
+      raw.competitions[0].daily_submissions_per_lineage = 2;
+      raw.competitions[0].targets[0].submit = { file: 'submission/claude.py', message: 'm' };
+      raw.competitions[0].targets[1].submit = { file: 'submission/gpt.py', message: 'm' };
+      const reg2 = parseTargetsRegistry(raw);
+      // 4/5 submitted, reserve 1 → effective cap 4 → reserve holds (not the hard cap of 5).
+      const held = planCompetitionSubmission(reg2, 'ptcg', {}, {
+        competitionSubmittedToday: 4,
+        submissionPolicy: reg2.submissionPolicy,
+      })!;
+      expect(held.targets.every((t) => t.action === 'skip')).toBe(true);
+      expect(held.targets[0].reason).toContain('reserve');
+      // 3/5 submitted → below effective cap → reserve does NOT hold (submits).
+      const open = planCompetitionSubmission(reg2, 'ptcg', {}, {
+        competitionSubmittedToday: 3,
+        submissionPolicy: reg2.submissionPolicy,
+      })!;
+      expect(open.targets.some((t) => t.action === 'submit')).toBe(true);
+    });
+
+    // 日次枠効率化: spacing — 直近提出から min_interval_min 未満は見送り。
+    test('spacing skips a repo whose last submit is within min_interval_min', () => {
+      const raw: any = JSON.parse(JSON.stringify(rawRegistry));
+      raw.submission_policy = { daily_reserve: 0, min_interval_min: 180 };
+      raw.competitions[0].targets[0].submit = { file: 'submission/claude.py', message: 'm' };
+      raw.competitions[0].targets[1].submit = { file: 'submission/gpt.py', message: 'm' };
+      const reg2 = parseTargetsRegistry(raw);
+      const now = 1_700_000_000_000;
+      const plan = planCompetitionSubmission(reg2, 'ptcg', {}, {
+        competitionSubmittedToday: 1,
+        submissionPolicy: reg2.submissionPolicy,
+        nowEpochMs: now,
+        lastSubmitEpochMsByRepo: { 'ptcg-agent-claude': now - 60 * 60_000 }, // 60min ago < 180
+      })!;
+      const claude = plan.targets.find((t) => t.repo === 'ptcg-agent-claude')!;
+      const gpt = plan.targets.find((t) => t.repo === 'ptcg-agent-gpt')!;
+      expect(claude.action).toBe('skip');
+      expect(claude.reason).toContain('spacing');
+      // gpt has no recent submission → spacing does not apply.
+      expect(gpt.reason).not.toContain('spacing');
+      // Same repo but 200min ago → spacing satisfied (not skipped for spacing).
+      const later = planCompetitionSubmission(reg2, 'ptcg', {}, {
+        competitionSubmittedToday: 1,
+        submissionPolicy: reg2.submissionPolicy,
+        nowEpochMs: now,
+        lastSubmitEpochMsByRepo: { 'ptcg-agent-claude': now - 200 * 60_000 },
+      })!;
+      expect(later.targets.find((t) => t.repo === 'ptcg-agent-claude')!.reason).not.toContain(
+        'spacing'
+      );
+    });
+
+    test('buildIssueBody: submission policy is improvement-gated + budget-aware', () => {
+      const c = reg().competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, {
+        submissionBudget: '- 本日(UTC 2026-08-20)の消費枠: 2/5（残 3）',
+      });
+      expect(body).toContain('提出予算ポリシー');
+      expect(body).toContain('改善ゲート');
+      expect(body).toContain('本日の提出予算');
+      expect(body).toContain('消費枠: 2/5'); // injected budget material is rendered
+      // 旧ポリシー（毎サイクル提出容認）は撤去済み。
+      expect(body).not.toContain('champion 昇格は必須条件にしない');
+    });
+
+    test('parseSubmissionPolicy: defaults + validation (fail-safe to 0/0)', () => {
+      expect(parseSubmissionPolicy(undefined)).toEqual({ dailyReserve: 0, minIntervalMin: 0 });
+      expect(parseSubmissionPolicy({ daily_reserve: 2, min_interval_min: 90 })).toEqual({
+        dailyReserve: 2,
+        minIntervalMin: 90,
+      });
+      // 負値/非数値は 0 に倒す。
+      expect(parseSubmissionPolicy({ daily_reserve: -1, min_interval_min: 'x' })).toEqual({
+        dailyReserve: 0,
+        minIntervalMin: 0,
+      });
+    });
   });
 
   describe('shipped registry file', () => {
@@ -1249,6 +1333,9 @@ describe('kaggleImprovement', () => {
       const r = parseTargetsRegistry(JSON.parse(fs.readFileSync(p, 'utf8')));
       // enabled は運用 kill switch（人間/セッションが随時トグルする）— 値そのものは断言しない。
       expect(typeof r.enabled).toBe('boolean');
+      // 日次枠効率化ポリシー（reserve/spacing）が設定され妥当であること。
+      expect(r.submissionPolicy.dailyReserve).toBeGreaterThanOrEqual(0);
+      expect(r.submissionPolicy.minIntervalMin).toBeGreaterThanOrEqual(0);
       expect(r.competitions.map((c) => c.key).sort()).toEqual(['biohub', 'kaggriculture']);
       // 削除したコンペが再混入していないこと。
       for (const gone of ['ptcg', 'arc-agi-2', 'arc-agi-3', 'agent-security', 'rogii']) {
