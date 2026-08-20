@@ -202,6 +202,26 @@ describe('runner', () => {
       expect(runner.worktreeLaneFor('booking-monitor--feata', 'SOT-1559', env)).toBe('booking-monitor--feata');
     });
 
+    it('repo-scope pool lane runs in-place: a non-default repo lane gets NO worktree (bug fix)', () => {
+      // The N-slot pool assigns the target repo name as the serialization lane even in repo scope.
+      // Distinct repos already have separate checkouts → run in-place, no worktree (which would try to
+      // create the unwritable /…/.runner-worktrees/<repo> and fail every dispatch).
+      const repoScopeEnv = { RUNNER_SERIALIZE_SCOPE: 'repo' };
+      expect(runner.worktreeLaneFor('personal-child-context-agent', 'SOT-2742', repoScopeEnv)).toBe(
+        runner.DEFAULT_LANE ?? 'default'
+      );
+      // default scope (unset) behaves the same.
+      expect(runner.worktreeLaneFor('toddler-private-rag', 'SOT-2746', {})).toBe(
+        runner.DEFAULT_LANE ?? 'default'
+      );
+    });
+
+    it('repo-scope + explicit worktree isolation still gets a per-issue iso lane', () => {
+      const env = { RUNNER_SERIALIZE_SCOPE: 'repo', RUNNER_WORKTREE_ISOLATION: '1' };
+      // even with a non-default pool lane, isolation opt-in yields iso-<issue> (not the repo lane).
+      expect(runner.worktreeLaneFor('biohub-claude', 'SOT-2999', env)).toBe('iso-SOT-2999');
+    });
+
     it('iso worktree lane stays lane-safe (cannot escape the worktree base dir)', () => {
       const lane = runner.resolveWorktreeLane({ RUNNER_WORKTREE_ISOLATION: '1' }, '../../evil/../id');
       expect(lane.includes('/')).toBe(false);
