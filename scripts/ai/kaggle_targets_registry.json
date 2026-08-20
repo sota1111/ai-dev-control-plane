@@ -126,7 +126,8 @@
             "file": ".targets/kaggriculture-claude/submission.tar.gz",
             "message": "auto-improve submit: kaggriculture-claude champion"
           },
-          "next_cycle": 1
+          "next_cycle": 1,
+          "mode": "maintain"
         },
         {
           "lineage": "gpt",
@@ -359,43 +360,11 @@
             "output": "submission.csv",
             "message": "auto-improve submit: biohub-gpt cycle-2 champion"
           },
-          "next_cycle": 2
+          "next_cycle": 2,
+          "mode": "maintain"
         }
       ],
       "deadline_utc": "2026-09-29T23:59:00Z"
-    },
-    {
-      "key": "nedo-loading-algo",
-      "__platform__": "SIGNATE（Kaggleではない）。NEDO Challenge Baggage-Loading Robot コンテスト2: 積付アルゴリズム スクリーニング。実提出は kaggle CLI 不可 — solo worker が target repo 内から signate CLI（~/.signate/signate.json 認証済み）で行う。コンペ詳細・実 slug/URL は repo の docs/ai/00_competition_context.md と初回子Issueで確定。",
-      "kaggle_competition": "signate-nedo-baggage-loading-algo-screening",
-      "daily_submission_cap": 5,
-      "daily_submissions_per_lineage": 2,
-      "submission_mode": "both",
-      "targets": [
-        {
-          "lineage": "claude",
-          "repo": "nedo-loading-algo-claude",
-          "project": "nedo-loading-algo-claude",
-          "workers_directive": "solo=claude:fable, handoff=off",
-          "stage": "submit-valid",
-          "submit": {
-            "file": "",
-            "message": "auto-improve submit: nedo-loading-algo-claude champion (SIGNATE — 実提出はsolo workerがsignate CLIで行う)"
-          },
-          "next_cycle": 1
-        }
-      ],
-      "deadline_utc": "2026-10-19T14:55:00Z",
-      "final_window_days": 7,
-      "score_direction": "max",
-      "validation": {
-        "primary": "cv",
-        "metric_kind": "regression"
-      },
-      "pinned_hours_jst": [
-        0,
-        12
-      ]
     }
   ],
   "allocation": {
