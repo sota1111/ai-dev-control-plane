@@ -279,13 +279,19 @@ ${historyBlock}
    - ラベル \`${LABEL}\` を付与（直列ガードが子の完了を待つために必須）
    - TARGET_REPO / 対象成分・ケース / 実装方針 / focused 検証（該当テストケースでのローカル評価）を明記
 3. 子issue登録後、親はこの issue を **In Review にして待機**する（全子が完了すると自動で親が再開される）
-4. **再開後（全子完了を確認してから）**: 統合ローカル評価（自作テストケース分布全体で run）→ ベスト
-   agent を確認 → **改善が確認できたら signate CLI で提出**する:
-   \`signate submit --task_key ${SIGNATE_TASK_KEY} --path submit.zip --memo "cycle${cycle}: <変更概要>"\`
+4. **再開後（全子完了を確認してから）**: 統合ローカル評価（自作テストケース分布全体で run）→ 候補を
+   選抜して **signate CLI で提出**する:
+   \`signate submit --task_key ${SIGNATE_TASK_KEY} --path submit.zip --memo "cycle${cycle}: <候補名と変更概要>"\`
    - 提出前に評価基盤互換を必ず確認: agent.py/Agentクラス仕様・policy 8s/step・optimize 180s・
      メモリ12GB・**インターネット遮断**（外部接続コードが無いこと）・requirements.txt の妥当性
-   - 日次提出上限を尊重（上限不明の間は 1サイクル1提出まで）。ローカル改善が無いサイクルは提出せず
-     その旨を台帳へ記録
+   - **提出予算 = 1日5回（JST日付基準）を使い切る**（ユーザー指示 2026-08-20）: ベスト候補に加え、
+     性質の異なる候補（順序規則・配置規則・パラメータのバリエーション等）を同日予算の残りで追加提出
+     してよい。提出ごとに成分別フィードバックが返るため、多様な候補の提出は評価器較正・重み回帰の
+     アンカーを増やす。ただし**同一内容（同一 SHA-256）の再提出はしない**。
+   - 日次カウント管理: 提出のたび \`docs/ai/submission_log.jsonl\` へ
+     \`{"ts":"<UTC>","jst_date":"YYYY-MM-DD","cycle":${cycle},"sha256":"<zipのSHA-256>","candidate":"<名前>","memo":"..."}\`
+     を追記し、**同一 JST 日付の行数が5を超える提出はしない**。プラットフォーム実上限が5未満と判明
+     したらそれに従い、00_competition_context.md を更新する
 5. \`docs/ai/loading_history.jsonl\` へ追記（1サイクル=1行）:
    \`{"cycle":${cycle},"ts":"<UTC>","local_score":N,"local_components":{"fill":N,"cog":N,"stability":N,"placement":N,"soft":N},"submitted":true|false,"lb_score":N,"lb_components":{...},"est_weights":{...},"changes":["..."],"next":["..."]}\`
    （未提出サイクルは lb_* を省略。**lb_score は oracle-drift 自動検知の真feedback入力** — 提出したら必ず記録）
