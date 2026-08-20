@@ -24,21 +24,23 @@ fi
 # (or collides with an active run's flock). Do not register it again.
 crontab -l 2>/dev/null | grep -v "run_auto.sh" | crontab - || true
 
-# Kaggle 改善サイクル cron（JST [0,3,6,9,12,15,18,21]・各コンペ1日2枠）。
-# cron は UTC 基準なので毎時起動し、スクリプト側で --only-scheduled により当番 JST 枠だけを処理する
-# （registry.schedule_hours_jst で枠を判定）。default OFF（env KAGGLE_IMPROVE_ENABLED + registry.enabled）
+# Kaggle 改善サイクル cron —【完了駆動ループ】(10分毎)。
+# JST時刻枠は使わない。--all-competitions で registry の全コンペを毎tick評価し、前サイクル完了済みの
+# improve ターゲットに次サイクルを即起案する（直列ガード findOpenImproveCycleParent が In Review 親も
+# 未完了として数えるので二重起票しない）。default OFF（env KAGGLE_IMPROVE_ENABLED + registry.enabled）
 # なので、登録しても2段 kill switch が ON になるまで実起案しない。
 KAGGLE_IMPROVE_LOG="${REPO_DIR}/docs/ai/auto_logs/kaggle_improve.log"
-IMPROVE_SCHEDULE="${KAGGLE_IMPROVE_CRON_SCHEDULE:-0 * * * *}"
+IMPROVE_SCHEDULE="${KAGGLE_IMPROVE_CRON_SCHEDULE:-*/10 * * * *}"
 # 実起案・実提出するかは env KAGGLE_IMPROVE_EXECUTE（既定ドライラン）。
 # 実行モードでは 2段 kill switch の env 側（KAGGLE_IMPROVE_ENABLED）も ON である必要がある。
 # 【重要】cron は登録時のシェル env を継承しない。旧実装 `KAGGLE_IMPROVE_ENABLED=${KAGGLE_IMPROVE_ENABLED:-}`
 # は cron 実行時に空へ展開され、登録しても永久に dry-run のままになるバグだった。ここでは実行モードの
 # ときだけ enable フラグを crontab 行へ **リテラルで焼き込む**（登録時に値を確定）。
-IMPROVE_FLAGS="--only-scheduled"
+# 完了駆動ループ: 時刻枠(--only-scheduled)は使わず、全コンペを毎tick評価する(--all-competitions)。
+IMPROVE_FLAGS="--all-competitions"
 IMPROVE_ENV=""
 if [ "${KAGGLE_IMPROVE_EXECUTE:-0}" = "1" ]; then
-  IMPROVE_FLAGS="--only-scheduled --execute"
+  IMPROVE_FLAGS="--all-competitions --execute"
   IMPROVE_ENV="KAGGLE_IMPROVE_ENABLED=${KAGGLE_IMPROVE_ENABLED:-1} "
 fi
 IMPROVE_CMD="${IMPROVE_SCHEDULE} cd ${REPO_DIR} && ${IMPROVE_ENV}bash scripts/ai/kaggle_improvement_cycle.sh ${IMPROVE_FLAGS} >> ${KAGGLE_IMPROVE_LOG} 2>&1"

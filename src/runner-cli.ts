@@ -42,7 +42,7 @@ import {
 } from './lib/workerRoleDirective.js';
 import { buildDelegationPreflight } from './lib/delegationPreflight.js';
 import { parseRegistry, planSubmission, type RecentSubmission } from './lib/kaggleSubmission.js';
-import { createDraftIssue, findOpenAutoImproveIssue, postIssueComment } from './lib/linearApi.js';
+import { createDraftIssue, findOpenImproveCycleParent, postIssueComment } from './lib/linearApi.js';
 import {
   parseTargetsRegistry,
   planImprovementCycle,
@@ -1191,11 +1191,25 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       let competitionKeyOverride: string | undefined;
       let selectedCompetition: string | null = null;
       const autoMaintained: Array<{ repo: string; reason: string }> = [];
+      // 完了駆動ループ（SOT: JST枠廃止）: `--competition <key>` が指定されたら JST時刻の pinned/動的配分を
+      // 一切スキップし、そのコンペだけを評価する。cron ラッパは全コンペを列挙してこれを毎tick回す
+      // （＝時刻枠でなく「前サイクル完了」で次サイクルが決まる）。
+      const forcedCompetition = flags.competition ? flags.competition : undefined;
       // 固定枠（pinned slot）: この hour が pinned なら動的配分をスキップし、その確定当番を使う。
       // recent_competitions（動的配分のクールダウン履歴）には記録せず、動的枠側の挙動を変えない。
-      const pinnedSlot = resolvePinnedSlotForHour(registry, hourJst);
+      const pinnedSlot = forcedCompetition ? null : resolvePinnedSlotForHour(registry, hourJst);
       const dynamicActive =
-        !pinnedSlot && registry.allocation.mode === 'dynamic' && registry.enabled && envEnabled;
+        !forcedCompetition &&
+        !pinnedSlot &&
+        registry.allocation.mode === 'dynamic' &&
+        registry.enabled &&
+        envEnabled;
+      if (forcedCompetition) {
+        competitionKeyOverride = forcedCompetition;
+        process.stderr.write(
+          `[allocation] competition forced=${forcedCompetition} (completion-driven; JST slot/dynamic skipped)\n`
+        );
+      }
       if (pinnedSlot) {
         competitionKeyOverride = pinnedSlot.competition;
         process.stderr.write(
@@ -1293,12 +1307,13 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
             continue;
           }
           // Live re-check of the active-cycle guard (guard 4) to avoid duplicate actionable drafts.
-          // In Review is intentionally ignored: it is historical review state, not current work.
-          const open = await findOpenAutoImproveIssue(t.project, label);
+          // Completion-driven loop: In Review cycle *parents* (children still implementing, or the
+          // integration/submission phase) count as unfinished so the 10-min cron never double-drafts.
+          const open = await findOpenImproveCycleParent(t.project, label);
           if (open) {
             skipped.push({
               project: t.project,
-              reason: `open auto-improve issue already exists (${open})`,
+              reason: `open improve cycle parent already exists (${open})`,
             });
             continue;
           }

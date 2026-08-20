@@ -26,7 +26,7 @@ import {
   type CompetitionCandidate,
   type PriorityWeights,
 } from './resourceAllocation.js';
-import { findOpenAutoImproveIssue, linearQuery } from './linearApi.js';
+import { findOpenImproveCycleParent, linearQuery } from './linearApi.js';
 import {
   appendNewScoreProgression,
   appendLeaderboardRank,
@@ -1052,12 +1052,13 @@ export async function collectImproveContext(
       targetSubmissionRows,
       comp.validation.brokenSubmissionConsecutive ?? SUBMISSION_BROKEN_CONSECUTIVE
     );
-    // guard 4: 前サイクル未完了。失敗時は安全側で false（＝ブロックしない）に倒す。
+    // guard 4: 前サイクル未完了。完了駆動ループでは In Review 親（子実装待ち／統合・提出フェーズ）も
+    // 未完了として数える（旧JST枠が隠していた重複起票窓を塞ぐ）。失敗時は安全側で false（＝ブロックしない）。
     let hasUnfinishedCycle = false;
     try {
-      hasUnfinishedCycle = !!(await findOpenAutoImproveIssue(t.project, label));
+      hasUnfinishedCycle = !!(await findOpenImproveCycleParent(t.project, label));
     } catch (err: any) {
-      log(`findOpenAutoImproveIssue failed for ${t.project}: ${err?.message || err}`);
+      log(`findOpenImproveCycleParent failed for ${t.project}: ${err?.message || err}`);
     }
 
     // guard 5 + 完了Issueダイジェスト。失敗時は fail-open（hasNewMaterial=true, digest 無し）。
@@ -1381,7 +1382,7 @@ export async function collectAllocationSignals(
 
       let hasOpenCycle = false;
       try {
-        hasOpenCycle = !!(await findOpenAutoImproveIssue(t.project, label));
+        hasOpenCycle = !!(await findOpenImproveCycleParent(t.project, label));
       } catch (err: any) {
         log(`allocation open-cycle check failed for ${t.project}: ${err?.message || err}`);
       }

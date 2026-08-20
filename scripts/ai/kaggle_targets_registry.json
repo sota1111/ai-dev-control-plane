@@ -1,5 +1,5 @@
 {
-  "__doc__": "Kaggle改善・提出サイクルの対象は PTCG / Kaggriculture / Agent Security / Biohub の4コンペ×Claude/GPT＝8ターゲット。各コンペを1日2枠処理し、Claude/GPTを各2回（計4回）提出する。加えて締切接近の ROGII は claude 系統のみ固定枠（pinned）で5時間ごと（JST 1/6/11/16/21）に改善提出サイクルを回す。",
+  "__doc__": "Kaggle改善サイクルは【完了駆動ループ】（signate nedo/sonnet型）。対象は Kaggriculture(gpt=improve/claude=maintain) と Biohub(claude=improve/gpt=maintain) の2コンペのみ。JST時刻枠(schedule_hours_jst/rotation)は起票トリガーに使わない — cronは10分毎に全コンペのimproveターゲットを評価し、前サイクルの親Issueが完了（＝当該projectにTodo/In Progress/In Reviewのサイクル親が無い）していれば次サイクルを即起票する。schedule_hours_jst/rotation/allocationはparse互換のため残すが未使用。停止=enabled:false または crontab行削除。",
   "__fields__": {
     "enabled": "レジストリ側 kill switch。false の間は起案しない（env KAGGLE_IMPROVE_ENABLED と AND）。",
     "schedule_hours_jst": "単一スケジュール。改善サイクル cron を起動する JST の時刻(hour)。",
@@ -30,86 +30,23 @@
     "competitions[].pinned_lineage": "任意。固定枠で起案する系統を1つに限定（claude/gpt）。未設定は両系統。pinned_hours_jstが必須。",
     "competitions[].validation": "SOT-2514 検証設定。欠落時は fail-safe で {primary:'cv'} 扱い。primary=一次KPI（cv=leak-free CVを一次に信じる[既定・hidden private splitのコンペは必ずcv] / lb=public==privateなどリークの無い例外構成でのみpublic LBを一次にできる）。cv_report_path=target repo内 cv_report.json の相対パス（既定 docs/ai/cv_report.json。{cv_scheme, entity_unit, folds, score, per_entity_scores?}、entity単位hold-out必須。行単位CVは契約違反警告）。tail_heavy_metric=重い裾metric名（playbook P3頑健受容の対象・説明メタ）。reference_public_score=参照実装/公開NBの公称public。自best publicが有意（既定2%）に上回ったら後付け較正の過学習を疑う警告を本文へ挿入（playbook P5）。require_scored_submission(SOT-2518 P8)=trueで有効な非ゼロ提出を成立の前提にする（agent/kernelコンペ既定true）。直近提出がERROR/0.000/未スコアを既定3回連続すると起案本文がsubmit-repairモード（新規改善軸を止め提出パイプライン復旧を最優先）へ切替わり、材料先頭に『🔴 提出が壊れています（直近N回…）』を表示する。broken_submission_consecutive(SOT-2519)=submissionHealth=brokenと判定する連続無効提出回数の上書き（1以上の整数・欠落時は既定3）。metric_kind(SOT-2518 P9)=regression（絶対スコアが実態・従来挙動）/relative_rating（相対rating。field改善下では維持=後退。本文に順位契約「維持を昇格根拠にせず前進軸必須・実LB順位の非劣化を昇格必須条件」を挿入）/attack（攻撃系・スコア成立自体が壊れやすい）。既存コンペへの値設定は別途。"
   },
-  "enabled": false,
+  "enabled": true,
   "schedule_hours_jst": [
     0,
-    6,
-    12,
-    18
+    12
   ],
   "rotation": [
     {
       "hour_jst": 0,
-      "competition": "ptcg"
-    },
-    {
-      "hour_jst": 3,
       "competition": "kaggriculture"
-    },
-    {
-      "hour_jst": 6,
-      "competition": "agent-security"
-    },
-    {
-      "hour_jst": 9,
-      "competition": "biohub"
     },
     {
       "hour_jst": 12,
-      "competition": "ptcg"
-    },
-    {
-      "hour_jst": 15,
-      "competition": "kaggriculture"
-    },
-    {
-      "hour_jst": 18,
-      "competition": "agent-security"
-    },
-    {
-      "hour_jst": 21,
       "competition": "biohub"
     }
   ],
   "issue_cap_guard": 240,
   "competitions": [
-    {
-      "key": "ptcg",
-      "kaggle_competition": "pokemon-tcg-ai-battle",
-      "daily_submission_cap": 5,
-      "daily_submissions_per_lineage": 2,
-      "repeat_requires_new_artifact": true,
-      "submission_mode": "both",
-      "targets": [
-        {
-          "lineage": "claude",
-          "repo": "ptcg-agent-claude",
-          "project": "ptcg-agent-claude",
-          "workers_directive": "solo=claude:fable, handoff=off",
-          "submit": {
-            "file": "/workspaces/ptcg-agent-claude/submission.tar.gz",
-            "message": "auto-improve submit: ptcg-agent-claude champion"
-          },
-          "next_cycle": 5
-        },
-        {
-          "lineage": "gpt",
-          "repo": "ptcg-agent-gpt",
-          "project": "ptcg-agent-gpt",
-          "workers_directive": "solo=codex:sol, handoff=off\nreasoning: solo=ultra",
-          "submit": {
-            "file": "/workspaces/ptcg-agent-gpt/submission.tar.gz",
-            "message": "auto-improve submit: ptcg-agent-gpt champion"
-          },
-          "next_cycle": 5
-        }
-      ],
-      "deadline_utc": "2026-08-16T23:59:00Z",
-      "validation": {
-        "primary": "cv",
-        "metric_kind": "relative_rating"
-      }
-    },
     {
       "key": "kaggriculture",
       "kaggle_competition": "kaggriculture",
@@ -142,190 +79,6 @@
         }
       ],
       "deadline_utc": "2026-09-30T23:59:00Z"
-    },
-    {
-      "key": "arc-agi-2",
-      "kaggle_competition": "arc-prize-2026-arc-agi-2",
-      "daily_submission_cap": 1,
-      "submission_mode": "alternate",
-      "alternate_anchor_date": "2026-07-29",
-      "alternate_anchor_lineage": "claude",
-      "targets": [
-        {
-          "lineage": "claude",
-          "repo": "arc-agi-2-claude",
-          "project": "arc-agi-2-claude",
-          "workers_directive": "solo=claude:fable, handoff=off",
-          "submit": {
-            "file": "/workspaces/arc-agi-2-claude/main.py",
-            "message": "auto-improve submit: arc-agi-2-claude champion"
-          },
-          "next_cycle": 1
-        },
-        {
-          "lineage": "gpt",
-          "repo": "arc-agi-2-gpt",
-          "project": "arc-agi-2-gpt",
-          "workers_directive": "solo=codex:sol, handoff=off\nreasoning: solo=ultra",
-          "champion_status": "exec-verified",
-          "submit": {
-            "file": "submission.json",
-            "kernel": "sota1111/arc-agi-2-gpt-identity-champion",
-            "version": 4,
-            "output": "submission.json",
-            "candidate_id": "identity",
-            "artifact_fingerprint": "sha256:94dc28395abe6c5046d1bf9af8376913e5a83aaa8fe11164656f54195f1f1a8b",
-            "message": "auto-improve submit: arc-agi-2-gpt identity champion"
-          },
-          "next_cycle": 1
-        }
-      ],
-      "deadline_utc": "2026-11-02T23:59:00Z"
-    },
-    {
-      "key": "arc-agi-3",
-      "kaggle_competition": "arc-prize-2026-arc-agi-3",
-      "daily_submission_cap": 1,
-      "submission_mode": "alternate",
-      "ab_evaluation": {
-        "game_ids": [
-          "ls20",
-          "ft09",
-          "sp80"
-        ],
-        "action_budget": 100,
-        "trials_per_game": 3,
-        "seed": 2191,
-        "guardrails": {
-          "max_total_tokens_ratio": 1.1,
-          "max_api_cost_ratio": 1.1,
-          "max_latency_ratio": 1.2
-        }
-      },
-      "alternate_anchor_date": "2026-07-29",
-      "alternate_anchor_lineage": "gpt",
-      "targets": [
-        {
-          "lineage": "claude",
-          "repo": "arc-agi-3-claude",
-          "project": "arc-agi-3-claude",
-          "workers_directive": "solo=claude:fable, handoff=off",
-          "evaluation_contract": "production-gateway",
-          "champion_status": "unproven",
-          "submit": {
-            "file": "",
-            "message": "auto-improve submit: arc-agi-3-claude champion"
-          },
-          "next_cycle": 1
-        },
-        {
-          "lineage": "gpt",
-          "repo": "arc-agi-3-gpt",
-          "project": "arc-agi-3-gpt",
-          "workers_directive": "solo=codex:sol, handoff=off\nreasoning: solo=ultra",
-          "evaluation_contract": "production-gateway",
-          "champion_status": "exec-verified",
-          "submit": {
-            "file": "submission.parquet",
-            "kernel": "sota1111/arc-agi-3-gpt-registered-champion",
-            "version": 6,
-            "output": "submission.parquet",
-            "candidate_id": "region-effect-full-v1",
-            "evaluation_fingerprint": "sha256:f8f95eb35b88e8de53562f884c2101c16c4d4bd8cf02dca51d17edb56e7c2e01",
-            "exec_fingerprint": "kaggle:kernel-v6/submission-55095979",
-            "source_fingerprint": "git:e6bba1d461c03856429e0ae19f8116ec3306149b",
-            "artifact_fingerprint": "sha256:c667ea758bf72eab13086ed9f1c29c22b5eb9306b9a0830568cbd5f2995ee0c1",
-            "submission_ref": 55095979,
-            "submission_status": "COMPLETE",
-            "public_score": 0,
-            "message": "auto-improve submit: arc-agi-3-gpt champion"
-          },
-          "next_cycle": 6
-        }
-      ],
-      "deadline_utc": "2026-11-02T23:59:00Z"
-    },
-    {
-      "key": "agent-security",
-      "kaggle_competition": "ai-agent-security-multi-step-tool-attacks",
-      "daily_submission_cap": 5,
-      "daily_submissions_per_lineage": 2,
-      "submission_mode": "both",
-      "targets": [
-        {
-          "lineage": "claude",
-          "repo": "agent-security-claude",
-          "project": "agent-security-claude",
-          "workers_directive": "solo=claude:fable, handoff=off",
-          "submit": {
-            "file": "submission.csv",
-            "kernel": "sota1111/agent-security-claude-cli-baseline",
-            "version": 8,
-            "output": "submission.csv",
-            "message": "auto-improve submit: agent-security-claude champion"
-          },
-          "next_cycle": 5
-        },
-        {
-          "lineage": "gpt",
-          "repo": "agent-security-gpt",
-          "project": "agent-security-gpt",
-          "workers_directive": "solo=codex:sol, handoff=off\nreasoning: solo=ultra",
-          "submit": {
-            "file": "submission.csv",
-            "kernel": "sota1111/agent-security-gpt-champion",
-            "version": 2,
-            "output": "submission.csv",
-            "message": "auto-improve submit: agent-security-gpt champion"
-          },
-          "next_cycle": 5
-        }
-      ],
-      "deadline_utc": "2026-09-01T23:59:00Z",
-      "validation": {
-        "primary": "cv",
-        "metric_kind": "attack",
-        "require_scored_submission": true
-      },
-      "pinned_hours_jst": [
-        6,
-        18
-      ]
-    },
-    {
-      "key": "rogii",
-      "kaggle_competition": "rogii-wellbore-geology-prediction",
-      "daily_submission_cap": 5,
-      "submission_mode": "both",
-      "targets": [
-        {
-          "lineage": "claude",
-          "repo": "rogii-claude",
-          "project": "rogii-claude",
-          "workers_directive": "solo=claude:fable, handoff=off",
-          "submit": {
-            "file": ".targets/rogii-claude/submission.csv",
-            "kernel": "sota1111/rogii-claude-baseline",
-            "version": 3,
-            "output": "submission.csv",
-            "message": "auto-improve submit: rogii-claude champion"
-          },
-          "next_cycle": 1
-        },
-        {
-          "lineage": "gpt",
-          "repo": "rogii-gpt",
-          "project": "rogii-gpt",
-          "workers_directive": "solo=codex:sol, handoff=off\nreasoning: solo=ultra",
-          "submit": {
-            "file": "",
-            "message": "auto-improve submit: rogii-gpt champion"
-          },
-          "next_cycle": 1
-        }
-      ],
-      "deadline_utc": "2026-08-05T23:59:00Z",
-      "daily_submissions_per_lineage": 5
     },
     {
       "key": "biohub",
