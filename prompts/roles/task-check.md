@@ -6,7 +6,7 @@ and decomposition are no longer split across separate worker dispatches; the sam
 once, with no script in between.)
 
 ## Context
-- Read `docs/ai/pipeline/context.md` for the target Linear issue id, repository, and mode.
+- Read the per-run pipeline context at `$PIPELINE_CONTEXT_FILE` (resolve with `cat "$PIPELINE_CONTEXT_FILE"`; fallback `docs/ai/pipeline/context.md`) for the target Linear issue id, repository, and mode.
 - Begin with the target issue identified in the pipeline context.
 
 ## Part A — Task check (actionability + classification)

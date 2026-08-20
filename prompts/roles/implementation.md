@@ -3,7 +3,7 @@
 You are a dispatched worker in a script-driven pipeline. Do ONLY this role, then write a report.
 
 ## Context
-- Read `docs/ai/pipeline/context.md` for the target issue id and **target repository** (work there, not
+- Read the per-run pipeline context at `$PIPELINE_CONTEXT_FILE` (resolve with `cat "$PIPELINE_CONTEXT_FILE"`; fallback `docs/ai/pipeline/context.md`) for the target issue id and **target repository** (work there, not
   in the control-plane repo unless the context says so).
 - Read `docs/ai/10_plan.md` and `docs/ai/30_tasks.md` (the plan/tasks) and `docs/ai/40_acceptance.md`.
 - If a "## Handoff from previous worker" section is prepended, CONTINUE that partial work — do not restart.

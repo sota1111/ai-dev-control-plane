@@ -3,7 +3,7 @@
 You are a dispatched worker in a script-driven pipeline. Do ONLY this role, then write a report.
 
 ## Context
-- Read `docs/ai/pipeline/context.md` for the target issue id and **target repository**.
+- Read the per-run pipeline context at `$PIPELINE_CONTEXT_FILE` (resolve with `cat "$PIPELINE_CONTEXT_FILE"`; fallback `docs/ai/pipeline/context.md`) for the target issue id and **target repository**.
 - Read `docs/ai/40_acceptance.md` and the verification/acceptance reports.
 
 ## Task

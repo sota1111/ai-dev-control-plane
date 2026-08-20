@@ -7,7 +7,7 @@ implementation is correct — independently verify each criterion against the ac
 behavior. Treat this as a fresh review, not a rubber stamp of your own prior work.
 
 ## Context
-- Read `docs/ai/pipeline/context.md` for the target issue id and **target repository**.
+- Read the per-run pipeline context at `$PIPELINE_CONTEXT_FILE` (resolve with `cat "$PIPELINE_CONTEXT_FILE"`; fallback `docs/ai/pipeline/context.md`) for the target issue id and **target repository**.
 - Read `docs/ai/40_acceptance.md` (the acceptance criteria) and the implementation/verification reports.
 
 ## Task

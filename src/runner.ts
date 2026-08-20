@@ -13,6 +13,7 @@ import { resolveRepoForProject } from './lib/projectRepo.js';
 import { resolveRepository } from './lib/ptcgProfile.js';
 import { notifyDetachedLaunched, DetachedOutcome } from './lib/laneNotifier.js';
 import { resolveLaneWorkingDir, cleanupLaneWorktree } from './lib/worktree.js';
+import { loadRunnerParallelConfig } from './lib/runnerConfig.js';
 import {
   isNewProject,
   deriveNewRepoName,
@@ -257,7 +258,11 @@ function sanitizeLaneToken(raw?: string | null): string {
  */
 function resolveStableMode(env: NodeJS.ProcessEnv = process.env): boolean {
   const v = (env.RUNNER_STABLE_MODE || '').trim().toLowerCase();
-  return v === '1' || v === 'true';
+  // Runtime env override wins when explicitly set; otherwise the committed config/runner.json value
+  // (config is the source of truth — the setting is kept OUT of .env).
+  if (v === '1' || v === 'true') return true;
+  if (v === '0' || v === 'false') return false;
+  return loadRunnerParallelConfig().stableMode;
 }
 
 /**
@@ -269,19 +274,27 @@ function resolveStableMode(env: NodeJS.ProcessEnv = process.env): boolean {
 function resolveSerializeScope(env: NodeJS.ProcessEnv = process.env): string {
   if (resolveStableMode(env)) return SERIALIZE_SCOPE_REPO;
   const raw = (env.RUNNER_SERIALIZE_SCOPE || '').trim().toLowerCase();
-  return raw === SERIALIZE_SCOPE_BRANCH ? SERIALIZE_SCOPE_BRANCH : SERIALIZE_SCOPE_REPO;
+  // Explicit env override first; else the committed config/runner.json value; else repo (default).
+  if (raw === SERIALIZE_SCOPE_BRANCH) return SERIALIZE_SCOPE_BRANCH;
+  if (raw === SERIALIZE_SCOPE_REPO) return SERIALIZE_SCOPE_REPO;
+  return loadRunnerParallelConfig().serializeScope === SERIALIZE_SCOPE_BRANCH
+    ? SERIALIZE_SCOPE_BRANCH
+    : SERIALIZE_SCOPE_REPO;
 }
 
 /**
- * N-slot parallel pool size (SOT-931 案A, 3rd step). `RUNNER_MAX_PARALLEL` controls how many queued
- * items `drainQueue()` may dispatch concurrently into DISTINCT serialization lanes. Default 1 keeps
- * the historical fully-serial drain (一切の挙動不変). Values < 1 or non-numeric clamp to 1. Under
- * `RUNNER_STABLE_MODE` the pool is forced to 1 (SOT-947) regardless of the env value.
+ * N-slot parallel pool size (SOT-931 案A, 3rd step). Controls how many queued items `drainQueue()`
+ * may dispatch concurrently into DISTINCT serialization lanes. Source of truth is
+ * `config/runner.json` (`maxParallel`); the env `RUNNER_MAX_PARALLEL` overrides it at runtime when
+ * explicitly set. Values < 1 or non-numeric fall back to the config value (default 1 = the historical
+ * fully-serial drain). Under `RUNNER_STABLE_MODE` the pool is forced to 1 (SOT-947).
  */
 function resolveMaxParallel(env: NodeJS.ProcessEnv = process.env): number {
   if (resolveStableMode(env)) return 1;
+  // Explicit env override first; else the committed config/runner.json value (source of truth).
   const n = parseInt((env.RUNNER_MAX_PARALLEL || '').trim(), 10);
-  return Number.isFinite(n) && n >= 1 ? n : 1;
+  if (Number.isFinite(n) && n >= 1) return n;
+  return loadRunnerParallelConfig().maxParallel;
 }
 
 /**
