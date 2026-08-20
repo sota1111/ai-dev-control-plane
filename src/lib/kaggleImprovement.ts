@@ -228,6 +228,17 @@ export interface RotationEntry {
 }
 
 /** kaggle_targets_registry.json をパースした形。 */
+/**
+ * 日次提出枠の効率化ポリシー（完了駆動ループが毎サイクル提出して cap を浪費するのを防ぐ）。
+ * - dailyReserve: 自動ループが1日に消費してよいのは `cap - dailyReserve` 枠まで（残りは温存）。0=無効。
+ * - minIntervalMin: 直近の提出からこの分数が経過するまで新規提出を抑止（spacing）。0=無効。
+ * 改善ゲート（leak-free CV が前回*提出*を上回った時のみ提出）は issue 本文ポリシー＋worker 判断で担保する。
+ */
+export interface SubmissionPolicy {
+  dailyReserve: number;
+  minIntervalMin: number;
+}
+
 export interface TargetsRegistry {
   /** レジストリ側 kill switch（env とは AND）。 */
   enabled: boolean;
@@ -237,6 +248,8 @@ export interface TargetsRegistry {
   competitions: ImprovementCompetition[];
   /** 適応的資源配分（design §50）。未設定は static（従来の rotation）。 */
   allocation: AllocationConfig;
+  /** 日次提出枠の効率化（reserve/spacing）。未設定は {dailyReserve:0, minIntervalMin:0}=無効。 */
+  submissionPolicy: SubmissionPolicy;
 }
 
 const VALID_HOUR = (h: unknown): h is number =>
@@ -331,8 +344,38 @@ export function parseTargetsRegistry(raw: unknown): TargetsRegistry {
   }
 
   const allocation = parseAllocationConfig(obj.allocation);
+  const submissionPolicy = parseSubmissionPolicy(obj.submission_policy ?? obj.submissionPolicy);
 
-  return { enabled, scheduleHoursJst, rotation, issueCapGuard: capGuardRaw, competitions, allocation };
+  return {
+    enabled,
+    scheduleHoursJst,
+    rotation,
+    issueCapGuard: capGuardRaw,
+    competitions,
+    allocation,
+    submissionPolicy,
+  };
+}
+
+/**
+ * `submission_policy` を検証。欠落/不正は fail-safe で {dailyReserve:0, minIntervalMin:0}（無効=従来挙動）。
+ * dailyReserve は 0 以上の整数、minIntervalMin は 0 以上の数値のみ採用（それ以外は 0 扱い）。
+ */
+export function parseSubmissionPolicy(raw: unknown): SubmissionPolicy {
+  const def: SubmissionPolicy = { dailyReserve: 0, minIntervalMin: 0 };
+  if (!raw || typeof raw !== 'object') return def;
+  const o = raw as Record<string, unknown>;
+  const reserveRaw = o.daily_reserve ?? o.dailyReserve;
+  const intervalRaw = o.min_interval_min ?? o.minIntervalMin;
+  const dailyReserve =
+    typeof reserveRaw === 'number' && Number.isInteger(reserveRaw) && reserveRaw >= 0
+      ? reserveRaw
+      : 0;
+  const minIntervalMin =
+    typeof intervalRaw === 'number' && Number.isFinite(intervalRaw) && intervalRaw >= 0
+      ? intervalRaw
+      : 0;
+  return { dailyReserve, minIntervalMin };
 }
 
 function parseCompetition(c: unknown, i: number, seen: Set<string>): ImprovementCompetition {
@@ -865,6 +908,11 @@ export interface ImprovementMaterial {
    */
   rankTrendDirection?: 'improving' | 'declining' | 'flat' | 'new' | 'unknown';
   /**
+   * 日次提出予算のダイジェスト（cron が自動収集）: 本日の提出数 / cap / reserve / 実効枠 / 直近提出時刻・
+   * 最小間隔。提出予算ポリシー（改善ゲート＋spacing）を worker が適用するための材料。
+   */
+  submissionBudget?: string;
+  /**
    * oracle-drift シグナル（SIGNATE rank-26 post-mortem）。proxy 飽和 × 真の一次KPI 停滞を突き合わせて
    * 立てる。`detectOracleDrift` が drift と判定すると buildIssueBody は再アンカー指令バナーを先頭に差し込む
    * （proxy を上げる局所A/Bを止め、oracle 再アンカーを唯一の軸に固定）。欠落時は従来挙動（後方互換）。
@@ -1218,6 +1266,9 @@ export function buildIssueBody(
   const childWorkers = childWorkersDirective(target);
   const prev =
     material.previousSubmission?.trim() || '(前回提出の記録なし — 初回サイクル、または取得できず)';
+  const submissionBudget =
+    material.submissionBudget?.trim() ||
+    '(本日の提出予算は未取得 — 残枠/直近提出を確認できない場合は保守的に。改善ゲート＝leak-free CVが前回提出を上回った時のみ提出)';
   const recent = material.recentIssuesDigest?.trim() || '(新規の完了Issueなし)';
   const failure = material.failureKpiExcerpt?.trim() || '(該当なし)';
   // 一次KPI = leak-free CV。未整備なら fail-safe（最初の子IssueでCV構築を必須にする）。
@@ -1361,6 +1412,9 @@ ${gapWarn}${refWarn}${gapSummary}${gapTrend}
 ### 前回提出結果（順位/スコア）
 ${prev}
 
+### 本日の提出予算（日次枠効率化 — 改善ゲート＋spacing/reserve）
+${submissionBudget}
+
 ### 実験台帳ダイジェスト（試行済み軸 — 非昇格軸の再試行禁止）
 ${ledger}${counterpartLedger}
 
@@ -1413,12 +1467,20 @@ ${childWorkers}
 \`\`\`
 3. 初回runは子Issue登録後に提出せず In Review で待機する。全子Issueが In Review/Doneへ到達すると
    webhookが \`<!-- auto-parent-resumed -->\` コメントを付けて親をTodoへ戻す。再開runでは子Issueを
-   再作成せず、全子Issueの完了と検証結果を再取得・集約し、この親Issueだけが提出契約を通過した最新
-   artifactを提出する。champion 昇格は必須条件にしないが、artifact fingerprintが前回提出と同一なら
-   「非昇格・新artifactなし」と記録し、提出成功として扱わない。cronと子Issueは提出してはならない。
+   再作成せず、全子Issueの完了と検証結果を再取得・集約する。
+   **【提出予算ポリシー — 日次枠を効率的に使う（毎サイクル提出しない）】**
+   - **改善ゲート（必須）**: 提出するのは **leak-free CV（一次KPI）が前回*提出*artifactをノイズ幅を超えて
+     上回った＝champion 昇格**が確認できた時 **だけ**。改善が無い／ノイズ幅内のサイクルは **提出せず**、
+     「非昇格・提出見送り」を親へ記録して次サイクルの局所改善へ回す（artifact fingerprint が前回提出と
+     同一の場合も同様に提出しない）。
+   - **日次枠(cap)の予約・スペーシング**: 下記「## 本日の提出予算」の残枠・reserve・直近提出からの経過を必ず
+     確認する。reserve 枠は温存し（終盤のより強い候補用）、直近提出から最小間隔が未経過なら見送る。
+     枠が残り少ない時は「ノイズ幅ギリギリの小改善」で枠を消費しない（大きな改善のみ提出）。
+   - 見送り時は cron/ガードが自動で次サイクルを回すので、**枠を無理に使い切らない**こと。
    提出は必ず control-plane の
    \`bash scripts/ai/kaggle_targets_submit.sh --competition ${competition.key} --repo ${target.repo} --execute\`
-   を使用する。Kaggle CLI/APIを直接呼び出してfingerprint gateを迂回してはならない。
+   を使用する（reserve/spacing/cap/fingerprint は plan 側でも決定論的にゲートされる）。Kaggle CLI/APIを
+   直接呼び出して fingerprint/cap/reserve/spacing gate を迂回してはならない。
    **effective-config fingerprint（提出物と設定の突合）**: 提出する artifact を生成した有効設定
    （パラメータ・フラグ・モデル/データ版）の要約を \`docs/ai/experiment_ledger.jsonl\` の提出エントリへ
    記録する（意図した設定と実際に有効だった設定の乖離事故 — 未export フラグ等 — を事後検証可能にする）。
@@ -1566,6 +1628,12 @@ export interface CompetitionSubmitOptions {
   artifactFingerprintsByRepo?: Readonly<Record<string, string>>;
   /** Artifact fingerprints already accepted today, grouped by repository. */
   submittedArtifactFingerprintsByRepo?: Readonly<Record<string, readonly string[]>>;
+  /** 日次提出枠の効率化ポリシー（reserve/spacing）。未指定は registry.submissionPolicy を使わない=無効。 */
+  submissionPolicy?: SubmissionPolicy;
+  /** spacing 判定の現在時刻(epoch ms)。未指定なら spacing ゲートは評価しない（テスト決定性のため注入）。 */
+  nowEpochMs?: number;
+  /** repo ごとの直近提出時刻(epoch ms)。spacing ゲートで参照。 */
+  lastSubmitEpochMsByRepo?: Readonly<Record<string, number>>;
 }
 
 /**
@@ -1652,7 +1720,24 @@ export function planCompetitionSubmission(
         (!currentFingerprint ||
           submittedFingerprints.length < submittedToday ||
           submittedFingerprints.includes(currentFingerprint));
-      return (opts.competitionSubmittedToday ?? 0) >= competition.dailySubmissionCap
+      // 日次枠効率化（SOT: 完了駆動ループの毎サイクル提出で cap 浪費を防ぐ）。
+      const policy = opts.submissionPolicy;
+      const reserve = Math.max(0, policy?.dailyReserve ?? 0);
+      const effectiveCap = Math.max(1, competition.dailySubmissionCap - reserve);
+      const competitionSubmitted = opts.competitionSubmittedToday ?? 0;
+      // spacing: 直近提出から minIntervalMin 未満なら抑止（now 未注入時は評価しない）。
+      const minIntervalMin = Math.max(0, policy?.minIntervalMin ?? 0);
+      const lastSubmitMs = opts.lastSubmitEpochMsByRepo?.[t.repo];
+      const spacingBlocked =
+        minIntervalMin > 0 &&
+        typeof opts.nowEpochMs === 'number' &&
+        typeof lastSubmitMs === 'number' &&
+        opts.nowEpochMs - lastSubmitMs < minIntervalMin * 60_000;
+      const spacingRemainMin =
+        spacingBlocked && typeof lastSubmitMs === 'number' && typeof opts.nowEpochMs === 'number'
+          ? Math.ceil((minIntervalMin * 60_000 - (opts.nowEpochMs - lastSubmitMs)) / 60_000)
+          : 0;
+      return competitionSubmitted >= competition.dailySubmissionCap
         ? {
             competition: competition.key,
             kaggleCompetition: competition.kaggleCompetition,
@@ -1663,6 +1748,28 @@ export function planCompetitionSubmission(
             submittedToday,
             reason: `daily competition cap reached (${opts.competitionSubmittedToday}/${competition.dailySubmissionCap})`,
           }
+        : reserve > 0 && competitionSubmitted >= effectiveCap
+          ? {
+              competition: competition.key,
+              kaggleCompetition: competition.kaggleCompetition,
+              repo: t.repo,
+              lineage: t.lineage,
+              action: 'skip' as const,
+              cap: competition.dailySubmissionCap,
+              submittedToday,
+              reason: `daily reserve held (${competitionSubmitted}/${competition.dailySubmissionCap}, reserve ${reserve} — auto-loop uses ≤${effectiveCap}/day; save slots for a stronger later candidate)`,
+            }
+          : spacingBlocked
+            ? {
+                competition: competition.key,
+                kaggleCompetition: competition.kaggleCompetition,
+                repo: t.repo,
+                lineage: t.lineage,
+                action: 'skip' as const,
+                cap: competition.dailySubmissionCap,
+                submittedToday,
+                reason: `submission spacing: last submit <${minIntervalMin}min ago (retry in ~${spacingRemainMin}min) — hold to spread the daily budget`,
+              }
         : opts.completedSlotRepos?.has(t.repo)
           ? {
               competition: competition.key,

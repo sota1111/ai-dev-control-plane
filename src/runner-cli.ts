@@ -1514,6 +1514,31 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         );
         process.exit(1);
       }
+      // 日次枠効率化（reserve/spacing）: 直近提出時刻(epoch ms, repo→number)と現在時刻を受け取り、
+      // registry.submissionPolicy と併せて plan 側で決定論的に skip する。未指定なら spacing は無評価。
+      let lastSubmitEpochMsByRepo: Record<string, number> = {};
+      if (flags['last-submit-epoch']) {
+        try {
+          const parsed = JSON.parse(flags['last-submit-epoch']);
+          if (
+            !parsed ||
+            typeof parsed !== 'object' ||
+            Array.isArray(parsed) ||
+            !Object.values(parsed).every((v) => typeof v === 'number' && Number.isFinite(v))
+          ) {
+            throw new Error('expected a JSON object with numeric (epoch ms) values');
+          }
+          lastSubmitEpochMsByRepo = parsed;
+        } catch (err: any) {
+          process.stderr.write(
+            `kaggle-submission-plan: invalid --last-submit-epoch JSON: ${err?.message || err}\n`
+          );
+          process.exit(1);
+        }
+      }
+      const nowEpochMs = Number.isFinite(Number(flags['now-epoch']))
+        ? Number(flags['now-epoch'])
+        : Date.now();
       const plan = planCompetitionSubmission(registry, competitionKey, submittedByRepo, {
         lastSubmittedLineage,
         dateUtc: flags['date-utc'],
@@ -1521,6 +1546,9 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         competitionSubmittedToday,
         artifactFingerprintsByRepo,
         submittedArtifactFingerprintsByRepo,
+        submissionPolicy: registry.submissionPolicy,
+        nowEpochMs,
+        lastSubmitEpochMsByRepo,
       });
       if (!plan) {
         process.stderr.write(

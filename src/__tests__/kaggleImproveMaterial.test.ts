@@ -23,6 +23,7 @@ import {
   DEFAULT_PROXY_SATURATION_MIN_IMPROVEMENT,
   DEFAULT_TRUE_KPI_MIN_IMPROVEMENT,
   detectSubmissionHealth,
+  buildSubmissionBudgetDigest,
   submissionRowState,
   computeRankTrend,
   SUBMISSION_BROKEN_CONSECUTIVE,
@@ -178,6 +179,41 @@ describe('kaggleImproveMaterial', () => {
       expect(credited.map((r) => r.publicScore)).toEqual(['8.739', '6.477']);
       // Without the single-target flag the unmarked 6.477 is dropped (multi-target behaviour).
       expect(submissionRowsForRepo(singleTargetRows, 'rogii-claude').map((r) => r.publicScore)).toEqual(['8.739']);
+    });
+  });
+
+  describe('buildSubmissionBudgetDigest', () => {
+    const NOW = Date.parse('2026-08-20T15:00:00Z');
+    const row = (date: string, status = 'SubmissionStatus.COMPLETE', publicScore = '1.0') => ({
+      date,
+      status,
+      publicScore,
+    });
+
+    test('counts today consuming submissions and computes remaining + effective (reserve)', () => {
+      const rows = [
+        row('2026-08-20 14:00:00'),
+        row('2026-08-20 10:00:00'),
+        row('2026-08-19 23:00:00'), // yesterday — not counted today
+        row('2026-08-20 09:00:00', 'SubmissionStatus.ERROR'), // ERROR does not consume a slot
+      ];
+      const d = buildSubmissionBudgetDigest(rows, 5, { dailyReserve: 1, minIntervalMin: 0 }, NOW);
+      expect(d).toContain('消費枠: 2/5'); // 2 today (ERROR + yesterday excluded)
+      expect(d).toContain('残 3');
+      expect(d).toContain('実効枠: 2 残'); // cap5 - reserve1 = 4; 4 - 2 = 2
+    });
+
+    test('spacing line flags a hold when last submit is within min_interval_min', () => {
+      const rows = [row('2026-08-20 14:00:00')]; // 60min before NOW
+      const d = buildSubmissionBudgetDigest(rows, 5, { dailyReserve: 0, minIntervalMin: 180 }, NOW);
+      expect(d).toContain('最小間隔 180分');
+      expect(d).toContain('見送り'); // 60 < 180
+    });
+
+    test('spacing satisfied when last submit is older than min_interval_min', () => {
+      const rows = [row('2026-08-20 10:00:00')]; // 300min before NOW
+      const d = buildSubmissionBudgetDigest(rows, 5, { dailyReserve: 0, minIntervalMin: 180 }, NOW);
+      expect(d).toContain('提出可（間隔OK）');
     });
   });
 
