@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import type { GuardSignals, ImprovementMaterial, Lineage, TargetsRegistry } from './kaggleImprovement.js';
+import type { GuardSignals, ImprovementMaterial, Lineage, OracleDriftSignal, TargetsRegistry } from './kaggleImprovement.js';
 import { getCompetition, resolveCompetitionPhase } from './kaggleImprovement.js';
 import {
   computeTargetPriority,
@@ -641,6 +641,111 @@ export function parseCvGapHistory(content: string): number[] {
   return out;
 }
 
+/* ============================================================================
+ * SOT-2745: oracle-drift シグナル算出（proxy飽和 × 真KPI停滞を history から決定論的に）
+ * ==========================================================================
+ * SIGNATE rank-26 post-mortem（自作gold一致 net proxy を99まで上げたが真値精度88.5%停滞・機構が
+ * re-anchor しなかった）の再発防止。engine primitive（detectOracleDrift / buildOracleDriftBanner）は
+ * PR #391 で導入済み。ここは材料収集が `proxySaturated` / `trueKpiStagnant` / `stagnantCycles` を
+ * 実データ history から供給する wiring（供給が無い間バナーは inert）。 */
+
+/** proxy(ローカル指標: leak-free CV / gold net)の直近改善が「頭打ち」とみなす既定の最小改善幅（方向つき絶対値）。 */
+export const DEFAULT_PROXY_SATURATION_MIN_IMPROVEMENT = 0.005;
+/** 真の一次KPI(実LB順位)が「有意に動いた」とみなす既定の最小改善幅（順位=1つ以上上げる）。未満は停滞。 */
+export const DEFAULT_TRUE_KPI_MIN_IMPROVEMENT = 1;
+
+/**
+ * cv_report_history.jsonl の各行から leak-free CV スコア系列（古い→新しい順）を抽出する。行は
+ * `{score: number, ...}` を受け付け、`score` を持たない/不正な行は握りつぶす（parseCvGapHistory と同源の履歴）。
+ */
+export function parseCvScoreHistory(content: string): number[] {
+  const out: number[] = [];
+  for (const line of (content || '').split(/\r?\n/)) {
+    const s = line.trim();
+    if (!s) continue;
+    let obj: any;
+    try {
+      obj = JSON.parse(s);
+    } catch {
+      continue;
+    }
+    if (obj && typeof obj === 'object' && typeof obj.score === 'number' && Number.isFinite(obj.score)) {
+      out.push(obj.score);
+    }
+  }
+  return out;
+}
+
+/** 方向つき改善幅。max=大きいほど良い(cur-prev)、min=小さいほど良い(prev-cur)。正=改善。 */
+function directionalGain(prev: number, cur: number, direction: 'max' | 'min'): number {
+  return direction === 'max' ? cur - prev : prev - cur;
+}
+
+/** computeOracleDriftSignal に渡す1系列（proxy / 真KPI）。 */
+export interface OracleDriftSeries {
+  /** 時系列（古い→新しい順）の数値。 */
+  series: number[];
+  /** 良い方向（max=大きいほど良い / min=小さいほど良い。順位は min）。 */
+  direction: 'max' | 'min';
+  /** これ未満の方向つき改善は「動いていない（飽和/停滞）」とみなす閾値。 */
+  minImprovement: number;
+  /** 表示名（本文の detail 用。例 "leak-free CV" / "public LB 順位"）。 */
+  name?: string;
+}
+
+/**
+ * proxy(ローカル指標)系列と真の一次KPI系列から oracle-drift シグナルを**決定論的に**算出する（SOT-2745）。
+ *  - 両系列の末尾を揃え、隣接ステップごとに「proxy改善 < proxy.minImprovement（頭打ち）」かつ
+ *    「真KPI改善 < trueKpi.minImprovement（停滞）」を **drift ステップ** とみなす。
+ *  - 末尾から連続する drift ステップ数を `stagnantCycles` に載せる（detectOracleDrift が閾値と突き合わせる）。
+ *  - `proxySaturated` / `trueKpiStagnant` は直近ステップの各条件（両方 true のときだけ最新が drift）。
+ *  - **どちらかの系列が 2 点未満（履歴欠落）なら signal を立てない（undefined）** = silent-safe（従来挙動）。
+ *    片方だけの飽和/停滞は signal は立つが detectOracleDrift 側で `none`（＝バナー不発火）になる。
+ */
+export function computeOracleDriftSignal(
+  proxy: OracleDriftSeries,
+  trueKpi: OracleDriftSeries
+): OracleDriftSignal | undefined {
+  const p = (proxy?.series || []).filter((n) => Number.isFinite(n));
+  const t = (trueKpi?.series || []).filter((n) => Number.isFinite(n));
+  // 履歴欠落 → fail-safe に signal を立てない（silent-safe）。
+  if (p.length < 2 || t.length < 2) return undefined;
+
+  // 両系列の末尾を揃えてステップ単位で drift 判定する（両 history はサイクルごとに append される）。
+  const n = Math.min(p.length, t.length);
+  const pTail = p.slice(p.length - n);
+  const tTail = t.slice(t.length - n);
+  const driftSteps: boolean[] = [];
+  for (let i = 1; i < n; i++) {
+    const proxyStalled = directionalGain(pTail[i - 1], pTail[i], proxy.direction) < proxy.minImprovement;
+    const trueStalled = directionalGain(tTail[i - 1], tTail[i], trueKpi.direction) < trueKpi.minImprovement;
+    driftSteps.push(proxyStalled && trueStalled);
+  }
+  // 末尾から連続する drift ステップ数。
+  let stagnantCycles = 0;
+  for (let i = driftSteps.length - 1; i >= 0; i--) {
+    if (driftSteps[i]) stagnantCycles++;
+    else break;
+  }
+  const proxySaturated = directionalGain(pTail[n - 2], pTail[n - 1], proxy.direction) < proxy.minImprovement;
+  const trueKpiStagnant = directionalGain(tTail[n - 2], tTail[n - 1], trueKpi.direction) < trueKpi.minImprovement;
+
+  const fmt = (arr: number[]) => arr.map((v) => round4(v)).join(' → ');
+  const detail =
+    `proxy(${proxy.name || 'ローカル指標'})=${fmt(pTail)} / ` +
+    `真KPI(${trueKpi.name || '一次KPI'})=${fmt(tTail)} — ` +
+    `proxy飽和×真KPI停滞の連続=${stagnantCycles}サイクル`;
+
+  return {
+    ...(proxy.name ? { proxyKpiName: proxy.name } : {}),
+    proxySaturated,
+    ...(trueKpi.name ? { trueKpiName: trueKpi.name } : {}),
+    trueKpiStagnant,
+    stagnantCycles,
+    detail,
+  };
+}
+
 /**
  * failure-log.md 本文から、指定キー（repo名・コンペkey 等）を含む行だけを抜粋する。
  * 1行も一致しなければ undefined。長すぎる場合は maxLines で打ち切り、省略を明示する。
@@ -1094,6 +1199,52 @@ export async function collectImproveContext(
     }
     if (experimentLedgerDigest) ledgerDigestByLineage[t.lineage] = { repo: t.repo, digest: experimentLedgerDigest };
 
+    // SOT-2745: oracle-drift シグナル。proxy(leak-free CV)飽和 × 真の一次KPI(実LB順位)停滞を
+    // history から決定論的に算出し material.oracleDrift へ供給する（両立が閾値サイクル続くと本文が
+    // detectOracleDrift/buildOracleDriftBanner 経由で再アンカー指令へ切り替わる）。全て best-effort。
+    let oracleDrift: OracleDriftSignal | undefined;
+    try {
+      const repoDir = path.join(targetsRoot, t.repo);
+      const cvReportRel = comp.validation.cvReportPath || DEFAULT_CV_REPORT_PATH;
+      // proxy 系列: cv_report_history.jsonl の leak-free CV score 時系列（無ければ空=下で silent-safe）。
+      const cvHistoryPath = path.join(repoDir, cvReportRel.replace(/\.json$/i, '_history.jsonl'));
+      let proxySeries: number[] = [];
+      try {
+        proxySeries = parseCvScoreHistory(fs.readFileSync(cvHistoryPath, 'utf8'));
+      } catch {
+        /* CV履歴なし → proxySeries 空のまま。両系列2点未満なら signal は立たない。 */
+      }
+      // 真の一次KPI 系列: 実LB順位履歴（古い→新しい・repo別）。圏外(null)は totalListed+1 の最悪順位として扱う。
+      const rankSeries = readLeaderboardRankHistory(leaderboardRankPath)
+        .filter((h) => h.repo === t.repo)
+        .map((h) =>
+          h.rank !== null && Number.isFinite(h.rank)
+            ? h.rank
+            : h.totalListed
+              ? h.totalListed + 1
+              : undefined
+        )
+        .filter((n): n is number => typeof n === 'number');
+      oracleDrift = computeOracleDriftSignal(
+        {
+          series: proxySeries,
+          direction: comp.scoreDirection,
+          minImprovement:
+            comp.validation.oracleDriftProxyMinImprovement ?? DEFAULT_PROXY_SATURATION_MIN_IMPROVEMENT,
+          name: 'leak-free CV',
+        },
+        {
+          series: rankSeries,
+          direction: 'min',
+          minImprovement:
+            comp.validation.oracleDriftTrueKpiMinImprovement ?? DEFAULT_TRUE_KPI_MIN_IMPROVEMENT,
+          name: 'public LB 順位',
+        }
+      );
+    } catch (err: any) {
+      log(`oracle-drift signal computation failed for ${t.repo}: ${err?.message || err}`);
+    }
+
     // 前回サイクル親Issueの申し送りコメント（best-effort・signate教訓の移植）。
     let previousCycleHandoff: string | undefined;
     try {
@@ -1130,6 +1281,7 @@ export async function collectImproveContext(
         : {}),
       ...(rankTrendSummary ? { rankTrend: rankTrendSummary } : {}),
       ...(rankTrendDirection ? { rankTrendDirection } : {}),
+      ...(oracleDrift ? { oracleDrift } : {}),
     };
   }
 
