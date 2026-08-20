@@ -437,6 +437,43 @@ export async function findOpenAutoImproveIssue(
   }
 }
 
+/** Kaggle 改善サイクルの親Issueタイトル（buildIssueTitle）。子Issueは別タイトルなので除外できる。 */
+const IMPROVE_CYCLE_PARENT_TITLE = /^\[[^\]]+\] Kaggle順位向上サイクル第\d+次/;
+
+/**
+ * 完了駆動ループ（10分毎cron）用の直列ガード。`findOpenAutoImproveIssue` は Todo/In Progress のみを
+ * 見るため、親が「子実装待ち」や「統合・提出フェーズ」で In Review にいる窓では次サイクルを重複起票し得る
+ * （旧JST枠は6h間隔でこの窓を隠していた）。本関数は In Review も含めて **サイクル親** を捕捉する。
+ *
+ * ただし実装子Issueはこのハーネスで恒久的に In Review 止まりになるため、In Review を無条件に数えると
+ * 「完了済みの子」に引きずられて永久にブロックしてしまう。よって **親タイトル正規表現でフィルタし、
+ * 親Issueだけ** を未完了サイクルとみなす（子は除外）。無ければ null・never throws。
+ */
+export async function findOpenImproveCycleParent(
+  projectName: string,
+  labelName = 'auto-improve'
+): Promise<string | null> {
+  const { log } = requireDeps();
+  try {
+    const data: any = await linearQuery(
+      `query($name: String!, $label: String!) {
+        issues(filter: {
+          project: { name: { eq: $name } },
+          labels: { name: { eq: $label } },
+          state: { name: { in: ["Todo", "In Progress", "In Review"] } }
+        }, first: 25) { nodes { identifier title } }
+      }`,
+      { name: projectName, label: labelName }
+    );
+    const nodes: any[] = data?.issues?.nodes ?? [];
+    const parent = nodes.find((n) => IMPROVE_CYCLE_PARENT_TITLE.test(n?.title || ''));
+    return parent?.identifier ?? null;
+  } catch (err: any) {
+    log('RUNNER', `findOpenImproveCycleParent failed: ${err.message}`, { issue: projectName });
+    return null;
+  }
+}
+
 export async function hasPendingIssues(): Promise<boolean> {
   try {
     const query = '{ issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: 1) { nodes { id } } }';

@@ -90,7 +90,9 @@ describe('SOT-1966 champion submission audit', () => {
     });
   });
 
-  it('registers independent Claude/GPT lineages with one shared artifact contract', () => {
+  // agent-security は kaggle 改善サイクルの完了駆動ループ化に伴い registry から削除済み（biohub+
+  // kaggriculture のみ運用）。系統/artifact 契約が registry に無くなったため、このアサートは撤去（skip）。
+  it.skip('registers independent Claude/GPT lineages with one shared artifact contract', () => {
     const competition = registry.competitions.find((item) => item.key === 'agent-security');
     expect(competition?.daily_submissions_per_lineage).toBe(2);
     expect(competition?.targets).toMatchObject([

@@ -10,9 +10,12 @@ const registry = JSON.parse(
 );
 const target = registry.competitions
   .find((competition: { key: string }) => competition.key === 'arc-agi-2')
-  .targets.find((entry: { lineage: string }) => entry.lineage === 'gpt');
+  ?.targets.find((entry: { lineage: string }) => entry.lineage === 'gpt');
 
-describe('ARC-AGI-2 GPT champion kernel', () => {
+// arc-agi-2 は kaggle 改善サイクルの完了駆動ループ化に伴い registry から削除済み（biohub+kaggriculture
+// のみ運用）。提出/champion 設定が registry に無くなったため、このコンペ固有の契約テストは撤去（skip）。
+const describeArcAgi2 = target ? describe : describe.skip;
+describeArcAgi2('ARC-AGI-2 GPT champion kernel', () => {
   it('pins the exec artifact to the incumbent identity champion fingerprint', () => {
     const fingerprint = createHash('sha256').update(fs.readFileSync(runtime)).digest('hex');
     expect(target).toMatchObject({

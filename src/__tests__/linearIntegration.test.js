@@ -26,7 +26,7 @@ const https = await import('node:https');
 const fs = await import('node:fs');
 const runner = await import('../runner.js');
 const { installLinearHttpMock } = await import('../__test_helpers__/linearMock.js');
-const { findOpenAutoImproveIssue, sanitizeLabelIds } = await import('../lib/linearApi.js');
+const { findOpenAutoImproveIssue, findOpenImproveCycleParent, sanitizeLabelIds } = await import('../lib/linearApi.js');
 
 describe('Linear Integration', () => {
   let linearMock;
@@ -107,6 +107,45 @@ describe('Linear Integration', () => {
         name: 'ptcg-agent-gpt',
         label: 'auto-improve',
       });
+    });
+
+    it('findOpenImproveCycleParent counts In Review cycle parents but ignores non-parent children', async () => {
+      // 完了駆動ループの直列ガード: 親は Todo/In Progress/In Review で捕捉し、恒久的に In Review 止まりに
+      // なる実装子Issue（親タイトルに一致しない）は無視する。
+      linearMock.enqueue({
+        data: {
+          issues: {
+            nodes: [
+              { identifier: 'SOT-CHILD', title: 'usage-limit後のresumeメタデータ保存を追加する' },
+              { identifier: 'SOT-PARENT', title: '[biohub-claude] Kaggle順位向上サイクル第3次 — 改善方針の立案と実施' },
+            ],
+          },
+        },
+      });
+
+      await expect(findOpenImproveCycleParent('biohub-claude')).resolves.toBe('SOT-PARENT');
+
+      expect(linearMock.calls).toHaveLength(1);
+      expect(linearMock.calls[0].query).toContain(
+        'state: { name: { in: ["Todo", "In Progress", "In Review"] } }'
+      );
+      expect(linearMock.calls[0].variables).toEqual({
+        name: 'biohub-claude',
+        label: 'auto-improve',
+      });
+    });
+
+    it('findOpenImproveCycleParent returns null when only In Review children remain (no deadlock)', async () => {
+      // 実装子Issueだけが In Review で残っている状態では次サイクルをブロックしない（親が無い＝完了）。
+      linearMock.enqueue({
+        data: {
+          issues: {
+            nodes: [{ identifier: 'SOT-CHILD', title: 'submission.py の exec 互換を修正する' }],
+          },
+        },
+      });
+
+      await expect(findOpenImproveCycleParent('biohub-claude')).resolves.toBeNull();
     });
 
     it('postUsageLimitComment checks for duplicates and posts comment', async () => {

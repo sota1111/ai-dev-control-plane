@@ -1196,23 +1196,25 @@ describe('kaggleImprovement', () => {
   });
 
   describe('shipped registry file', () => {
-    test('scripts/ai/kaggle_targets_registry.json schedules two daily slots per requested competition', () => {
+    test('scripts/ai/kaggle_targets_registry.json is the completion-driven biohub+kaggriculture registry', () => {
+      // 完了駆動ループ化（旧 JST時刻枠 rotation を撤去）: registry は biohub / kaggriculture の
+      // 2コンペのみ。他コンペ（ptcg/arc-agi-2/arc-agi-3/agent-security/rogii）は削除済み。
       const here = path.dirname(fileURLToPath(import.meta.url));
       const p = path.join(here, '..', '..', 'scripts', 'ai', 'kaggle_targets_registry.json');
       const r = parseTargetsRegistry(JSON.parse(fs.readFileSync(p, 'utf8')));
       // enabled は運用 kill switch（人間/セッションが随時トグルする）— 値そのものは断言しない。
       expect(typeof r.enabled).toBe('boolean');
-      expect(r.competitions).toHaveLength(7);
-      expect(r.rotation).toEqual([
-        { hourJst: 0, competition: 'ptcg' },
-        { hourJst: 3, competition: 'kaggriculture' },
-        { hourJst: 6, competition: 'agent-security' },
-        { hourJst: 9, competition: 'biohub' },
-        { hourJst: 12, competition: 'ptcg' },
-        { hourJst: 15, competition: 'kaggriculture' },
-        { hourJst: 18, competition: 'agent-security' },
-        { hourJst: 21, competition: 'biohub' },
-      ]);
+      expect(r.competitions.map((c) => c.key).sort()).toEqual(['biohub', 'kaggriculture']);
+      // 削除したコンペが再混入していないこと。
+      for (const gone of ['ptcg', 'arc-agi-2', 'arc-agi-3', 'agent-security', 'rogii']) {
+        expect(r.competitions.some((c) => c.key === gone)).toBe(false);
+      }
+      // rotation/schedule_hours_jst は parse 互換のため残す vestige（起票トリガーには使わない）。
+      // 参照先は必ず現存コンペであること。
+      const compKeys = new Set(r.competitions.map((c) => c.key));
+      for (const slot of r.rotation) {
+        expect(compKeys.has(slot.competition)).toBe(true);
+      }
       // 各コンペは claude/gpt の2ターゲットを持つ。
       for (const c of r.competitions) {
         expect(c.targets.map((t) => t.lineage).sort()).toEqual(['claude', 'gpt']);
@@ -1223,23 +1225,19 @@ describe('kaggleImprovement', () => {
         dailySubmissionsPerLineage: 2,
         submissionMode: 'both',
       });
-      expect(r.competitions.find((c) => c.key === 'agent-security')).toMatchObject({
-        kaggleCompetition: 'ai-agent-security-multi-step-tool-attacks',
-        dailySubmissionCap: 5,
-        dailySubmissionsPerLineage: 2,
-        submissionMode: 'both',
-      });
-      expect(r.competitions.find((c) => c.key === 'ptcg')).toMatchObject({
-        kaggleCompetition: 'pokemon-tcg-ai-battle',
-        dailySubmissionCap: 5,
-        dailySubmissionsPerLineage: 2,
-        submissionMode: 'both',
-      });
       expect(r.competitions.find((c) => c.key === 'biohub')).toMatchObject({
         dailySubmissionCap: 5,
         dailySubmissionsPerLineage: 2,
         submissionMode: 'both',
       });
+      // mode:maintain 側は起票しない（biohub=gpt維持 / kaggriculture=claude維持）。improve 側だけが
+      // 完了駆動ループの起票対象（biohub-claude / kaggriculture-gpt）。
+      const modeOf = (compKey: string, lineage: string) =>
+        r.competitions.find((c) => c.key === compKey)!.targets.find((t) => t.lineage === lineage)!.mode;
+      expect(modeOf('biohub', 'gpt')).toBe('maintain');
+      expect(modeOf('biohub', 'claude')).not.toBe('maintain');
+      expect(modeOf('kaggriculture', 'claude')).toBe('maintain');
+      expect(modeOf('kaggriculture', 'gpt')).not.toBe('maintain');
       for (const c of r.competitions) {
         const claude = c.targets.find((t) => t.lineage === 'claude')!;
         const gpt = c.targets.find((t) => t.lineage === 'gpt')!;
@@ -1253,28 +1251,10 @@ describe('kaggleImprovement', () => {
         expect(gptBody).toContain('workers: solo=codex:gpt-5.6-sol, handoff=off');
         expect(gptBody).toContain('reasoning: solo=low');
       }
-      // ptcg は締切超過(2026-08-16)で pinned 0/12 を撤去済み。SIGNATE NEDO 積付アルゴリズムは
-      // この registry ではなく完了駆動ドラフタ（scripts/ai/nedo_loading_cycle_draft.ts）が起票する。
-      expect(r.competitions.find((c) => c.key === 'ptcg')!.pinnedHoursJst).toBeUndefined();
-      expect(r.competitions.some((c) => c.key === 'nedo-loading-algo')).toBe(false);
-      // SOT-2518: agent-security は有効提出を前提(P8)＋attack、ptcg は relative_rating(P9)。
-      expect(r.competitions.find((c) => c.key === 'agent-security')!.validation).toMatchObject({
-        requireScoredSubmission: true,
-        metricKind: 'attack',
-      });
-      expect(r.competitions.find((c) => c.key === 'ptcg')!.validation).toMatchObject({
-        metricKind: 'relative_rating',
-      });
-      // SOT-1913 提出cap補正: ARC=1/day & alternate、他=5/day & both。
+      // 残存2コンペは 5/day & both（旧 ARC の 1/day & alternate は削除済み）。
       for (const c of r.competitions) {
-        const isArc = c.key === 'arc-agi-2' || c.key === 'arc-agi-3';
-        if (isArc) {
-          expect(c.dailySubmissionCap).toBe(1);
-          expect(c.submissionMode).toBe('alternate');
-        } else {
-          expect(c.dailySubmissionCap).toBe(5);
-          expect(c.submissionMode).toBe('both');
-        }
+        expect(c.dailySubmissionCap).toBe(5);
+        expect(c.submissionMode).toBe('both');
       }
     });
   });

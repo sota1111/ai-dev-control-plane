@@ -44,10 +44,12 @@ describe('ARC-AGI-3 champion exec contract', () => {
     ]);
   });
 
-  it('pins the completed cycle-5 GPT champion submission provenance', () => {
+  // arc-agi-3 は kaggle 改善サイクルの完了駆動ループ化に伴い registry から削除済み（biohub+kaggriculture
+  // のみ運用）。提出 provenance が registry に無くなったため、この registry 依存アサートは撤去（skip）。
+  it.skip('pins the completed cycle-5 GPT champion submission provenance', () => {
     const target = targetRegistry.competitions
       .find((competition: { key: string }) => competition.key === 'arc-agi-3')
-      .targets.find((item: { repo: string }) => item.repo === 'arc-agi-3-gpt');
+      ?.targets.find((item: { repo: string }) => item.repo === 'arc-agi-3-gpt');
 
     expect(target.submit).toMatchObject({
       kernel: 'sota1111/arc-agi-3-gpt-registered-champion',
