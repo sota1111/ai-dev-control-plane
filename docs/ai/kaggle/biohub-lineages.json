@@ -4,7 +4,7 @@
   "recordedAt": "2026-07-31T08:25:00.000Z",
   "competition": "biohub-cell-tracking-during-development",
   "dailySubmissionCap": 5,
-  "dailySubmissionsPerLineage": 2,
+  "dailySubmissionsPerLineage": 5,
   "artifactContract": {
     "file": "submission.csv",
     "output": "submission.csv",
