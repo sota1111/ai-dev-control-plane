@@ -179,6 +179,16 @@ export interface CompetitionValidation {
    * 成立自体が壊れやすい）。`relative_rating` のとき本文に「維持=後退・前進軸必須」の順位契約を挿入する。
    */
   metricKind?: 'regression' | 'relative_rating' | 'attack';
+  /**
+   * SOT-2745: oracle-drift の proxy(ローカル指標: leak-free CV)系列で「改善が頭打ち」とみなす最小改善幅
+   * （方向つき絶対値）。欠落時は `DEFAULT_PROXY_SATURATION_MIN_IMPROVEMENT`。0 以上の有限数。
+   */
+  oracleDriftProxyMinImprovement?: number;
+  /**
+   * SOT-2745: oracle-drift の真の一次KPI(実LB順位)系列で「有意に動いた」とみなす最小改善幅（順位=1つ以上
+   * 上げる）。これ未満は停滞。欠落時は `DEFAULT_TRUE_KPI_MIN_IMPROVEMENT`。0 以上の有限数。
+   */
+  oracleDriftTrueKpiMinImprovement?: number;
 }
 
 /**
@@ -607,6 +617,26 @@ function parseCompetitionValidation(raw: unknown, i: number): CompetitionValidat
       );
     }
     validation.metricKind = metricKind;
+  }
+
+  // SOT-2745: oracle-drift の proxy/真KPI 最小改善幅の registry 上書き（欠落時は既定値）。
+  const odProxy = v.oracle_drift_proxy_min_improvement ?? v.oracleDriftProxyMinImprovement;
+  if (odProxy !== undefined) {
+    if (typeof odProxy !== 'number' || !Number.isFinite(odProxy) || odProxy < 0) {
+      throw new Error(
+        `registry.competitions[${i}].validation.oracle_drift_proxy_min_improvement must be a finite number >= 0`
+      );
+    }
+    validation.oracleDriftProxyMinImprovement = odProxy;
+  }
+  const odTrue = v.oracle_drift_true_kpi_min_improvement ?? v.oracleDriftTrueKpiMinImprovement;
+  if (odTrue !== undefined) {
+    if (typeof odTrue !== 'number' || !Number.isFinite(odTrue) || odTrue < 0) {
+      throw new Error(
+        `registry.competitions[${i}].validation.oracle_drift_true_kpi_min_improvement must be a finite number >= 0`
+      );
+    }
+    validation.oracleDriftTrueKpiMinImprovement = odTrue;
   }
 
   return validation;

@@ -18,6 +18,10 @@ import {
   referenceOverfitWarning,
   formatCvGapTrend,
   parseCvGapHistory,
+  parseCvScoreHistory,
+  computeOracleDriftSignal,
+  DEFAULT_PROXY_SATURATION_MIN_IMPROVEMENT,
+  DEFAULT_TRUE_KPI_MIN_IMPROVEMENT,
   detectSubmissionHealth,
   submissionRowState,
   computeRankTrend,
@@ -26,6 +30,12 @@ import {
   REFERENCE_OVERFIT_RELATIVE_MARGIN,
   type CompletedIssue,
 } from '../lib/kaggleImproveMaterial.js';
+import {
+  detectOracleDrift,
+  buildOracleDriftBanner,
+  DEFAULT_ORACLE_DRIFT_REANCHOR_CYCLES,
+  DEFAULT_ORACLE_DRIFT_ESCALATE_CYCLES,
+} from '../lib/kaggleImprovement.js';
 
 // SOT-1913 材料自動収集の純関数ヘルパー。cron が起案本文へ埋め込む「入力材料」を空にしないための収集ロジック。
 describe('kaggleImproveMaterial', () => {
@@ -534,6 +544,107 @@ describe('kaggleImproveMaterial', () => {
     test('a single observation is "new"; empty is "unknown"', () => {
       expect(computeRankTrend([{ rank: 42 }]).direction).toBe('new');
       expect(computeRankTrend([]).direction).toBe('unknown');
+    });
+  });
+
+  // SOT-2745: oracle-drift シグナルを proxy(CV)/真KPI(順位) history から決定論算出する。
+  describe('parseCvScoreHistory', () => {
+    test('extracts the CV score series in order, ignoring malformed / score-less lines', () => {
+      const content = [
+        JSON.stringify({ score: 0.80, publicScore: 0.75 }),
+        '{not json',
+        JSON.stringify({ relativeGap: 0.1 }), // score なし → 無視
+        JSON.stringify({ score: 0.88 }),
+        '',
+        JSON.stringify({ score: 'x' }), // 非数値 → 無視
+      ].join('\n');
+      expect(parseCvScoreHistory(content)).toEqual([0.8, 0.88]);
+    });
+
+    test('empty content yields an empty series', () => {
+      expect(parseCvScoreHistory('')).toEqual([]);
+    });
+  });
+
+  describe('computeOracleDriftSignal', () => {
+    // proxy は大きいほど良い(max)、真KPI=順位は小さいほど良い(min)。
+    const proxy = (series: number[]) => ({
+      series,
+      direction: 'max' as const,
+      minImprovement: DEFAULT_PROXY_SATURATION_MIN_IMPROVEMENT,
+      name: 'leak-free CV',
+    });
+    const rank = (series: number[]) => ({
+      series,
+      direction: 'min' as const,
+      minImprovement: DEFAULT_TRUE_KPI_MIN_IMPROVEMENT,
+      name: 'public LB 順位',
+    });
+
+    test('proxy saturated only (true KPI still improving) does NOT drift', () => {
+      // proxy 頭打ち（0.900→0.901≒改善0）だが順位は 40→30 と改善 → drift でない。
+      const sig = computeOracleDriftSignal(proxy([0.9, 0.901]), rank([40, 30]));
+      expect(sig).toBeDefined();
+      expect(sig!.proxySaturated).toBe(true);
+      expect(sig!.trueKpiStagnant).toBe(false);
+      expect(sig!.stagnantCycles).toBe(0);
+      expect(detectOracleDrift(sig).level).toBe('none');
+      expect(detectOracleDrift(sig).drifting).toBe(false);
+    });
+
+    test('true KPI stagnant only (proxy still improving) does NOT drift', () => {
+      // 順位停滞（30→30）だが proxy は 0.80→0.90 と大きく改善 → drift でない。
+      const sig = computeOracleDriftSignal(proxy([0.8, 0.9]), rank([30, 30]));
+      expect(sig).toBeDefined();
+      expect(sig!.proxySaturated).toBe(false);
+      expect(sig!.trueKpiStagnant).toBe(true);
+      expect(sig!.stagnantCycles).toBe(0);
+      expect(detectOracleDrift(sig).level).toBe('none');
+    });
+
+    test('both saturated & stagnant for 2 cycles → reanchor (banner fires)', () => {
+      // post-mortem 再現: proxy はほぼ頭打ちで微増(<0.005)、真KPI(順位)は据置き（3観測=2ステップ）。
+      const sig = computeOracleDriftSignal(proxy([0.98, 0.982, 0.984]), rank([26, 26, 26]));
+      expect(sig).toBeDefined();
+      expect(sig!.proxySaturated).toBe(true);
+      expect(sig!.trueKpiStagnant).toBe(true);
+      expect(sig!.stagnantCycles).toBe(DEFAULT_ORACLE_DRIFT_REANCHOR_CYCLES);
+      const result = detectOracleDrift(sig);
+      expect(result.level).toBe('reanchor');
+      expect(result.drifting).toBe(true);
+      // wiring が実データ history から供給した signal で実際にバナーが発火することを確認。
+      const banner = buildOracleDriftBanner(sig, result);
+      expect(banner).toContain('再アンカー');
+    });
+
+    test('both saturated & stagnant for 4 cycles → escalate', () => {
+      const sig = computeOracleDriftSignal(
+        proxy([0.98, 0.982, 0.984, 0.986, 0.988]),
+        rank([26, 26, 26, 26, 26])
+      );
+      expect(sig!.stagnantCycles).toBe(DEFAULT_ORACLE_DRIFT_ESCALATE_CYCLES);
+      expect(detectOracleDrift(sig).level).toBe('escalate');
+    });
+
+    test('a worsening true KPI (rank rising) while proxy plateaus still drifts', () => {
+      // 順位が悪化(26→30)しても改善<閾値なので停滞扱い＝drift。
+      const sig = computeOracleDriftSignal(proxy([0.99, 0.99, 0.99]), rank([26, 28, 30]));
+      expect(sig!.stagnantCycles).toBe(2);
+      expect(detectOracleDrift(sig).level).toBe('reanchor');
+    });
+
+    test('missing history (either series < 2 points) yields no signal (silent-safe)', () => {
+      expect(computeOracleDriftSignal(proxy([0.99]), rank([26, 26, 26]))).toBeUndefined();
+      expect(computeOracleDriftSignal(proxy([0.98, 0.99]), rank([26]))).toBeUndefined();
+      expect(computeOracleDriftSignal(proxy([]), rank([]))).toBeUndefined();
+      // signal 無し → detectOracleDrift は none（バナー不発火）。
+      expect(detectOracleDrift(undefined).level).toBe('none');
+    });
+
+    test('only the trailing consecutive drift steps count toward stagnantCycles', () => {
+      // 最古ステップは proxy 改善大(0.70→0.90)で drift でない → 末尾2ステップ(微増<0.005)のみ計上。
+      const sig = computeOracleDriftSignal(proxy([0.7, 0.9, 0.902, 0.903]), rank([50, 40, 40, 40]));
+      expect(sig!.stagnantCycles).toBe(2);
     });
   });
 });
