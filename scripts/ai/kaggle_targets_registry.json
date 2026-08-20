@@ -51,7 +51,7 @@
       "key": "kaggriculture",
       "kaggle_competition": "kaggriculture",
       "daily_submission_cap": 5,
-      "daily_submissions_per_lineage": 2,
+      "daily_submissions_per_lineage": 5,
       "submission_mode": "both",
       "targets": [
         {
@@ -84,7 +84,7 @@
       "key": "biohub",
       "kaggle_competition": "biohub-cell-tracking-during-development",
       "daily_submission_cap": 5,
-      "daily_submissions_per_lineage": 2,
+      "daily_submissions_per_lineage": 5,
       "submission_mode": "both",
       "targets": [
         {

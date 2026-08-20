@@ -1222,12 +1222,12 @@ describe('kaggleImprovement', () => {
       expect(r.competitions.find((c) => c.key === 'kaggriculture')).toMatchObject({
         kaggleCompetition: 'kaggriculture',
         dailySubmissionCap: 5,
-        dailySubmissionsPerLineage: 2,
+        dailySubmissionsPerLineage: 5,
         submissionMode: 'both',
       });
       expect(r.competitions.find((c) => c.key === 'biohub')).toMatchObject({
         dailySubmissionCap: 5,
-        dailySubmissionsPerLineage: 2,
+        dailySubmissionsPerLineage: 5,
         submissionMode: 'both',
       });
       // mode:maintain 側は起票しない（biohub=gpt維持 / kaggriculture=claude維持）。improve 側だけが
