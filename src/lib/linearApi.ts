@@ -1021,7 +1021,12 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
       { id: parent.id }
     );
     const existingComments = commentsData.issue?.comments?.nodes || [];
-    if (existingComments.some((c: any) => (c.body || '').includes(marker))) {
+    // Idempotency marker match must be LEADING-anchored, not a substring. The marker is always posted
+    // as the first line of the transition comment; a worker's completion report that merely *quotes*
+    // the marker string (e.g. "webhookが `<!-- auto-parent-resumed -->` を付け…") must NOT be mistaken
+    // for an actual transition, or the parent is stranded forever (observed: biohub SOT-2773 never
+    // resumed → never submitted → its whole competition loop blocked).
+    if (existingComments.some((c: any) => (c.body || '').trimStart().startsWith(marker))) {
       log('WEBHOOK', `finalizeParent: ${parent.identifier} already ${resumeParent ? 'resumed' : 'finalized'} (marker present), skip`, { issue: parent.identifier });
       return false;
     }
