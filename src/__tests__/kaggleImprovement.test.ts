@@ -761,6 +761,51 @@ describe('kaggleImprovement', () => {
       }
     });
 
+    // 行き詰まり時の「過去 Kaggle 上位解法を参照・移植」優先軸バナー。
+    const STUCK_HEADING = '🔺 行き詰まり検知';
+    const STUCK_AXIS = '過去 Kaggle 上位解法の調査と移植';
+
+    test('stuck banner fires on declining or flat LB rank trend', () => {
+      const c = reg().competitions[0];
+      for (const dir of ['declining', 'flat'] as const) {
+        const body = buildIssueBody(c.targets[0], c, 3, { rankTrendDirection: dir });
+        expect(body).toContain(STUCK_HEADING);
+        expect(body).toContain(STUCK_AXIS);
+        expect(body).toContain('外部知識取り込み');
+        // コンペ slug を明示して「このコンペの」上位解法へ誘導する。
+        expect(body).toContain(c.kaggleCompetition);
+      }
+    });
+
+    test('stuck banner fires under oracle-drift (proxy saturated AND true KPI stagnant)', () => {
+      const c = reg().competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, {
+        oracleDrift: { proxySaturated: true, trueKpiStagnant: true, stagnantCycles: 2 },
+      });
+      expect(body).toContain(STUCK_HEADING);
+      expect(body).toContain(STUCK_AXIS);
+    });
+
+    test('stuck banner does NOT fire while improving / new / unknown / absent', () => {
+      const c = reg().competitions[0];
+      for (const dir of ['improving', 'new', 'unknown', undefined] as const) {
+        const body = buildIssueBody(c.targets[0], c, 3, {
+          ...(dir ? { rankTrendDirection: dir } : {}),
+        });
+        expect(body).not.toContain(STUCK_HEADING);
+        expect(body).toContain('## 目的');
+      }
+    });
+
+    test('stuck banner is suppressed in proxy-establishment stage even when stuck', () => {
+      const c = reg().competitions[0];
+      const proxyTarget = { ...c.targets[0], stage: 'proxy' as const };
+      const body = buildIssueBody(proxyTarget, c, 3, { rankTrendDirection: 'declining' });
+      expect(body).not.toContain(STUCK_HEADING);
+      // proxy 確立モードのバナーは出る（目標は CV 構築で、外部解法探索より基盤整備を優先）。
+      expect(body).toContain('段階目標: proxy 確立モード');
+    });
+
     test('submit-repair takes precedence over oracle-drift (cannot measure true KPI while broken)', () => {
       const raw = JSON.parse(JSON.stringify(rawRegistry));
       raw.competitions[0].validation = { primary: 'cv', require_scored_submission: true };

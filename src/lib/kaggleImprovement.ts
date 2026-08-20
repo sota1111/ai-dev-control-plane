@@ -1140,6 +1140,53 @@ ${header}
 }
 
 /** 起案Issue本文テンプレート（§6・材料 digest を埋め込む。要約はしない）。 */
+/**
+ * 「行き詰まり（plateau/停滞）」判定（純粋関数）。改善が頭打ちのシグナルを material から導出する:
+ *  - oracle-drift（proxy飽和×真KPI停滞）が発火している、または
+ *  - 実LB順位トレンドが declining / flat（上昇していない）。
+ * 早期サイクル（rankTrend が new/unknown）は「行き詰まり」と判定しない（誤発火防止）。
+ */
+export function isImprovementStuck(
+  material: ImprovementMaterial
+): { stuck: boolean; reason: string } {
+  const drift = detectOracleDrift(material.oracleDrift);
+  if (drift.drifting) {
+    return { stuck: true, reason: `proxy飽和×真KPI停滞（oracle-drift: ${drift.level}）` };
+  }
+  if (material.rankTrendDirection === 'declining') {
+    return { stuck: true, reason: '実LB順位が低下傾向' };
+  }
+  if (material.rankTrendDirection === 'flat') {
+    return { stuck: true, reason: '実LB順位が停滞（flat）' };
+  }
+  return { stuck: false, reason: '' };
+}
+
+/**
+ * 行き詰まり検知時（isImprovementStuck）に、**過去の Kaggle 上位解法の調査・移植を今サイクルの優先軸に
+ * 固定する**プロミネントなバナーを返す（非行き詰まり時は空文字）。常時汎用の「web検索で上位解法を調査」
+ * 指示（## 実施内容 / ## 実行リソース）と違い、行き詰まり時にだけ本文冒頭へ前面化して発火する。
+ */
+export function buildStuckExternalSolutionsBanner(
+  competition: ImprovementCompetition,
+  material: ImprovementMaterial
+): string {
+  const s = isImprovementStuck(material);
+  if (!s.stuck) return '';
+  return `
+
+## 🔺 行き詰まり検知 — 過去の Kaggle 上位解法を最優先で参照・移植せよ
+本サイクルは行き詰まり兆候（${s.reason}）を検知した。局所チューニングの継続は禁止し、**今サイクルの主軸を
+「このコンペ（\`${competition.kaggleCompetition}\`）の過去 Kaggle 上位解法の調査と移植」に固定**する
+（escalation ladder の「外部知識取り込み」を前倒しする）:
+- web検索で **上位解法**（優勝／上位入賞の write-up・Kaggle Discussion の Solution スレッド・公開 gold/銀銅
+  kernel・関連論文）を調査し、勝ち筋（前処理・特徴量・モデル・後処理・**CV設計**）の要点を出典URLとともに
+  target repo の \`docs/ai/experiment_ledger.jsonl\` へ記録する。
+- 有効な手法を **1つ以上、具体的に移植** する子Issueを立てる。移植可否は可搬性（ロジック/データ蒸留=可搬・
+  GPU weights 等=非可搬）と本 repo の実行制約（オフライン提出・依存関係）の下で成立するかを見極める。
+- 既に台帳で **rejected の軸は新しい根拠なしに再試行しない**。移植した手法の出典・要点は台帳の evidence に残す。`;
+}
+
 export function buildIssueBody(
   target: ImprovementTarget,
   competition: ImprovementCompetition,
@@ -1164,6 +1211,10 @@ export function buildIssueBody(
     material.oracleDrift,
     detectOracleDrift(material.oracleDrift)
   );
+  // 行き詰まり（plateau/停滞）検知時: 過去の Kaggle 上位解法の参照・移植を優先軸に固定するバナーを前面化。
+  // proxy 確立モードは目標が CV 構築なので発火させない（外部解法探索より基盤整備を優先）。
+  const stuckBanner =
+    target.stage === 'proxy' ? '' : buildStuckExternalSolutionsBanner(competition, material);
   const childWorkers = childWorkersDirective(target);
   const prev =
     material.previousSubmission?.trim() || '(前回提出の記録なし — 初回サイクル、または取得できず)';
@@ -1286,7 +1337,7 @@ ${material.counterpartLedgerDigest.trim()}`
 - 評価は外向き通信を無効化した隔離環境で行い、artifactには集計値・真偽値・hashだけを保存する。
 - 上記ゲートの成否を親Issueへ記録する。失敗時は提出せず、具体的な不足条件をBlocked理由にする。`
     : '';
-  return `workers: ${target.workersDirective}${oracleDriftBanner}
+  return `workers: ${target.workersDirective}${oracleDriftBanner}${stuckBanner}
 
 ## 目的
 Kaggleコンペ \`${competition.kaggleCompetition}\`（repo: ${target.repo} / 系統: ${target.lineage}）の
