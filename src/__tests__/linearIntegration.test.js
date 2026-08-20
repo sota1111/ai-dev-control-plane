@@ -148,6 +148,57 @@ describe('Linear Integration', () => {
       await expect(findOpenImproveCycleParent('biohub-claude')).resolves.toBeNull();
     });
 
+    // Regression (biohub SOT-2773): a completion-report comment that merely QUOTES the
+    // `<!-- auto-parent-resumed -->` marker must NOT be mistaken for an actual resume, or the parent
+    // is stranded In Review forever (never submits, whole competition loop blocked).
+    const KAGGLE_PARENT = {
+      id: 'parent-uuid',
+      identifier: 'SOT-9999',
+      title: '[biohub-claude] Kaggle順位向上サイクル第2次 — 改善方針の立案と実施',
+      description: 'workers: solo=claude:fable\n\n## 入力材料（cronが自動収集・要約なし）\n本文…',
+      state: { name: 'In Review', type: 'started' },
+      team: { id: 'team-1' },
+      children: { nodes: [{ identifier: 'SOT-CHILD', state: { name: 'Done', type: 'completed' } }] },
+      relations: { nodes: [] },
+      inverseRelations: { nodes: [] },
+    };
+
+    it('finalizeParent resumes when a comment only QUOTES the resume marker mid-text', async () => {
+      linearMock.enqueue({ data: { issue: KAGGLE_PARENT } });
+      // Completion report that quotes the marker inside prose (the SOT-2773 pattern).
+      linearMock.enqueue({ data: { issue: { comments: { nodes: [
+        { body: '## Completion Report\n全子完了後に webhookが `<!-- auto-parent-resumed -->` を付け親を Todo へ戻す。' },
+      ] } } } });
+      linearMock.enqueue({ data: { workflowStates: { nodes: [
+        { id: 'todo-1', name: 'Todo', type: 'unstarted' },
+        { id: 'ir-1', name: 'In Review', type: 'started' },
+      ] } } });
+      linearMock.enqueue({ data: { issueUpdate: { success: true } } });
+      linearMock.enqueue({ data: { commentCreate: { success: true } } });
+
+      await expect(
+        runner.finalizeParentIfChildrenComplete('SOT-CHILD', 'parent-uuid')
+      ).resolves.toBe(true);
+
+      const update = linearMock.calls.find((c) => c.query.includes('issueUpdate'));
+      expect(update).toBeTruthy();
+      expect(update.variables.stateId).toBe('todo-1'); // resumed to Todo
+    });
+
+    it('finalizeParent stays idempotent when a real marker leads a comment', async () => {
+      linearMock.enqueue({ data: { issue: KAGGLE_PARENT } });
+      linearMock.enqueue({ data: { issue: { comments: { nodes: [
+        { body: '<!-- auto-parent-resumed -->\n## 親Issue自動再開（集約・提出フェーズ）' },
+      ] } } } });
+
+      await expect(
+        runner.finalizeParentIfChildrenComplete('SOT-CHILD', 'parent-uuid')
+      ).resolves.toBe(false);
+
+      // Skipped before resolving states / mutating (only parent + comments were queried).
+      expect(linearMock.calls.find((c) => c.query.includes('issueUpdate'))).toBeUndefined();
+    });
+
     it('postUsageLimitComment checks for duplicates and posts comment', async () => {
       const issueId = 'ISS-1';
       const uuid = 'uuid-123';

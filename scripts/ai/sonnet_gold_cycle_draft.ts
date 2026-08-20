@@ -131,7 +131,9 @@ async function reconcileStalledParent(projectName: string, labelName: string): P
         s?.type === 'completed' || s?.type === 'canceled' || (s?.name || '').toLowerCase() === 'in review';
       if (!children.every((c) => complete(c.state))) continue;
       const comments: any[] = parent?.comments?.nodes ?? [];
-      if (comments.some((c) => (c?.body || '').includes(RESUME_MARKER))) continue;
+      // 先頭一致で判定する（完了報告がマーカー文字列を逐語引用しても誤検知しない。finalizeParent の
+      // SOT-2773 恒久滞留と同型のバグを防ぐ）。
+      if (comments.some((c) => (c?.body || '').trimStart().startsWith(RESUME_MARKER))) continue;
       // Todo state を解決して再開。
       const st: any = await linearQuery(
         'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "unstarted" } }) { nodes { id name } } }',
