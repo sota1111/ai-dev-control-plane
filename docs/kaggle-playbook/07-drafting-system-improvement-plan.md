@@ -233,3 +233,48 @@ ROGII の真の教訓は「ローカル proxy でなく**実LBの結果**を信�
 
 全子 Opus 担当（`workers: solo=claude:opus, handoff=off`）。A/B は SOT-2513/2514 の材料・テンプレ基盤に
 乗る独立変更で並行可。人間承認ゲートは置かない（ラウンド1 方針を踏襲）。
+
+---
+
+## ラウンド3（SIGNATE「煩雑な社内ドライブ」26位 post-mortem 由来）
+
+- 状態: **エンジン primitive 実装済み**（`feat/oracle-drift-guard`, P10-a）。**材料収集の wiring は follow-up**（P10-b）。
+- 出所: [事後分析メモリ](../../…) `signate-drive-final-rank26-postmortem` / `autonomous-cycle-optimized-wrong-oracle`
+  （private 0.88571・26位/962。net proxy を99まで上げたが真値精度88.5%停滞）。
+
+### 発見（ラウンド1/2 の一般化）
+ラウンド1 は「CV を一次KPI に」、ラウンド2 は「提出が実際にスコアしたか（生存）」をゲートにした。だが
+SIGNATE の自動サイクルは **ローカル proxy（自作 gold との一致 net）を KPI にし、その proxy が飽和（net96→99）
+しても真の一次KPI（真値精度/実LB順位）は停滞（88.5%）** という第3の失敗をした。**proxy と真KPIが"静かに"
+decouple（乖離警告すら出ない）**まま、機構が proxy を relentless に登り続けた。既存の「CV↔public 乖離警告」は
+**両者を観測できる場合**のガードで、proxy自体がオラクルを代表しなくなる drift は捕捉できない。
+
+### P10. oracle-drift 自動検知（proxy飽和×真KPI停滞 → 再アンカー強制/エスカレーション）
+**現状の穴**: `buildIssueBody` 実施内容(1)に「ローカルCV飽和×public乖離なら oracle ドリフトを疑え」という
+**非強制の散文**はあるが、submit-repair/stage=proxy のような**決定論的に発火する構造ゲートが無い**。worker
+LLM が気づくか頼み。
+
+**変更**:
+- **P10-a（実装済み・engine primitive）**: `kaggleImprovement.ts` に
+  - `OracleDriftSignal`（material 追加フィールド: `proxySaturated` / `trueKpiStagnant` / `stagnantCycles` / 名称・詳細）、
+  - `detectOracleDrift()`（純粋関数: **両方**真かつ停滞が閾値サイクル継続で `reanchor`/`escalate` を返す。
+    既定 `DEFAULT_ORACLE_DRIFT_REANCHOR_CYCLES=2` / `DEFAULT_ORACLE_DRIFT_ESCALATE_CYCLES=4`）、
+  - `buildOracleDriftBanner()`（本文先頭へ差し込む強制再アンカー指令: 「proxy を上げる局所A/B・per-idx回収の
+    新規起案禁止」「今サイクルの唯一の軸を escalation ladder (2) データ/oracle 再アンカーに固定」。escalate では
+    `## 申し送り` 先頭に `⚠ ORACLE-DRIFT ESCALATION` を書かせ人間へ判断材料を提示、承認待ちブロックはしない）
+  を追加。submit-repair の**後**に評価（提出が壊れているうちは真KPIを測れないため submit-repair 優先）。
+  `planImprovementCycle` の draft reason にも drift を注記。ユニットテスト9件（両条件必須・閾値・precedence）。
+- **P10-b（follow-up・未実装）**: `kaggleImproveMaterial.ts` が `proxySaturated`/`trueKpiStagnant`/`stagnantCycles` を
+  **履歴から算出**して material に供給する wiring。proxy 系列（cv_report/net 履歴）の直近改善幅が閾値未満＝
+  saturated、真KPI 系列（実LB順位/privateScore/held-out）が停滞＝stagnant を、experiment_ledger と
+  submission-history から判定する。**この wiring が入るまでバナーは発火しない**（primitive はあるが真値
+  観測が無いと signal が立たない）— この制約を明記して silent-no-op を避ける。
+
+**受け入れ条件（P10-a・済）**: detectOracleDrift の閾値/両条件テスト、banner 注入・submit-repair precedence の
+本文テスト、plan reason 注記テスト。lint/typecheck/既存91テスト green。
+
+### ラウンド3 子Issue（依存順）
+| # | 子Issue（機能名） | 主対象 | 規模 | 状態 |
+|---|---|---|---|---|
+| P10-a | oracle-drift 検知の engine primitive とバナーを追加する | kaggleImprovement.ts + テスト | 中 | ✅ 実装済 |
+| P10-b | proxy飽和×真KPI停滞を履歴から算出し material に供給する | kaggleImproveMaterial.ts + registry | 中 | ⬜ follow-up |

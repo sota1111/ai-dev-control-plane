@@ -14,8 +14,13 @@ import {
   planCompetitionSubmission,
   nextAlternateLineage,
   alternateLineageForUtcDate,
+  detectOracleDrift,
+  buildOracleDriftBanner,
+  DEFAULT_ORACLE_DRIFT_REANCHOR_CYCLES,
+  DEFAULT_ORACLE_DRIFT_ESCALATE_CYCLES,
   type TargetsRegistry,
   type CycleInput,
+  type OracleDriftSignal,
 } from '../lib/kaggleImprovement.js';
 
 // SOT-1913 / SOT-1932 — Kaggle 改善サイクル起案エンジン。
@@ -701,6 +706,112 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('### 実LB順位トレンド');
       expect(body).toContain('順位トレンド');
     });
+
+    // P10 — oracle-drift（proxy飽和×真KPI停滞→再アンカー強制）。SIGNATE rank-26 post-mortem。
+    test('oracle-drift banner is injected when proxy saturated AND true KPI stagnant', () => {
+      const c = reg().competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, {
+        oracleDrift: {
+          proxyKpiName: 'gold100 net',
+          proxySaturated: true,
+          trueKpiName: 'private accuracy',
+          trueKpiStagnant: true,
+          stagnantCycles: 2,
+          detail: 'net 96→99 と登ったが真値精度は88.5%で停滞',
+        },
+      });
+      expect(body).toContain('🔻 ORACLE DRIFT 検知');
+      expect(body).toContain('局所A/B・per-idx回収を新規に起案してはならない');
+      expect(body).toContain('escalation ladder (2) データ/oracle 再アンカー');
+      expect(body).toContain('gold100 net');
+      expect(body).toContain('private accuracy');
+      expect(body).toContain('net 96→99 と登ったが真値精度は88.5%で停滞');
+      // reanchor level does NOT demand human escalation.
+      expect(body).not.toContain('⚠ ORACLE-DRIFT ESCALATION');
+      // normal material framing is retained (banner prepends, does not replace).
+      expect(body).toContain('検証階層（一次=leak-free CV / 二次=public LB）');
+    });
+
+    test('oracle-drift escalation banner at the higher threshold demands human escalation', () => {
+      const c = reg().competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, {
+        oracleDrift: {
+          proxySaturated: true,
+          trueKpiStagnant: true,
+          stagnantCycles: DEFAULT_ORACLE_DRIFT_ESCALATE_CYCLES,
+        },
+      });
+      expect(body).toContain('🔻🔻 ORACLE DRIFT（エスカレーション）');
+      expect(body).toContain('⚠ ORACLE-DRIFT ESCALATION');
+      expect(body).toContain('人間へエスカレーション');
+    });
+
+    test('no oracle-drift banner unless BOTH proxy saturated and true KPI stagnant', () => {
+      const c = reg().competitions[0];
+      const proxyOnly = buildIssueBody(c.targets[0], c, 3, {
+        oracleDrift: { proxySaturated: true, trueKpiStagnant: false, stagnantCycles: 5 },
+      });
+      const trueOnly = buildIssueBody(c.targets[0], c, 3, {
+        oracleDrift: { proxySaturated: false, trueKpiStagnant: true, stagnantCycles: 5 },
+      });
+      const none = buildIssueBody(c.targets[0], c, 3, {});
+      for (const body of [proxyOnly, trueOnly, none]) {
+        expect(body).not.toContain('ORACLE DRIFT');
+        expect(body).toContain('## 目的');
+      }
+    });
+
+    test('submit-repair takes precedence over oracle-drift (cannot measure true KPI while broken)', () => {
+      const raw = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].validation = { primary: 'cv', require_scored_submission: true };
+      const c = parseTargetsRegistry(raw).competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, {
+        submissionHealth: 'broken',
+        submissionHealthReason: 'x',
+        oracleDrift: { proxySaturated: true, trueKpiStagnant: true, stagnantCycles: 9 },
+      });
+      expect(body).toContain('submit-repair モード');
+      expect(body).not.toContain('ORACLE DRIFT');
+    });
+  });
+
+  // P10 — detectOracleDrift 純粋関数。
+  describe('detectOracleDrift', () => {
+    const drift = (over: Partial<OracleDriftSignal>): OracleDriftSignal => ({
+      proxySaturated: true,
+      trueKpiStagnant: true,
+      stagnantCycles: DEFAULT_ORACLE_DRIFT_REANCHOR_CYCLES,
+      ...over,
+    });
+
+    test('undefined signal → none (backward compatible)', () => {
+      expect(detectOracleDrift(undefined)).toMatchObject({ level: 'none', drifting: false });
+    });
+
+    test('requires BOTH conditions', () => {
+      expect(detectOracleDrift(drift({ proxySaturated: false })).drifting).toBe(false);
+      expect(detectOracleDrift(drift({ trueKpiStagnant: false })).drifting).toBe(false);
+    });
+
+    test('reanchor at the reanchor threshold, escalate at the escalate threshold', () => {
+      expect(detectOracleDrift(drift({ stagnantCycles: 1 })).level).toBe('none');
+      expect(detectOracleDrift(drift({ stagnantCycles: DEFAULT_ORACLE_DRIFT_REANCHOR_CYCLES })).level).toBe(
+        'reanchor'
+      );
+      expect(detectOracleDrift(drift({ stagnantCycles: DEFAULT_ORACLE_DRIFT_ESCALATE_CYCLES })).level).toBe(
+        'escalate'
+      );
+    });
+
+    test('custom thresholds are honored', () => {
+      const r = detectOracleDrift(drift({ stagnantCycles: 3 }), { reanchorCycles: 5, escalateCycles: 10 });
+      expect(r.level).toBe('none');
+    });
+
+    test('buildOracleDriftBanner is empty when not drifting', () => {
+      const result = detectOracleDrift(drift({ trueKpiStagnant: false }));
+      expect(buildOracleDriftBanner(drift({ trueKpiStagnant: false }), result)).toBe('');
+    });
   });
 
   describe('planImprovementCycle guards', () => {
@@ -813,6 +924,28 @@ describe('kaggleImprovement', () => {
       const claude = plan.targets.find((t) => t.project === 'ptcg-agent-claude')!;
       expect(claude.action).toBe('draft');
       expect(claude.reason).toMatch(/plateau escalation/);
+    });
+
+    test('oracle-drift annotates the draft reason and injects the banner into the body', () => {
+      const plan = planImprovementCycle(
+        baseInput({
+          registry: enabledReg(),
+          hourJst: 0,
+          material: {
+            'ptcg-agent-claude': {
+              oracleDrift: {
+                proxySaturated: true,
+                trueKpiStagnant: true,
+                stagnantCycles: DEFAULT_ORACLE_DRIFT_REANCHOR_CYCLES,
+              },
+            },
+          },
+        })
+      );
+      const claude = plan.targets.find((t) => t.project === 'ptcg-agent-claude')!;
+      expect(claude.action).toBe('draft');
+      expect(claude.reason).toMatch(/oracle-drift \(reanchor\)/);
+      expect(claude.issueBody).toContain('🔻 ORACLE DRIFT 検知');
     });
   });
 

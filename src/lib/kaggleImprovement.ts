@@ -741,6 +741,28 @@ export function getCompetition(
   return registry.competitions.find((c) => c.key === key);
 }
 
+/**
+ * oracle-drift シグナル（SIGNATE rank-26 post-mortem 由来）。cron の材料収集が、proxy（ローカル指標:
+ * leak-free CV / 自作 gold との一致 net など）の飽和と、真の一次KPI（実LB順位 / 真値精度）の停滞を
+ * 突き合わせて立てる。**両方が真**かつ停滞が閾値サイクル継続したとき buildIssueBody が再アンカー指令
+ * バナーへ切り替える。欠落時は従来挙動（後方互換）。submit-repair とは独立（提出は生存しているが
+ * oracle が真値を代表しなくなった状態を捉える）。
+ */
+export interface OracleDriftSignal {
+  /** 飽和している proxy/ローカル指標の名称（表示用。例 "leak-free CV" / "gold100 net"）。 */
+  proxyKpiName?: string;
+  /** proxy が上限付近で頭打ち（直近サイクルの改善が閾値未満）か。 */
+  proxySaturated: boolean;
+  /** 真の一次KPIの名称（表示用。例 "public LB 順位" / "private accuracy"）。 */
+  trueKpiName?: string;
+  /** 真の一次KPI が有意に動いていない（停滞）か。 */
+  trueKpiStagnant: boolean;
+  /** proxy飽和×真KPI停滞が連続したサイクル数。 */
+  stagnantCycles: number;
+  /** 人間向けの説明（本文に表示）。 */
+  detail?: string;
+}
+
 /** cron が収集して渡す1プロジェクトぶんの起案材料（要約なしの生 digest）。 */
 export interface ImprovementMaterial {
   /** 前回提出の順位/スコア（Kaggle CLI・best-effort）。「翌日に前回結果を確認」の実体。 */
@@ -812,6 +834,12 @@ export interface ImprovementMaterial {
    * 本文へ「維持=後退・前進軸必須」の強調警告を挿入する。
    */
   rankTrendDirection?: 'improving' | 'declining' | 'flat' | 'new' | 'unknown';
+  /**
+   * oracle-drift シグナル（SIGNATE rank-26 post-mortem）。proxy 飽和 × 真の一次KPI 停滞を突き合わせて
+   * 立てる。`detectOracleDrift` が drift と判定すると buildIssueBody は再アンカー指令バナーを先頭に差し込む
+   * （proxy を上げる局所A/Bを止め、oracle 再アンカーを唯一の軸に固定）。欠落時は従来挙動（後方互換）。
+   */
+  oracleDrift?: OracleDriftSignal;
 }
 
 /** ガードの各シグナル（cron が Linear/cooldown を見て渡す）。 */
@@ -969,6 +997,118 @@ ${childWorkers}
 - 親（改善サイクル設計）: SOT-1913 / このサイクル自動起案の起点（第${cycleNumber}次・submit-repair）`;
 }
 
+/** oracle-drift の判定レベル。none=通常 / reanchor=再アンカー強制 / escalate=人間へエスカレーション。 */
+export type OracleDriftLevel = 'none' | 'reanchor' | 'escalate';
+
+/** detectOracleDrift の結果。 */
+export interface OracleDriftResult {
+  level: OracleDriftLevel;
+  /** level !== 'none'。 */
+  drifting: boolean;
+  reason: string;
+}
+
+/** proxy飽和×真KPI停滞が「再アンカー強制」に至る連続サイクル数の既定閾値。 */
+export const DEFAULT_ORACLE_DRIFT_REANCHOR_CYCLES = 2;
+/** proxy飽和×真KPI停滞が「人間エスカレーション」に至る連続サイクル数の既定閾値。 */
+export const DEFAULT_ORACLE_DRIFT_ESCALATE_CYCLES = 4;
+
+/**
+ * oracle-drift（proxy飽和 × 真の一次KPI停滞）を決定論的に判定する純粋関数（SIGNATE rank-26 post-mortem）。
+ * **両方**（proxySaturated かつ trueKpiStagnant）が真のときだけドリフトとみなす（片方だけ＝通常の改善余地/
+ * 汎化ギャップは既存の gap 警告が扱う）。停滞サイクル数が escalateCycles 以上なら 'escalate'、reanchorCycles
+ * 以上なら 'reanchor'、未満は 'none'。signal 欠落は 'none'（後方互換）。
+ */
+export function detectOracleDrift(
+  signal: OracleDriftSignal | undefined,
+  opts?: { reanchorCycles?: number; escalateCycles?: number }
+): OracleDriftResult {
+  if (!signal) return { level: 'none', drifting: false, reason: 'no oracle-drift signal' };
+  if (!signal.proxySaturated || !signal.trueKpiStagnant) {
+    return {
+      level: 'none',
+      drifting: false,
+      reason: 'oracle-drift requires proxy saturated AND true KPI stagnant',
+    };
+  }
+  const reanchorAt =
+    opts?.reanchorCycles && opts.reanchorCycles > 0
+      ? Math.floor(opts.reanchorCycles)
+      : DEFAULT_ORACLE_DRIFT_REANCHOR_CYCLES;
+  const escalateAt =
+    opts?.escalateCycles && opts.escalateCycles > 0
+      ? Math.floor(opts.escalateCycles)
+      : DEFAULT_ORACLE_DRIFT_ESCALATE_CYCLES;
+  const cycles =
+    Number.isFinite(signal.stagnantCycles) && signal.stagnantCycles > 0
+      ? Math.floor(signal.stagnantCycles)
+      : 0;
+  if (cycles >= escalateAt) {
+    return {
+      level: 'escalate',
+      drifting: true,
+      reason: `proxy saturated & true KPI stagnant for ${cycles} cycle(s) (>= ${escalateAt}); escalate to human`,
+    };
+  }
+  if (cycles >= reanchorAt) {
+    return {
+      level: 'reanchor',
+      drifting: true,
+      reason: `proxy saturated & true KPI stagnant for ${cycles} cycle(s) (>= ${reanchorAt}); force oracle re-anchor`,
+    };
+  }
+  return {
+    level: 'none',
+    drifting: false,
+    reason: `proxy saturated & true KPI stagnant for ${cycles} cycle(s) (< ${reanchorAt})`,
+  };
+}
+
+/**
+ * oracle-drift バナー（SIGNATE rank-26 post-mortem）。ドリフト時に buildIssueBody 本文の先頭（workers
+ * ディレクティブ直後）へ差し込む強制再アンカー指令。proxy を上げる局所A/B・per-idx回収の新規起案を禁止し、
+ * 今サイクルの唯一の軸を escalation ladder (2) データ/oracle 再アンカーに固定する。level=escalate では
+ * 加えて人間エスカレーションを指示する。drifting=false のとき空文字（先頭 `\n\n`・末尾改行なしで返す）。
+ */
+export function buildOracleDriftBanner(
+  signal: OracleDriftSignal | undefined,
+  result: OracleDriftResult
+): string {
+  if (!signal || !result.drifting) return '';
+  const proxy = signal.proxyKpiName?.trim() || 'ローカル proxy/CV';
+  const trueKpi = signal.trueKpiName?.trim() || '真の一次KPI（実LB順位/真値精度）';
+  const cycles =
+    Number.isFinite(signal.stagnantCycles) && signal.stagnantCycles > 0
+      ? Math.floor(signal.stagnantCycles)
+      : 0;
+  const detail = signal.detail?.trim();
+  const escalate = result.level === 'escalate';
+  const header = escalate
+    ? '🔻🔻 ORACLE DRIFT（エスカレーション）— proxy 最適化を捨て、真KPIへ再アンカーし人間へ判断を要請'
+    : '🔻 ORACLE DRIFT 検知 — proxy 最適化を凍結し oracle を再アンカーせよ';
+  const escalateLines = escalate
+    ? `
+- **人間へエスカレーション**（proxy飽和×真KPI停滞が${cycles}サイクル継続）: \`## 申し送り\` コメントの
+  先頭に \`⚠ ORACLE-DRIFT ESCALATION\` を明記し、(a) 現 proxy が真KPIを代表していない証拠、(b) oracle 再構築
+  もしくはコンペ方針転換の選択肢、を人間の判断材料として提示する（承認待ちでブロックはせず、安全側
+  デフォルト＝再アンカー継続で進む）。`
+    : `
+- 再アンカー後は proxy を作り直し、**真KPI と連動する**ことを確認してから通常の改善サイクルへ戻す。`;
+  return `
+
+${header}
+- 飽和している proxy: **${proxy}**（頭打ち＝これ以上上げても真KPIは動かない可能性大）
+- 停滞している真の一次KPI: **${trueKpi}**（約${cycles}サイクル停滞）${detail ? `\n- 詳細: ${detail}` : ''}
+
+**この状態では proxy を上げる局所A/B・per-idx回収を新規に起案してはならない。** proxy と真KPI が乖離
+＝オラクル（gold/正解ラベル/検証holdout）が真値を代表していない疑い。SIGNATE で proxy net を99まで上げても
+真値精度は88.5%停滞（26位/962）という実事故の再発防止。今サイクルの唯一の軸を
+**escalation ladder (2) データ/oracle 再アンカー**に固定する:
+- oracle の**真値妥当性を独立に再検証**する（意味的一致でなく厳格judge基準／複数独立解の逐語majority／
+  held-out 実測）。proxy を疑い、oracle 側の系統誤りを探す。
+- 真KPI を直接動かす材料（真の誤り修正・分布の穴）を探し、proxy 一致度の改善を成果にしない。${escalateLines}`;
+}
+
 /** 起案Issue本文テンプレート（§6・材料 digest を埋め込む。要約はしない）。 */
 export function buildIssueBody(
   target: ImprovementTarget,
@@ -988,6 +1128,12 @@ export function buildIssueBody(
   ) {
     return buildSubmitRepairBody(target, competition, cycleNumber, material);
   }
+  // oracle-drift（proxy飽和×真KPI停滞）検知時は、本文先頭に強制再アンカー指令バナーを差し込む。
+  // submit-repair の後に評価する（提出が壊れているうちは真KPIを測れず drift 判定が無意味なため）。
+  const oracleDriftBanner = buildOracleDriftBanner(
+    material.oracleDrift,
+    detectOracleDrift(material.oracleDrift)
+  );
   const childWorkers = childWorkersDirective(target);
   const prev =
     material.previousSubmission?.trim() || '(前回提出の記録なし — 初回サイクル、または取得できず)';
@@ -1110,7 +1256,7 @@ ${material.counterpartLedgerDigest.trim()}`
 - 評価は外向き通信を無効化した隔離環境で行い、artifactには集計値・真偽値・hashだけを保存する。
 - 上記ゲートの成否を親Issueへ記録する。失敗時は提出せず、具体的な不足条件をBlocked理由にする。`
     : '';
-  return `workers: ${target.workersDirective}
+  return `workers: ${target.workersDirective}${oracleDriftBanner}
 
 ## 目的
 Kaggleコンペ \`${competition.kaggleCompetition}\`（repo: ${target.repo} / 系統: ${target.lineage}）の
@@ -1575,12 +1721,14 @@ export function planImprovementCycle(input: CycleInput): CyclePlan {
       };
     }
 
+    const drift = detectOracleDrift(mat.oracleDrift);
+    const driftNote = drift.drifting ? `; ⚠ oracle-drift (${drift.level}): ${drift.reason}` : '';
     return {
       ...common,
       action: 'draft' as const,
       reason: sig.plateauReason
-        ? `default draft policy (order-first); ${sig.plateauReason}${phase.phase === 'converge' ? '; converge phase (deadline near)' : ''}`
-        : `default draft policy (order-first): only duplicate-prevention guard applies${phase.phase === 'converge' ? '; converge phase (deadline near)' : ''}`,
+        ? `default draft policy (order-first); ${sig.plateauReason}${phase.phase === 'converge' ? '; converge phase (deadline near)' : ''}${driftNote}`
+        : `default draft policy (order-first): only duplicate-prevention guard applies${phase.phase === 'converge' ? '; converge phase (deadline near)' : ''}${driftNote}`,
       issueTitle: buildIssueTitle(t, t.nextCycle),
       issueBody: buildIssueBody(t, competition, t.nextCycle, mat, phase),
     };
