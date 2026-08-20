@@ -152,7 +152,22 @@ worker_prompt() {
 # Canonical per-role instruction the orchestrator writes once (WORKER_PROMPT_FILE overrides the path).
 # When present, it is copied into the selected worker's prompt file before invocation. When absent,
 # each worker falls back to its own existing prompt file (backward compatible).
-ROLE_PROMPT_SRC="${WORKER_PROMPT_FILE:-$(lane_path "$CONTROL_PLANE_DIR/prompts/roles/$ROLE.md")}"
+# The canonical role prompt is checked in at the BASE path (prompts/roles/<role>.md): it is read-only and
+# identical across lanes, so it is NOT lane-suffixed. Only the per-worker DEST copy (worker_prompt) is
+# lane-suffixed, to avoid concurrent-write collisions under the parallel pool. Prefer a lane-specific
+# source if one actually exists (default lane resolves to the base path); otherwise fall back to the base
+# path — this fixes the parallel-pool case where a non-default lane's `solo.<lane>.md` source does not
+# exist and every worker dispatch would otherwise fail with "Prompt file not found".
+if [ -n "${WORKER_PROMPT_FILE:-}" ]; then
+  ROLE_PROMPT_SRC="$WORKER_PROMPT_FILE"
+else
+  _lane_role_src="$(lane_path "$CONTROL_PLANE_DIR/prompts/roles/$ROLE.md")"
+  if [ -s "$_lane_role_src" ]; then
+    ROLE_PROMPT_SRC="$_lane_role_src"
+  else
+    ROLE_PROMPT_SRC="$CONTROL_PLANE_DIR/prompts/roles/$ROLE.md"
+  fi
+fi
 
 # ── SOT-1549: per-leg metrics auto-collection ────────────────────────────────────────────────────
 # The dispatcher (NOT an AI) records each leg's objective metrics as a side-effect and shapes them via

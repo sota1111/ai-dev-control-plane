@@ -398,7 +398,20 @@ function worktreeLaneFor(
   issueId?: string | null,
   env: NodeJS.ProcessEnv = process.env
 ): string {
-  if (baseLane && baseLane !== DEFAULT_LANE) return baseLane;
+  // Branch scope: the serialization lane is `repo--branch` and its work must live in a per-branch
+  // worktree (SOT-932). Under REPO scope the N-slot pool ALSO assigns a non-default serialization lane
+  // (= the target repo name) so distinct repos drain concurrently — but those runs already have separate
+  // repo checkouts, so they execute IN-PLACE and must NOT be given a worktree (the worktree base dir may
+  // be unwritable, and no isolation is needed). Only branch scope, or the explicit isolation opt-in
+  // below, provisions a worktree. Gating on the scope (not merely "lane !== default") is what makes the
+  // repo-scope pool run in-place instead of failing to create /…/.runner-worktrees/<repo>.
+  if (
+    baseLane &&
+    baseLane !== DEFAULT_LANE &&
+    resolveSerializeScope(env) === SERIALIZE_SCOPE_BRANCH
+  ) {
+    return baseLane;
+  }
   if (resolveWorktreeIsolation(env)) {
     const id = sanitizeLaneToken(issueId);
     if (id) return `iso-${id}`;
