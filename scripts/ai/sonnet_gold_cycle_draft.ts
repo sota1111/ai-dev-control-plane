@@ -5,6 +5,12 @@
  * サイクル Issue を JST 4時間グリッドで起票する。回答実行は Sonnet のみ（Gemini は前処理限定）、
  * 第1目標 = abstain を前処理で 0 に、その後 wrong 削減 — の常設指示をテンプレートに埋め込む。
  *
+ * oracle-drift ガード（SIGNATE rank-26 post-mortem）: net は「我々の手動 gold との一致度」＝自己参照 proxy で、
+ * gold 自体の真値精度 ~88.5% が天井。proxy を net99 まで上げても真値は停滞したのに機構は re-anchor しなかった。
+ * 本ドラフタは台帳末尾から proxy 飽和×真KPI停滞を検知し（`deriveOracleDriftSignalFromHistory`）、drift 時は
+ * kaggle エンジンと**同一の model 非依存バナー**（`detectOracleDrift`/`buildOracleDriftBanner`）を本文冒頭へ挿入
+ * する。どの worker（fable/opus/codex/gpt）が処理しても同じ再アンカー指令が効く。
+ *
  * 設計は kaggle_improvement_cycle.sh と同型（毎時 cron → 本スクリプトが JST 時刻・直列ガードを
  * 判定して起票）。既存コードは変更せず linearApi の createDraftIssue / findOpenAutoImproveIssue を
  * 流用する standalone スクリプト。
@@ -24,6 +30,15 @@ import {
   createDraftIssue,
   linearQuery,
 } from '../../src/lib/linearApi.js';
+import {
+  detectOracleDrift,
+  buildOracleDriftBanner,
+  DEFAULT_ORACLE_DRIFT_ESCALATE_CYCLES,
+} from '../../src/lib/kaggleImprovement.js';
+import {
+  deriveOracleDriftSignalFromHistory,
+  type GoldHistoryEntry,
+} from '../../src/lib/sonnetGoldOracleDrift.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = 'signate-messy-drive-rag';
@@ -56,6 +71,22 @@ function lastHistoryLine(): string | null {
     return lines.length ? lines[lines.length - 1] : null;
   } catch {
     return null;
+  }
+}
+
+/** 台帳末尾 n 件を parse して返す（oracle-drift 判定用）。読めない/壊れた行は空オブジェクト。 */
+function readHistoryEntries(n: number): GoldHistoryEntry[] {
+  try {
+    const lines = fs.readFileSync(HISTORY_FILE, 'utf8').trim().split('\n').filter(Boolean);
+    return lines.slice(-n).map((l) => {
+      try {
+        return JSON.parse(l) as GoldHistoryEntry;
+      } catch {
+        return {} as GoldHistoryEntry;
+      }
+    });
+  } catch {
+    return [];
   }
 }
 
@@ -161,7 +192,12 @@ async function findOpenCycleIssue(projectName: string, labelName: string): Promi
   }
 }
 
-function buildDescription(cycle: number, state: State, history: string | null): string {
+function buildDescription(
+  cycle: number,
+  state: State,
+  history: string | null,
+  driftBanner: string
+): string {
   const prevRef = state.lastIssue
     ? `前回サイクル: ${state.lastIssue}（申し送りコメントを必ず読むこと）`
     : '前回サイクル: なし（本サイクルが初回）';
@@ -169,7 +205,9 @@ function buildDescription(cycle: number, state: State, history: string | null): 
     ? `直近の台帳エントリ（docs/ai/sonnet_gold_history.jsonl 最終行）:\n\`\`\`\n${history}\n\`\`\``
     : '台帳 docs/ai/sonnet_gold_history.jsonl は未作成 → 本サイクルで基盤整備（下記【初回タスク】）から始める。';
 
-  return `workers: solo=claude:fable, handoff=on
+  // oracle-drift（net proxy 飽和×真KPI停滞）時は本文冒頭へ強制再アンカー指令を差し込む。kaggle エンジンと
+  // 同一の model 非依存バナー — どの worker（fable/opus/codex/gpt）が処理しても同じガードが効く。
+  return `workers: solo=claude:fable, handoff=on${driftBanner}
 
 TARGET_REPO=${TARGET_REPO}（\`.venv\` 必須）
 
@@ -214,6 +252,9 @@ ${historyBlock}
    1回実行**（claude-mcp・並列1・resume 対応・Gemini $0 確認）。usage limit 逼迫時は gold100 をスキップし
    その旨を記録
 5. \`docs/ai/sonnet_gold_history.jsonl\` へ追記: \`{"cycle":${cycle},"ts":"<UTC>","match":N,"abstain":N,"wrong":N,"net":N,"gemini_cost_usd":0,"changes":["..."],"skipped_gold":false,"next":["..."]}\`
+   - **可能なら \`"true_net":N\`（厳格判定/held-out probe の net＝真feedback）も記録する**。net(自己参照 proxy)と
+     独立な真値KPIを台帳に残すことで、次サイクルの oracle-drift 自動検知が「proxy 飽和×真値停滞」を判定できる
+     （真値KPIが無いと proxy が天井付近で頭打ちした時点で自動的に再アンカーが促される）。
 6. 本 issue に結果サマリと**次サイクルへの申し送り**（子ごとの成果 / 閉じた軸と証拠 / 未検証仮説 /
    次の候補クラスタ）をコメントし、完了する
 
@@ -232,6 +273,11 @@ ${historyBlock}
 - **担当の役割分担**: 親issue（本issue）= Fable（\`solo=claude:fable\`）が分析・分解・統合を担当。**子issue = opus**（説明冒頭に必ず \`workers: solo=claude:opus, handoff=on\`）が実装を並列に担当。子issueには TARGET_REPO・focused検証（番兵つき）・Gemini禁止の制約を継承させ、**ラベル \`sonnet-gold-cycle\` を必ず付与**する
 - 1サイクル直列（親と全子が完了するまで次の自動起票は抑止される）。gold100 全量はサイクル末の親の1回のみ（子は focused のみ）
 - **人間コメント尊重（newest-wins）**: (a) 子issue分解の直前、(b) 再開後の統合測定の直前に、本 issue のコメントを再取得し、人間の新しい指示があれば最新を優先する
+- **oracle-drift 監視（自動・SIGNATE rank-26 post-mortem）**: net（自己参照 proxy）が天井付近で頭打ちなのに
+  独立な真値KPI（\`true_net\`）が動かない/無いと判定されると、本文冒頭に **🔻 ORACLE DRIFT 再アンカー指令**が
+  自動挿入される。挿入時は net 最大化・per-idx回収を止め、**gold（オラクル）の真値妥当性の独立再検証**を唯一の軸に
+  する（proxy を99まで上げても真値88.5%停滞だった実事故の再発防止）。この判定は model 非依存で、どの worker が
+  処理しても同じく効く。
 - 停止方法: \`docs/ai/auto_logs/sonnet_gold_cycle.stop\` を作成（control-plane 側）
 
 ## 受け入れ条件
@@ -299,11 +345,22 @@ async function main(): Promise<void> {
   const state = readState();
   const cycle = (state.lastCycle || 0) + 1;
   const history = lastHistoryLine();
+  // oracle-drift: 台帳末尾から net proxy 飽和×真KPI停滞を判定し、drift なら再アンカー指令バナーを本文へ挿入。
+  const driftSignal = deriveOracleDriftSignalFromHistory(
+    readHistoryEntries(DEFAULT_ORACLE_DRIFT_ESCALATE_CYCLES + 2),
+    Number(process.env.SONNET_GOLD_DRIFT_NET_CEILING)
+      ? { netCeilingFloor: Number(process.env.SONNET_GOLD_DRIFT_NET_CEILING) }
+      : undefined
+  );
+  const driftResult = detectOracleDrift(driftSignal);
+  const driftBanner = buildOracleDriftBanner(driftSignal, driftResult);
   const title = `[SONNET-GOLD] sonnet local gold100 改善サイクル第${cycle}次（abstain→0を前処理で）`;
-  const description = buildDescription(cycle, state, history);
+  const description = buildDescription(cycle, state, history, driftBanner);
 
   if (dryRun) {
-    console.log(JSON.stringify({ ...result, action: 'dry-run', cycle, title }));
+    console.log(
+      JSON.stringify({ ...result, action: 'dry-run', cycle, title, oracleDrift: driftResult.level })
+    );
     console.log('----- description -----');
     console.log(description);
     return;
@@ -318,7 +375,16 @@ async function main(): Promise<void> {
   const next: State = { lastCycle: cycle, lastIssue: created.identifier, lastCreatedAt: new Date().toISOString() };
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
   fs.writeFileSync(STATE_FILE, JSON.stringify(next, null, 2) + '\n');
-  console.log(JSON.stringify({ ...result, action: 'created', cycle, issue: created.identifier, url: created.url }));
+  console.log(
+    JSON.stringify({
+      ...result,
+      action: 'created',
+      cycle,
+      issue: created.identifier,
+      url: created.url,
+      oracleDrift: driftResult.level,
+    })
+  );
 }
 
 main().catch((err) => {
