@@ -142,6 +142,75 @@ export function deriveLoadingDriftSignal(
   };
 }
 
+/** 停滞（plateau）とみなす「ベスト未更新の連続サイクル数」の既定。 */
+export const DEFAULT_PLATEAU_STAGNANT_CYCLES = 2;
+
+/**
+ * 台帳末尾から停滞（plateau）を決定論的に検知する（純粋関数）。
+ * KPI 系列は lb_score（一次KPI）を優先し、lb 観測が2件未満なら local_score で代用する。
+ * 「末尾から連続して自己ベストを更新していないサイクル数」が threshold 以上なら停滞。
+ * oracle-drift（proxy 飽和×真KPI停滞）とは独立の弱いシグナル — 天井に達していなくても
+ * 改善が止まっていれば発火し、外部解法（過去の類似コンペ上位解法・文献）の参照を指令する。
+ */
+export function derivePlateauSignal(
+  entries: LoadingHistoryEntry[],
+  opts?: { stagnantThreshold?: number }
+): { metric: string; stagnantCycles: number; best: number } | undefined {
+  const threshold =
+    typeof opts?.stagnantThreshold === 'number' && opts.stagnantThreshold > 0
+      ? opts.stagnantThreshold
+      : DEFAULT_PLATEAU_STAGNANT_CYCLES;
+  const lbSeries = entries
+    .map((e) => e.lb_score)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  const useLb = lbSeries.length >= 2;
+  const series = useLb
+    ? lbSeries
+    : entries
+        .map((e) => e.local_score)
+        .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  if (series.length < threshold + 1) return undefined;
+
+  // 末尾から「そのサイクル時点までの自己ベストを更新していない」連続数を数える。
+  let stagnant = 0;
+  for (let i = series.length - 1; i > 0; i--) {
+    const bestBefore = Math.max(...series.slice(0, i));
+    if (series[i] > bestBefore) break;
+    stagnant += 1;
+  }
+  if (stagnant < threshold) return undefined;
+  return {
+    metric: useLb ? 'SIGNATE LB スコア' : 'ローカル評価スコア（LB未計測のため代用）',
+    stagnantCycles: stagnant,
+    best: Math.max(...series),
+  };
+}
+
+/** 停滞時に本文へ挿入する外部解法参照指令バナー。 */
+function buildPlateauBanner(
+  signal: ReturnType<typeof derivePlateauSignal>
+): string {
+  if (!signal) return '';
+  return `
+
+## 📚 停滞検知 — 過去の類似コンペ上位解法の参照を必須化（自動挿入）
+
+${signal.metric} が **${signal.stagnantCycles} サイクル連続でベスト（${signal.best}）を更新していない**。
+自前の改善軸だけで押し続けるのを止め、本サイクルの分析フェーズ（手順1）で **外部解法の調査を必ず先に行う**こと:
+
+1. **過去の類似コンペの上位解法**: Kaggle・SIGNATE・Hash Code 等のパッキング/積載/巡回最適化系コンペの
+   上位 solution write-up・公開Notebookを WebSearch/WebFetch で調査する（例: ビンパッキング系、Santa系
+   最適化、配送・積載最適化）。「上位解が何を最適化の主軸にしたか・どんな探索/ヒューリスティックか」を抽出する。
+2. **3Dビンパッキングの文献定石**: DBLF（Deepest-Bottom-Left-Fill）・extreme points・corner points・
+   layer/wall building・beam search・simulated annealing・Packing Configuration Tree 等の RL/学習系。
+   評価基盤の制約（policy 8s/step・optimize 180s・ネット遮断・追加依存は requirements.txt）内で
+   実装可能なものに絞る。
+3. 調査結果は \`docs/ai/prior_art.md\`（target repo）へ「手法 / 本コンペへの適用形 / 期待成分効果 /
+   実装コスト」で記録し、そこから本サイクルの子issue（改善軸）を導出する。台帳の changes に
+   \`prior-art:<手法名>\` を付けて由来を残す。
+4. 既に prior_art.md にある手法は再調査せず、未検証エントリの実装を優先する。`;
+}
+
 const RESUME_MARKER = '<!-- auto-parent-resumed -->';
 
 /**
@@ -234,7 +303,8 @@ function buildDescription(
   cycle: number,
   state: State,
   history: string | null,
-  driftBanner: string
+  driftBanner: string,
+  plateauBanner: string
 ): string {
   const prevRef = state.lastIssue
     ? `前回サイクル: ${state.lastIssue}（申し送りコメントを必ず読むこと）`
@@ -243,7 +313,7 @@ function buildDescription(
     ? `直近の台帳エントリ（docs/ai/loading_history.jsonl 最終行）:\n\`\`\`\n${history}\n\`\`\``
     : '台帳 docs/ai/loading_history.jsonl は未作成 → 本サイクルで基盤整備（下記【初回タスク】）から始める。';
 
-  return `workers: solo=claude:fable, handoff=on${driftBanner}
+  return `workers: solo=claude:fable, handoff=on${driftBanner}${plateauBanner}
 
 TARGET_REPO=${TARGET_REPO}
 
@@ -323,6 +393,10 @@ ${historyBlock}
 - **oracle-drift 監視（自動）**: ローカル proxy が天井付近で頭打ちなのに LB が停滞/未計測と判定されると、
   本文冒頭に 🔻 再アンカー指令が自動挿入される。挿入時は proxy 登攀を止め、**評価器の再較正と
   テストケース分布の再設計**を唯一の軸にする
+- **行き詰まったら外部を見る（ユーザー指示 2026-08-20）**: 自前の改善軸が尽きた・非改善が続くときは、
+  過去の類似コンペ（3Dビンパッキング/積載/最適化系）の**上位解法や文献**を調査して軸を補充する。
+  KPI がベスト未更新 ${DEFAULT_PLATEAU_STAGNANT_CYCLES} サイクル連続で 📚 停滞バナーが本文冒頭に自動挿入され、
+  調査が必須になる（調査結果は \`docs/ai/prior_art.md\` へ・由来は台帳 changes に \`prior-art:<手法名>\`）
 - 1サイクル直列（親と全子が完了するまで次の自動起票は抑止される）
 - 停止方法: \`docs/ai/auto_logs/nedo_loading_cycle.stop\` を作成（control-plane 側）
 
@@ -394,12 +468,27 @@ async function main(): Promise<void> {
   );
   const driftResult = detectOracleDrift(driftSignal);
   const driftBanner = buildOracleDriftBanner(driftSignal, driftResult);
+  // 停滞（ベスト未更新の連続）検知: drift とは独立の弱いシグナル。外部解法参照を指令する。
+  const plateauSignal = derivePlateauSignal(
+    readHistoryEntries(DEFAULT_ORACLE_DRIFT_ESCALATE_CYCLES + 2),
+    Number(process.env.NEDO_LOADING_PLATEAU_CYCLES)
+      ? { stagnantThreshold: Number(process.env.NEDO_LOADING_PLATEAU_CYCLES) }
+      : undefined
+  );
+  const plateauBanner = buildPlateauBanner(plateauSignal);
   const title = `${TITLE_TAG} 積付アルゴリズム改善サイクル第${cycle}次（LBスコア最大化）`;
-  const description = buildDescription(cycle, state, history, driftBanner);
+  const description = buildDescription(cycle, state, history, driftBanner, plateauBanner);
 
   if (dryRun) {
     console.log(
-      JSON.stringify({ ...result, action: 'dry-run', cycle, title, oracleDrift: driftResult.level })
+      JSON.stringify({
+        ...result,
+        action: 'dry-run',
+        cycle,
+        title,
+        oracleDrift: driftResult.level,
+        plateau: plateauSignal?.stagnantCycles ?? 0,
+      })
     );
     console.log('----- description -----');
     console.log(description);
@@ -423,6 +512,7 @@ async function main(): Promise<void> {
       issue: created.identifier,
       url: created.url,
       oracleDrift: driftResult.level,
+      plateau: plateauSignal?.stagnantCycles ?? 0,
     })
   );
 }
