@@ -123,5 +123,10 @@
     "project": "signate-messy-drive-rag",
     "repo": "sota1111/signate-messy-drive-rag",
     "localPath": "/workspaces/signate-messy-drive-rag"
+  },
+  {
+    "project": "nedo-loading-algo-claude",
+    "repo": "sota1111/nedo-loading-algo-claude",
+    "localPath": "/workspaces/nedo-loading-algo-claude"
   }
 ]
