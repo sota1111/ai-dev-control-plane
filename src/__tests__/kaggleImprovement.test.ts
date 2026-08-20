@@ -1202,7 +1202,7 @@ describe('kaggleImprovement', () => {
       const r = parseTargetsRegistry(JSON.parse(fs.readFileSync(p, 'utf8')));
       // enabled は運用 kill switch（人間/セッションが随時トグルする）— 値そのものは断言しない。
       expect(typeof r.enabled).toBe('boolean');
-      expect(r.competitions).toHaveLength(8);
+      expect(r.competitions).toHaveLength(7);
       expect(r.rotation).toEqual([
         { hourJst: 0, competition: 'ptcg' },
         { hourJst: 3, competition: 'kaggriculture' },
@@ -1213,13 +1213,9 @@ describe('kaggleImprovement', () => {
         { hourJst: 18, competition: 'agent-security' },
         { hourJst: 21, competition: 'biohub' },
       ]);
-      // 各コンペは claude/gpt の2ターゲットを持つ（SIGNATE系 nedo-loading-algo は claude 単独）。
+      // 各コンペは claude/gpt の2ターゲットを持つ。
       for (const c of r.competitions) {
-        if (c.key === 'nedo-loading-algo') {
-          expect(c.targets.map((t) => t.lineage)).toEqual(['claude']);
-        } else {
-          expect(c.targets.map((t) => t.lineage).sort()).toEqual(['claude', 'gpt']);
-        }
+        expect(c.targets.map((t) => t.lineage).sort()).toEqual(['claude', 'gpt']);
       }
       expect(r.competitions.find((c) => c.key === 'kaggriculture')).toMatchObject({
         kaggleCompetition: 'kaggriculture',
@@ -1246,31 +1242,21 @@ describe('kaggleImprovement', () => {
       });
       for (const c of r.competitions) {
         const claude = c.targets.find((t) => t.lineage === 'claude')!;
+        const gpt = c.targets.find((t) => t.lineage === 'gpt')!;
         expect(claude.workersDirective).toContain('solo=claude:fable');
+        expect(gpt.workersDirective).toContain('solo=codex:sol');
+        expect(gpt.workersDirective).toContain('reasoning: solo=ultra');
         expect(buildIssueBody(claude, c, 1, {})).toContain(
           'workers: solo=claude:opus, handoff=off'
         );
-        const gpt = c.targets.find((t) => t.lineage === 'gpt');
-        if (gpt) {
-          expect(gpt.workersDirective).toContain('solo=codex:sol');
-          expect(gpt.workersDirective).toContain('reasoning: solo=ultra');
-          const gptBody = buildIssueBody(gpt, c, 1, {});
-          expect(gptBody).toContain('workers: solo=codex:gpt-5.6-sol, handoff=off');
-          expect(gptBody).toContain('reasoning: solo=low');
-        }
+        const gptBody = buildIssueBody(gpt, c, 1, {});
+        expect(gptBody).toContain('workers: solo=codex:gpt-5.6-sol, handoff=off');
+        expect(gptBody).toContain('reasoning: solo=low');
       }
-      // SIGNATE NEDO 積付アルゴリズム: コード提出型・signate CLI提出（submit.file 空 = kaggle経路skip）。
-      // pinned 0/12 は締切超過の ptcg から引き継いだ固定枠。
-      const nedo = r.competitions.find((c) => c.key === 'nedo-loading-algo')!;
-      expect(nedo).toMatchObject({
-        kaggleCompetition: 'signate-nedo-baggage-loading-algo-screening',
-        deadlineUtc: '2026-10-19T14:55:00Z',
-        pinnedHoursJst: [0, 12],
-        scoreDirection: 'max',
-      });
-      expect(nedo.targets[0]).toMatchObject({ lineage: 'claude', stage: 'submit-valid' });
-      expect(nedo.targets[0]!.submit?.file).toBe('');
+      // ptcg は締切超過(2026-08-16)で pinned 0/12 を撤去済み。SIGNATE NEDO 積付アルゴリズムは
+      // この registry ではなく完了駆動ドラフタ（scripts/ai/nedo_loading_cycle_draft.ts）が起票する。
       expect(r.competitions.find((c) => c.key === 'ptcg')!.pinnedHoursJst).toBeUndefined();
+      expect(r.competitions.some((c) => c.key === 'nedo-loading-algo')).toBe(false);
       // SOT-2518: agent-security は有効提出を前提(P8)＋attack、ptcg は relative_rating(P9)。
       expect(r.competitions.find((c) => c.key === 'agent-security')!.validation).toMatchObject({
         requireScoredSubmission: true,
