@@ -392,15 +392,34 @@ export function buildSubmissionBudgetDigest(
   const spacingOk = minIntervalMin === 0 || sinceMin == null || sinceMin >= minIntervalMin;
   const lastStr =
     lastMs != null ? `${new Date(lastMs).toISOString().replace('T', ' ').slice(0, 19)}Z（${sinceMin}分前）` : 'なし';
+  const spacingOkNow = spacingOk;
   const spacingLine =
     minIntervalMin > 0
-      ? `- spacing: 最小間隔 ${minIntervalMin}分 / 直近提出 ${lastStr} → ${spacingOk ? '提出可（間隔OK）' : `**あと約${Math.max(0, minIntervalMin - (sinceMin ?? 0))}分は見送り**`}`
+      ? `- spacing: 最小間隔 ${minIntervalMin}分 / 直近提出 ${lastStr} → ${spacingOkNow ? '提出可（間隔OK）' : `**あと約${Math.max(0, minIntervalMin - (sinceMin ?? 0))}分は見送り**`}`
       : `- spacing: 無効（最小間隔0）/ 直近提出 ${lastStr}`;
+  // 日次プローブ枠（プラトー打破）: 一定時間提出が無く枠が残り spacing もOKなら、改善ゲート未達でも
+  // 「性質の異なる gap-closing/hedge 候補」を1件提出してLBを探る due を出す。
+  const probeAfterHours = Math.max(0, policy?.probeAfterHours ?? 0);
+  const sinceHours = sinceMin != null ? sinceMin / 60 : null;
+  const probeDue =
+    probeAfterHours > 0 &&
+    loopRemaining > 0 &&
+    spacingOkNow &&
+    (sinceHours == null || sinceHours >= probeAfterHours);
+  const probeLine = probeDue
+    ? `- 🔎 **プローブ提出 due**: 直近提出 ${lastStr} が ${probeAfterHours}h 以上前で実効枠 ${loopRemaining} 残。` +
+      ` 改善ゲート未達でも **前回提出と別 artifact の gap-closing/hedge 候補を1件提出**し LB を探ること` +
+      `（public LB 首位との差が大きい間は plateau=天井ではない。公開上位ノート/baseline 移植で gap を埋める）。`
+    : probeAfterHours > 0
+      ? `- プローブ枠: due でない（直近提出 ${lastStr} / 閾値 ${probeAfterHours}h / 実効枠 ${loopRemaining}）`
+      : '';
   return [
     `- 本日(UTC ${todayUtc})の消費枠: ${todayCount}/${cap}（残 ${remaining}）`,
     `- 自動ループ実効枠: ${loopRemaining} 残（cap ${cap} − reserve ${reserve}；reserve は終盤の強い候補用に温存）`,
     spacingLine,
-    `- 提出判断: **leak-free CV が前回*提出*をノイズ幅超えで上回った時のみ**。実効枠0/間隔未経過/小改善なら見送り、局所改善を継続。`,
+    ...(probeLine ? [probeLine] : []),
+    `- 提出判断: **leak-free CV が前回*提出*をノイズ幅超えで上回った時のみ**（＝改善ゲート）。ただし上記プローブ枠が` +
+      ` due の時、または public LB に明確な伸びしろがある時は、gap-closing 候補を作って枠を使い LB を動かすことを優先。`,
   ].join('\n');
 }
 

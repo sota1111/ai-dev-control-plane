@@ -29,7 +29,7 @@
     "competitions[].pinned_hours_jst": "任意。固定枠。このJST hourの枠は動的配分(allocation)・rotationを無視してこのコンペが確定当番になる（締切接近コンペの一定間隔サイクル保証用）。schedule_hours_jstに含めること。コンペ間で重複不可。固定枠の起案はrecent_competitionsに記録されず、動的枠のcooldownへ影響しない。",
     "competitions[].pinned_lineage": "任意。固定枠で起案する系統を1つに限定（claude/gpt）。未設定は両系統。pinned_hours_jstが必須。",
     "competitions[].validation": "SOT-2514 検証設定。欠落時は fail-safe で {primary:'cv'} 扱い。primary=一次KPI（cv=leak-free CVを一次に信じる[既定・hidden private splitのコンペは必ずcv] / lb=public==privateなどリークの無い例外構成でのみpublic LBを一次にできる）。cv_report_path=target repo内 cv_report.json の相対パス（既定 docs/ai/cv_report.json。{cv_scheme, entity_unit, folds, score, per_entity_scores?}、entity単位hold-out必須。行単位CVは契約違反警告）。tail_heavy_metric=重い裾metric名（playbook P3頑健受容の対象・説明メタ）。reference_public_score=参照実装/公開NBの公称public。自best publicが有意（既定2%）に上回ったら後付け較正の過学習を疑う警告を本文へ挿入（playbook P5）。require_scored_submission(SOT-2518 P8)=trueで有効な非ゼロ提出を成立の前提にする（agent/kernelコンペ既定true）。直近提出がERROR/0.000/未スコアを既定3回連続すると起案本文がsubmit-repairモード（新規改善軸を止め提出パイプライン復旧を最優先）へ切替わり、材料先頭に『🔴 提出が壊れています（直近N回…）』を表示する。broken_submission_consecutive(SOT-2519)=submissionHealth=brokenと判定する連続無効提出回数の上書き（1以上の整数・欠落時は既定3）。metric_kind(SOT-2518 P9)=regression（絶対スコアが実態・従来挙動）/relative_rating（相対rating。field改善下では維持=後退。本文に順位契約「維持を昇格根拠にせず前進軸必須・実LB順位の非劣化を昇格必須条件」を挿入）/attack（攻撃系・スコア成立自体が壊れやすい）。既存コンペへの値設定は別途。",
-    "submission_policy": "日次提出枠の効率化(完了駆動ループの毎サイクル提出でcap浪費を防ぐ)。daily_reserve=自動ループが1日に消費してよいのはcap-reserve枠まで(残りは終盤の強い候補用に温存,0で無効)。min_interval_min=直近提出からこの分数未満は新規提出を抑止(spacing,0で無効)。改善ゲート(leak-free CVが前回*提出*をノイズ幅超えで上回った時のみ提出)はissue本文ポリシー+worker判断で担保。plan(kaggle-submission-plan)がreserve/spacingを決定論skip。"
+    "submission_policy": "日次提出枠の効率化(完了駆動ループの毎サイクル提出でcap浪費を防ぐ)。daily_reserve=自動ループが1日に消費してよいのはcap-reserve枠まで(残りは終盤の強い候補用に温存,0で無効)。min_interval_min=直近提出からこの分数未満は新規提出を抑止(spacing,0で無効)。改善ゲート(leak-free CVが前回*提出*をノイズ幅超えで上回った時のみ提出)はissue本文ポリシー+worker判断で担保。plan(kaggle-submission-plan)がreserve/spacingを決定論skip。 probe_after_hours=直近提出からこの時間以上経過し実効枠が残る時、改善ゲート未達でもプローブ提出(前回と別artifactのgap-closing/hedge候補)を1件許可する床(プラトー打破・LB探索,0で無効)。public LB首位との差が大きい間はローカルplateauを天井とみなさず公開上位ノート/baseline移植でgapを埋めることを最優先。"
   },
   "enabled": true,
   "schedule_hours_jst": [
@@ -140,6 +140,7 @@
   },
   "submission_policy": {
     "daily_reserve": 1,
-    "min_interval_min": 180
+    "min_interval_min": 180,
+    "probe_after_hours": 8
   }
 }

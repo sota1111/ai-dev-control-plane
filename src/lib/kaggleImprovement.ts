@@ -232,11 +232,14 @@ export interface RotationEntry {
  * 日次提出枠の効率化ポリシー（完了駆動ループが毎サイクル提出して cap を浪費するのを防ぐ）。
  * - dailyReserve: 自動ループが1日に消費してよいのは `cap - dailyReserve` 枠まで（残りは温存）。0=無効。
  * - minIntervalMin: 直近の提出からこの分数が経過するまで新規提出を抑止（spacing）。0=無効。
+ * - probeAfterHours: 直近提出からこの時間以上経過し日次枠が残っていれば、改善ゲート未達でも「プローブ提出」
+ *   （多様候補 / gap-closing 候補を1件）を許可する床。プラトー中に枠を遊ばせず public LB を探るため。0=無効。
  * 改善ゲート（leak-free CV が前回*提出*を上回った時のみ提出）は issue 本文ポリシー＋worker 判断で担保する。
  */
 export interface SubmissionPolicy {
   dailyReserve: number;
   minIntervalMin: number;
+  probeAfterHours: number;
 }
 
 export interface TargetsRegistry {
@@ -362,11 +365,12 @@ export function parseTargetsRegistry(raw: unknown): TargetsRegistry {
  * dailyReserve は 0 以上の整数、minIntervalMin は 0 以上の数値のみ採用（それ以外は 0 扱い）。
  */
 export function parseSubmissionPolicy(raw: unknown): SubmissionPolicy {
-  const def: SubmissionPolicy = { dailyReserve: 0, minIntervalMin: 0 };
+  const def: SubmissionPolicy = { dailyReserve: 0, minIntervalMin: 0, probeAfterHours: 0 };
   if (!raw || typeof raw !== 'object') return def;
   const o = raw as Record<string, unknown>;
   const reserveRaw = o.daily_reserve ?? o.dailyReserve;
   const intervalRaw = o.min_interval_min ?? o.minIntervalMin;
+  const probeRaw = o.probe_after_hours ?? o.probeAfterHours;
   const dailyReserve =
     typeof reserveRaw === 'number' && Number.isInteger(reserveRaw) && reserveRaw >= 0
       ? reserveRaw
@@ -375,7 +379,9 @@ export function parseSubmissionPolicy(raw: unknown): SubmissionPolicy {
     typeof intervalRaw === 'number' && Number.isFinite(intervalRaw) && intervalRaw >= 0
       ? intervalRaw
       : 0;
-  return { dailyReserve, minIntervalMin };
+  const probeAfterHours =
+    typeof probeRaw === 'number' && Number.isFinite(probeRaw) && probeRaw >= 0 ? probeRaw : 0;
+  return { dailyReserve, minIntervalMin, probeAfterHours };
 }
 
 function parseCompetition(c: unknown, i: number, seen: Set<string>): ImprovementCompetition {
@@ -1479,7 +1485,17 @@ ${childWorkers}
    - **日次枠(cap)の予約・スペーシング**: 下記「## 本日の提出予算」の残枠・reserve・直近提出からの経過を必ず
      確認する。reserve 枠は温存し（終盤のより強い候補用）、直近提出から最小間隔が未経過なら見送る。
      枠が残り少ない時は「ノイズ幅ギリギリの小改善」で枠を消費しない（大きな改善のみ提出）。
-   - 見送り時は cron/ガードが自動で次サイクルを回すので、**枠を無理に使い切らない**こと。
+   - **headroom 認識（重要）**: 上記「実LB順位トレンド／LB首位との差」を必ず見る。**public LB 首位との差が
+     大きい間は、ローカル指標の plateau を「天井」とみなしてはならない**（leak-free CV 未整備コンペでは
+     ローカル proxy と LB が乖離しうる）。改善ゲートで見送る前に、**escalation ladder の外部知識取り込み
+     （このコンペの公開上位ノート・公式/主催 baseline の移植で gap を埋める）を最優先で試す**こと。
+   - **日次プローブ枠（プラトー打破）**: 下記「## 本日の提出予算」が **🔎 プローブ提出 due** を示す
+     （＝一定時間提出が無く枠が残る）とき、改善ゲート未達でも **枠を1つ使ってプローブ提出する**。ただし
+     **前回提出と同一 artifact の再提出は禁止**（fingerprint gate で弾かれる・無意味）— 必ず **性質の異なる
+     候補**（公開上位ノート/baseline を移植した gap-closing 候補、または既提出と成分プロファイルの異なる
+     hedge）を用意して提出し、返ってきた LB を台帳へ記録して次サイクルの学習に使う。
+   - 見送り時は cron/ガードが自動で次サイクルを回す。ただし **public LB に明確な伸びしろがある間は
+     「見送り」を続けず、gap-closing 候補を作って（プローブ枠で）提出し LB を動かす**ことを優先する。
    提出は必ず control-plane の
    \`bash scripts/ai/kaggle_targets_submit.sh --competition ${competition.key} --repo ${target.repo} --execute\`
    を使用する（reserve/spacing/cap/fingerprint は plan 側でも決定論的にゲートされる）。Kaggle CLI/APIを
