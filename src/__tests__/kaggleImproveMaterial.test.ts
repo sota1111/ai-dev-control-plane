@@ -197,7 +197,7 @@ describe('kaggleImproveMaterial', () => {
         row('2026-08-19 23:00:00'), // yesterday — not counted today
         row('2026-08-20 09:00:00', 'SubmissionStatus.ERROR'), // ERROR does not consume a slot
       ];
-      const d = buildSubmissionBudgetDigest(rows, 5, { dailyReserve: 1, minIntervalMin: 0 }, NOW);
+      const d = buildSubmissionBudgetDigest(rows, 5, { dailyReserve: 1, minIntervalMin: 0, probeAfterHours: 0 }, NOW);
       expect(d).toContain('消費枠: 2/5'); // 2 today (ERROR + yesterday excluded)
       expect(d).toContain('残 3');
       expect(d).toContain('実効枠: 2 残'); // cap5 - reserve1 = 4; 4 - 2 = 2
@@ -205,15 +205,62 @@ describe('kaggleImproveMaterial', () => {
 
     test('spacing line flags a hold when last submit is within min_interval_min', () => {
       const rows = [row('2026-08-20 14:00:00')]; // 60min before NOW
-      const d = buildSubmissionBudgetDigest(rows, 5, { dailyReserve: 0, minIntervalMin: 180 }, NOW);
+      const d = buildSubmissionBudgetDigest(rows, 5, { dailyReserve: 0, minIntervalMin: 180, probeAfterHours: 0 }, NOW);
       expect(d).toContain('最小間隔 180分');
       expect(d).toContain('見送り'); // 60 < 180
     });
 
     test('spacing satisfied when last submit is older than min_interval_min', () => {
       const rows = [row('2026-08-20 10:00:00')]; // 300min before NOW
-      const d = buildSubmissionBudgetDigest(rows, 5, { dailyReserve: 0, minIntervalMin: 180 }, NOW);
+      const d = buildSubmissionBudgetDigest(
+        rows,
+        5,
+        { dailyReserve: 0, minIntervalMin: 180, probeAfterHours: 0 },
+        NOW
+      );
       expect(d).toContain('提出可（間隔OK）');
+    });
+
+    test('probe is due when no submission for probe_after_hours and slots remain', () => {
+      // last submit 10h before NOW (>8h threshold), effective slots remain, spacing OK.
+      const rows = [row('2026-08-20 05:00:00')]; // NOW is 15:00 → 10h ago
+      const d = buildSubmissionBudgetDigest(
+        rows,
+        5,
+        { dailyReserve: 1, minIntervalMin: 180, probeAfterHours: 8 },
+        NOW
+      );
+      expect(d).toContain('プローブ提出 due');
+      expect(d).toContain('gap-closing/hedge');
+    });
+
+    test('probe is NOT due when last submission is recent', () => {
+      const rows = [row('2026-08-20 14:00:00')]; // 1h ago < 8h
+      const d = buildSubmissionBudgetDigest(
+        rows,
+        5,
+        { dailyReserve: 1, minIntervalMin: 0, probeAfterHours: 8 },
+        NOW
+      );
+      expect(d).not.toContain('プローブ提出 due');
+      expect(d).toContain('プローブ枠: due でない');
+    });
+
+    test('probe is suppressed while effective slots are exhausted (reserve)', () => {
+      // 4 today, cap5-reserve1=4 → loopRemaining 0 → no probe even if long since last.
+      const rows = [
+        row('2026-08-20 05:00:00'),
+        row('2026-08-20 05:01:00'),
+        row('2026-08-20 05:02:00'),
+        row('2026-08-20 05:03:00'),
+      ];
+      const d = buildSubmissionBudgetDigest(
+        rows,
+        5,
+        { dailyReserve: 1, minIntervalMin: 0, probeAfterHours: 8 },
+        NOW
+      );
+      expect(d).not.toContain('プローブ提出 due');
     });
   });
 

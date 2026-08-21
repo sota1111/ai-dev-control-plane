@@ -1311,21 +1311,26 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('改善ゲート');
       expect(body).toContain('本日の提出予算');
       expect(body).toContain('消費枠: 2/5'); // injected budget material is rendered
+      // プラトー打破: headroom 認識 + 日次プローブ枠のポリシーが含まれる。
+      expect(body).toContain('headroom 認識');
+      expect(body).toContain('日次プローブ枠');
       // 旧ポリシー（毎サイクル提出容認）は撤去済み。
       expect(body).not.toContain('champion 昇格は必須条件にしない');
     });
 
-    test('parseSubmissionPolicy: defaults + validation (fail-safe to 0/0)', () => {
-      expect(parseSubmissionPolicy(undefined)).toEqual({ dailyReserve: 0, minIntervalMin: 0 });
-      expect(parseSubmissionPolicy({ daily_reserve: 2, min_interval_min: 90 })).toEqual({
-        dailyReserve: 2,
-        minIntervalMin: 90,
-      });
-      // 負値/非数値は 0 に倒す。
-      expect(parseSubmissionPolicy({ daily_reserve: -1, min_interval_min: 'x' })).toEqual({
+    test('parseSubmissionPolicy: defaults + validation (fail-safe to 0/0/0)', () => {
+      expect(parseSubmissionPolicy(undefined)).toEqual({
         dailyReserve: 0,
         minIntervalMin: 0,
+        probeAfterHours: 0,
       });
+      expect(
+        parseSubmissionPolicy({ daily_reserve: 2, min_interval_min: 90, probe_after_hours: 8 })
+      ).toEqual({ dailyReserve: 2, minIntervalMin: 90, probeAfterHours: 8 });
+      // 負値/非数値は 0 に倒す。
+      expect(
+        parseSubmissionPolicy({ daily_reserve: -1, min_interval_min: 'x', probe_after_hours: -3 })
+      ).toEqual({ dailyReserve: 0, minIntervalMin: 0, probeAfterHours: 0 });
     });
   });
 
