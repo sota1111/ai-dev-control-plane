@@ -1,11 +1,11 @@
 {
   "__doc__": "Runner concurrency / parallel-execution config (source of truth — NOT in .env). The N-slot drain pool (SOT-931/933) runs distinct serialization lanes concurrently while same-lane (=同一repo) work stays serial. Env vars still override at runtime when explicitly set: RUNNER_MAX_PARALLEL / RUNNER_SERIALIZE_SCOPE / RUNNER_STABLE_MODE.",
   "__fields__": {
-    "maxParallel": "N-slot pool size: how many DISTINCT-lane queue items drainQueue may dispatch concurrently. 1 = fully serial (historical). >1 runs different-repo Todos in parallel; same repo stays serial.",
+    "maxParallel": "N-slot pool size: how many DISTINCT-lane queue items drainQueue may dispatch concurrently. 1 = fully serial (historical). >1 runs different-repo Todos in parallel; same repo stays serial. Set to 4 = one slot per active Kaggle lineage lane (biohub-claude / biohub-gpt / kaggriculture-claude / kaggriculture-gpt) so lanes never queue behind each other; within a lane child Issues share the repo and stay serial (safety valve).",
     "serializeScope": "'repo' (default: 同一repo直列・別repo並行) | 'branch' (別branchも別laneで並行可).",
     "stableMode": "true forces fully-serial (maxParallel→1, scope→repo, no detach) — emergency kill-switch. Prefer the runtime env RUNNER_STABLE_MODE=1 for a temporary halt; keep this false as the committed steady state."
   },
-  "maxParallel": 2,
+  "maxParallel": 4,
   "serializeScope": "repo",
   "stableMode": false
 }
