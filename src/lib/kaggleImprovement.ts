@@ -1294,11 +1294,16 @@ export function buildExplorationBanner(
 - **多様な独立方向のポートフォリオを 3〜5 本**同時に子Issue化する。各方向は**構造的に独立**で、現 champion の
   変種にしない。例:
   - (a) **役割A'＝可搬な公開上位 baseline/agent を"丸ごと"採用**して実スコアを測る（1機能のつまみ食いでなく
-    土台ごと差し替え。可搬な公開 agent が自 best を ≫ノイズ幅で上回るなら最優先で採用・出典明記・旧を hedge 温存）。
+    土台ごと差し替え・出典明記・旧を hedge 温存）。**⚠ rogii の教訓（public↔private τ=−1.00 逆転で public 首位が
+    private 圏外・過学習全滅）**: 丸ごと採用は**候補"方向"を作るため**であって、**その高 public を private の証拠にしない**。
+    「public が自 best を上回る＝最優先で champion 化」は**禁止**——(1) 昇格は必ず二信号ゲート（**CV↑ の裏付け必須**）を
+    通し、CV が裏付けない public 跳ねは **public 過学習/逆転を疑い hedge 扱い**、(2) **cv_representative=false（CVで検証
+    不能）では採用は"賭け"**＝旧champion を必ず hedge 温存し全賭けしない。
   - (b) 根本的に異なる戦略／アーキテクチャ、(c) 問題定式化の変更、(d) 上位ノートの **CV/検証設計の移植**（役割B）。
 - 各方向は**それ自身の実力で評価**する（現 champion の panel で「発火するか」ではなく、その方向の実スコア/CV を
   直接測る）。方向間で比較し、**筋の良い方向を特定してから exploit（深掘り）**へ移る。
-- 昇格・提出は private-anchored 二信号ゲート/hedge の規律に従う（探索は候補生成の多様性・評価はローカル一次KPI）。`;
+- 昇格・提出は private-anchored 二信号ゲート/hedge の規律に従う（探索は候補生成の多様性・評価はローカル一次KPI）。
+  **探索で public 上位を広く採るのは"良い方向の生成"に限る。選抜は決して public-best で行わない（rogii 再発防止）。**`;
 }
 
 export function buildIssueBody(

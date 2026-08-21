@@ -824,6 +824,10 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('役割A'); // 可搬な公開 baseline を丸ごと採用
       expect(body).toContain('ポートフォリオ');
       expect(body).toContain('cv_representative=false');
+      // rogii 反省点: 丸ごと採用の high-public を private の証拠にしない／選抜は public-best 禁止。
+      expect(body).toContain('rogii');
+      expect(body).toContain('public↔private');
+      expect(body).toContain('public-best');
     });
 
     test('exploration banner fires when stuck even if cv_representative=true', () => {
