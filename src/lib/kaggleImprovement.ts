@@ -1510,8 +1510,10 @@ ${childWorkers}
        - \`public↑ & CV↓/横\` = **public-hack / metric-hack** → **棄却**（採用は下記 hedge のみ）。
        - \`CV↑ & public 未観測\` = CVで暫定保持し、**最終前に1回だけ** public 照合（public を反復チューニングに使わない）。
    - **public は疎に消費・public-best 選抜は禁止**: 下記「本日の提出予算」の残枠/reserve/spacing を守り、
-     多数候補を public で順位付けしない（public 集合の情報漏洩＝過学習）。**最終2枠 = CV最良 × 構造的に独立な
-     hedge**（三角測量は独立誤差にのみ有効・train↔private 共通シフトは hedge でしか守れない）。
+     多数候補を public で順位付けしない（public 集合の情報漏洩＝過学習）。**最終submission の選抜（CV最良×構造
+     独立hedge）は締切接近＝converge フェーズでのみ行う選抜規律**であり、**explore/通常サイクル中に「最終2枠の
+     候補セット整備」等の子Issueを作ってはならない**（converge の指示は本文に「## 収束モード」が出た時だけ従う。
+     hedge は train↔private 共通シフトへの唯一の保険だが、準備は converge で十分）。
    - **transfer-trust（CV↔public 乖離監視）**: 上記「CV↔public gap」を見る。乖離が大きい/相関が低いなら、どちらも
      private を代表していない → **public を追わず「CV設計を private 代理へ作り直す（oracle 修理）」を最優先軸**にする。
    - **外部知識（公開ノート/上位解法）の取り込み**（上記「高得点公開ノート」節・詳細は設計docの§3）:
