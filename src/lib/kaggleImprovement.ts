@@ -1227,9 +1227,11 @@ export function buildStuckExternalSolutionsBanner(
 本サイクルは行き詰まり兆候（${s.reason}）を検知した。局所チューニングの継続は禁止し、**今サイクルの主軸を
 「このコンペ（\`${competition.kaggleCompetition}\`）の過去 Kaggle 上位解法の調査と移植」に固定**する
 （escalation ladder の「外部知識取り込み」を前倒しする）:
-- web検索で **上位解法**（優勝／上位入賞の write-up・Kaggle Discussion の Solution スレッド・公開 gold/銀銅
-  kernel・関連論文）を調査し、勝ち筋（前処理・特徴量・モデル・後処理・**CV設計**）の要点を出典URLとともに
-  target repo の \`docs/ai/experiment_ledger.jsonl\` へ記録する。
+- web検索で次の**両方**を調査する: (a) **上位解法**（優勝／上位入賞の write-up・Kaggle Discussion の
+  Solution スレッド・公開 gold/銀銅 kernel・関連論文）、(b) **該当コンペ自身の公開ノートブック**
+  （Kaggle の Code タブ：**公式/主催 baseline・EDA・高評価(upvote上位) kernel**。入賞に限らず、その
+  コンペ固有のデータ癖・前処理・特徴量・評価の実務が詰まっている）。勝ち筋（前処理・特徴量・モデル・
+  後処理・**CV設計**）の要点を出典URLとともに target repo の \`docs/ai/experiment_ledger.jsonl\` へ記録する。
 - 有効な手法を **1つ以上、具体的に移植** する子Issueを立てる。移植可否は可搬性（ロジック/データ蒸留=可搬・
   GPU weights 等=非可搬）と本 repo の実行制約（オフライン提出・依存関係）の下で成立するかを見極める。
 - 既に台帳で **rejected の軸は新しい根拠なしに再試行しない**。移植した手法の出典・要点は台帳の evidence に残す。`;
@@ -1442,8 +1444,9 @@ ${convergeMode}
 通過する（leak-free CV の有無・CVとpublicのオーダー一致・乖離時はCVを信じる・重い裾metricの頑健受容・
 最終2枠を CV最良×hedge で分散）。未整備の項目があれば最初の子Issueで整備する。
 1. 上記材料から未着手の改善軸を選定する。軸の選定にあたっては必ず web 検索を行い、Kaggle の上位
-   ノートブック（公開 kernel・上位解法の write-up・discussion）を積極的に調査して、外部の有効な手法を
-   改善軸の候補に含める（実験台帳を必ず参照し、非昇格済み軸の再試行は新しい根拠を明示。
+   ノートブック（公開 kernel・上位解法の write-up・discussion）**に加え、該当コンペ自身の Code タブの
+   公開ノートブック（公式/主催 baseline・EDA・高評価 kernel＝入賞に限らない）**を積極的に調査して、外部の
+   有効な手法を改善軸の候補に含める（実験台帳を必ず参照し、非昇格済み軸の再試行は新しい根拠を明示。
    ローカルCVが飽和しているのに public LB が乖離/低下している場合は oracle ドリフト・汎化ギャップを疑い、
    局所A/Bを続けず再アンカリング（holdout/GT再整備・評価系再構築）を軸に選ぶ。CVと乖離した public は
    追わない。連続非昇格が続く場合は escalation ladder の次の段へ強制的に進む:
@@ -1491,9 +1494,10 @@ ${childWorkers}
 ## 実行リソース
 - 改善の実装・学習・検証では GPU の使用を許可する。
 - 改善方針の検討では必ず web 検索を行い、Kaggle の上位ノートブック（公開 kernel・上位解法の
-  write-up・discussion）を積極的に調査・活用する。有効な手法は本 repo の実行制約（オフライン提出・
-  依存関係等）の下で移植する。スコア源が可搬（ロジック/データ蒸留）か非可搬（GPU weights 等）かを
-  見極めてから取り込むこと。
+  write-up・discussion）**と、該当コンペ自身の Code タブの公開ノートブック（公式/主催 baseline・EDA・
+  高評価 kernel＝入賞に限らない）**の両方を積極的に調査・活用する。有効な手法は本 repo の実行制約
+  （オフライン提出・依存関係等）の下で移植する。スコア源が可搬（ロジック/データ蒸留）か非可搬
+  （GPU weights 等）かを見極めてから取り込むこと。
 
 ## 受け入れ条件
 - [ ] 改善方針と選定理由がコメントに記録されている

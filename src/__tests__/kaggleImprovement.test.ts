@@ -428,6 +428,9 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('改善の実装・学習・検証では GPU の使用を許可する。');
       expect(body).toContain('必ず web 検索を行い');
       expect(body).toContain('Kaggle の上位ノートブック');
+      // 過去の入賞解法だけでなく、該当コンペ自身の Code タブの公開ノートブック（baseline/EDA/高評価）も参照する。
+      expect(body).toContain('該当コンペ自身の Code タブ');
+      expect(body).toContain('入賞に限らない');
       expect(body).toContain('子IssueはKaggle提出を実行してはならない');
       expect(body).toContain('auto-parent-resumed');
       // 提出は改善ゲート＋日次枠効率化ポリシーに従う（旧「新artifactなら毎回提出」から反転）。
@@ -774,6 +777,8 @@ describe('kaggleImprovement', () => {
         expect(body).toContain(STUCK_HEADING);
         expect(body).toContain(STUCK_AXIS);
         expect(body).toContain('外部知識取り込み');
+        // 該当コンペ自身の公開ノートブック（Code タブ）も第一級ソースとして指示する。
+        expect(body).toContain('該当コンペ自身の公開ノートブック');
         // コンペ slug を明示して「このコンペの」上位解法へ誘導する。
         expect(body).toContain(c.kaggleCompetition);
       }
