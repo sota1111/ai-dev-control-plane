@@ -833,10 +833,21 @@ describe('kaggleImprovement', () => {
       expect(body).toContain(EXPLORE_HEADING);
     });
 
-    test('exploration banner does NOT fire when cv_representative=true and not stuck', () => {
+    test('exploration banner does NOT fire when cv_representative=true and not stuck (no explore_first)', () => {
       const c = reg().competitions[0];
       const body = buildIssueBody(c.targets[0], c, 3, { rankTrendDirection: 'improving' });
       expect(body).not.toContain(EXPLORE_HEADING);
+    });
+
+    test('exploration banner fires for explore_first=true even when cv_representative=true and not stuck (biohub-style)', () => {
+      const raw: any = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].explore_first = true; // cv_representative defaults true
+      const c = parseTargetsRegistry(raw).competitions[0];
+      expect(c.cvRepresentative).toBe(true);
+      expect(c.exploreFirst).toBe(true);
+      const body = buildIssueBody(c.targets[0], c, 3, { rankTrendDirection: 'improving' });
+      expect(body).toContain(EXPLORE_HEADING);
+      expect(body).toContain('explore_first=true');
     });
 
     test('exploration banner is suppressed in proxy-establishment stage', () => {
