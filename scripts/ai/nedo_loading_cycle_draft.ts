@@ -341,6 +341,10 @@ ${historyBlock}
 
 ## 【1サイクルの手順】（親=分析・分解・統合 / 子=並列実装）
 
+0. **pending 提出の消化（サイクル冒頭・枠があるときだけ）**: \`docs/ai/pending_submissions.jsonl\` に
+   未提出候補があり、当日(JST)の提出枠が残っていれば、**分析より先に**ベストから順に提出して
+   submission_log へ記録し、採点(~35分)を回収して台帳の該当 cycle 行へ lb_* を追記する。
+   枠が無ければ何もしない（**枠回復を待ってはならない** — 次以降のサイクルが拾う）。
 1. **前回結果の採点分析と方針立案（Fable 必須・成果物化）**: 台帳・前回サイクルの申し送り・直近の
    ローカル評価結果（成分別）・LB フィードバックを読み、**弱い成分と失敗ケースを特定**する
    （どの成分が律速か / どのテストケース型で落ちるか / タイムアウト・積載未達=fill以外0 の有無）。
@@ -364,6 +368,12 @@ ${historyBlock}
      \`{"ts":"<UTC>","jst_date":"YYYY-MM-DD","cycle":${cycle},"sha256":"<zipのSHA-256>","candidate":"<名前>","memo":"..."}\`
      を追記し、**同一 JST 日付の行数が5を超える提出はしない**。プラットフォーム実上限が5未満と判明
      したらそれに従い、00_competition_context.md を更新する
+   - **【最重要】枠が無い場合に枠回復(JST日付替わり)を待ってはならない**（ユーザー指示 2026-08-21）:
+     提出できない候補は \`docs/ai/pending_submissions.jsonl\` へ
+     \`{"ts":"<UTC>","cycle":${cycle},"path":"<zip>","sha256":"...","candidate":"...","gated_predicted_lb":N,"note":"優先順位"}\`
+     として記録し、**そのまま手順5→6へ進んでサイクルを完了する**。提出と採点回収は「枠がある
+     サイクル」の手順0が拾う。サイクルの進行はローカル採点（ゲート後 predicted_lb）で継続し、
+     提出枠に律速させない — hold/sleep ループでの枠待ち滞留は禁止
 5. \`docs/ai/loading_history.jsonl\` へ追記（1サイクル=1行）:
    \`{"cycle":${cycle},"ts":"<UTC>","local_score":N,"local_components":{"fill":N,"cog":N,"stability":N,"placement":N,"soft":N},"submitted":true|false,"lb_score":N,"lb_components":{...},"est_weights":{...},"changes":["..."],"next":["..."]}\`
    （未提出サイクルは lb_* を省略。**lb_score は oracle-drift 自動検知の真feedback入力** — 提出したら必ず記録）
