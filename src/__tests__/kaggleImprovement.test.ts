@@ -434,7 +434,7 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('子IssueはKaggle提出を実行してはならない');
       expect(body).toContain('auto-parent-resumed');
       // 提出は改善ゲート＋日次枠効率化ポリシーに従う（旧「新artifactなら毎回提出」から反転）。
-      expect(body).toContain('提出予算ポリシー');
+      expect(body).toContain('提出・昇格ポリシー');
       // 未指定の材料は安全側のプレースホルダになる。
       expect(body).toContain('(該当なし)');
     });
@@ -1307,21 +1307,35 @@ describe('kaggleImprovement', () => {
       const body = buildIssueBody(c.targets[0], c, 3, {
         submissionBudget: '- 本日(UTC 2026-08-20)の消費枠: 2/5（残 3）',
       });
-      expect(body).toContain('提出予算ポリシー');
-      expect(body).toContain('改善ゲート');
+      // private-anchored: 二信号一致ゲート / public=反証器 / プローブ枠。
+      expect(body).toContain('提出・昇格ポリシー');
+      expect(body).toContain('二信号一致ゲート');
+      expect(body).toContain('反証器'); // public は目標でなく反証器
+      expect(body).toContain('transfer-trust');
+      expect(body).toContain('プローブ枠');
       expect(body).toContain('本日の提出予算');
       expect(body).toContain('消費枠: 2/5'); // injected budget material is rendered
-      // プラトー打破: headroom 認識 + 日次プローブ枠のポリシーが含まれる。
-      expect(body).toContain('headroom 認識');
-      expect(body).toContain('日次プローブ枠');
       // 高得点公開ノート材料が注入されていれば専用セクションに描画される。
       const withNotebooks = buildIssueBody(c.targets[0], c, 3, {
         publicNotebooksDigest: '1. `foo/bar` — 高得点ノート\n\n**参照方針**: leak-free CV',
       });
       expect(withNotebooks).toContain('高得点公開ノート（Kaggle Code');
       expect(withNotebooks).toContain('foo/bar');
-      // 旧ポリシー（毎サイクル提出容認）は撤去済み。
+      // 旧ポリシー（毎サイクル提出容認 / public追い）は撤去済み。
       expect(body).not.toContain('champion 昇格は必須条件にしない');
+      // cv_representative=true（既定）は agent/RL 退避ブロックを出さない。
+      expect(body).not.toContain('cv_representative=false');
+    });
+
+    test('buildIssueBody: cv_representative=false inserts the agent/RL fallback (no champion-chasing)', () => {
+      const raw: any = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].cv_representative = false;
+      const c = parseTargetsRegistry(raw).competitions[0];
+      expect(c.cvRepresentative).toBe(false);
+      const body = buildIssueBody(c.targets[0], c, 3, {});
+      expect(body).toContain('cv_representative=false（agent/RL');
+      expect(body).toContain('役割B'); // 評価系再設計へ退避
+      expect(body).toContain('champion 化・local A/B の追い込みはしない');
     });
 
     test('parseSubmissionPolicy: defaults + validation (fail-safe to 0/0/0)', () => {

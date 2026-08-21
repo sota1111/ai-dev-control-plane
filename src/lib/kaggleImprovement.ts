@@ -139,6 +139,12 @@ export interface ImprovementCompetition {
   pinnedLineage?: Lineage;
   /** 検証設定（SOT-2514）。欠落時は fail-safe に `{ primary: 'cv' }`。 */
   validation: CompetitionValidation;
+  /**
+   * leak-free CV が private を代表できる競技型か（private-anchored 設計 §4）。既定 true。
+   * false = agent/RL・live matchmaking 等、固定相手の CV が最終フィールド(private)を代表しない型。
+   * false のとき本文は「外部知識は評価系再設計(役割B)/hedge(役割D)へ退避・champion 化しない」へ切替える。
+   */
+  cvRepresentative: boolean;
   targets: ImprovementTarget[];
 }
 
@@ -564,6 +570,10 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
   }
 
   const validation = parseCompetitionValidation(co.validation, i);
+  // private-anchored §4: cv_representative（既定 true）。boolean 以外は true 扱い（fail-safe）。
+  const cvRepresentativeRaw = (co as Record<string, unknown>).cv_representative
+    ?? (co as Record<string, unknown>).cvRepresentative;
+  const cvRepresentative = cvRepresentativeRaw === false ? false : true;
 
   return {
     key,
@@ -581,6 +591,7 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
     pinnedHoursJst,
     pinnedLineage,
     validation,
+    cvRepresentative,
     targets,
   };
 }
@@ -1490,25 +1501,29 @@ ${childWorkers}
 3. 初回runは子Issue登録後に提出せず In Review で待機する。全子Issueが In Review/Doneへ到達すると
    webhookが \`<!-- auto-parent-resumed -->\` コメントを付けて親をTodoへ戻す。再開runでは子Issueを
    再作成せず、全子Issueの完了と検証結果を再取得・集約する。
-   **【提出予算ポリシー — 日次枠を効率的に使う（毎サイクル提出しない）】**
-   - **改善ゲート（必須）**: 提出するのは **leak-free CV（一次KPI）が前回*提出*artifactをノイズ幅を超えて
-     上回った＝champion 昇格**が確認できた時 **だけ**。改善が無い／ノイズ幅内のサイクルは **提出せず**、
-     「非昇格・提出見送り」を親へ記録して次サイクルの局所改善へ回す（artifact fingerprint が前回提出と
-     同一の場合も同様に提出しない）。
-   - **日次枠(cap)の予約・スペーシング**: 下記「## 本日の提出予算」の残枠・reserve・直近提出からの経過を必ず
-     確認する。reserve 枠は温存し（終盤のより強い候補用）、直近提出から最小間隔が未経過なら見送る。
-     枠が残り少ない時は「ノイズ幅ギリギリの小改善」で枠を消費しない（大きな改善のみ提出）。
-   - **headroom 認識（重要）**: 上記「実LB順位トレンド／LB首位との差」を必ず見る。**public LB 首位との差が
-     大きい間は、ローカル指標の plateau を「天井」とみなしてはならない**（leak-free CV 未整備コンペでは
-     ローカル proxy と LB が乖離しうる）。改善ゲートで見送る前に、**escalation ladder の外部知識取り込み
-     （このコンペの公開上位ノート・公式/主催 baseline の移植で gap を埋める）を最優先で試す**こと。
-   - **日次プローブ枠（プラトー打破）**: 下記「## 本日の提出予算」が **🔎 プローブ提出 due** を示す
-     （＝一定時間提出が無く枠が残る）とき、改善ゲート未達でも **枠を1つ使ってプローブ提出する**。ただし
-     **前回提出と同一 artifact の再提出は禁止**（fingerprint gate で弾かれる・無意味）— 必ず **性質の異なる
-     候補**（公開上位ノート/baseline を移植した gap-closing 候補、または既提出と成分プロファイルの異なる
-     hedge）を用意して提出し、返ってきた LB を台帳へ記録して次サイクルの学習に使う。
-   - 見送り時は cron/ガードが自動で次サイクルを回す。ただし **public LB に明確な伸びしろがある間は
-     「見送り」を続けず、gap-closing 候補を作って（プローブ枠で）提出し LB を動かす**ことを優先する。
+   **【提出・昇格ポリシー — private が真KPI（観測不能）／CV一次・public反証・二信号一致ゲート】**
+   設計: \`docs/ai/kaggle-private-anchored-improvement.md\`。**public LB は"目標"でなく"反証器"。high-public
+   スコア単独では何も昇格・提出しない**（public 過学習＝private 毀損・rogii 全滅の再発防止）。
+   - **二信号一致ゲート（昇格の必須条件）**: 候補は leak-free CV（private 一次代理）が前回*提出*をノイズ幅超えで
+     上回り（**CV↑**）、**かつ public が矛盾しない**（未観測 or 非低下）時**のみ**昇格・提出する:
+       - \`CV↑ & public↓\` = **CV固有の過学習**（private に乗らない疑い）→ **棄却**（提出しない）。
+       - \`public↑ & CV↓/横\` = **public-hack / metric-hack** → **棄却**（採用は下記 hedge のみ）。
+       - \`CV↑ & public 未観測\` = CVで暫定保持し、**最終前に1回だけ** public 照合（public を反復チューニングに使わない）。
+   - **public は疎に消費・public-best 選抜は禁止**: 下記「本日の提出予算」の残枠/reserve/spacing を守り、
+     多数候補を public で順位付けしない（public 集合の情報漏洩＝過学習）。**最終2枠 = CV最良 × 構造的に独立な
+     hedge**（三角測量は独立誤差にのみ有効・train↔private 共通シフトは hedge でしか守れない）。
+   - **transfer-trust（CV↔public 乖離監視）**: 上記「CV↔public gap」を見る。乖離が大きい/相関が低いなら、どちらも
+     private を代表していない → **public を追わず「CV設計を private 代理へ作り直す（oracle 修理）」を最優先軸**にする。
+   - **外部知識（公開ノート/上位解法）の取り込み**（上記「高得点公開ノート」節・詳細は設計docの§3）:
+       - 役割A（軸の仮説源）: 手法を移植 → CV で評価 → 二信号ゲート通過で champion 候補（high-public だけでは不可）。
+       - 役割B（最高レバレッジ）: transfer-trust が低い時は**彼らの CV設計/既知leak を学び自分の CV を private 代理へ修理**。
+       - 役割D（hedge）: public 高いが CV 未確認・**⚠hack フラグ付き**は**構造独立 hedge 候補のみ**（champion 化禁止）。
+${competition.cvRepresentative ? '' : `   - **⚠この競技は cv_representative=false（agent/RL・live matchmaking 型）**: 固定相手の CV は最終フィールド(private)を
+     代表しない。外部知識は**役割B（評価系の再設計）と役割D（少数の多様 hedge を出して静観）へ退避**し、
+     **役割A の champion 化・local A/B の追い込みはしない**。
+`}   - **プローブ枠（プラトー時のみ・public追いでない）**: 「本日の提出予算」が 🔎 プローブ due の時のみ、
+     **CV では確認できないが構造の異なる hedge 候補を1件**出して private 汎化の保険/情報を得る（既提出と別
+     fingerprint・別成分プロファイル）。枠が無ければ見送り、局所改善を継続する（**見送りは失敗ではない**）。
    提出は必ず control-plane の
    \`bash scripts/ai/kaggle_targets_submit.sh --competition ${competition.key} --repo ${target.repo} --execute\`
    を使用する（reserve/spacing/cap/fingerprint は plan 側でも決定論的にゲートされる）。Kaggle CLI/APIを
