@@ -145,6 +145,12 @@ export interface ImprovementCompetition {
    * false のとき本文は「外部知識は評価系再設計(役割B)/hedge(役割D)へ退避・champion 化しない」へ切替える。
    */
   cvRepresentative: boolean;
+  /**
+   * 探索優先（explore-first §4.5）の明示オプトイン（既定 false）。true のとき、行き詰まり/cv_representative に
+   * 依らず常に「現コードの逐次改変でなく多方向探索」バナーを出す。frontier と大差で強い公開ノートがある間、
+   * 逐次改変で局所最適に留まらないため（biohub/kaggriculture のように public 首位と大差の競技で有効）。
+   */
+  exploreFirst: boolean;
   targets: ImprovementTarget[];
 }
 
@@ -574,6 +580,9 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
   const cvRepresentativeRaw = (co as Record<string, unknown>).cv_representative
     ?? (co as Record<string, unknown>).cvRepresentative;
   const cvRepresentative = cvRepresentativeRaw === false ? false : true;
+  // explore_first（既定 false）。boolean 以外は false 扱い（fail-safe）。
+  const exploreFirst = (co as Record<string, unknown>).explore_first === true
+    || (co as Record<string, unknown>).exploreFirst === true;
 
   return {
     key,
@@ -592,6 +601,7 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
     pinnedLineage,
     validation,
     cvRepresentative,
+    exploreFirst,
     targets,
   };
 }
@@ -1271,6 +1281,7 @@ export function buildExplorationBanner(
 ): string {
   const stuck = isImprovementStuck(material);
   const reasons: string[] = [];
+  if (competition.exploreFirst) reasons.push('explore_first=true（registry・frontier と大差の探索対象）');
   if (!competition.cvRepresentative) reasons.push('cv_representative=false（agent/RL・live matchmaking）');
   if (stuck.stuck) reasons.push(stuck.reason);
   if (reasons.length === 0) return '';
