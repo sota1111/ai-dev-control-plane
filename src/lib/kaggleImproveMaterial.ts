@@ -945,6 +945,94 @@ function collectLeaderboardScores(slug: string, log: (m: string) => void): numbe
   }
 }
 
+/** `kaggle kernels list --sort-by scoreDescending --csv` の1行（列 ref,title,author,lastRunTime,totalVotes）。 */
+export interface PublicKernelRow {
+  ref: string;
+  title: string;
+  votes?: number;
+}
+
+/**
+ * `kaggle kernels list --competition <slug> --sort-by scoreDescending --csv` の出力をパースする。
+ * Kaggle CLI は**数値スコアを列に出さない**ため、返るのは「スコア降順の並び（上位＝高得点）」＋ref/title/votes。
+ */
+export function parseTopPublicKernels(csv: string): PublicKernelRow[] {
+  const lines = (csv || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const headerIdx = lines.findIndex((l) => /(^|,)ref(,|$)/i.test(l) && /title/i.test(l));
+  if (headerIdx < 0) return [];
+  const header = splitCsvLine(lines[headerIdx]).map((h) => h.trim().toLowerCase());
+  const iRef = header.indexOf('ref');
+  const iTitle = header.indexOf('title');
+  const iVotes = header.indexOf('totalvotes');
+  const out: PublicKernelRow[] = [];
+  for (const line of lines.slice(headerIdx + 1)) {
+    const cols = splitCsvLine(line);
+    const ref = (cols[iRef] || '').trim();
+    if (!ref) continue;
+    const votesRaw = iVotes >= 0 ? Number((cols[iVotes] || '').trim()) : NaN;
+    out.push({
+      ref,
+      title: (cols[iTitle] || '').trim(),
+      ...(Number.isFinite(votesRaw) ? { votes: votesRaw } : {}),
+    });
+  }
+  return out;
+}
+
+/** タイトル/ref に public メトリクスhack・過学習の匂いがあるか（過学習ガードの目印）。 */
+function looksLikePublicOverfit(k: PublicKernelRow): boolean {
+  return /metric[\s_-]*hack|public[\s_-]*holdout|\bleak|overfit|magic|lb[\s_-]*probe/i.test(
+    `${k.ref} ${k.title}`
+  );
+}
+
+/**
+ * 高得点公開ノート（スコア降順・上位N）を **手法参照用**にダイジェスト化する。数値スコアは非公開のため
+ * 「並び＝高得点順」であること、および **public 過学習を避ける参照方針**を明記する（ユーザ要望）。
+ */
+export function buildPublicNotebooksDigest(
+  kernels: PublicKernelRow[],
+  opts: { limit?: number } = {}
+): string | undefined {
+  const limit = opts.limit ?? 8;
+  const top = kernels.slice(0, limit);
+  if (top.length === 0) return undefined;
+  const listed = top
+    .map((k, i) => {
+      const hack = looksLikePublicOverfit(k) ? ' ⚠public過学習の疑い(hack/holdout/leak)' : '';
+      const votes = typeof k.votes === 'number' ? `, ▲${k.votes}` : '';
+      return `${i + 1}. \`${k.ref}\` — ${k.title || '(no title)'}${votes}${hack}`;
+    })
+    .join('\n');
+  return [
+    listed,
+    '',
+    '**参照方針（public スコア過学習を避ける）**:',
+    '- 参照するのは **手法**（アーキ/前処理/特徴量/後処理/**CV設計**）であって public スコアへ合わせ込むためではない。' +
+      '一次KPIは **leak-free CV**（public は二次 sanity）。自分の public/LB順位との差は上記「検証階層」を参照。',
+    '- ⚠ 付きノートは **public メトリクス hack / public holdout / leak** の可能性（public高↔private崩壊）。' +
+      '手法の genuine 性を吟味し、hack 系は移植しない（または性質の異なる hedge としてのみ扱う）。',
+    '- 移植候補は必ず **leak-free CV / robust 分布で検証**してから昇格。最終2枠は **CV最良×性質の異なる hedge** で' +
+      '分散（public best 一辺倒は禁止・rogii 過学習全滅の再発防止）。',
+  ].join('\n');
+}
+
+/** 高得点公開ノートをコンペ単位で1回取得（best-effort・失敗時 undefined）。 */
+function collectTopPublicKernels(slug: string, log: (m: string) => void): PublicKernelRow[] {
+  if (!slug) return [];
+  try {
+    const out = execFileSync(
+      'kaggle',
+      ['kernels', 'list', '--competition', slug, '--sort-by', 'scoreDescending', '--page-size', '12', '--csv'],
+      { encoding: 'utf8', timeout: 25000, stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+    return parseTopPublicKernels(out);
+  } catch (err: any) {
+    log(`kaggle kernels list failed for ${slug}: ${err?.message || err}`);
+    return [];
+  }
+}
+
 function readFailureLog(explicitPath: string | undefined, log: (m: string) => void): string | undefined {
   const file = explicitPath || path.join(__dirname, '..', '..', 'docs', 'ai', 'failure-log.md');
   try {
@@ -1102,6 +1190,11 @@ export async function collectImproveContext(
   const leaderboardScores = opts.kaggle === false
     ? []
     : collectLeaderboardScores(comp.kaggleCompetition, log);
+  // 高得点公開ノート（スコア降順・手法参照用）: コンペ単位で1回取得し全ターゲットの material へ配る。
+  const publicNotebooksDigest =
+    opts.kaggle === false
+      ? undefined
+      : buildPublicNotebooksDigest(collectTopPublicKernels(comp.kaggleCompetition, log));
   const leaderboardRankPath = opts.leaderboardRankPath
     || path.join(__dirname, '..', '..', 'docs', 'ai', 'kaggle', 'leaderboard-rank.jsonl');
   const targetsRoot = opts.targetsRoot || '/workspaces';
@@ -1369,6 +1462,7 @@ export async function collectImproveContext(
       ...(rankTrendDirection ? { rankTrendDirection } : {}),
       ...(oracleDrift ? { oracleDrift } : {}),
       ...(submissionBudget ? { submissionBudget } : {}),
+      ...(publicNotebooksDigest ? { publicNotebooksDigest } : {}),
     };
   }
 

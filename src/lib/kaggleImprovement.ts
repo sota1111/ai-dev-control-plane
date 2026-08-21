@@ -919,6 +919,11 @@ export interface ImprovementMaterial {
    */
   submissionBudget?: string;
   /**
+   * このコンペの高得点公開ノート（Kaggle Code, スコア降順・上位N）＋ public 過学習を避ける参照方針。
+   * `kaggle kernels list --sort-by scoreDescending` を cron が自動取得。手法参照用（スコア値は非公開）。
+   */
+  publicNotebooksDigest?: string;
+  /**
    * oracle-drift シグナル（SIGNATE rank-26 post-mortem）。proxy 飽和 × 真の一次KPI 停滞を突き合わせて
    * 立てる。`detectOracleDrift` が drift と判定すると buildIssueBody は再アンカー指令バナーを先頭に差し込む
    * （proxy を上げる局所A/Bを止め、oracle 再アンカーを唯一の軸に固定）。欠落時は従来挙動（後方互換）。
@@ -1277,6 +1282,7 @@ export function buildIssueBody(
   const submissionBudget =
     material.submissionBudget?.trim() ||
     '(本日の提出予算は未取得 — 残枠/直近提出を確認できない場合は保守的に。改善ゲート＝leak-free CVが前回提出を上回った時のみ提出)';
+  const publicNotebooks = material.publicNotebooksDigest?.trim();
   const recent = material.recentIssuesDigest?.trim() || '(新規の完了Issueなし)';
   const failure = material.failureKpiExcerpt?.trim() || '(該当なし)';
   // 一次KPI = leak-free CV。未整備なら fail-safe（最初の子IssueでCV構築を必須にする）。
@@ -1422,7 +1428,14 @@ ${prev}
 
 ### 本日の提出予算（日次枠効率化 — 改善ゲート＋spacing/reserve）
 ${submissionBudget}
-
+${
+  publicNotebooks
+    ? `
+### このコンペの高得点公開ノート（Kaggle Code・スコア降順／手法参照用）
+${publicNotebooks}
+`
+    : ''
+}
 ### 実験台帳ダイジェスト（試行済み軸 — 非昇格軸の再試行禁止）
 ${ledger}${counterpartLedger}
 

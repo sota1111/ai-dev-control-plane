@@ -24,6 +24,8 @@ import {
   DEFAULT_TRUE_KPI_MIN_IMPROVEMENT,
   detectSubmissionHealth,
   buildSubmissionBudgetDigest,
+  parseTopPublicKernels,
+  buildPublicNotebooksDigest,
   submissionRowState,
   computeRankTrend,
   SUBMISSION_BROKEN_CONSECUTIVE,
@@ -261,6 +263,40 @@ describe('kaggleImproveMaterial', () => {
         NOW
       );
       expect(d).not.toContain('プローブ提出 due');
+    });
+  });
+
+  describe('parseTopPublicKernels / buildPublicNotebooksDigest', () => {
+    const CSV = [
+      'ref,title,author,lastRunTime,totalVotes',
+      'boatlee/v16-rc5-high-score,V16-RC5 | High-Score 8C/4S,boatlee,2026-08-12 10:25:26,205',
+      'kirneo/metric-hack-last-call-update,Metric_hack_last_call_update,Кирилл,2026-07-22 09:50:39,125',
+      'foo/genuine-pipeline,Genuine pipeline writeup,Foo,2026-08-01 00:00:00,40',
+    ].join('\n');
+
+    test('parses ref/title/votes in score-descending order (score value not exposed)', () => {
+      const rows = parseTopPublicKernels(CSV);
+      expect(rows).toHaveLength(3);
+      expect(rows[0]).toMatchObject({ ref: 'boatlee/v16-rc5-high-score', votes: 205 });
+      expect(rows[1].ref).toBe('kirneo/metric-hack-last-call-update');
+    });
+
+    test('digest lists top-N, flags public-overfit (metric hack), and states the anti-overfit policy', () => {
+      const d = buildPublicNotebooksDigest(parseTopPublicKernels(CSV))!;
+      expect(d).toContain('boatlee/v16-rc5-high-score');
+      // metric-hack row is flagged as public-overfit risk.
+      expect(d).toContain('public過学習の疑い');
+      // genuine row is NOT flagged.
+      expect(d).toMatch(/genuine-pipeline[^\n]*(?!過学習)/);
+      // anti-overfit reference policy is present.
+      expect(d).toContain('参照方針');
+      expect(d).toContain('leak-free CV');
+      expect(d).toContain('CV最良×');
+    });
+
+    test('digest is undefined when there are no kernels', () => {
+      expect(buildPublicNotebooksDigest([])).toBeUndefined();
+      expect(parseTopPublicKernels('no header here')).toEqual([]);
     });
   });
 
