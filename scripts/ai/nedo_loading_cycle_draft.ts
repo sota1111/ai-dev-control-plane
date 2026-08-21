@@ -49,6 +49,8 @@ const TARGET_REPO = '/workspaces/nedo-loading-algo-claude';
 const HISTORY_FILE = path.join(TARGET_REPO, 'docs/ai/loading_history.jsonl');
 const DEADLINE = '2026-10-19 23:55 JST（スクリーニング提出期限）';
 const SIGNATE_TASK_KEY = '54eb698257344d638111c73d49664ddb';
+const RANK_FILE = path.join(REPO_ROOT, 'docs/ai/kaggle/leaderboard-rank.jsonl');
+const COMPETITION_KEY = 'nedo-loading-algo';
 
 type State = { lastCycle: number; lastIssue?: string; lastCreatedAt?: string };
 
@@ -152,6 +154,100 @@ export const DEFAULT_PLATEAU_STAGNANT_CYCLES = 2;
  * oracle-drift（proxy 飽和×真KPI停滞）とは独立の弱いシグナル — 天井に達していなくても
  * 改善が止まっていれば発火し、外部解法（過去の類似コンペ上位解法・文献）の参照を指令する。
  */
+/** leaderboard-rank.jsonl の1エントリ（必要フィールドのみ）。 */
+interface RankEntry {
+  competition?: string;
+  topScore?: number;
+  top10Cutoff?: number;
+  /** 少数提出高得点の競合実例（人間提供のWeb LB観測から記録）。 */
+  few_shot_evidence?: { subs: number; score: number }[];
+}
+
+/** 通過ラインとの差がこの値以上なら「漸進チューニングの域を超えた構造差」とみなす既定。 */
+export const DEFAULT_STRUCTURAL_GAP_THRESHOLD = 10;
+
+export interface StructuralGapSignal {
+  gap: number;
+  cutoff: number;
+  bestLb: number;
+  fewShot?: { subs: number; score: number }[];
+}
+
+/**
+ * 構造ギャップの決定論検知（SIGNATE積付・少数提出高得点の見逃し事故からの恒久化 2026-08-22）。
+ *
+ * 教訓: 「毎サイクル改善が出ていること」は路線の正しさの証拠にならない。plateau/oracle-drift は
+ * 停滞時にしか発火せず、+1.5/サイクルで登っていても通過ラインまで30点差なら漸進路線自体が誤りで
+ * あり得る。特に**少数提出で上位帯に到達している競合**がいる場合、上位帯は磨き込みの産物ではなく
+ * 「正しいアーキテクチャの初期値」であり、パラメータ磨きでは構造差を埋められない。
+ *
+ * 判定: 最新の rank エントリ（cutoff）と台帳の実LBベストから gap を計算し、threshold 以上で発火。
+ * few_shot_evidence があればバナーを強化する。真feedback（LB実測）が無い場合は発火しない。
+ */
+export function deriveStructuralGapSignal(
+  rank: RankEntry | undefined,
+  entries: LoadingHistoryEntry[],
+  opts?: { gapThreshold?: number }
+): StructuralGapSignal | undefined {
+  const threshold =
+    typeof opts?.gapThreshold === 'number' && opts.gapThreshold > 0
+      ? opts.gapThreshold
+      : DEFAULT_STRUCTURAL_GAP_THRESHOLD;
+  const cutoff = rank?.top10Cutoff;
+  if (typeof cutoff !== 'number' || !Number.isFinite(cutoff)) return undefined;
+  const lbVals = entries
+    .map((e) => e.lb_score)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  if (lbVals.length === 0) return undefined;
+  const bestLb = Math.max(...lbVals);
+  const gap = cutoff - bestLb;
+  if (gap < threshold) return undefined;
+  return { gap, cutoff, bestLb, fewShot: rank?.few_shot_evidence };
+}
+
+/** 最新の対象コンペ rank エントリを読む（無ければ undefined・fail-open）。 */
+function readLatestRankEntry(): RankEntry | undefined {
+  try {
+    const lines = fs.readFileSync(RANK_FILE, 'utf8').trim().split('\n').filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const o = JSON.parse(lines[i]) as RankEntry;
+        if (o.competition === COMPETITION_KEY) return o;
+      } catch {
+        /* skip broken line */
+      }
+    }
+  } catch {
+    /* no rank file */
+  }
+  return undefined;
+}
+
+/** 構造ギャップ時に本文へ挿入するアーキテクチャ再考指令バナー。 */
+function buildStructuralGapBanner(signal: StructuralGapSignal | undefined): string {
+  if (!signal) return '';
+  const fewShotLine = signal.fewShot?.length
+    ? `\n**少数提出の高得点実例**: ${signal.fewShot
+        .map((f) => `${f.subs}提出で${f.score}点`)
+        .join(' / ')} — 上位帯は磨き込みの産物ではなく**正しいアーキテクチャの初期値**である。`
+    : '';
+  return `
+
+## 🏗 構造ギャップ検知 — 漸進チューニングを路線の正しさの証拠にするな（自動挿入）
+
+実LBベスト ${signal.bestLb.toFixed(2)} と通過ライン ${signal.cutoff.toFixed(2)} の差は **${signal.gap.toFixed(1)}点** —
+毎サイクル改善が出ていても、この規模の差は漸進チューニングでは埋まらない可能性を常に疑うこと。${fewShotLine}
+
+本サイクルでは、パラメータ/近傍/予算の磨き込み子issueを立てる**前に**、次を必ず行う:
+
+1. **構造仮説を1つ立てて検証する**: 「上位解は何を保証していて、我々の設計は何を保証できていないか」
+   （例: 妥当性違反ゼロの完走保証・観測ベースの状態追従・別の配置パラダイム）。仮説は
+   \`docs/ai/cycle_analysis/\` に明記し、検証する子issueを最低1件含める。
+2. **採点構造からの逆算**: 解読済みの採点式・成分実測から「上位スコアが数式的に何で構成されているか」を
+   分解し、最大の欠落成分を特定してそこを直接攻める（磨きやすい軸ではなく、欠けている軸を攻める）。
+3. 漸進軸のみで構成されたサイクルはこのバナーが出ている間は**禁止**。`;
+}
+
 export function derivePlateauSignal(
   entries: LoadingHistoryEntry[],
   opts?: { stagnantThreshold?: number }
@@ -306,7 +402,8 @@ function buildDescription(
   state: State,
   history: string | null,
   driftBanner: string,
-  plateauBanner: string
+  plateauBanner: string,
+  structuralGapBanner: string
 ): string {
   const prevRef = state.lastIssue
     ? `前回サイクル: ${state.lastIssue}（申し送りコメントを必ず読むこと）`
@@ -315,7 +412,7 @@ function buildDescription(
     ? `直近の台帳エントリ（docs/ai/loading_history.jsonl 最終行）:\n\`\`\`\n${history}\n\`\`\``
     : '台帳 docs/ai/loading_history.jsonl は未作成 → 本サイクルで基盤整備（下記【初回タスク】）から始める。';
 
-  return `workers: solo=claude:fable, handoff=on${driftBanner}${plateauBanner}
+  return `workers: solo=claude:fable, handoff=on${driftBanner}${structuralGapBanner}${plateauBanner}
 
 TARGET_REPO=${TARGET_REPO}
 
@@ -415,6 +512,10 @@ ${historyBlock}
 - **oracle-drift 監視（自動）**: ローカル proxy が天井付近で頭打ちなのに LB が停滞/未計測と判定されると、
   本文冒頭に 🔻 再アンカー指令が自動挿入される。挿入時は proxy 登攀を止め、**評価器の再較正と
   テストケース分布の再設計**を唯一の軸にする
+- **構造ギャップ監視（自動・ユーザー指示 2026-08-22）**: 実LBベストと通過ラインの差が ${DEFAULT_STRUCTURAL_GAP_THRESHOLD} 点
+  以上あるあいだは 🏗 バナーが自動挿入され、**毎サイクル構造仮説の検証が必須**になる。改善が続いて
+  いること自体を路線の正しさの証拠にしない（少数提出で上位帯に到達する競合がいる場合、上位帯は
+  正しいアーキテクチャの初期値である）
 - **行き詰まったら外部を見る（ユーザー指示 2026-08-20）**: 自前の改善軸が尽きた・非改善が続くときは、
   過去の類似コンペ（3Dビンパッキング/積載/最適化系）の**上位解法や文献**を調査して軸を補充する。
   KPI がベスト未更新 ${DEFAULT_PLATEAU_STAGNANT_CYCLES} サイクル連続で 📚 停滞バナーが本文冒頭に自動挿入され、
@@ -498,8 +599,24 @@ async function main(): Promise<void> {
       : undefined
   );
   const plateauBanner = buildPlateauBanner(plateauSignal);
+  // 構造ギャップ: 通過ラインとの大差×(あれば)少数提出高得点の競合実例で、アーキテクチャ再考を強制する。
+  const structuralGapSignal = deriveStructuralGapSignal(
+    readLatestRankEntry(),
+    readHistoryEntries(50),
+    Number(process.env.NEDO_LOADING_GAP_THRESHOLD)
+      ? { gapThreshold: Number(process.env.NEDO_LOADING_GAP_THRESHOLD) }
+      : undefined
+  );
+  const structuralGapBanner = buildStructuralGapBanner(structuralGapSignal);
   const title = `${TITLE_TAG} 積付アルゴリズム改善サイクル第${cycle}次（LBスコア最大化）`;
-  const description = buildDescription(cycle, state, history, driftBanner, plateauBanner);
+  const description = buildDescription(
+    cycle,
+    state,
+    history,
+    driftBanner,
+    plateauBanner,
+    structuralGapBanner
+  );
 
   if (dryRun) {
     console.log(
@@ -510,6 +627,7 @@ async function main(): Promise<void> {
         title,
         oracleDrift: driftResult.level,
         plateau: plateauSignal?.stagnantCycles ?? 0,
+        structuralGap: structuralGapSignal?.gap ?? 0,
       })
     );
     console.log('----- description -----');
