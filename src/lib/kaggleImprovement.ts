@@ -1259,6 +1259,37 @@ export function buildStuckExternalSolutionsBanner(
 - 既に台帳で **rejected の軸は新しい根拠なしに再試行しない**。移植した手法の出典・要点は台帳の evidence に残す。`;
 }
 
+/**
+ * 探索優先（explore-first）バナー。現 champion からの逐次改変（local A/B・1機能のゲート付き移植）に閉じ込め
+ * られて局所最適に留まるのを防ぐ。行き詰まり時、または CV が private を代表しない型（cv_representative=false・
+ * agent/RL）では、**多様な独立方向のポートフォリオを試して筋の良い方向を先に見つける**探索を強制する。
+ * exploit（現行の深掘り）よりも explore（土台ごと異なる複数方向）を優先させる。
+ */
+export function buildExplorationBanner(
+  competition: ImprovementCompetition,
+  material: ImprovementMaterial
+): string {
+  const stuck = isImprovementStuck(material);
+  const reasons: string[] = [];
+  if (!competition.cvRepresentative) reasons.push('cv_representative=false（agent/RL・live matchmaking）');
+  if (stuck.stuck) reasons.push(stuck.reason);
+  if (reasons.length === 0) return '';
+  return `
+
+## 🧭 探索優先（explore-first）— 現行コードの逐次改変でなく、多方向を試して筋の良い方向を見つける
+発火理由: ${reasons.join(' / ')}。**現 champion の小改変（local A/B・1機能のゲート付き移植）を続けてはならない。**
+局所最適（例: public 首位と大差なのに自 best 付近で停滞）から抜けるには、探索の単位を「現コードへの差分」でなく
+「**互いに独立した複数の方向**」にする:
+- **多様な独立方向のポートフォリオを 3〜5 本**同時に子Issue化する。各方向は**構造的に独立**で、現 champion の
+  変種にしない。例:
+  - (a) **役割A'＝可搬な公開上位 baseline/agent を"丸ごと"採用**して実スコアを測る（1機能のつまみ食いでなく
+    土台ごと差し替え。可搬な公開 agent が自 best を ≫ノイズ幅で上回るなら最優先で採用・出典明記・旧を hedge 温存）。
+  - (b) 根本的に異なる戦略／アーキテクチャ、(c) 問題定式化の変更、(d) 上位ノートの **CV/検証設計の移植**（役割B）。
+- 各方向は**それ自身の実力で評価**する（現 champion の panel で「発火するか」ではなく、その方向の実スコア/CV を
+  直接測る）。方向間で比較し、**筋の良い方向を特定してから exploit（深掘り）**へ移る。
+- 昇格・提出は private-anchored 二信号ゲート/hedge の規律に従う（探索は候補生成の多様性・評価はローカル一次KPI）。`;
+}
+
 export function buildIssueBody(
   target: ImprovementTarget,
   competition: ImprovementCompetition,
@@ -1287,6 +1318,9 @@ export function buildIssueBody(
   // proxy 確立モードは目標が CV 構築なので発火させない（外部解法探索より基盤整備を優先）。
   const stuckBanner =
     target.stage === 'proxy' ? '' : buildStuckExternalSolutionsBanner(competition, material);
+  // 探索優先: 局所最適に留まる逐次改変を止め、多様な独立方向のポートフォリオ探索を強制する（proxy 確立中は除く）。
+  const explorationBanner =
+    target.stage === 'proxy' ? '' : buildExplorationBanner(competition, material);
   const childWorkers = childWorkersDirective(target);
   const prev =
     material.previousSubmission?.trim() || '(前回提出の記録なし — 初回サイクル、または取得できず)';
@@ -1413,7 +1447,7 @@ ${material.counterpartLedgerDigest.trim()}`
 - 評価は外向き通信を無効化した隔離環境で行い、artifactには集計値・真偽値・hashだけを保存する。
 - 上記ゲートの成否を親Issueへ記録する。失敗時は提出せず、具体的な不足条件をBlocked理由にする。`
     : '';
-  return `workers: ${target.workersDirective}${oracleDriftBanner}${stuckBanner}
+  return `workers: ${target.workersDirective}${oracleDriftBanner}${stuckBanner}${explorationBanner}
 
 ## 目的
 Kaggleコンペ \`${competition.kaggleCompetition}\`（repo: ${target.repo} / 系統: ${target.lineage}）の
