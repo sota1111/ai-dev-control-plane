@@ -1314,6 +1314,12 @@ describe('kaggleImprovement', () => {
       // プラトー打破: headroom 認識 + 日次プローブ枠のポリシーが含まれる。
       expect(body).toContain('headroom 認識');
       expect(body).toContain('日次プローブ枠');
+      // 高得点公開ノート材料が注入されていれば専用セクションに描画される。
+      const withNotebooks = buildIssueBody(c.targets[0], c, 3, {
+        publicNotebooksDigest: '1. `foo/bar` — 高得点ノート\n\n**参照方針**: leak-free CV',
+      });
+      expect(withNotebooks).toContain('高得点公開ノート（Kaggle Code');
+      expect(withNotebooks).toContain('foo/bar');
       // 旧ポリシー（毎サイクル提出容認）は撤去済み。
       expect(body).not.toContain('champion 昇格は必須条件にしない');
     });
