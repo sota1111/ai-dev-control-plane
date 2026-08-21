@@ -1313,6 +1313,11 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('反証器'); // public は目標でなく反証器
       expect(body).toContain('transfer-trust');
       expect(body).toContain('プローブ枠');
+      // explore中は最終2枠の候補セット整備を子Issue化しない（converge限定）— SOT-2904 の再発防止。
+      expect(body).toContain('converge フェーズでのみ行う選抜規律');
+      expect(body).toContain('子Issueを作ってはならない');
+      // explore(phase未指定)では収束モード「節」は描画されない（ポリシー文中の参照名とは区別）。
+      expect(body).not.toContain('収束モード（締切まで残り');
       expect(body).toContain('本日の提出予算');
       expect(body).toContain('消費枠: 2/5'); // injected budget material is rendered
       // 高得点公開ノート材料が注入されていれば専用セクションに描画される。
