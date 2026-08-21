@@ -153,7 +153,8 @@ describe('kaggle autonomy — planImprovementCycle strategy gates', () => {
     expect(body).toContain('### 実験台帳ダイジェスト');
     expect(body).toContain('belief-width');
     expect(body).toContain('escalation ladder');
-    expect(body).not.toContain('## 収束モード');
+    // explore では収束モード「節」は描画されない（提出ポリシー文中の参照名『## 収束モード』とは区別）。
+    expect(body).not.toContain('収束モード（締切まで残り');
   });
 });
 
