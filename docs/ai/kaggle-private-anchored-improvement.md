@@ -57,6 +57,20 @@ CV と public を private の（部分的に独立な誤差を持つ）2推定�
   再設計）と役割D（少数多様 hedge を出して静観）へ退避**。CV を無理に強要しない。
 - registry `competitions[].cv_representative`（既定 true、agent/RL は false）で本文の指示を切り替える。
 
+## 4.5 探索優先（explore-first portfolio）— 局所最適を抜けるための単位変更
+現 champion からの**逐次改変（local A/B・1機能のゲート付き移植）**は、公開首位と大差なのに自 best 付近で停滞する
+局所最適に閉じ込める（kaggriculture が public 2786 の agent がある中で 600 付近に停滞した実例）。恒久策として、
+**行き詰まり時 または cv_representative=false（agent/RL）では探索の単位を「差分」でなく「独立した複数方向」にする**。
+
+- **多様な独立方向のポートフォリオを 3〜5 本**同時に立てる。各方向は**構造的に独立**で現 champion の変種にしない:
+  - **役割A'＝可搬な公開上位 baseline/agent を"丸ごと"採用**（1機能のつまみ食いでなく土台ごと差し替え。可搬な
+    公開 agent が自 best を ≫ノイズ幅で上回るなら最優先で採用・出典明記・旧を hedge 温存）。
+  - 根本的に異なる戦略／アーキテクチャ、問題定式化の変更、上位ノートの CV/検証設計の移植（役割B）。
+- 各方向は**それ自身の実力で評価**（現 champion の panel で「発火するか」でなく、その方向の実スコア/CV を直接測る）。
+  方向間で比較して**筋の良い方向を特定してから exploit（深掘り）**へ移る（explore→exploit）。
+- 昇格・提出は §1 の二信号ゲート／§2 の hedge 規律に従う（探索は候補生成の多様性・評価はローカル一次KPI）。
+- 実装: `buildExplorationBanner`（本文冒頭バナー。trigger=isImprovementStuck || !cvRepresentative）。
+
 ## 5. escalation・飽和・天井の正直さ（空回り防止）
 - escalation ladder を**決定論の状態機械**にし、枯渇軸の再試行を機構が禁止（台帳と突合）。
 - ladder 完全枯渇 ＋ 制約下の到達天井 < frontier が証拠付きで確認されたら **mode:maintain＋compute 再配分**。

@@ -813,6 +813,41 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('段階目標: proxy 確立モード');
     });
 
+    // 探索優先（explore-first portfolio）: 逐次改変でなく多方向探索を強制する。
+    const EXPLORE_HEADING = '🧭 探索優先（explore-first）';
+    test('exploration banner fires for cv_representative=false (agent/RL), even when not stuck', () => {
+      const raw: any = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].cv_representative = false;
+      const c = parseTargetsRegistry(raw).competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, { rankTrendDirection: 'improving' });
+      expect(body).toContain(EXPLORE_HEADING);
+      expect(body).toContain('役割A'); // 可搬な公開 baseline を丸ごと採用
+      expect(body).toContain('ポートフォリオ');
+      expect(body).toContain('cv_representative=false');
+    });
+
+    test('exploration banner fires when stuck even if cv_representative=true', () => {
+      const c = reg().competitions[0]; // cvRepresentative defaults true
+      expect(c.cvRepresentative).toBe(true);
+      const body = buildIssueBody(c.targets[0], c, 3, { rankTrendDirection: 'flat' });
+      expect(body).toContain(EXPLORE_HEADING);
+    });
+
+    test('exploration banner does NOT fire when cv_representative=true and not stuck', () => {
+      const c = reg().competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, { rankTrendDirection: 'improving' });
+      expect(body).not.toContain(EXPLORE_HEADING);
+    });
+
+    test('exploration banner is suppressed in proxy-establishment stage', () => {
+      const raw: any = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].cv_representative = false;
+      const c = parseTargetsRegistry(raw).competitions[0];
+      const proxyTarget = { ...c.targets[0], stage: 'proxy' as const };
+      const body = buildIssueBody(proxyTarget, c, 3, {});
+      expect(body).not.toContain(EXPLORE_HEADING);
+    });
+
     test('submit-repair takes precedence over oracle-drift (cannot measure true KPI while broken)', () => {
       const raw = JSON.parse(JSON.stringify(rawRegistry));
       raw.competitions[0].validation = { primary: 'cv', require_scored_submission: true };
