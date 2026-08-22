@@ -155,6 +155,9 @@ describe('kaggle autonomy — planImprovementCycle strategy gates', () => {
     expect(body).toContain('escalation ladder');
     // explore では収束モード「節」は描画されない（提出ポリシー文中の参照名『## 収束モード』とは区別）。
     expect(body).not.toContain('収束モード（締切まで残り');
+    // 恒久: 人間可読の統合記録 STRATEGY_AND_ROADMAP.md の作成/更新が集約ステップ＋受け入れ条件に入る。
+    expect(body).toContain('docs/ai/STRATEGY_AND_ROADMAP.md');
+    expect(body).toContain('人間可読の統合記録');
   });
 });
 

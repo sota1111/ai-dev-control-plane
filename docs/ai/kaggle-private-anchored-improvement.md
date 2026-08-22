@@ -115,6 +115,13 @@ replay/clone 再構成ハック**（実障害 SOT-2988: V16-RC5 public~3164 は 
   なら premise-dead として自動 Cancel し親を再開（`cancelStrandedBlockedChildren`）。In Progress の兄弟がいる間は触れない。
   find→port→judge 分解で find が negative 完了→port/judge が Blocked stranding する実障害（SOT-2926/2928）の恒久解。
 
+**人間可読の統合記録（`docs/ai/STRATEGY_AND_ROADMAP.md`・全コンペ必須）**: 機械可読な `experiment_ledger.jsonl` とは別に、
+**人間が1枚で「コンペの性質／現状／これまでの試行錯誤と結果／確定した結論／今後の方針」を読める単一の真実源**を各 target
+repo に維持する。**毎サイクルの集約フェーズで作成/更新を必須化**（kaggle=buildIssueBody step5＋受け入れ条件、signate/nedo=
+nedo_loading_cycle_draft step7＋受け入れ条件）。節構成は 0.性質/制約/指標・1.現状サマリ・2.試行錯誤履歴と結果・3.確定した結論
+（天井/パラダイム/律速）・4.今後の方針・5.参照。古い記述は消さず追記（判断の変遷が追えること）。今後の新規コンペも同じ
+ドクトリンで自動的にこの文書を持つ。
+
 ladder 完全枯渇 ＋ 制約下の到達天井 < frontier が証拠付きで確認されたら **mode:maintain＋compute 再配分**。
 **健全性指標 = 「CV↑×public非矛盾（cv_rep=true）／強い可搬公開 baseline の採用+提出+観測（cv_rep=false）が起きているか」**。
 提出数や public スコアそのものを成果にしない。
