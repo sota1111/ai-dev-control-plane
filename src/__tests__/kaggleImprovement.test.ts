@@ -1382,15 +1382,23 @@ describe('kaggleImprovement', () => {
       expect(body).not.toContain('cv_representative=false');
     });
 
-    test('buildIssueBody: cv_representative=false inserts the agent/RL fallback (no champion-chasing)', () => {
+    test('buildIssueBody: cv_representative=false directs wholesale-adopt+submit+observe (no research-into-inconclusive paralysis)', () => {
       const raw: any = JSON.parse(JSON.stringify(rawRegistry));
       raw.competitions[0].cv_representative = false;
       const c = parseTargetsRegistry(raw).competitions[0];
       expect(c.cvRepresentative).toBe(false);
       const body = buildIssueBody(c.targets[0], c, 3, {});
       expect(body).toContain('cv_representative=false（agent/RL');
-      expect(body).toContain('役割B'); // 評価系再設計へ退避
-      expect(body).toContain('champion 化・local A/B の追い込みはしない');
+      // 新規律: 研究で止めず「採用+提出+観測」まで遂行、枠を余らせて inconclusive を積むな。
+      expect(body).toContain('採用+提出+観測');
+      expect(body).toContain('inconclusive を積むな');
+      // rogii 逆転ガードは維持（最終2枠を public-max 一辺倒にしない・hedge 温存）。
+      expect(body).toContain('public-max 一辺倒にしない');
+      expect(body).toContain('hedge 温存');
+      // 役割B（評価系再設計）は併走可だが、それを理由に採用+提出を先延ばししない。
+      expect(body).toContain('役割B');
+      // 旧「静観・追い込みはしない」パラリシス文言は撤去済み。
+      expect(body).not.toContain('champion 化・local A/B の追い込みはしない');
     });
 
     test('parseSubmissionPolicy: defaults + validation (fail-safe to 0/0/0)', () => {
