@@ -31,8 +31,10 @@ import {
   SUBMISSION_BROKEN_CONSECUTIVE,
   CV_PUBLIC_GAP_RELATIVE_WARN,
   REFERENCE_OVERFIT_RELATIVE_MARGIN,
+  computeStagnationForensics,
   type CompletedIssue,
 } from '../lib/kaggleImproveMaterial.js';
+import type { ExperimentLedgerEntry } from '../lib/experimentLedger.js';
 import {
   detectOracleDrift,
   buildOracleDriftBanner,
@@ -764,6 +766,69 @@ describe('kaggleImproveMaterial', () => {
       // 最古ステップは proxy 改善大(0.70→0.90)で drift でない → 末尾2ステップ(微増<0.005)のみ計上。
       const sig = computeOracleDriftSignal(proxy([0.7, 0.9, 0.902, 0.903]), rank([50, 40, 40, 40]));
       expect(sig!.stagnantCycles).toBe(2);
+    });
+  });
+
+  // 恒久対策: サイクル内自己監査＝台帳から停滞の型を決定論的に算出する。
+  describe('computeStagnationForensics (cycle self-audit)', () => {
+    const e = (o: Partial<ExperimentLedgerEntry>): ExperimentLedgerEntry => ({
+      recordedAt: '2026-08-21T00:00:00Z', axis: 'x', result: 'inconclusive', ...o,
+    });
+
+    it('returns undefined for an empty ledger (backward compatible)', () => {
+      expect(computeStagnationForensics([])).toBeUndefined();
+    });
+
+    it('kaggriculture-style: external transfers all inconclusive, never adopted → paralysis signal', () => {
+      const f = computeStagnationForensics([
+        e({ axis: 'evaluation oracle re-anchor', result: 'promoted', cycle: 1 }),
+        e({ axis: 'cycle-2 external-solution transfer: live replay re-anchor', result: 'inconclusive', cycle: 2 }),
+        e({ axis: 'cycle-1 role-A-prime wholesale portable V7 public-agent hedge adoption', result: 'inconclusive', cycle: 1 }),
+        e({ axis: 'cycle-2 top-solution transfer: coherent post-opening midgame', result: 'inconclusive', cycle: 2 }),
+      ])!;
+      expect(f.externalAdoptAttempts).toBe(3);
+      expect(f.externalAdoptPromoted).toBe(0);
+      expect(f.externalAdoptInconclusive).toBe(3);
+      // wholesale は inconclusive のみ＝確定結果なし → never。
+      expect(f.wholesaleAdoptOutcome).toBe('never');
+      expect(f.portabilityVerifiedNonPortable).toBe(false);
+      expect(f.promotedEver).toBe(true);
+    });
+
+    it('internal oracle/policy promotions are NOT counted as external adoption', () => {
+      const f = computeStagnationForensics([
+        e({ axis: 'global spatiotemporal worker assignment', result: 'promoted', cycle: 2 }),
+        e({ axis: 'public standing-on-work before bounded global worker assignment', result: 'promoted', cycle: 1 }),
+      ])!;
+      expect(f.externalAdoptAttempts).toBe(0);
+      expect(f.externalAdoptPromoted).toBe(0);
+    });
+
+    it('biohub-style: wholesale foundation rejected + a prior external port promoted', () => {
+      const f = computeStagnationForensics([
+        e({ axis: 'port classical levers from the public frontier lineage tracker notebook', result: 'promoted', cycle: 5 }),
+        e({ axis: 'SOT-2930 cycle-6 wholesale independent foundation / role A prime', result: 'rejected', cycle: 6 }),
+      ])!;
+      expect(f.externalAdoptAttempts).toBe(2);
+      expect(f.externalAdoptPromoted).toBe(1);
+      expect(f.wholesaleAdoptOutcome).toBe('rejected');
+      expect(f.latestCycle).toBe(6);
+    });
+
+    it('wholesale latest-by-timestamp wins (rejected then later promoted → promoted)', () => {
+      const f = computeStagnationForensics([
+        e({ axis: 'wholesale adoption', result: 'rejected', recordedAt: '2026-08-01T00:00:00Z', cycle: 1 }),
+        e({ axis: 'wholesale adoption v2', result: 'promoted', recordedAt: '2026-08-10T00:00:00Z', cycle: 2 }),
+      ])!;
+      expect(f.wholesaleAdoptOutcome).toBe('promoted');
+    });
+
+    it('detects a portability-verification entry concluding non-portable', () => {
+      const f = computeStagnationForensics([
+        e({ axis: 'portability re-verification of top notebooks', result: 'inconclusive',
+            evidence: 'all 5 load GPU-trained weights, non-portable; 0.676 is the ceiling' }),
+      ])!;
+      expect(f.portabilityVerifiedNonPortable).toBe(true);
     });
   });
 });

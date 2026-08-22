@@ -866,6 +866,29 @@ export interface OracleDriftSignal {
 }
 
 /** cron が収集して渡す1プロジェクトぶんの起案材料（要約なしの生 digest）。 */
+/**
+ * サイクル内自己監査の決定論メトリクス（恒久対策・design §5 の状態機械化）。
+ * すべて on-disk 証拠（experiment_ledger.jsonl）から算出＝LLM判断ゼロで監査可能。`computeStagnationForensics`
+ * （kaggleImproveMaterial）が生成し、`buildCorrectiveDirectiveBanner` が停滞の「型」に応じた是正指示を本文へ
+ * 自動注入する（手作業の監査→是正をサイクル自身に内在化）。欠落時は従来挙動（後方互換）。
+ */
+export interface StagnationForensics {
+  /** 台帳最新の cycle 番号。 */
+  latestCycle: number;
+  /** 昇格(result=promoted)がこれまで1度でもあったか。 */
+  promotedEver: boolean;
+  /** 外部知識の採用を試みた軸の数（external/transfer/wholesale/public-agent/上位解/移植 …）。 */
+  externalAdoptAttempts: number;
+  /** そのうち promoted（＝実際に採用に至った）数。 */
+  externalAdoptPromoted: number;
+  /** そのうち inconclusive（＝研究止まりで採用+提出していない）数。 */
+  externalAdoptInconclusive: number;
+  /** 丸ごと採用（役割A'）軸の最新結果。 */
+  wholesaleAdoptOutcome: 'promoted' | 'rejected' | 'never';
+  /** 可搬性検証が「非可搬（天井）」と結論した台帳エントリがあるか。 */
+  portabilityVerifiedNonPortable: boolean;
+}
+
 export interface ImprovementMaterial {
   /** 前回提出の順位/スコア（Kaggle CLI・best-effort）。「翌日に前回結果を確認」の実体。 */
   previousSubmission?: string;
@@ -952,6 +975,11 @@ export interface ImprovementMaterial {
    * （proxy を上げる局所A/Bを止め、oracle 再アンカーを唯一の軸に固定）。欠落時は従来挙動（後方互換）。
    */
   oracleDrift?: OracleDriftSignal;
+  /**
+   * サイクル内自己監査メトリクス（恒久対策）。停滞の「型」を決定論的に判定し、buildIssueBody が
+   * `buildCorrectiveDirectiveBanner` で是正指示（採用+提出強制 / 可搬性再検証 / 天井PIVOT）を注入する。
+   */
+  stagnationForensics?: StagnationForensics;
 }
 
 /** ガードの各シグナル（cron が Linear/cooldown を見て渡す）。 */
@@ -1308,6 +1336,68 @@ export function buildExplorationBanner(
   **探索で public 上位を広く採るのは"良い方向の生成"に限る。選抜は決して public-best で行わない（rogii 再発防止）。**`;
 }
 
+/** 外部知識の採用を N 回試みて 1 度も採用に至らない＝研究停滞と判定する閾値（型A）。 */
+export const CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN = 3;
+
+/**
+ * サイクル内自己監査＝停滞の「型」に応じた是正指示バナー（恒久対策・design §5 状態機械）。
+ * 手作業でやっていた「監査→型の特定→是正」をサイクル自身に内在化する。決定論（forensics は台帳由来）。
+ * 優先順位（排他・上から順に最初に該当した1つだけ出す）:
+ *  - 型B（可搬性天井）: 丸ごと採用が実測 rejected かつ非可搬が検証済 → 同じ移植の反復禁止・役割B/maintain へ PIVOT。
+ *  - 型D（可搬性再検証）: 丸ごと採用 rejected だが非可搬未検証 → 天井宣言の前に可搬性を1回だけ再検証。
+ *  - 型A（採用+提出強制）: 外部採用を規定回試みたが1度も採用+提出していない → 研究禁止・最強可搬公開baselineを採用+提出+観測。
+ * proxy 確立中は抑制（基盤整備優先）。forensics 欠落時は空（後方互換）。
+ */
+export function buildCorrectiveDirectiveBanner(
+  competition: ImprovementCompetition,
+  material: ImprovementMaterial
+): string {
+  const f = material.stagnationForensics;
+  if (!f) return '';
+  const hasNotebooks = !!material.publicNotebooksDigest?.trim();
+
+  // 型B: 天井確定（丸ごと採用 rejected × 非可搬検証済）→ 反復移植を止めて PIVOT。
+  if (f.wholesaleAdoptOutcome === 'rejected' && f.portabilityVerifiedNonPortable) {
+    return `
+
+## 🧱 可搬性天井を検知（PIVOT 必須）— 同じ移植を繰り返すな
+自己監査（台帳）: 公開上位 baseline の**丸ごと採用は実測で rejected**、かつ残る上位ノートは**非可搬（GPU学習weights等）と検証済**。
+制約下の到達天井が frontier 未満であることが証拠付きで確定している。**同型の classical lever 再移植・逐次A/B は禁止**（新根拠なしの再試行）。
+今サイクルの軸は次のどちらかに固定せよ:
+- **役割B（最高レバレッジ）**: 二信号ゲート用の**独立した同一metric public アンカーの獲得** / leak-free CV（private代理）oracle の再設計。
+- それも枯渇なら **mode:maintain 提案＋compute 再配分**（伸びない対象に枠を注ぎ続けない・design §5）。親の申し送りへ根拠を残す。`;
+  }
+
+  // 型D: 丸ごと採用 rejected だが可搬性は未検証 → 天井を主張する前に1回だけ再検証。
+  if (f.wholesaleAdoptOutcome === 'rejected' && !f.portabilityVerifiedNonPortable && hasNotebooks) {
+    return `
+
+## 🔎 可搬性の再検証（天井を主張する前に1回だけ）
+自己監査（台帳）: 公開上位 baseline の丸ごと採用は rejected だが、**可搬性検証の記録がない**。天井（これ以上伸びない）と結論する前に、
+**上位ノートが本当に非可搬（GPU学習weights/外部replay/leak/ライセンス阻害）か、未採用の"可搬"高scorer が無いかを1回だけ再検証する子Issue**を立てよ。
+結論（可搬/非可搬・採用可否）は \`docs/ai/experiment_ledger.jsonl\` へ **axis に "portability"（可搬性）を含めて**記録する（次サイクルの型B/型A判定の入力になる）。`;
+  }
+
+  // 型A: 外部採用を規定回試みたが 1 度も採用+提出していない＝研究停滞 → 採用+提出+観測を強制。
+  if (
+    f.externalAdoptAttempts >= CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN &&
+    f.externalAdoptPromoted === 0 &&
+    hasNotebooks &&
+    !f.portabilityVerifiedNonPortable
+  ) {
+    return `
+
+## 🔴 研究停滞を検知（ADOPT+SUBMIT 強制）— "研究して inconclusive" を繰り返すな
+自己監査（台帳）: 外部知識の採用を **${f.externalAdoptAttempts} 回試みたが promoted（実採用）は 0**（inconclusive ${f.externalAdoptInconclusive} 件）。
+上位公開解を"研究"しては台帳に inconclusive を積むだけで、**強い公開 baseline を丸ごと採用+提出していない**（＝停滞の正体）。
+今サイクルは **research 禁止**。最強の**可搬**公開 baseline（オフライン実行可・GPU学習weights/replay bytes/leak/ライセンス阻害なし）を
+**土台ごと採用 → 提出枠を使って実提出 → 実スコア観測**（旧 champion は hedge 温存）。**枠を余らせて inconclusive を積むな。**
+ただし提出は submission budget（reserve/spacing/cap）を守り、**rogii 逆転対策として最終2枠を public-max 一辺倒にしない**（構造独立 hedge を1枠残す）。`;
+  }
+
+  return '';
+}
+
 export function buildIssueBody(
   target: ImprovementTarget,
   competition: ImprovementCompetition,
@@ -1339,6 +1429,9 @@ export function buildIssueBody(
   // 探索優先: 局所最適に留まる逐次改変を止め、多様な独立方向のポートフォリオ探索を強制する（proxy 確立中は除く）。
   const explorationBanner =
     target.stage === 'proxy' ? '' : buildExplorationBanner(competition, material);
+  // サイクル内自己監査: 停滞の型（研究停滞/可搬性未検証/天井）に応じた是正指示を注入（proxy 確立中は抑制）。
+  const correctiveBanner =
+    target.stage === 'proxy' ? '' : buildCorrectiveDirectiveBanner(competition, material);
   const childWorkers = childWorkersDirective(target);
   const prev =
     material.previousSubmission?.trim() || '(前回提出の記録なし — 初回サイクル、または取得できず)';
@@ -1465,7 +1558,7 @@ ${material.counterpartLedgerDigest.trim()}`
 - 評価は外向き通信を無効化した隔離環境で行い、artifactには集計値・真偽値・hashだけを保存する。
 - 上記ゲートの成否を親Issueへ記録する。失敗時は提出せず、具体的な不足条件をBlocked理由にする。`
     : '';
-  return `workers: ${target.workersDirective}${oracleDriftBanner}${stuckBanner}${explorationBanner}
+  return `workers: ${target.workersDirective}${oracleDriftBanner}${stuckBanner}${explorationBanner}${correctiveBanner}
 
 ## 目的
 Kaggleコンペ \`${competition.kaggleCompetition}\`（repo: ${target.repo} / 系統: ${target.lineage}）の

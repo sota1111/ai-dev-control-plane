@@ -26,7 +26,7 @@ const https = await import('node:https');
 const fs = await import('node:fs');
 const runner = await import('../runner.js');
 const { installLinearHttpMock } = await import('../__test_helpers__/linearMock.js');
-const { findOpenAutoImproveIssue, findOpenImproveCycleParent, sanitizeLabelIds } = await import('../lib/linearApi.js');
+const { findOpenAutoImproveIssue, findOpenImproveCycleParent, sanitizeLabelIds, cancelStrandedBlockedChildren } = await import('../lib/linearApi.js');
 
 describe('Linear Integration', () => {
   let linearMock;
@@ -197,6 +197,51 @@ describe('Linear Integration', () => {
 
       // Skipped before resolving states / mutating (only parent + comments were queried).
       expect(linearMock.calls.find((c) => c.query.includes('issueUpdate'))).toBeUndefined();
+    });
+
+    // 恒久対策・型C: 前提が死んだ Blocked 子（他に動いている子がない）を reaper が自動 Cancel する。
+    const KAGGLE_PARENT_META = {
+      identifier: 'SOT-2924',
+      title: '[kaggriculture-gpt] Kaggle順位向上サイクル第2次 — 改善方針の立案と実施',
+      description: 'workers: solo=codex\n\n## 入力材料（cronが自動収集・要約なし）\n本文…',
+      team: { id: 'team-1' },
+    };
+
+    it('cancelStrandedBlockedChildren cancels a premise-dead Blocked child when nothing else is running', async () => {
+      linearMock.enqueue({ data: { issue: { ...KAGGLE_PARENT_META, children: { nodes: [
+        { id: 'c-done', identifier: 'SOT-2925', state: { name: 'Done', type: 'completed' } },
+        { id: 'c-blocked', identifier: 'SOT-2926', state: { name: 'Blocked', type: 'unstarted' } },
+      ] } } } });
+      linearMock.enqueue({ data: { workflowStates: { nodes: [
+        { id: 'canceled-1', name: 'Canceled', type: 'canceled' },
+        { id: 'todo-1', name: 'Todo', type: 'unstarted' },
+      ] } } });
+      linearMock.enqueue({ data: { issueUpdate: { success: true } } });
+      linearMock.enqueue({ data: { commentCreate: { success: true } } });
+
+      await expect(cancelStrandedBlockedChildren('parent-uuid')).resolves.toBe(1);
+      const update = linearMock.calls.find((c) => c.query.includes('issueUpdate'));
+      expect(update.variables.id).toBe('c-blocked');
+      expect(update.variables.stateId).toBe('canceled-1');
+    });
+
+    it('cancelStrandedBlockedChildren does NOT cancel while a sibling is still running', async () => {
+      linearMock.enqueue({ data: { issue: { ...KAGGLE_PARENT_META, children: { nodes: [
+        { id: 'c-run', identifier: 'SOT-2925', state: { name: 'In Progress', type: 'started' } },
+        { id: 'c-blocked', identifier: 'SOT-2926', state: { name: 'Blocked', type: 'unstarted' } },
+      ] } } } });
+
+      await expect(cancelStrandedBlockedChildren('parent-uuid')).resolves.toBe(0);
+      expect(linearMock.calls.find((c) => c.query.includes('issueUpdate'))).toBeUndefined();
+    });
+
+    it('cancelStrandedBlockedChildren is a no-op for non-improvement parents', async () => {
+      linearMock.enqueue({ data: { issue: {
+        identifier: 'SOT-1', title: 'ordinary issue', description: 'no material', team: { id: 'team-1' },
+        children: { nodes: [{ id: 'c-blocked', identifier: 'SOT-2', state: { name: 'Blocked', type: 'unstarted' } }] },
+      } } });
+      await expect(cancelStrandedBlockedChildren('parent-uuid')).resolves.toBe(0);
+      expect(linearMock.calls.find((c) => c.query.includes('workflowStates'))).toBeUndefined();
     });
 
     it('postUsageLimitComment checks for duplicates and posts comment', async () => {
@@ -491,6 +536,14 @@ describe('Linear Integration', () => {
         id: 'parent-uuid', identifier: 'SOT-2000',
         children: { nodes: [{ identifier: 'SOT-2001' }] },
       }] } } });
+      // 型C の cancelStrandedBlockedChildren が先に親の子を照会する（Blocked 子なし→0で早期return）。
+      linearMock.enqueue({ data: { issue: {
+        identifier: 'SOT-2000',
+        title: '[demo-gpt] Kaggle順位向上サイクル第2次 — 改善方針の立案と実施',
+        description: '## 入力材料（cronが自動収集・要約なし）',
+        team: { id: 't1' },
+        children: { nodes: [{ id: 'c1', identifier: 'SOT-2001', state: { name: 'In Review', type: 'started' } }] },
+      } } });
       linearMock.enqueue({ data: { issue: {
         id: 'parent-uuid', identifier: 'SOT-2000',
         title: '[demo-gpt] Kaggle順位向上サイクル第2次 — 改善方針の立案と実施',

@@ -9,6 +9,8 @@ import {
   isScheduledHour,
   buildIssueTitle,
   buildIssueBody,
+  buildCorrectiveDirectiveBanner,
+  CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN,
   planImprovementCycle,
   planChampionSubmission,
   planCompetitionSubmission,
@@ -861,6 +863,96 @@ describe('kaggleImprovement', () => {
       const proxyTarget = { ...c.targets[0], stage: 'proxy' as const };
       const body = buildIssueBody(proxyTarget, c, 3, {});
       expect(body).not.toContain(EXPLORE_HEADING);
+    });
+
+    // 恒久対策: サイクル内自己監査＝停滞の型に応じた是正指示（buildCorrectiveDirectiveBanner）。
+    describe('corrective directive banner (cycle self-audit state machine)', () => {
+      const comp = () => parseTargetsRegistry(JSON.parse(JSON.stringify(rawRegistry))).competitions[0];
+      const NOTE = '1. `x/y` — z, ▲10'; // publicNotebooksDigest ダミー
+
+      test('no forensics → empty (backward compatible)', () => {
+        expect(buildCorrectiveDirectiveBanner(comp(), {})).toBe('');
+      });
+
+      test('型A ADOPT+SUBMIT: external adopt tried but never promoted → force adopt+submit', () => {
+        const banner = buildCorrectiveDirectiveBanner(comp(), {
+          publicNotebooksDigest: NOTE,
+          stagnationForensics: {
+            latestCycle: 3, promotedEver: true,
+            externalAdoptAttempts: CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN,
+            externalAdoptPromoted: 0, externalAdoptInconclusive: 3,
+            wholesaleAdoptOutcome: 'never', portabilityVerifiedNonPortable: false,
+          },
+        });
+        expect(banner).toContain('ADOPT+SUBMIT 強制');
+        expect(banner).toContain('research 禁止');
+        expect(banner).toContain('public-max 一辺倒にしない'); // rogii hedge 維持
+      });
+
+      test('型A does NOT fire once an external adoption was promoted (biohub-style)', () => {
+        const banner = buildCorrectiveDirectiveBanner(comp(), {
+          publicNotebooksDigest: NOTE,
+          stagnationForensics: {
+            latestCycle: 5, promotedEver: true,
+            externalAdoptAttempts: 6, externalAdoptPromoted: 1, externalAdoptInconclusive: 5,
+            wholesaleAdoptOutcome: 'never', portabilityVerifiedNonPortable: false,
+          },
+        });
+        expect(banner).toBe('');
+      });
+
+      test('型D re-verify portability: wholesale rejected but portability not yet verified', () => {
+        const banner = buildCorrectiveDirectiveBanner(comp(), {
+          publicNotebooksDigest: NOTE,
+          stagnationForensics: {
+            latestCycle: 6, promotedEver: true,
+            externalAdoptAttempts: 8, externalAdoptPromoted: 1, externalAdoptInconclusive: 6,
+            wholesaleAdoptOutcome: 'rejected', portabilityVerifiedNonPortable: false,
+          },
+        });
+        expect(banner).toContain('可搬性の再検証');
+        expect(banner).toContain('portability');
+      });
+
+      test('型B ceiling PIVOT: wholesale rejected AND portability verified non-portable', () => {
+        const banner = buildCorrectiveDirectiveBanner(comp(), {
+          publicNotebooksDigest: NOTE,
+          stagnationForensics: {
+            latestCycle: 7, promotedEver: true,
+            externalAdoptAttempts: 8, externalAdoptPromoted: 1, externalAdoptInconclusive: 6,
+            wholesaleAdoptOutcome: 'rejected', portabilityVerifiedNonPortable: true,
+          },
+        });
+        expect(banner).toContain('可搬性天井を検知');
+        expect(banner).toContain('PIVOT');
+        expect(banner).toContain('役割B');
+      });
+
+      test('型A suppressed when portability ceiling already verified (no chasing)', () => {
+        const banner = buildCorrectiveDirectiveBanner(comp(), {
+          publicNotebooksDigest: NOTE,
+          stagnationForensics: {
+            latestCycle: 7, promotedEver: false,
+            externalAdoptAttempts: 5, externalAdoptPromoted: 0, externalAdoptInconclusive: 5,
+            wholesaleAdoptOutcome: 'never', portabilityVerifiedNonPortable: true,
+          },
+        });
+        expect(banner).toBe(''); // 天井検証済で丸ごと採用未実施(never)→A/B/Dいずれも非該当
+      });
+
+      test('corrective banner is wired into buildIssueBody and suppressed in proxy stage', () => {
+        const c = comp();
+        const forensics = {
+          latestCycle: 3, promotedEver: true,
+          externalAdoptAttempts: CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN,
+          externalAdoptPromoted: 0, externalAdoptInconclusive: 3,
+          wholesaleAdoptOutcome: 'never' as const, portabilityVerifiedNonPortable: false,
+        };
+        const body = buildIssueBody(c.targets[0], c, 3, { publicNotebooksDigest: NOTE, stagnationForensics: forensics });
+        expect(body).toContain('ADOPT+SUBMIT 強制');
+        const proxyBody = buildIssueBody({ ...c.targets[0], stage: 'proxy' as const }, c, 3, { publicNotebooksDigest: NOTE, stagnationForensics: forensics });
+        expect(proxyBody).not.toContain('ADOPT+SUBMIT 強制');
+      });
     });
 
     test('submit-repair takes precedence over oracle-drift (cannot measure true KPI while broken)', () => {
