@@ -1526,6 +1526,21 @@ describe('kaggleImprovement', () => {
       expect(body).toContain('役割B');
       // 旧「静観・追い込みはしない」パラリシス文言は撤去済み。
       expect(body).not.toContain('champion 化・local A/B の追い込みはしない');
+      // provenance ゲート（replay 再構成/無ライセンス/固定 action table は verbatim 採用禁止・fetch-only）。
+      expect(body).toContain('provenance ゲート');
+      expect(body).toContain('replay 再構成');
+      expect(body).toContain('fetch-only');
+    });
+
+    test('provenance gate appears in the explore-first role-A′ banner (all competitions)', () => {
+      // frontier_paradigm 無し・cv_rep=true でも explore_first=true なら探索バナーに provenance ゲートが載る。
+      const raw: any = JSON.parse(JSON.stringify(rawRegistry));
+      raw.competitions[0].explore_first = true;
+      const c = parseTargetsRegistry(raw).competitions[0];
+      const body = buildIssueBody(c.targets[0], c, 3, { rankTrendDirection: 'flat' });
+      expect(body).toContain('provenance ゲート');
+      expect(body).toContain('replay 再構成');
+      expect(body).toContain('fetch-only');
     });
 
     test('parseSubmissionPolicy: defaults + validation (fail-safe to 0/0/0)', () => {
