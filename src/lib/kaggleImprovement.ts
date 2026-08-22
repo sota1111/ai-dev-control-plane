@@ -142,7 +142,9 @@ export interface ImprovementCompetition {
   /**
    * leak-free CV が private を代表できる競技型か（private-anchored 設計 §4）。既定 true。
    * false = agent/RL・live matchmaking 等、固定相手の CV が最終フィールド(private)を代表しない型。
-   * false のとき本文は「外部知識は評価系再設計(役割B)/hedge(役割D)へ退避・champion 化しない」へ切替える。
+   * false のとき二信号ゲートの CV↑ が発火不能なので、本文は「最強の"可搬"公開 agent を丸ごと採用+提出+観測して
+   * baseline を差し替え（旧は hedge 温存・研究で止めず inconclusive を積まない）／rogii 逆転は最終2枠の hedge で守る」
+   * へ切替える（役割B の評価系再設計は併走可だが採用+提出を先延ばししない）。
    */
   cvRepresentative: boolean;
   /**
@@ -1570,9 +1572,20 @@ ${childWorkers}
        - 役割A（軸の仮説源）: 手法を移植 → CV で評価 → 二信号ゲート通過で champion 候補（high-public だけでは不可）。
        - 役割B（最高レバレッジ）: transfer-trust が低い時は**彼らの CV設計/既知leak を学び自分の CV を private 代理へ修理**。
        - 役割D（hedge）: public 高いが CV 未確認・**⚠hack フラグ付き**は**構造独立 hedge 候補のみ**（champion 化禁止）。
-${competition.cvRepresentative ? '' : `   - **⚠この競技は cv_representative=false（agent/RL・live matchmaking 型）**: 固定相手の CV は最終フィールド(private)を
-     代表しない。外部知識は**役割B（評価系の再設計）と役割D（少数の多様 hedge を出して静観）へ退避**し、
-     **役割A の champion 化・local A/B の追い込みはしない**。
+${competition.cvRepresentative ? '' : `   - **⚠この競技は cv_representative=false（agent/RL・live matchmaking 型）＝規律を切替える**: 固定相手の CV は
+     最終フィールド(private)を代表しない → **二信号ゲートの「CV↑」が原理的に発火しない**。ここで「昇格させない」を貫くと
+     *強い公開 baseline を永久に採用せず停滞*する（実障害: 上位公開 agent が public 3000超なのに自作 variant で 600 付近に
+     滞留し、上位解を"研究"しては台帳が inconclusive で埋まるだけだった）。したがってこの型では:
+       - **役割A'（丸ごと採用）を"研究"で止めず"採用+提出+観測"まで必ず遂行する**: 最強の**可搬**公開 agent
+         （オフライン実行可・**GPU学習weights/外部replay bytes/leak/ライセンス阻害を含まない**）を **土台ごと差し替えて
+         working baseline にし、本日の提出枠を使って実提出し実スコアを観測する**（旧 champion は hedge 温存）。CV が private を
+         代表しない以上、**live field への public スコアが得られる唯一の一次信号**であり、強い公開 baseline を出さないのは
+         private 規律ではなく停滞。**枠を余らせて inconclusive を積むな**（可搬な強公開 baseline が自 champion の public を
+         上回るなら採用し提出、effective-config fingerprint を台帳へ記録）。
+       - **rogii 逆転ガード（public↔private は逆転しうる）**: だから**最終2枠を public-max 一辺倒にしない**＝構造独立 hedge を
+         必ず1枠残す。ただし「採用して観測する」こと自体は妨げない（逆転リスクは hedge で守り、観測は続ける）。
+       - **⚠hack/holdout/leak フラグ付きノートは primary 採用にせず hedge 候補のみ**。役割B（評価系＝private代理 oracle の
+         再設計）は並行して進めてよいが、**それを理由に強公開 baseline の採用+提出を先延ばしにしない**。
 `}   - **プローブ枠（プラトー時のみ・public追いでない）**: 「本日の提出予算」が 🔎 プローブ due の時のみ、
      **CV では確認できないが構造の異なる hedge 候補を1件**出して private 汎化の保険/情報を得る（既提出と別
      fingerprint・別成分プロファイル）。枠が無ければ見送り、局所改善を継続する（**見送りは失敗ではない**）。
