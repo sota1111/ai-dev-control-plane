@@ -75,11 +75,30 @@ CV と public を private の（部分的に独立な誤差を持つ）2推定�
 - 昇格・提出は §1 の二信号ゲート／§2 の hedge 規律に従う（探索は候補生成の多様性・評価はローカル一次KPI）。
 - 実装: `buildExplorationBanner`（本文冒頭バナー。trigger=isImprovementStuck || !cvRepresentative）。
 
-## 5. escalation・飽和・天井の正直さ（空回り防止）
-- escalation ladder を**決定論の状態機械**にし、枯渇軸の再試行を機構が禁止（台帳と突合）。
-- ladder 完全枯渇 ＋ 制約下の到達天井 < frontier が証拠付きで確認されたら **mode:maintain＋compute 再配分**。
-  「伸びない対象に枠と計算を注ぎ続けない」も恒久対策。
-- **健全性指標 = 「CV↑×public非矛盾の候補が出ているか（＝汎化証拠）」**。提出数や public スコアを成果にしない。
+## 5. escalation・飽和・天井の正直さ（空回り防止）＝サイクル内自己監査（決定論の状態機械）
+人手の「監査→型の特定→是正」を**サイクル自身に内在化**する。毎起票時に **on-disk 証拠（experiment_ledger.jsonl）から
+停滞の型を決定論的に算出**（`computeStagnationForensics`）し、型に応じた是正指示を本文へ自動注入
+（`buildCorrectiveDirectiveBanner`）。LLM判断ゼロ＝監査可能。
+
+**自己監査メトリクス**: `externalAdoptAttempts/Promoted/Inconclusive`（外部知識"採用"軸の試行/採用/研究止まり数・
+内部oracle/policy改善とは区別）・`wholesaleAdoptOutcome`（丸ごと採用=役割A'の最新確定結果 promoted/rejected/never）・
+`portabilityVerifiedNonPortable`（可搬性検証が非可搬=天井と結論した台帳エントリの有無）。
+
+**是正 directive（排他・優先順）**:
+- **型B 可搬性天井（PIVOT）**: `wholesaleAdoptOutcome=rejected` × `portabilityVerifiedNonPortable` → 同型 classical lever の
+  反復移植を禁止し、**役割B（独立 public アンカー獲得／oracle 再設計）** か **mode:maintain＋compute 再配分**へ固定。
+- **型D 可搬性再検証**: `wholesaleAdoptOutcome=rejected` × 未検証 → 天井を主張する前に**可搬性を1回だけ再検証**する子Issueを
+  立て、結論を axis に "portability" を含めて台帳へ記録（次サイクルの型B/A の入力）。
+- **型A ADOPT+SUBMIT 強制**: 外部採用を規定回（`CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN`）試みたが promoted=0 ＝
+  「研究して inconclusive を積むだけ」→ **research 禁止・最強の可搬公開 baseline を丸ごと採用+提出+観測**（旧は hedge 温存・
+  §4 の cv_representative=false 規律をデータ駆動で全コンペへ一般化）。budget/rogii hedge は必ず経由。
+- **型C 前提死んだ子の自動解消（reaper）**: 改善親の子が Blocked で、**他に動いている子が無い**（前提を供給しうる作業なし）
+  なら premise-dead として自動 Cancel し親を再開（`cancelStrandedBlockedChildren`）。In Progress の兄弟がいる間は触れない。
+  find→port→judge 分解で find が negative 完了→port/judge が Blocked stranding する実障害（SOT-2926/2928）の恒久解。
+
+ladder 完全枯渇 ＋ 制約下の到達天井 < frontier が証拠付きで確認されたら **mode:maintain＋compute 再配分**。
+**健全性指標 = 「CV↑×public非矛盾（cv_rep=true）／強い可搬公開 baseline の採用+提出+観測（cv_rep=false）が起きているか」**。
+提出数や public スコアそのものを成果にしない。
 
 ## 6. 敵対的レビュー（本設計自体の限界・明示）
 1. **common-mode**: CV と public が同じ分布シフトを共有すると揃って private を外す。三角測量は独立誤差にのみ有効
@@ -90,11 +109,18 @@ CV と public を private の（部分的に独立な誤差を持つ）2推定�
    スキーム・leak-free 強制・per-entity 無退行で proxy 整合性を担保。
 5. **観測不能性**: private は競技中測れない以上、**いかなる対策も private 改善を保証しない**。本設計の本質は
    「最適化を強める」ではなく**認識論的謙抑＋頑健性（CV一次・public反証・hedge・型/天井の正直さ）**。
+6. **自己監査（§5）の誤判定**: 軸の型分類は台帳の axis 文字列の正規表現＝誤検知しうる。緩和＝型A/B は「実際に採用を
+   試して確定（promoted/rejected）した台帳証拠」を要求し推測で発火しない・型B の天井宣言は型D の可搬性再検証通過を
+   前提にする（推測 maintain の禁止）・型C は「他に動いている子が無い」ときだけ発火（In Progress の兄弟がいれば触れない）。
+   閾値は「gap 実在＋可搬 baseline 未採用」で門を絞り、毎サイクル提出強制にならないようにする。
 
 ## 7. 実装状態（本設計への対応）
 - 済: 提出枠効率化(reserve/spacing/改善ゲート)・公開ノート供給＋過学習フラグ(PR#404-409)。
-- 本PR: 昇格ゲートを**二信号一致**へ・外部知識の**4役割**を本文へ・`cv_representative` 型フラグ導入。
-- 追って: transfer-trust の決定論算出、escalation 状態機械化、健全性メトリクスの自動通報。
+- 済: 昇格ゲート**二信号一致**・外部知識**4役割**・`cv_representative` 型フラグ(PR#410)。
+- 済: `cv_representative=false` を『採用+提出+観測』へ(PR#418)。
+- 済: **サイクル内自己監査＝決定論状態機械**（`computeStagnationForensics`＋`buildCorrectiveDirectiveBanner` 型A/B/D・
+  reaper 型C `cancelStrandedBlockedChildren`。§5）＝ escalation 状態機械化＋健全性メトリクス自動通報の実装。
+- 追って: transfer-trust の決定論算出、mode:maintain の自動提案（型Bからの昇格）。
 
 **要旨: private は観測不能。CV を private 代理の一次に、public を独立反証器に、両者一致だけ昇格し、
 残余不確実性は構造独立 hedge で守る。外部知識は仮説源として同ゲートを通し、high-public 単独では昇格させない。**

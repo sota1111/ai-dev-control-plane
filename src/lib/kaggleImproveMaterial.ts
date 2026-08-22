@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import type { GuardSignals, ImprovementMaterial, Lineage, OracleDriftSignal, SubmissionPolicy, TargetsRegistry } from './kaggleImprovement.js';
+import type { GuardSignals, ImprovementMaterial, Lineage, OracleDriftSignal, StagnationForensics, SubmissionPolicy, TargetsRegistry } from './kaggleImprovement.js';
 import { getCompetition, resolveCompetitionPhase } from './kaggleImprovement.js';
 import {
   computeTargetPriority,
@@ -43,6 +43,7 @@ import {
   readExperimentLedger,
   summarizeExperimentLedger,
 } from './experimentLedger.js';
+import type { ExperimentLedgerEntry } from './experimentLedger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -862,6 +863,83 @@ function issueTimeMs(i: CompletedIssue): number {
  *    hasNewMaterial=true とし、存在する完了Issueをそのままダイジェストにする。
  *  - sinceIso があれば、その時刻より後に完了した Issue のみを新材料とみなす。
  */
+/** 外部知識の"採用"を試みた軸（研究含む）を識別する（内部oracle/policy改善とは区別）。 */
+const EXTERNAL_ADOPT_AXIS_RE =
+  /external[- ]?(solution|knowledge)|top[- ]?solution|wholesale|role[- ]?a['’]?\b|public[- ]?(agent|baseline|notebook|solution)|frontier|上位解|公開(ノート|agent|baseline)|丸ごと採用|移植/i;
+/**
+ * 親の集約/提出判定など「サイクル境界の帳簿エントリ」を識別して採用試行カウントから除外する
+ * （"external-knowledge parent aggregation and submission" 等を採用と誤カウントしない）。
+ */
+const PARENT_BOOKKEEPING_AXIS_RE =
+  /\bparent\b.*(aggregation|resume|submission|decision|integration)|(aggregation|resume|integration).*\bparent\b|親.*(集約|再開|統合|提出判定)|axis selection|decomposition/i;
+/** 「丸ごと採用（役割A'・土台差し替え）」軸を識別する。 */
+const WHOLESALE_AXIS_RE = /wholesale|role[- ]?a['’]|丸ごと採用|independent foundation/i;
+/**
+ * 「可搬性の検証そのもの」を目的にした軸を識別する（採用軸に含まれる形容詞 "portable" では発火しない）。
+ * 例: "portability re-verification of top notebooks" / "可搬性の再検証"。
+ */
+const PORTABILITY_VERIFY_AXIS_RE =
+  /portability[- ]?(re[- ]?)?(verif|check|audit|assessment|recheck)|可搬性(の)?(再)?(検証|検討|監査|確認)/i;
+/** 「非可搬（天井）」の結論を示す語。 */
+const NONPORTABLE_EVIDENCE_RE = /non[- ]?portable|非可搬|GPU|weights|天井|ceiling/i;
+
+/**
+ * サイクル内自己監査（恒久対策・design §5）: experiment_ledger.jsonl から停滞の「型」を決定論的に算出する。
+ * LLM判断ゼロ＝監査可能。buildCorrectiveDirectiveBanner（kaggleImprovement）がこの結果から是正指示を注入する。
+ * 空配列（台帳なし）は undefined（後方互換＝バナー非発火）。
+ */
+export function computeStagnationForensics(
+  entries: ExperimentLedgerEntry[]
+): StagnationForensics | undefined {
+  if (!entries || entries.length === 0) return undefined;
+  const latestCycle = entries.reduce(
+    (m, e) => (typeof e.cycle === 'number' && e.cycle > m ? e.cycle : m),
+    0
+  );
+  const promotedEver = entries.some((e) => e.result === 'promoted');
+
+  let externalAdoptAttempts = 0;
+  let externalAdoptPromoted = 0;
+  let externalAdoptInconclusive = 0;
+  for (const e of entries) {
+    if (!EXTERNAL_ADOPT_AXIS_RE.test(e.axis)) continue;
+    // 親集約/提出判定/軸選定などの帳簿エントリは「採用の試行」ではないので除外する。
+    if (PARENT_BOOKKEEPING_AXIS_RE.test(e.axis)) continue;
+    externalAdoptAttempts++;
+    if (e.result === 'promoted') externalAdoptPromoted++;
+    else if (e.result === 'inconclusive') externalAdoptInconclusive++;
+  }
+
+  // 丸ごと採用軸の「最新の確定結果（promoted/rejected）」。inconclusive は確定でないので never のまま。
+  let wholesaleAdoptOutcome: 'promoted' | 'rejected' | 'never' = 'never';
+  let latestWholesaleTs = -Infinity;
+  for (const e of entries) {
+    if (!WHOLESALE_AXIS_RE.test(e.axis)) continue;
+    if (e.result !== 'promoted' && e.result !== 'rejected') continue;
+    const ts = Date.parse(e.recordedAt || '') || 0;
+    if (ts >= latestWholesaleTs) {
+      latestWholesaleTs = ts;
+      wholesaleAdoptOutcome = e.result;
+    }
+  }
+
+  const portabilityVerifiedNonPortable = entries.some(
+    (e) =>
+      PORTABILITY_VERIFY_AXIS_RE.test(e.axis) &&
+      NONPORTABLE_EVIDENCE_RE.test(`${e.axis} ${e.evidence || ''} ${e.hypothesis || ''}`)
+  );
+
+  return {
+    latestCycle,
+    promotedEver,
+    externalAdoptAttempts,
+    externalAdoptPromoted,
+    externalAdoptInconclusive,
+    wholesaleAdoptOutcome,
+    portabilityVerifiedNonPortable,
+  };
+}
+
 export function buildRecentIssuesDigest(
   issues: CompletedIssue[],
   sinceIso: string | null,
@@ -1356,10 +1434,13 @@ export async function collectImproveContext(
 
     // 実験台帳ダイジェスト（design §48）: target repo の docs/ai/experiment_ledger.jsonl を読む。
     let experimentLedgerDigest: string | undefined;
+    // サイクル内自己監査（恒久対策）: 同じ台帳から停滞の型を決定論的に算出する。
+    let stagnationForensics: StagnationForensics | undefined;
     try {
       const ledgerPath = defaultExperimentLedgerPath(path.join(targetsRoot, t.repo));
       const entries = readExperimentLedger(ledgerPath);
       if (entries.length > 0) experimentLedgerDigest = summarizeExperimentLedger(entries);
+      stagnationForensics = computeStagnationForensics(entries);
     } catch (err: any) {
       log(`experiment ledger read failed for ${t.repo}: ${err?.message || err}`);
     }
@@ -1463,6 +1544,7 @@ export async function collectImproveContext(
       ...(oracleDrift ? { oracleDrift } : {}),
       ...(submissionBudget ? { submissionBudget } : {}),
       ...(publicNotebooksDigest ? { publicNotebooksDigest } : {}),
+      ...(stagnationForensics ? { stagnationForensics } : {}),
     };
   }
 
