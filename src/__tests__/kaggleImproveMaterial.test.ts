@@ -830,5 +830,24 @@ describe('kaggleImproveMaterial', () => {
       ])!;
       expect(f.portabilityVerifiedNonPortable).toBe(true);
     });
+
+    it('computes cyclesSinceLastPromotion and paradigmAttempted (paradigm-gap §5.5)', () => {
+      // 最後の promoted は cycle 3、最新は cycle 6 → 停滞 3 cycle。paradigm 軸なし。
+      const f = computeStagnationForensics([
+        e({ axis: 'motion-link', result: 'promoted', cycle: 3 }),
+        e({ axis: 'gate tweak', result: 'rejected', cycle: 4 }),
+        e({ axis: 'op-point search', result: 'rejected', cycle: 6 }),
+      ])!;
+      expect(f.cyclesSinceLastPromotion).toBe(3);
+      expect(f.paradigmAttempted).toBe(false);
+      // never promoted → cyclesSinceLastPromotion = latestCycle。
+      const f2 = computeStagnationForensics([e({ axis: 'x', result: 'inconclusive', cycle: 5 })])!;
+      expect(f2.cyclesSinceLastPromotion).toBe(5);
+      // paradigm 着手（axis に "paradigm"）を検知。
+      const f3 = computeStagnationForensics([
+        e({ axis: 'paradigm: train own 3D U-Net detector on external GT', result: 'inconclusive', cycle: 7 }),
+      ])!;
+      expect(f3.paradigmAttempted).toBe(true);
+    });
   });
 });

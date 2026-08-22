@@ -153,6 +153,18 @@ export interface ImprovementCompetition {
    * 逐次改変で局所最適に留まらないため（biohub/kaggriculture のように public 首位と大差の競技で有効）。
    */
   exploreFirst: boolean;
+  /**
+   * フロンティア（公開上位）が用いている「手法クラス」の宣言（恒久対策・paradigm-gap）。例:
+   * "learned 3D U-Net detector（自前学習 or 公開重みアタッチ）" / "agent/RL self-play" / undefined。
+   * 停滞中に、我々が別クラス（例: 古典）で頭打ちしているのにフロンティアがこのクラスなら、同クラスの微調整を
+   * やめて **paradigm 移行**を強制する（型E）。**「非可搬＝到達不能」ではない**: クラスが我々に再現可能なら追う。
+   */
+  frontierParadigm?: string;
+  /**
+   * frontierParadigm が我々にとって到達可能か（自前学習できる / 公開重みを使える / 必要 compute を許可）。既定 true。
+   * false = 私有データ/資源が必須で入手不能＝真に到達不能（このときだけ停滞は maintain 候補・型B）。
+   */
+  paradigmReachable: boolean;
   targets: ImprovementTarget[];
 }
 
@@ -585,6 +597,15 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
   // explore_first（既定 false）。boolean 以外は false 扱い（fail-safe）。
   const exploreFirst = (co as Record<string, unknown>).explore_first === true
     || (co as Record<string, unknown>).exploreFirst === true;
+  // paradigm-gap（恒久対策）: フロンティアの手法クラス宣言と到達可能性（既定 reachable=true）。
+  const frontierParadigmRaw = (co as Record<string, unknown>).frontier_paradigm
+    ?? (co as Record<string, unknown>).frontierParadigm;
+  const frontierParadigm = typeof frontierParadigmRaw === 'string' && frontierParadigmRaw.trim()
+    ? frontierParadigmRaw.trim()
+    : undefined;
+  const paradigmReachableRaw = (co as Record<string, unknown>).paradigm_reachable
+    ?? (co as Record<string, unknown>).paradigmReachable;
+  const paradigmReachable = paradigmReachableRaw === false ? false : true;
 
   return {
     key,
@@ -604,6 +625,8 @@ function parseCompetition(c: unknown, i: number, seen: Set<string>): Improvement
     validation,
     cvRepresentative,
     exploreFirst,
+    ...(frontierParadigm ? { frontierParadigm } : {}),
+    paradigmReachable,
     targets,
   };
 }
@@ -877,6 +900,10 @@ export interface StagnationForensics {
   latestCycle: number;
   /** 昇格(result=promoted)がこれまで1度でもあったか。 */
   promotedEver: boolean;
+  /** 最後の昇格 cycle からの経過 cycle 数（今 cycle 昇格なら 0・未昇格なら latestCycle）＝停滞の実測。 */
+  cyclesSinceLastPromotion: number;
+  /** フロンティア手法クラスへの移行（paradigm）を着手済みか（台帳 axis に "paradigm" を含むか）。 */
+  paradigmAttempted: boolean;
   /** 外部知識の採用を試みた軸の数（external/transfer/wholesale/public-agent/上位解/移植 …）。 */
   externalAdoptAttempts: number;
   /** そのうち promoted（＝実際に採用に至った）数。 */
@@ -1338,12 +1365,18 @@ export function buildExplorationBanner(
 
 /** 外部知識の採用を N 回試みて 1 度も採用に至らない＝研究停滞と判定する閾値（型A）。 */
 export const CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN = 3;
+/** 連続 N cycle 昇格ゼロ＝現手法クラスで停滞と判定し paradigm 移行を促す閾値（型E）。 */
+export const CORRECTIVE_PARADIGM_STAGNATION_CYCLES = 3;
 
 /**
  * サイクル内自己監査＝停滞の「型」に応じた是正指示バナー（恒久対策・design §5 状態機械）。
  * 手作業でやっていた「監査→型の特定→是正」をサイクル自身に内在化する。決定論（forensics は台帳由来）。
  * 優先順位（排他・上から順に最初に該当した1つだけ出す）:
- *  - 型B（可搬性天井）: 丸ごと採用が実測 rejected かつ非可搬が検証済 → 同じ移植の反復禁止・役割B/maintain へ PIVOT。
+ *  - 型E（paradigm 移行）: registry が frontier の手法クラスを宣言（frontier_paradigm）× 我々に到達可能（paradigm_reachable）×
+ *    未着手 → 同クラス微調整をやめ frontier の手法クラスへ土台ごと移行（**非可搬≠到達不能**・古典で停滞し続ける再発防止）。
+ *    宣言そのものが決定なので停滞カウントでは gate しない（着手すると台帳 axis "paradigm" が付き自動で止む）。
+ *  - 型B（到達天井）: 丸ごと採用が実測 rejected × 非可搬検証済 かつ **frontier paradigm が到達不能 or 着手済で頭打ち** →
+ *    反復移植禁止・役割B/maintain へ PIVOT。
  *  - 型D（可搬性再検証）: 丸ごと採用 rejected だが非可搬未検証 → 天井宣言の前に可搬性を1回だけ再検証。
  *  - 型A（採用+提出強制）: 外部採用を規定回試みたが1度も採用+提出していない → 研究禁止・最強可搬公開baselineを採用+提出+観測。
  * proxy 確立中は抑制（基盤整備優先）。forensics 欠落時は空（後方互換）。
@@ -1355,17 +1388,42 @@ export function buildCorrectiveDirectiveBanner(
   const f = material.stagnationForensics;
   if (!f) return '';
   const hasNotebooks = !!material.publicNotebooksDigest?.trim();
+  // frontier の手法クラスが registry で宣言され、我々に到達可能（自前学習/公開重み）で、まだ未着手か。
+  // 宣言そのものが「そのクラスへ移る」意思決定なので、停滞カウントの閾値では gate しない（宣言=決定）。
+  // 未宣言のとき自動で気づくための停滞シグナルは cyclesSinceLastPromotion として本文に併記する。
+  const paradigmReachableUnattempted =
+    !!competition.frontierParadigm && competition.paradigmReachable && !f.paradigmAttempted;
 
-  // 型B: 天井確定（丸ごと採用 rejected × 非可搬検証済）→ 反復移植を止めて PIVOT。
-  if (f.wholesaleAdoptOutcome === 'rejected' && f.portabilityVerifiedNonPortable) {
+  // 型E: frontier は別クラスで到達可能 × 未着手 → paradigm 移行を強制（最優先）。
+  // 「古典で停滞し続けた／非可搬を到達不能と誤認して同クラスを磨き続けた」の恒久対策。
+  if (paradigmReachableUnattempted) {
     return `
 
-## 🧱 可搬性天井を検知（PIVOT 必須）— 同じ移植を繰り返すな
+## 🧭 パラダイム移行を強制（PARADIGM SWITCH）— 同クラスの微調整をやめ、フロンティアの手法クラスへ移れ
+自己監査（台帳）: **${f.cyclesSinceLastPromotion} cycle 連続で昇格ゼロ＝現手法クラスで頭打ち**。registry 宣言では frontier の手法クラスは
+**「${competition.frontierParadigm}」**で、これは我々にとって**到達可能（paradigm_reachable=true・自前学習/公開重み/必要computeを許可）**。
+- **最優先で frontier の手法クラスへ土台ごと移行**する（このクラスを実装する子Issueを立てる）。同クラスの逐次微調整・operating-point 探索・
+  1機能ゲート付き移植は**禁止**（頭打ちクラスを磨き続けない）。
+- **「非可搬（彼らの成果物をそのままコピーできない）」を「到達不能」と混同するな**。手法クラスが再現可能（我々が自前学習で作れる／
+  公開重みをアタッチできる）なら追え。まず public 上位を実際に pull して手法クラスを分類し、我々のクラスとの差を明示（recon）。
+- **到達天井（maintain）を宣言してよいのは、frontier の手法クラスを実際に我々が試して届かなかった時 or 私有資源必須で入手不能な時だけ**。
+  それ以前に「非可搬だから天井」で maintain してはならない（古典停滞の再発防止）。
+- 着手・結論は \`docs/ai/experiment_ledger.jsonl\` へ **axis に "paradigm" を含めて**記録する（次サイクルの型E/型B判定の入力になる）。`;
+  }
+
+  // 型B: 到達天井（丸ごと採用 rejected × 非可搬検証済）→ 反復移植を止めて PIVOT。
+  // ただし frontier paradigm が到達可能で未着手なら上の型Eが優先（ここには来ない）。
+  if (f.wholesaleAdoptOutcome === 'rejected' && f.portabilityVerifiedNonPortable) {
+    const paradigmNote = competition.frontierParadigm && competition.paradigmReachable
+      ? `\n- **ただし frontier 手法クラス「${competition.frontierParadigm}」は到達可能**。maintain の前に、それを我々が実際に試して届かなかった証拠が必要（型E参照）。`
+      : '';
+    return `
+
+## 🧱 到達天井を検知（PIVOT 必須）— 同じ移植を繰り返すな
 自己監査（台帳）: 公開上位 baseline の**丸ごと採用は実測で rejected**、かつ残る上位ノートは**非可搬（GPU学習weights等）と検証済**。
-制約下の到達天井が frontier 未満であることが証拠付きで確定している。**同型の classical lever 再移植・逐次A/B は禁止**（新根拠なしの再試行）。
-今サイクルの軸は次のどちらかに固定せよ:
+**同型の classical lever 再移植・逐次A/B は禁止**（新根拠なしの再試行）。今サイクルの軸は次のどちらかに固定せよ:
 - **役割B（最高レバレッジ）**: 二信号ゲート用の**独立した同一metric public アンカーの獲得** / leak-free CV（private代理）oracle の再設計。
-- それも枯渇なら **mode:maintain 提案＋compute 再配分**（伸びない対象に枠を注ぎ続けない・design §5）。親の申し送りへ根拠を残す。`;
+- それも枯渇し、かつ frontier 手法クラスが**到達不能 or 着手済で頭打ち**なら **mode:maintain 提案＋compute 再配分**（design §5）。${paradigmNote}`;
   }
 
   // 型D: 丸ごと採用 rejected だが可搬性は未検証 → 天井を主張する前に1回だけ再検証。
