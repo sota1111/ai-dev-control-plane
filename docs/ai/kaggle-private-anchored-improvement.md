@@ -45,8 +45,12 @@ CV と public を private の（部分的に独立な誤差を持つ）2推定�
 - **役割B（CV/oracle 設計の修理・最高レバレッジ）**: transfer-trust が低い時、上位解法の**「検証の仕方
   （CV設計・private分布の性質・既知leak）」**を取り込み自分の CV を private 代理として作り直す。＝「何を提出
   したか」でなく「**どう測ったか**」を学ぶ。
-- **役割C（到達天井・可搬性の現実認識）**: 上位が GPU 事前学習等で**非可搬**なら到達天井を確定し、無益な
-  再移植を避け、可搬面（古典前後処理）に集中 or maintain/再配分（§5）。
+- **役割C（到達天井・可搬性の現実認識）**: **「非可搬（彼らの成果物をそのままコピーできない）」を「到達不能」と
+  混同しない**（biohub 古典停滞の真因＝この誤認）。上位が GPU 事前学習等でも、**手法クラスが我々に再現可能
+  （外部GTで自前学習できる／公開重みをアタッチできる／必要computeが許可されている）なら、そのクラスへ土台ごと
+  移行して追う**（§5.5 paradigm 移行）。**到達天井の確定＝maintain は、frontier の手法クラスを我々が実際に試して
+  届かなかった時 or 私有データ/資源が必須で入手不能な時だけ**。単に「非可搬だから」で天井を宣言し古典微調整に
+  逃げてはならない。
 - **役割D（hedge 候補）**: public 高いが CV 未確認の手法は**構造独立 hedge としてのみ**採用可（common-mode 保険）。
   **champion 化は禁止。** metric-hack フラグ付きノートはこの用途に限定。
 
@@ -85,8 +89,15 @@ CV と public を private の（部分的に独立な誤差を持つ）2推定�
 `portabilityVerifiedNonPortable`（可搬性検証が非可搬=天井と結論した台帳エントリの有無）。
 
 **是正 directive（排他・優先順）**:
-- **型B 可搬性天井（PIVOT）**: `wholesaleAdoptOutcome=rejected` × `portabilityVerifiedNonPortable` → 同型 classical lever の
-  反復移植を禁止し、**役割B（独立 public アンカー獲得／oracle 再設計）** か **mode:maintain＋compute 再配分**へ固定。
+- **型E パラダイム移行（PARADIGM SWITCH・最優先）**: registry `frontier_paradigm` 宣言あり × `paradigm_reachable=true` ×
+  未着手（台帳 axis に "paradigm" 無し）→ **同クラスの微調整をやめ frontier の手法クラスへ土台ごと移行**（自前学習/公開重み）。
+  **宣言そのものが「そのクラスへ移る」決定**なので停滞カウントでは gate しない（着手すると axis "paradigm" が付き自動で止む）。
+  未宣言の競技で自動検知するための停滞シグナル `cyclesSinceLastPromotion` は本文に併記（人間が frontier_paradigm を宣言する契機）。
+  **「非可搬≠到達不能」**: クラスが再現可能なら追う。**maintain はそのクラスを実際に試して届かなかった時だけ**。
+  「古典で停滞し続けた／非可搬を到達不能と誤認して同クラスを磨き続けた（biohub 実障害）」の恒久対策。
+- **型B 到達天井（PIVOT）**: `wholesaleAdoptOutcome=rejected` × `portabilityVerifiedNonPortable`（かつ frontier paradigm が
+  到達不能 or 着手済で頭打ち＝型E が発火しない）→ 同型 classical lever の反復移植を禁止し、**役割B（独立 public アンカー
+  獲得／oracle 再設計）** か **mode:maintain＋compute 再配分**へ固定。
 - **型D 可搬性再検証**: `wholesaleAdoptOutcome=rejected` × 未検証 → 天井を主張する前に**可搬性を1回だけ再検証**する子Issueを
   立て、結論を axis に "portability" を含めて台帳へ記録（次サイクルの型B/A の入力）。
 - **型A ADOPT+SUBMIT 強制**: 外部採用を規定回（`CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN`）試みたが promoted=0 ＝

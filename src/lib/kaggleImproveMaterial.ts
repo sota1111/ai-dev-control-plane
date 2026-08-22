@@ -897,6 +897,13 @@ export function computeStagnationForensics(
     0
   );
   const promotedEver = entries.some((e) => e.result === 'promoted');
+  const lastPromotedCycle = entries.reduce(
+    (m, e) => (e.result === 'promoted' && typeof e.cycle === 'number' && e.cycle > m ? e.cycle : m),
+    -1
+  );
+  const cyclesSinceLastPromotion = lastPromotedCycle < 0 ? latestCycle : latestCycle - lastPromotedCycle;
+  // paradigm 移行の着手記録（型E の directive が axis に "paradigm" を含めて記録させる）。
+  const paradigmAttempted = entries.some((e) => /paradigm/i.test(e.axis));
 
   let externalAdoptAttempts = 0;
   let externalAdoptPromoted = 0;
@@ -932,6 +939,8 @@ export function computeStagnationForensics(
   return {
     latestCycle,
     promotedEver,
+    cyclesSinceLastPromotion,
+    paradigmAttempted,
     externalAdoptAttempts,
     externalAdoptPromoted,
     externalAdoptInconclusive,

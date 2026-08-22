@@ -11,6 +11,7 @@ import {
   buildIssueBody,
   buildCorrectiveDirectiveBanner,
   CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN,
+  CORRECTIVE_PARADIGM_STAGNATION_CYCLES,
   planImprovementCycle,
   planChampionSubmission,
   planCompetitionSubmission,
@@ -868,7 +869,20 @@ describe('kaggleImprovement', () => {
     // 恒久対策: サイクル内自己監査＝停滞の型に応じた是正指示（buildCorrectiveDirectiveBanner）。
     describe('corrective directive banner (cycle self-audit state machine)', () => {
       const comp = () => parseTargetsRegistry(JSON.parse(JSON.stringify(rawRegistry))).competitions[0];
+      // frontier_paradigm を宣言した競技（型E 用）。
+      const compPara = (reachable = true) => {
+        const raw: any = JSON.parse(JSON.stringify(rawRegistry));
+        raw.competitions[0].frontier_paradigm = 'learned 3D U-Net detector（自前学習/公開重み）';
+        raw.competitions[0].paradigm_reachable = reachable;
+        return parseTargetsRegistry(raw).competitions[0];
+      };
       const NOTE = '1. `x/y` — z, ▲10'; // publicNotebooksDigest ダミー
+      // 全必須フィールドの既定（既定は非停滞・paradigm 未着手）。
+      const F = (o: Partial<import('../lib/kaggleImprovement.js').StagnationForensics> = {}) => ({
+        latestCycle: 3, promotedEver: true, cyclesSinceLastPromotion: 0, paradigmAttempted: false,
+        externalAdoptAttempts: 0, externalAdoptPromoted: 0, externalAdoptInconclusive: 0,
+        wholesaleAdoptOutcome: 'never' as const, portabilityVerifiedNonPortable: false, ...o,
+      });
 
       test('no forensics → empty (backward compatible)', () => {
         expect(buildCorrectiveDirectiveBanner(comp(), {})).toBe('');
@@ -877,12 +891,7 @@ describe('kaggleImprovement', () => {
       test('型A ADOPT+SUBMIT: external adopt tried but never promoted → force adopt+submit', () => {
         const banner = buildCorrectiveDirectiveBanner(comp(), {
           publicNotebooksDigest: NOTE,
-          stagnationForensics: {
-            latestCycle: 3, promotedEver: true,
-            externalAdoptAttempts: CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN,
-            externalAdoptPromoted: 0, externalAdoptInconclusive: 3,
-            wholesaleAdoptOutcome: 'never', portabilityVerifiedNonPortable: false,
-          },
+          stagnationForensics: F({ externalAdoptAttempts: CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN, externalAdoptInconclusive: 3 }),
         });
         expect(banner).toContain('ADOPT+SUBMIT 強制');
         expect(banner).toContain('research 禁止');
@@ -892,11 +901,7 @@ describe('kaggleImprovement', () => {
       test('型A does NOT fire once an external adoption was promoted (biohub-style)', () => {
         const banner = buildCorrectiveDirectiveBanner(comp(), {
           publicNotebooksDigest: NOTE,
-          stagnationForensics: {
-            latestCycle: 5, promotedEver: true,
-            externalAdoptAttempts: 6, externalAdoptPromoted: 1, externalAdoptInconclusive: 5,
-            wholesaleAdoptOutcome: 'never', portabilityVerifiedNonPortable: false,
-          },
+          stagnationForensics: F({ externalAdoptAttempts: 6, externalAdoptPromoted: 1, externalAdoptInconclusive: 5 }),
         });
         expect(banner).toBe('');
       });
@@ -904,50 +909,80 @@ describe('kaggleImprovement', () => {
       test('型D re-verify portability: wholesale rejected but portability not yet verified', () => {
         const banner = buildCorrectiveDirectiveBanner(comp(), {
           publicNotebooksDigest: NOTE,
-          stagnationForensics: {
-            latestCycle: 6, promotedEver: true,
-            externalAdoptAttempts: 8, externalAdoptPromoted: 1, externalAdoptInconclusive: 6,
-            wholesaleAdoptOutcome: 'rejected', portabilityVerifiedNonPortable: false,
-          },
+          stagnationForensics: F({ externalAdoptAttempts: 8, externalAdoptPromoted: 1, externalAdoptInconclusive: 6, wholesaleAdoptOutcome: 'rejected' }),
         });
         expect(banner).toContain('可搬性の再検証');
         expect(banner).toContain('portability');
       });
 
-      test('型B ceiling PIVOT: wholesale rejected AND portability verified non-portable', () => {
+      test('型B ceiling PIVOT: wholesale rejected AND portability verified non-portable (no reachable paradigm)', () => {
         const banner = buildCorrectiveDirectiveBanner(comp(), {
           publicNotebooksDigest: NOTE,
-          stagnationForensics: {
-            latestCycle: 7, promotedEver: true,
-            externalAdoptAttempts: 8, externalAdoptPromoted: 1, externalAdoptInconclusive: 6,
-            wholesaleAdoptOutcome: 'rejected', portabilityVerifiedNonPortable: true,
-          },
+          stagnationForensics: F({ externalAdoptPromoted: 1, wholesaleAdoptOutcome: 'rejected', portabilityVerifiedNonPortable: true }),
         });
-        expect(banner).toContain('可搬性天井を検知');
+        expect(banner).toContain('到達天井を検知');
         expect(banner).toContain('PIVOT');
         expect(banner).toContain('役割B');
+      });
+
+      test('型E PARADIGM SWITCH: stagnating + reachable frontier paradigm declared + not attempted (highest priority)', () => {
+        const banner = buildCorrectiveDirectiveBanner(compPara(true), {
+          publicNotebooksDigest: NOTE,
+          // 停滞 + 丸ごと採用 rejected + 非可搬検証済 でも、到達可能な未着手 paradigm があれば E が最優先。
+          stagnationForensics: F({
+            cyclesSinceLastPromotion: CORRECTIVE_PARADIGM_STAGNATION_CYCLES,
+            wholesaleAdoptOutcome: 'rejected', portabilityVerifiedNonPortable: true,
+          }),
+        });
+        expect(banner).toContain('パラダイム移行を強制');
+        expect(banner).toContain('非可搬');
+        expect(banner).toContain('混同するな');
+      });
+
+      test('型E does NOT fire when paradigm already attempted → falls through to 型B', () => {
+        const banner = buildCorrectiveDirectiveBanner(compPara(true), {
+          publicNotebooksDigest: NOTE,
+          stagnationForensics: F({
+            cyclesSinceLastPromotion: CORRECTIVE_PARADIGM_STAGNATION_CYCLES, paradigmAttempted: true,
+            wholesaleAdoptOutcome: 'rejected', portabilityVerifiedNonPortable: true,
+          }),
+        });
+        expect(banner).not.toContain('パラダイム移行を強制');
+        expect(banner).toContain('到達天井を検知'); // 型B（paradigm 着手済で頭打ち）
+      });
+
+      test('型E does NOT fire when the paradigm is unreachable (private/unavailable) → 型B maintain path', () => {
+        const banner = buildCorrectiveDirectiveBanner(compPara(false), {
+          publicNotebooksDigest: NOTE,
+          stagnationForensics: F({
+            cyclesSinceLastPromotion: CORRECTIVE_PARADIGM_STAGNATION_CYCLES,
+            wholesaleAdoptOutcome: 'rejected', portabilityVerifiedNonPortable: true,
+          }),
+        });
+        expect(banner).not.toContain('パラダイム移行を強制');
+        expect(banner).toContain('到達天井を検知');
+      });
+
+      test('型E fires on declaration even without stagnation (declaration = decision)', () => {
+        // 宣言(frontier_paradigm)+到達可能+未着手なら停滞カウントに依らず即発火（biohub 即switch）。
+        const banner = buildCorrectiveDirectiveBanner(compPara(true), {
+          publicNotebooksDigest: NOTE,
+          stagnationForensics: F({ cyclesSinceLastPromotion: 0 }),
+        });
+        expect(banner).toContain('パラダイム移行を強制');
       });
 
       test('型A suppressed when portability ceiling already verified (no chasing)', () => {
         const banner = buildCorrectiveDirectiveBanner(comp(), {
           publicNotebooksDigest: NOTE,
-          stagnationForensics: {
-            latestCycle: 7, promotedEver: false,
-            externalAdoptAttempts: 5, externalAdoptPromoted: 0, externalAdoptInconclusive: 5,
-            wholesaleAdoptOutcome: 'never', portabilityVerifiedNonPortable: true,
-          },
+          stagnationForensics: F({ promotedEver: false, externalAdoptAttempts: 5, externalAdoptInconclusive: 5, portabilityVerifiedNonPortable: true }),
         });
-        expect(banner).toBe(''); // 天井検証済で丸ごと採用未実施(never)→A/B/Dいずれも非該当
+        expect(banner).toBe(''); // 天井検証済で丸ごと採用未実施(never)→A/B/D/Eいずれも非該当
       });
 
       test('corrective banner is wired into buildIssueBody and suppressed in proxy stage', () => {
         const c = comp();
-        const forensics = {
-          latestCycle: 3, promotedEver: true,
-          externalAdoptAttempts: CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN,
-          externalAdoptPromoted: 0, externalAdoptInconclusive: 3,
-          wholesaleAdoptOutcome: 'never' as const, portabilityVerifiedNonPortable: false,
-        };
+        const forensics = F({ externalAdoptAttempts: CORRECTIVE_EXTERNAL_ADOPT_ATTEMPTS_MIN, externalAdoptInconclusive: 3 });
         const body = buildIssueBody(c.targets[0], c, 3, { publicNotebooksDigest: NOTE, stagnationForensics: forensics });
         expect(body).toContain('ADOPT+SUBMIT 強制');
         const proxyBody = buildIssueBody({ ...c.targets[0], stage: 'proxy' as const }, c, 3, { publicNotebooksDigest: NOTE, stagnationForensics: forensics });
