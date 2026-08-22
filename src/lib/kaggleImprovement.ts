@@ -1356,6 +1356,12 @@ export function buildExplorationBanner(
     「public が自 best を上回る＝最優先で champion 化」は**禁止**——(1) 昇格は必ず二信号ゲート（**CV↑ の裏付け必須**）を
     通し、CV が裏付けない public 跳ねは **public 過学習/逆転を疑い hedge 扱い**、(2) **cv_representative=false（CVで検証
     不能）では採用は"賭け"**＝旧champion を必ず hedge 温存し全賭けしない。
+    **⚠ provenance ゲート（丸ごと採用/verbatim 提出の前に必須）**: 採用対象を静的監査し、次のいずれかなら **verbatim 採用/
+    提出を禁止し fetch-only 扱い**（＝適応ロジックのみ clean-room 再実装可・成果物を丸ごとは使わない）: ①**replay 再構成**
+    （記録対戦/特定 submission の replay から固定 schedule を復元・**埋め込みの大きな固定 action/lookup テーブル**）、②**ライセンス
+    未宣言/再配布不可**、③外部 replay bytes・固定 private trace・無ライセンス source の直接コピー。理由: そうした成果物は
+    **過去フィールド固有で live/private に転移せず**（固定手順）、かつ**再配布・提出が規約/ライセンス違反**（実障害: V16-RC5 は
+    720step 固定 action table を replay 再構成・license 未宣言＝提出不可）。provenance 判定は台帳へ記録する。
   - (b) 根本的に異なる戦略／アーキテクチャ、(c) 問題定式化の変更、(d) 上位ノートの **CV/検証設計の移植**（役割B）。
 - 各方向は**それ自身の実力で評価**する（現 champion の panel で「発火するか」ではなく、その方向の実スコア/CV を
   直接測る）。方向間で比較し、**筋の良い方向を特定してから exploit（深掘り）**へ移る。
@@ -1737,6 +1743,12 @@ ${competition.cvRepresentative ? '' : `   - **⚠この競技は cv_representati
          必ず1枠残す。ただし「採用して観測する」こと自体は妨げない（逆転リスクは hedge で守り、観測は続ける）。
        - **⚠hack/holdout/leak フラグ付きノートは primary 採用にせず hedge 候補のみ**。役割B（評価系＝private代理 oracle の
          再設計）は並行して進めてよいが、**それを理由に強公開 baseline の採用+提出を先延ばしにしない**。
+       - **⚠ provenance ゲート（採用/提出の前に必須・agent/RL は特に）**: 採用対象を静的監査し、**①replay 再構成（記録対戦/
+         特定 submission の replay から固定 schedule を復元・埋め込みの大きな固定 action/lookup テーブル）②license 未宣言/再配布
+         不可 ③外部 replay bytes・無ライセンス source の直接コピー**のいずれかなら **verbatim 採用/提出を禁止**（fetch-only＝適応
+         ロジックのみ clean-room 再実装可）。**agent/RL の公開上位は大半がこの replay/clone 再構成ハックで、過去フィールド固有＝
+         live/private に転移せず・再配布不可**（実障害: V16-RC5 public~3164 は 720step 固定 action table を replay 再構成・license
+         未宣言で提出不可＝「2500+ に届かない」の実体は"転移しない replay 人工物"だった）。provenance 判定を台帳へ記録する。
 `}   - **プローブ枠（プラトー時のみ・public追いでない）**: 「本日の提出予算」が 🔎 プローブ due の時のみ、
      **CV では確認できないが構造の異なる hedge 候補を1件**出して private 汎化の保険/情報を得る（既提出と別
      fingerprint・別成分プロファイル）。枠が無ければ見送り、局所改善を継続する（**見送りは失敗ではない**）。

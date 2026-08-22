@@ -40,6 +40,14 @@ CV と public を private の（部分的に独立な誤差を持つ）2推定�
 外部知識は **「private に効く仮説の供給源」であって「目標・複製対象」ではない**。取り込みは必ず §1 の
 二信号ゲートを通す。**high-public スコア単独では絶対に昇格させない。**
 
+**provenance ゲート（丸ごと採用/verbatim 提出の前に必須）**: 採用対象を静的監査し、**①replay 再構成（記録対戦/特定
+submission の replay から固定 schedule を復元・埋め込みの大きな固定 action/lookup テーブル）②license 未宣言/再配布不可
+③外部 replay bytes・無ライセンス source の直接コピー**のいずれかなら **verbatim 採用/提出を禁止し fetch-only 扱い**
+（＝適応ロジックのみ clean-room 再実装可・成果物を丸ごとは使わない）。理由: そうした成果物は**過去フィールド固有で
+live/private に転移せず**（固定手順）、かつ**再配布・提出が規約/ライセンス違反**。**agent/RL の公開上位は大半がこの
+replay/clone 再構成ハック**（実障害 SOT-2988: V16-RC5 public~3164 は 720step 固定 action table を replay 再構成・license
+未宣言＝提出不可。「2500+ に届かない」の実体は"採用失敗"でなく"転移しない replay 人工物"だった）。判定は台帳へ記録。
+
 - **役割A（改善軸の仮説源・主経路）**: 常時の候補プール。局所軸が枯渇＝プラトー時に escalation で優先度昇格。
   移植手法は CV↑ を第一関門にし、二信号ゲート通過で champion 候補。**public-hack はゲートで自動棄却。**
 - **役割B（CV/oracle 設計の修理・最高レバレッジ）**: transfer-trust が低い時、上位解法の**「検証の仕方
