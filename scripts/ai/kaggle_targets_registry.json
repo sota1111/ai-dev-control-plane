@@ -80,7 +80,7 @@
             "file": ".targets/kaggriculture-gpt/submission.tar.gz",
             "message": "auto-improve submit: kaggriculture-gpt champion"
           },
-          "next_cycle": 1
+          "next_cycle": 8
         }
       ],
       "deadline_utc": "2026-09-30T23:59:00Z",
@@ -106,7 +106,7 @@
             "output": "submission.csv",
             "message": "auto-improve submit: biohub-claude champion"
           },
-          "next_cycle": 2
+          "next_cycle": 6
         },
         {
           "lineage": "gpt",
@@ -145,7 +145,7 @@
   },
   "state": {
     "last_run_at": null,
-    "created_today": 18,
+    "created_today": 29,
     "last_submitted_date": {}
   },
   "submission_policy": {

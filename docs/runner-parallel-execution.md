@@ -5,8 +5,9 @@ while work on the **same repository stays strictly serial**. This lets independe
 `biohub-claude` Kaggle cycle, a `kaggriculture-gpt` cycle, the SIGNATE `signate-messy-drive-rag` cycle, or
 any app-dev project registered in Linear — make progress at the same time when each has a Todo.
 
-Nothing is forced to launch simultaneously: the auto-drafting system files issues **when needed**, and
-whenever Todos of different projects happen to coexist in the queue, they drain in parallel.
+Nothing is forced to launch simultaneously. Issues are created by humans or approved upstream
+producers such as `epistemic-research-loop`; whenever Todos of different projects coexist in the
+queue, they drain in parallel.
 
 ## How it works
 

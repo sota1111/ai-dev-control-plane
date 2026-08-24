@@ -36,6 +36,7 @@ directly for role work. **AI does not call AI** — the dispatcher `run_worker.s
 entry point for all delegated work.
 
 How it works:
+
 1. Write the role's worker-agnostic instruction to `prompts/roles/<role>.md` (see `TEMPLATE.md`).
 2. Run `scripts/ai/run_worker.sh <role>` (set `TARGET_REPO=…` first when working a target repo).
 3. The dispatcher reads the role's ordered chain from `config/worker_roles.json`, copies your prompt
@@ -64,6 +65,7 @@ child-issue registration, inheriting the parent's Project/Priority) in one worke
 between. The `decomposition` role stays valid for manual/override dispatch but is not a separate step in
 the default pipeline. The roles read `docs/ai/pipeline/context.md` for the issue id / target repo. After
 each role, `run_auto.sh` reads the winning report's `## Next Action` and gates:
+
 - `task-check` not-actionable OR decomposed-into-children (`NEEDS_USER_INPUT`/`BLOCKED`) → stop as a
   successful no-op (exit 0);
 - `verification`/`acceptance` `NEEDS_DEBUG` → loop back to `implementation` (bounded by
@@ -98,9 +100,11 @@ workers: implementation=codex, verification=claude
 - **Model selection (SOT-1583):** a worker token may pin a **model** as `worker:model`, so you can steer
   not just the CLI but the specific model a role runs on. Each element of a fallback chain can carry its
   own model:
+
   ```
   workers: implementation=codex:gpt-5.5, verification=claude:sonnet>codex:gpt-5.4-mini
   ```
+
   The model is everything after the **first** colon (ids with dots/spaces/parens survive, e.g.
   `agy:Gemini 3.5 Flash (High)`). A missing/empty model means "use the worker's default" (fully backward
   compatible with the model-less syntax). The dispatcher passes the resolved model to the selected
@@ -117,6 +121,7 @@ workers: implementation=codex, verification=claude
     `sonnet` / `haiku` remain the CLI's own shorthands; the default is still `opus` when no model is pinned.)
 
   Add new aliases in the corresponding `resolve_*_model_alias` case.
+
 - The directive may appear in the description or any comment; the **newest occurrence wins** per role.
 - Mechanics: at pipeline start `run_auto.sh` calls `runner-cli resolve-worker-roles <issue>`, which
   merges overrides onto the base config, writes `docs/ai/pipeline/worker_roles.<issue>.json` (with any
@@ -140,7 +145,7 @@ workers: implementation=codex, verification=claude
   gets only the work result.
 - **Per-worker disable flags** (`CODEX_DISABLED` / `ANTIGRAVITY_DISABLED` / `CLAUDE_DISABLED`). A truthy
   value (`1|true|yes|on`) makes that worker's run script exit `75` so the dispatcher skips it. These are
-  availability escape hatches evaluated *after* chain selection, not role overrides. Default off.
+  availability escape hatches evaluated _after_ chain selection, not role overrides. Default off.
 - The former global switches `ALL_CLAUDE_MODE` / `WORKER_MODE` were **removed**. Worker selection is
   governed solely by `config/worker_roles.json`.
 
@@ -149,21 +154,21 @@ workers: implementation=codex, verification=claude
 The single source of truth for which worker handles each role. Each role maps to an ordered chain
 (index 0 = primary, rest = fallback order); a bare string is a single-element chain; keys starting with
 `__` are docs. The dispatcher reads the chain, sets `RUN_WORKER_DISPATCH=1`, and tries workers in order.
-**Precedence:** this config is evaluated *before* the per-worker availability flags and the usage-limit
+**Precedence:** this config is evaluated _before_ the per-worker availability flags and the usage-limit
 cooldown. Fail-open: missing/invalid config or unknown role → dispatcher exits `75` (Claude fallback).
 Helper: `src/lib/workerRoles.ts`. To run everything on Claude, set every role to `["claude"]`.
 
 Default chains (SOT-1569): every role's chain is primary `claude`, secondary `codex`, tertiary
 `antigravity`.
 
-| Role | Default chain |
-| --- | --- |
-| `task-check` | `["claude","codex","antigravity"]` |
-| `decomposition` | `["claude","codex","antigravity"]` |
-| `implementation` | `["claude","codex","antigravity"]` |
-| `verification` | `["claude","codex","antigravity"]` |
-| `acceptance` | `["claude","codex","antigravity"]` |
-| `github` (branch/PR/merge) | `["claude","codex","antigravity"]` |
+| Role                                  | Default chain                      |
+| ------------------------------------- | ---------------------------------- |
+| `task-check`                          | `["claude","codex","antigravity"]` |
+| `decomposition`                       | `["claude","codex","antigravity"]` |
+| `implementation`                      | `["claude","codex","antigravity"]` |
+| `verification`                        | `["claude","codex","antigravity"]` |
+| `acceptance`                          | `["claude","codex","antigravity"]` |
+| `github` (branch/PR/merge)            | `["claude","codex","antigravity"]` |
 | `linear-report` (state sync/progress) | `["claude","codex","antigravity"]` |
 
 Every role — including Claude-primary ones — goes through the dispatcher; if Claude wins a chain,
@@ -276,6 +281,7 @@ Linear webhook / queue ─► runner.ts (injects WEBHOOK_ISSUE_ID) ─► run_au
 ## Final Review Policy
 
 Before reporting to the human, Claude Code must:
+
 1. Read `docs/ai/50_worker_antigravity_report.md` — verify implementation completeness.
 2. Read `docs/ai/60_worker_codex_report.md` — verify all checks pass.
 3. Summarize in `docs/ai/70_final_report.md`.
@@ -298,6 +304,7 @@ Before reporting to the human, Claude Code must:
 ## Development Environment — Target Projects
 
 When working a target project (e.g., booking-monitor):
+
 1. **Clone to `/workspaces/<project>`** before starting (accessible inside the DevContainer, visible on
    host via bind mount). If it already exists, `git pull origin main`.
    `git clone https://github.com/sota1111/<project>.git /workspaces/<project>`.
@@ -318,6 +325,7 @@ When working a target project (e.g., booking-monitor):
 
 Terse one-line requirements are the biggest source of wasted work (same Issue reopened 2–5×). Before
 implementing an ambiguous Issue, ONCE up front:
+
 1. **State your interpretation** in a Linear comment (what it means, what you'll change).
 2. **List the ambiguities** (assumptions, points that could mean more than one thing).
 3. **Proceed or stop:** if there's one obviously-correct reading or a safe default, state it, proceed,
@@ -378,15 +386,11 @@ work closes itself. Mechanics:
 - Blocked / NEEDS_USER_INPUT are reserved for cases with NO safe default; when a safe default exists,
   proceed on it and disclose (design §2/§66).
 
-Related autonomous-operation machinery: stall watchdog for detached runs
-(`runDetachedWatchdog`, env `RUNNER_WATCHDOG_STALL_MS` / `RUNNER_WATCHDOG_KILL_MS`; design §34), and
-the Kaggle strategy layer — leaderboard rank as primary KPI (`docs/ai/kaggle/leaderboard-rank.jsonl`),
-per-repo experiment ledger (`<target repo>/docs/ai/experiment_ledger.jsonl`), registry
-`deadline_utc`/`final_window_days`/`score_direction`/target `mode: maintain`, and adaptive compute
-allocation (registry `allocation` block, `src/lib/resourceAllocation.ts`; `mode: dynamic` picks the
-highest-priority improve competition per cron slot from on-disk history, `auto_maintain_threshold`
-auto-retires saturated lineages — design §42-51; see `prompts/roles/solo.md` and
-`scripts/ai/kaggle_targets_registry.json` `__fields__`).
+Related autonomous-operation machinery: the stall watchdog for detached runs
+(`runDetachedWatchdog`, env `RUNNER_WATCHDOG_STALL_MS` / `RUNNER_WATCHDOG_KILL_MS`; design §34).
+Research strategy, hypothesis management, adaptive experiment selection, and automatic experiment
+ticket creation are owned by the separate `epistemic-research-loop` repository. This repository
+must not schedule new research work; it validates Linear webhook input and executes queued issues.
 
 ### Progress Comments
 
@@ -394,16 +398,22 @@ Post concise, structured comments at milestones (start, design done, implementat
 blocked, done).
 
 Progress format:
+
 ```markdown
 ## Progress Update
+
 Status: In Progress
+
 ### Done / ### Current Work / ### Next / ### Blockers
 ```
 
 Completion format:
+
 ```markdown
 ## Completion Report
+
 Status: In Review
+
 ### Summary / ### Changed Files / ### Verification / ### Remaining Issues / ### Human Check Needed
 ```
 
@@ -474,6 +484,7 @@ independence, verification unit, or PR-split necessity warrants it. Small tasks 
 sub-issues, (5) if no process the parent directly.
 
 **Decomposition judgment** — post in a Linear comment:
+
 ```
 分解判断: 必要 / 不要
 理由: <one-line reason>
@@ -503,12 +514,18 @@ Start the title with the feature/outcome, NOT a process name (avoid Implement/De
 ### Child Issue Description Template
 
 ```markdown
-## 目的            <feature change this Issue achieves>
-## 変更範囲        - target files / components
-## 実装内容        - what to implement
-## 検証内容        - verification within this Issue (Debug/Test included here, not a separate Issue)
-## 想定commit      - meaningful commit(s) this Issue maps to (≥1)
-## 受け入れ条件    - [ ] completion condition verifiable standalone
+## 目的 <feature change this Issue achieves>
+
+## 変更範囲 - target files / components
+
+## 実装内容 - what to implement
+
+## 検証内容 - verification within this Issue (Debug/Test included here, not a separate Issue)
+
+## 想定commit - meaningful commit(s) this Issue maps to (≥1)
+
+## 受け入れ条件 - [ ] completion condition verifiable standalone
+
 ## 関連する親Issue - parent Issue ID and Title
 ```
 
@@ -557,20 +574,21 @@ Issues with progress.
 
 Before starting any Issue, classify it — this determines the worker and approach. Post the
 classification as a Linear comment at the start:
+
 ```
 タスク分類: <TYPE>
 担当AI: <TYPE>:<WORKER>   (e.g. IMPLEMENT:ANTIGRAVITY)
 ```
 
-| Type | Description | Primary Worker |
-| --- | --- | --- |
-| `PLAN` | Design, policy planning | Claude Code (structures plan; delegates impl to Antigravity) |
-| `IMPLEMENT` | New/multi-file implementation | Antigravity (always delegate) |
-| `FIX` | Small bug fix (clear single-file cause) | Codex |
-| `DEBUG` | Test failures, error investigation | Codex |
-| `DOC` | Documentation changes | Codex (small) / Antigravity (large) |
-| `REVIEW` | PR diff / acceptance check | Codex (first pass) → Claude (final) |
-| `SECURITY` | Permission/secret/env/devcontainer check | Codex (scan) → Claude (judge) |
+| Type        | Description                              | Primary Worker                                               |
+| ----------- | ---------------------------------------- | ------------------------------------------------------------ |
+| `PLAN`      | Design, policy planning                  | Claude Code (structures plan; delegates impl to Antigravity) |
+| `IMPLEMENT` | New/multi-file implementation            | Antigravity (always delegate)                                |
+| `FIX`       | Small bug fix (clear single-file cause)  | Codex                                                        |
+| `DEBUG`     | Test failures, error investigation       | Codex                                                        |
+| `DOC`       | Documentation changes                    | Codex (small) / Antigravity (large)                          |
+| `REVIEW`    | PR diff / acceptance check               | Codex (first pass) → Claude (final)                          |
+| `SECURITY`  | Permission/secret/env/devcontainer check | Codex (scan) → Claude (judge)                                |
 
 **PLAN terminal state:** a PLAN task produces its deliverable, then stops at `In Review` for human
 review — no PR/merge/`Done` (the `[PLAN]` title prefix is an auto-accept hold condition). Implementation
@@ -592,6 +610,7 @@ store.
 
 **Branch:** `main` (protected) → `feat/<issue-id>-<short-description>` (lowercase alphanumeric + hyphen).
 One feature branch per parent Issue; all child work on the same branch. Create at first child start:
+
 ```bash
 git checkout main && git pull origin main && git checkout -b feat/<issue-id>-<short-description>
 ```
@@ -604,6 +623,7 @@ git checkout main && git pull origin main && git checkout -b feat/<issue-id>-<sh
 Always create a PR after all child Issues are Done. Pushing directly to `main` is prohibited.
 **PLAN tasks are the exception — no PR; stop at `In Review`.** The gate below and merge steps apply only
 to IMPLEMENT/FIX/DEBUG/DOC. Create a PR only when ALL hold:
+
 1. All child Issues Done.
 2. `npm run lint` exit 0.
 3. `npm run typecheck` exit 0.
@@ -619,9 +639,11 @@ If any fails, don't create the PR — reopen the failed child and run the fix cy
 If the Linear Issue has a **`Bug` label**, also create a GitHub Issue and link it (auto-closes on merge).
 Only for PR-producing tasks (not PLAN); one GitHub Issue per parent Linear Issue; do it after the gate,
 just before PR creation.
+
 ```bash
 gh issue create --title "<Linear Title>" --body "<desc + criteria + Linear URL + ID>" --label bug
 ```
+
 Add `--label bug` only if the repo has that label. Put `Closes #<N>` in the PR body. Record the GitHub
 Issue URL on the Linear Issue. Best-effort: if it fails, comment on Linear and proceed with the PR/merge.
 
@@ -629,6 +651,7 @@ Issue URL on the Linear Issue. Best-effort: if it fails, comment on Linear and p
 
 If the Linear Issue has a **`snapshot` label**, capture an **after** screenshot and attach it to both the
 PR and the Linear Issue. Only for PR-producing tasks; after the gate, before PR creation.
+
 1. **Capture** via the project's existing e2e/Playwright mock harness (`installApiMocks`/`login`); commit
    the image (e.g. `docs/screenshots/`) and note the commit SHA. Skip for changes with no visible screen
    (backend/doc only) and note that on Linear.
@@ -644,29 +667,40 @@ Best-effort: on failure, comment on Linear and proceed.
 ```bash
 git push origin feat/<issue-id>-<short-description>
 ```
+
 Create via MCP or `gh`. Title `feat(<issue-id>): <parent Title>`; base `main`; body per template below.
 After creation: comment the PR link on the parent and set it to `In Progress`.
 
 PR body template:
+
 ```markdown
-## Summary        <parent goal, 1–2 sentences>
-## Changes        - <bullets>
-## Related Issues  - Parent: <ID>  - Children: <IDs>  - Closes #<N>  <!-- Bug label only -->
+## Summary <parent goal, 1–2 sentences>
+
+## Changes - <bullets>
+
+## Related Issues - Parent: <ID> - Children: <IDs> - Closes #<N> <!-- Bug label only -->
+
 ## Quality Gate Results
+
 - [x] Lint / TypeCheck / Unit Test / E2E (pass or N/A) / Diff Review
-## Snapshot       <!-- snapshot label only -->
+
+## Snapshot <!-- snapshot label only -->
+
 ![after](https://raw.githubusercontent.com/<owner>/<repo>/<sha>/docs/screenshots/<file>)
-## Acceptance Criteria  - [x] <criterion>
+
+## Acceptance Criteria - [x] <criterion>
 ```
 
 ### Merge
 
 Merge when: PR created and gate passed; no conflict with `main`. If so, Claude merges autonomously
 (no separate approve, no waiting on the developer):
+
 ```bash
 gh pr merge <PR> --merge --delete-branch
 git -C <repo-path> pull origin main
 ```
+
 After merge: set the parent to `In Review` (worker-side terminal; the control plane then auto-accepts a
 verified completion to `Done` per Autonomous Acceptance — do not set `Done` yourself); comment the
 Completion Report; delete the feature branch. **Auto-redeploy (best-effort, SOT-1421 / P6):** call
@@ -683,20 +717,24 @@ set the parent `Blocked` and comment the conflict.
 
 After a GitHub event, sync state to Linear (the only report channel — no other route).
 
-| GitHub Event | Linear Action |
-| --- | --- |
-| Branch created | Parent: "branch created" comment |
-| PR created | Parent → `In Progress`, PR-link comment |
-| PR updated (push) | Parent: diff-summary comment |
-| PR merged | Parent → `In Review`, Completion Report comment |
-| PR closed (not merged) | Parent → `Blocked`, reason comment |
+| GitHub Event           | Linear Action                                   |
+| ---------------------- | ----------------------------------------------- |
+| Branch created         | Parent: "branch created" comment                |
+| PR created             | Parent → `In Progress`, PR-link comment         |
+| PR updated (push)      | Parent: diff-summary comment                    |
+| PR merged              | Parent → `In Review`, Completion Report comment |
+| PR closed (not merged) | Parent → `Blocked`, reason comment              |
 
 Sync comment format:
+
 ```markdown
 ## GitHub Sync
+
 Event: <PR Created / PR Merged / Branch Created>
-### Details   - Branch / PR #<n> (URL) / Status
-### Next Action  - <confirmation request or completion report>
+
+### Details - Branch / PR #<n> (URL) / Status
+
+### Next Action - <confirmation request or completion report>
 ```
 
 **Autonomous mode reporting:** Linear comments are the ONLY report channel — no chat/email/Slack.
@@ -727,13 +765,14 @@ links the rest instead of copying it:
   to `docs/ai/investigations/*.md` deep-dives; it does not copy them.
 - **`[OUTCOME]` 集計** (`scripts/ai/aggregate_outcomes.sh` → `runner-cli aggregate-outcomes`) — machine
   aggregation of per-run success / usage-limit / failure rates, and the source of **promotion candidates**.
-- **memory** (`MEMORY.md` + memory files) — the *promoted* lessons (durable, cross-session rules).
+- **memory** (`MEMORY.md` + memory files) — the _promoted_ lessons (durable, cross-session rules).
 
 **Role split (no duplication):** failure-log = raw time-ordered operational log; memory = promoted
 lessons. A lesson lives in exactly one of these — the failure-log entry's `昇格先` field points at the
 promoted rule, it does not restate it.
 
 **Promotion workflow (半自動: 集計 → 候補提示 → 恒久化判断):**
+
 1. `bash scripts/ai/aggregate_outcomes.sh 0 --promote [--threshold N]` (default N=3) surfaces recurring
    failure kinds (grouped by run exit `code`) that occurred ≥ N times as **promotion candidates**.
 2. Record each candidate as a `failure-log.md` entry (link the investigation if any).

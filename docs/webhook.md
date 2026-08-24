@@ -1,5 +1,9 @@
 # Webhook サーバー / Webhook モード
 
+> このサービスは実行入口であり、定期的な研究課題を起票しません。任意の
+> `epistemic-research-loop` request marker と検証契約は
+> [execution-ingress.md](execution-ingress.md) を参照してください。
+
 `npm run start:webhook` で webhook サーバーを起動する。
 
 子 Issue の完了（`Done` / `In Review`）を受信したとき、全ての子 Issue が完了していて親が

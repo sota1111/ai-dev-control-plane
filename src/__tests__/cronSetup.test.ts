@@ -4,14 +4,16 @@ import path from 'node:path';
 describe('cron setup', () => {
   const script = fs.readFileSync(path.join(process.cwd(), 'scripts/ai/setup_cron.sh'), 'utf8');
 
-  test('removes the obsolete untargeted run_auto cron without registering it again', () => {
-    expect(script).toContain('grep -v "run_auto.sh"');
-    expect(script).not.toMatch(/CRON_CMD=.*run_auto\.sh/);
-    expect(script).not.toContain('echo "$CRON_CMD"');
+  test('removes all historical automatic drafting cron entries', () => {
+    expect(script).toContain('LEGACY_PATTERN');
+    expect(script).toContain('kaggle_improvement_cycle');
+    expect(script).toContain('sonnet_gold_cycle');
+    expect(script).toContain('nedo_loading_cycle');
   });
 
-  test('keeps the scheduled Kaggle improvement cycle', () => {
-    expect(script).toContain('kaggle_improvement_cycle.sh');
-    expect(script).toContain('--only-scheduled');
+  test('does not register replacement work and points operators to webhook ingress', () => {
+    expect(script).not.toMatch(/echo\s+"\$.*CMD"\s*\|\s*crontab/);
+    expect(script).toContain('npm run start:webhook');
+    expect(script).toContain('epistemic-research-loop');
   });
 });

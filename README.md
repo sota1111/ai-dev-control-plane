@@ -1,6 +1,6 @@
 # ai-dev-control-plane
 
-**A control plane for autonomous, AI-driven software development.**
+**A webhook-driven execution control plane for AI-assisted software development.**
 
 Humans steer the system from **Linear** (and Discord). The harness turns each Linear issue into a
 full development lifecycle — triage → implementation → verification → acceptance → PR → merge →
@@ -11,11 +11,18 @@ whichever worker the configuration (or the issue itself) selects.
 The result is a development line that keeps moving without a human at the keyboard: file an issue on
 your phone, and come back to a merged PR with a completion report.
 
+> **Responsibility boundary:** this repository no longer schedules or originates recurring research
+> work. Hypothesis management, experiment selection, and automatic research-ticket creation live in
+> the sibling `epistemic-research-loop` repository. This control plane validates signed Linear
+> webhooks, de-duplicates them, queues eligible issues, selects workers, executes, retries, and
+> reports results. Historical drafting commands are read-only during migration.
+
 ---
 
 ## Table of Contents
 
 - [Core Ideas](#core-ideas)
+- [Responsibility Boundary](#responsibility-boundary)
 - [Linear as the Command Surface](#linear-as-the-command-surface)
 - [Architecture](#architecture)
 - [The Pipeline](#the-pipeline)
@@ -55,6 +62,22 @@ your phone, and come back to a merged PR with a completion report.
 
 ---
 
+## Responsibility Boundary
+
+| System                    | Owns                                                                                                                               |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `epistemic-research-loop` | observation, hypotheses, preregistration, utility, falsification, belief, Research Brief, automatic experiment requests            |
+| `ai-dev-control-plane`    | signed Linear webhook ingress, event de-duplication, persistent queue, worker/model dispatch, execution, retries, result reporting |
+| Kaggle Solver             | features, training, inference, submission artifacts                                                                                |
+| Benchmark evaluator       | submission credentials, sealed scores, final unseal                                                                                |
+
+Experiment tickets from the research loop contain
+`<!-- epistemic-research-loop:experiment-request:v1 -->` and a complete JSON contract. The webhook
+validates its idempotency scope, read-only mounts, resources, seeds, outputs, and network policy
+before queueing it. Ordinary human-authored Linear issues remain supported.
+
+---
+
 ## Linear as the Command Surface
 
 The combination with Linear is what makes this a _control plane_ rather than a scripting harness.
@@ -62,7 +85,8 @@ Linear is not just a ticket tracker here — it is the system's command bus, sta
 control:
 
 - **Issues are execution requests.** Creating an issue (or moving it to `Todo`) triggers a run via
-  webhook or the polling scheduler. The issue description _is_ the task specification.
+  signed webhook. Startup/reaper reconciliation polls only to recover missed deliveries and stale
+  state. The issue description _is_ the task specification.
 
 - **Comments are live instructions.** New comments are read on every run; the newest instruction
   wins. You can change scope, request a rework, or approve a plan by commenting — including from the
@@ -79,11 +103,9 @@ control:
   graph: plan-with-discussion                            # select a pipeline graph variant
   ```
 
-- **AI-managed decomposition uses Linear's issue hierarchy.** The harness judges whether a parent
-  issue should be split; when it is, the AI _creates the child issues itself_ as Linear sub-issues
-  (2–5, inheriting project and priority, `blockedBy`-chained when order matters) and works through
-  them in dependency order. The human files one parent issue; the tree underneath is machine-made
-  and machine-executed, but fully visible and editable in Linear.
+- **Issue creation is upstream-owned.** Human operators and approved producers such as
+  `epistemic-research-loop` create execution issues. This repository consumes and executes them; it
+  does not run a recurring drafting cron.
 
 - **State is synchronized both ways.** Every GitHub event maps to a Linear action: branch created →
   comment, PR created → `In Progress` + link, PR merged → `In Review` + completion report, PR closed
@@ -95,9 +117,8 @@ Done`), and nothing is marked `Done` without verification — merged work waits 
   on merge; a `snapshot` label attaches an after-screenshot to the PR and the Linear issue;
   a `long-run` label detaches the run so it does not hold the execution lock.
 
-- **Capacity is self-managed.** When the workspace nears Linear's issue cap, the harness archives old
-  completed child issues automatically and retries, so autonomous decomposition never wedges on the
-  plan limit.
+- **Capacity recovery is operational.** The archive helpers remain available for administrators, but
+  this repository does not create replacement research work.
 
 ---
 
@@ -107,12 +128,12 @@ Done`), and nothing is marked `Done` without verification — merged work waits 
 ┌──────────┐   issues / comments / directives   ┌────────────────────┐
 │  Human   │◄──────────────────────────────────►│       Linear        │◄─ state sync
 │ (Linear/ │                                    └─────────┬──────────┘
-│ Discord) │                                              │ webhook / polling
+│ Discord) │                                              │ signed webhook
 └────▲─────┘                                              ▼
      │ reports                    ┌─────────────────────────────────┐
      │ (Discord)                  │ Trigger layer                   │
      │                            │  src/webhook-server.ts (events) │
-     │                            │  scripts/ai/scheduler.sh (poll) │
+     │                            │  startup/reaper reconciliation │
      │                            └───────────────┬─────────────────┘
      │                                            │ runner.ts picks the issue
      │                            ┌───────────────▼─────────────────┐
@@ -147,7 +168,7 @@ Done`), and nothing is marked `Done` without verification — merged work waits 
 | Discussion mode    | Multi-round debate between heterogeneous models               | `scripts/ai/run_discussion.sh`                                             |
 | Role assignment    | Per-role worker priority chains, solo mode, model pins        | `config/worker_roles.json`                                                 |
 | Role prompts       | Worker-agnostic instructions per role                         | `prompts/roles/<role>.md`                                                  |
-| Trigger layer      | Webhook server (event-driven) and scheduler (polling)         | `src/webhook-server.ts`, `scripts/ai/scheduler.sh`                         |
+| Trigger layer      | Signed webhook ingress plus recovery reconciliation           | `src/webhook-server.ts`, `src/lib/experimentRequest.ts`                    |
 | Discord bot        | Remote status/control (`/status`, `/queue`, `/pause`, `/ask`) | `src/lib/discord*.ts`                                                      |
 | Incident response  | Health probe → classify → rollback → postmortem               | `scripts/ai/incident_response.sh`, `docs/incident-response.md`             |
 
@@ -311,13 +332,13 @@ Secrets stay in `.env` (untracked). Full list: [docs/environment-variables.md](d
 # A. Event-driven via Linear webhooks (recommended, low latency)
 npm run dev:webhook
 
-# B. Polling scheduler (no webhook setup needed)
+# B. Recovery polling (compatibility/fallback; does not create issues)
 bash scripts/ai/scheduler.sh --watch      # foreground with logs
 bash scripts/ai/scheduler.sh              # background; `status` / `stop` subcommands
 
-# C. One manual run
-bash scripts/ai/run_auto.sh --dry-run     # inspect the prompt only
-bash scripts/ai/run_auto.sh
+# C. One explicitly targeted manual execution
+bash scripts/ai/run_auto.sh --issue SOT-1234 --dry-run
+bash scripts/ai/run_auto.sh --issue SOT-1234
 ```
 
 **5. Use it**
@@ -350,6 +371,7 @@ model pins under `__models__`) — the single top-level switch. Frequently used 
 
 - [Scheduler](docs/scheduler.md) — polling modes and operations
 - [Webhook server](docs/webhook.md) — event-driven startup, bootstrap scan, persistent operation
+- [Execution ingress contract](docs/execution-ingress.md) — repository boundary and ERL request validation
 - [Runner queue and logs](docs/runner-queue.md) — queue file, ordering, locks, retries, lanes
 - [Usage limits and resume](docs/usage-limit-and-resume.md) — cooldown detection and auto-resume
 - [Incident auto-response](docs/incident-response.md) — monitoring, rollback decisions, postmortems

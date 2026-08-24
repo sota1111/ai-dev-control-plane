@@ -42,7 +42,7 @@ import {
 } from './lib/workerRoleDirective.js';
 import { buildDelegationPreflight } from './lib/delegationPreflight.js';
 import { parseRegistry, planSubmission, type RecentSubmission } from './lib/kaggleSubmission.js';
-import { createDraftIssue, findOpenImproveCycleParent, postIssueComment } from './lib/linearApi.js';
+import { postIssueComment } from './lib/linearApi.js';
 import {
   parseTargetsRegistry,
   planImprovementCycle,
@@ -77,9 +77,8 @@ import { explainExecutionPlan, isTruthyFlag, resolveExecutionPlan } from './lib/
 const [, , command, ...args] = process.argv;
 
 /**
- * SOT-1913 材料自動収集の共通ラッパ。当番枠が active で、かつ signals/material の少なくとも一方が
- * 明示指定されていないときだけ、当番コンペの材料/シグナルを収集する（best-effort・never throws）。
- * 非 active / 枠外 / --no-collect / 両方明示済み のときは null（収集スキップ）。
+ * Legacy read-only planning support. Issue creation moved to epistemic-research-loop; this helper
+ * remains only so historical submission registries can still be inspected during migration.
  */
 async function maybeCollectImproveContext(o: {
   registry: import('./lib/kaggleImprovement.js').TargetsRegistry;
@@ -90,25 +89,23 @@ async function maybeCollectImproveContext(o: {
   haveSignals: boolean;
   haveMaterial: boolean;
   kaggle: boolean;
-  /** 動的配分が選んだコンペ。指定時は hour→rotation 解決より優先（design §50）。 */
   competitionKeyOverride?: string;
 }): Promise<{
   signals: Record<string, GuardSignals>;
   material: Record<string, ImprovementMaterial>;
 } | null> {
   if (o.noCollect || !o.active || (o.haveSignals && o.haveMaterial)) return null;
-  const competitionKey = o.competitionKeyOverride ?? resolveCompetitionForHour(o.registry, o.hourJst);
+  const competitionKey =
+    o.competitionKeyOverride ?? resolveCompetitionForHour(o.registry, o.hourJst);
   if (!competitionKey) return null;
   try {
     return await collectImproveContext(o.registry, competitionKey, {
       label: o.label || 'auto-improve',
       kaggle: o.kaggle,
-      log: (m) => process.stderr.write(`[improve-collect] ${m}\n`),
+      log: (message) => process.stderr.write(`[improve-collect] ${message}\n`),
     });
   } catch (err: any) {
-    process.stderr.write(
-      `kaggle-improve: material collection failed (best-effort): ${err?.message || err}\n`
-    );
+    process.stderr.write(`legacy improve context collection failed: ${err?.message || err}\n`);
     return null;
   }
 }
@@ -329,8 +326,16 @@ async function main() {
         )
         .join(', ');
       const handoffSummary = handoff === undefined ? '' : `handoff=${handoff ? 'on' : 'off'}`;
-      const reasoningSummary = Object.entries(reasoning).map(([r, v]) => `${r}=${v}`).join(',');
-      const summary = [overrideSummary, modelSummary, reasoningSummary && `reasoning{${reasoningSummary}}`, soloSummary, handoffSummary]
+      const reasoningSummary = Object.entries(reasoning)
+        .map(([r, v]) => `${r}=${v}`)
+        .join(',');
+      const summary = [
+        overrideSummary,
+        modelSummary,
+        reasoningSummary && `reasoning{${reasoningSummary}}`,
+        soloSummary,
+        handoffSummary,
+      ]
         .filter(Boolean)
         .join(' | ');
       process.stderr.write(`resolve-worker-roles: ${issueId} overrides ${summary} → ${outPath}\n`);
@@ -353,7 +358,9 @@ async function main() {
         const eq = flags.find((f) => f.startsWith(`${name}=`));
         if (eq) return eq.slice(name.length + 1);
         const idx = args.indexOf(name);
-        return idx >= 0 && args[idx + 1] && !args[idx + 1].startsWith('--') ? args[idx + 1] : undefined;
+        return idx >= 0 && args[idx + 1] && !args[idx + 1].startsWith('--')
+          ? args[idx + 1]
+          : undefined;
       };
       const issueId = getFlag('--issue') || positional[0];
       const competition = getFlag('--competition') || '';
@@ -402,7 +409,11 @@ async function main() {
         emit(true, cycle, reason);
         break;
       }
-      emit(false, cycle, control.submitHold === false ? 'submit=auto directive' : 'no submit=hold directive');
+      emit(
+        false,
+        cycle,
+        control.submitHold === false ? 'submit=auto directive' : 'no submit=hold directive'
+      );
       break;
     }
     case 'resolve-pipeline-graph': {
@@ -547,9 +558,13 @@ async function main() {
         args[1] === 'completed' || args[1] === 'completed-no-pr' ? args[1] : 'incomplete';
       if (outcome === 'incomplete') {
         await runner.setIssueInProgress(issueId, { preserveBlocked: true }).catch(() => {});
-        runner.log('WORKER_ROLES', `ensure-issue-reviewed ${issueId}: incomplete run state preserved`, {
-          issue: issueId,
-        });
+        runner.log(
+          'WORKER_ROLES',
+          `ensure-issue-reviewed ${issueId}: incomplete run state preserved`,
+          {
+            issue: issueId,
+          }
+        );
         process.stdout.write('active');
         process.exit(0);
         break;
@@ -1050,91 +1065,9 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
       process.exit(0);
       break;
     }
-    case 'kaggle-improve-plan': {
-      // SOT-1913/SOT-1932: decide which improvement issues to draft this cron slot, deterministically.
-      // Pure logic in src/lib/kaggleImprovement.ts; scripts/ai/kaggle_improvement_cycle.sh (SOT-1933)
-      // collects the material/guard signals, calls this to get the plan, then creates the issues.
-      // Usage:
-      //   runner-cli.js kaggle-improve-plan [--registry <path>] [--hour <0-23>]
-      //       [--env-enabled 1|0] [--signals <json>] [--material <json>]
-      // (--issue-count / --cooldown are accepted but ignored: order-first "draft by default" policy.)
-      // Prints the CyclePlan as JSON on stdout (exit 0). Fail-loud (exit 1) on a bad registry/JSON.
-      // Dry-run by design: this never creates issues — it only computes the plan.
-      const flags: Record<string, string> = {};
-      for (let i = 0; i < args.length; i += 1) {
-        const a = args[i];
-        if (a && a.startsWith('--')) {
-          flags[a.slice(2)] = args[i + 1] ?? '';
-          i += 1;
-        }
-      }
-      const registryPath =
-        flags.registry ||
-        path.join(__dirname, '..', 'scripts', 'ai', 'kaggle_targets_registry.json');
-      let registry;
-      try {
-        registry = parseTargetsRegistry(JSON.parse(fs.readFileSync(registryPath, 'utf8')));
-      } catch (err: any) {
-        process.stderr.write(
-          `kaggle-improve-plan: invalid registry ${registryPath}: ${err?.message || err}\n`
-        );
-        process.exit(1);
-      }
-      const parseJsonFlag = <T>(name: string): T | undefined => {
-        if (!flags[name]) return undefined;
-        try {
-          return JSON.parse(flags[name]) as T;
-        } catch (err: any) {
-          process.stderr.write(
-            `kaggle-improve-plan: invalid --${name} JSON: ${err?.message || err}\n`
-          );
-          process.exit(1);
-        }
-      };
-      const hourJst = Number.isFinite(Number(flags.hour))
-        ? Number(flags.hour)
-        : new Date().getHours();
-      const truthy = (v: string | undefined) => v === '1' || v === 'true' || v === 'yes';
-      // env kill switch: explicit --env-enabled wins, else fall back to KAGGLE_IMPROVE_ENABLED.
-      const envEnabled =
-        flags['env-enabled'] !== undefined
-          ? truthy(flags['env-enabled'])
-          : truthy(process.env.KAGGLE_IMPROVE_ENABLED);
-      let signals = parseJsonFlag<Record<string, GuardSignals>>('signals');
-      let material = parseJsonFlag<Record<string, ImprovementMaterial>>('material');
-      // 材料/シグナルは cron が自動収集する（未指定かつ active な当番枠のみ・best-effort）。
-      const collected = await maybeCollectImproveContext({
-        registry,
-        hourJst,
-        active: registry.enabled && envEnabled,
-        label: flags.label,
-        noCollect: flags['no-collect'] === '1' || truthy(process.env.KAGGLE_IMPROVE_NO_COLLECT),
-        haveSignals: signals !== undefined,
-        haveMaterial: material !== undefined,
-        kaggle: flags['no-kaggle'] !== '1',
-      });
-      if (collected) {
-        if (signals === undefined) signals = collected.signals;
-        if (material === undefined) material = collected.material;
-      }
-      const plan = planImprovementCycle({
-        registry,
-        hourJst,
-        envEnabled,
-        signals,
-        material,
-      });
-      process.stdout.write(JSON.stringify(plan) + '\n');
-      process.exit(0);
-      break;
-    }
     case 'kaggle-improve-run': {
-      // SOT-1913/SOT-1933: the cron's execute path. Computes the same CyclePlan as kaggle-improve-plan,
-      // then (only with --execute && active) creates the drafted "improvement parent" issues in Linear
-      // — in Todo (NOT In Review) so the pipeline's dependency-order queue can auto-implement them —
-      // re-checking the unfinished-cycle guard live, and bumps each drafted target's next_cycle in the
-      // registry file. Without --execute it is identical to kaggle-improve-plan (dry-run, no writes).
-      // Usage: same flags as kaggle-improve-plan, plus [--execute] [--label <name>].
+      // Migration-only, read-only compatibility path. Research planning and every issue-creation
+      // mutation moved to epistemic-research-loop. Even --execute returns a plan without writes.
       const flags: Record<string, string> = {};
       const bare = new Set<string>();
       for (let i = 0; i < args.length; i += 1) {
@@ -1251,7 +1184,9 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
           // 多様性補正（design §50）: 直近起案コンペを registry.state.recent_competitions から読み、
           // クールダウン減衰を効かせて同一コンペの連続独占を防ぐ（momentum 偏重の抑制）。
           const recentlyDrafted: string[] = Array.isArray(raw?.state?.recent_competitions)
-            ? raw.state.recent_competitions.filter((k: unknown): k is string => typeof k === 'string')
+            ? raw.state.recent_competitions.filter(
+                (k: unknown): k is string => typeof k === 'string'
+              )
             : [];
           const selected = selectDynamicCompetition(candidates, {
             recentlyDrafted,
@@ -1267,7 +1202,9 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
           );
         } catch (err: any) {
           // Fail-open: 配分計算が失敗したら静的 rotation に戻す（override 未設定）。
-          process.stderr.write(`[allocation] failed (fallback to static rotation): ${err?.message || err}\n`);
+          process.stderr.write(
+            `[allocation] failed (fallback to static rotation): ${err?.message || err}\n`
+          );
         }
       }
 
@@ -1296,89 +1233,25 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
         competitionKeyOverride,
       });
 
-      const execute = bare.has('execute');
-      const label = runLabel;
-      const created: Array<{ project: string; identifier: string; url: string }> = [];
-      const skipped: Array<{ project: string; reason: string }> = [];
-      if (execute && plan.active) {
-        for (const t of plan.targets) {
-          if (t.action !== 'draft' || !t.issueTitle || !t.issueBody) {
-            skipped.push({ project: t.project, reason: t.reason });
-            continue;
-          }
-          // Live re-check of the active-cycle guard (guard 4) to avoid duplicate actionable drafts.
-          // Completion-driven loop: In Review cycle *parents* (children still implementing, or the
-          // integration/submission phase) count as unfinished so the 10-min cron never double-drafts.
-          const open = await findOpenImproveCycleParent(t.project, label);
-          if (open) {
-            skipped.push({
-              project: t.project,
-              reason: `open improve cycle parent already exists (${open})`,
-            });
-            continue;
-          }
-          try {
-            const res = await createDraftIssue({
-              projectName: t.project,
-              title: t.issueTitle,
-              description: t.issueBody,
-              labelName: label,
-            });
-            if (res) {
-              created.push({ project: t.project, identifier: res.identifier, url: res.url });
-              // Bump next_cycle for this target in the raw registry so the next cycle is 第(N+1)次.
-              for (const comp of raw.competitions ?? []) {
-                if (comp.key !== t.competition) continue;
-                for (const tgt of comp.targets ?? []) {
-                  if (tgt.repo === t.repo) tgt.next_cycle = (Number(tgt.next_cycle) || 1) + 1;
-                }
-              }
-            } else {
-              skipped.push({ project: t.project, reason: 'createDraftIssue returned null' });
-            }
-          } catch (err: any) {
-            skipped.push({ project: t.project, reason: `create failed: ${err?.message || err}` });
-          }
-        }
-        // 自動 maintain（design §49）: 閾値超過の系統を registry で maintain に落とす（枠再配分）。
-        for (const m of autoMaintained) {
-          for (const comp of raw.competitions ?? []) {
-            for (const tgt of comp.targets ?? []) {
-              if (tgt.repo === m.repo && tgt.mode !== 'maintain') {
-                tgt.mode = 'maintain';
-                process.stderr.write(`[allocation] ${m.repo} -> mode:maintain (${m.reason})\n`);
-              }
-            }
-          }
-        }
-        // Persist next_cycle bumps + maintain flips + recent-competition history + last_run_at
-        // (best-effort; keeps doc keys intact).
-        try {
-          raw.state = raw.state && typeof raw.state === 'object' ? raw.state : {};
-          raw.state.created_today = (Number(raw.state.created_today) || 0) + created.length;
-          // 多様性補正のクールダウン履歴（design §50）: 実際に起案できた枠だけ記録し、newest-first で保持。
-          // cooldownWindow の2倍まで保持すれば十分（それより古い出現は減衰計算に影響しない）。
-          if (selectedCompetition && created.length > 0) {
-            const prior: string[] = Array.isArray(raw.state.recent_competitions)
-              ? raw.state.recent_competitions.filter((k: unknown): k is string => typeof k === 'string')
-              : [];
-            raw.state.recent_competitions = [selectedCompetition, ...prior].slice(
-              0,
-              Math.max(6, registry.allocation.cooldownWindow * 2)
-            );
-          }
-          fs.writeFileSync(registryPath, JSON.stringify(raw, null, 2) + '\n');
-        } catch (err: any) {
-          process.stderr.write(
-            `kaggle-improve-run: failed to persist registry: ${err?.message || err}\n`
-          );
-        }
+      const issueCreationRequested = bare.has('execute');
+      if (issueCreationRequested) {
+        process.stderr.write(
+          'kaggle-improve-run: issue creation moved to epistemic-research-loop; returning a read-only plan\n'
+        );
       }
-
       process.stdout.write(
-        JSON.stringify({ plan, executed: execute, created, skipped, autoMaintained }) + '\n'
+        JSON.stringify({
+          plan,
+          executed: false,
+          created: [],
+          skipped: plan.targets.map((target) => ({
+            project: target.project,
+            reason: 'automatic issue creation moved to epistemic-research-loop',
+          })),
+          autoMaintained,
+          migration: 'epistemic-research-loop',
+        }) + '\n'
       );
-      process.exit(0);
       break;
     }
     case 'kaggle-submission-plan':
@@ -1616,7 +1489,7 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
     }
     default: {
       process.stderr.write(
-        `Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, execution-plan, pipeline-graph, kaggle-plan, kaggle-improve-plan, kaggle-champion-plan, ...\n`
+        `Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, execution-plan, pipeline-graph, kaggle-plan, kaggle-champion-plan, ...\n`
       );
       process.exit(1);
     }

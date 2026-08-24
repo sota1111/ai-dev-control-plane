@@ -20,6 +20,7 @@ docs/ai/auto_logs/*
 
 # SOT-1904 Kaggle 自動提出の実行記録（runtime append-only log; kept out of git）
 docs/ai/kaggle/submission-history.jsonl
+docs/ai/kaggle/leaderboard-rank.jsonl
 
 # AI worker ephemeral artifacts (per-run pipeline reports — regenerated every run)
 docs/ai/10_plan.md
@@ -29,6 +30,10 @@ docs/ai/40_acceptance.md
 docs/ai/50_worker_antigravity_report.md
 docs/ai/55_worker_claude_report.md
 docs/ai/60_worker_codex_report.md
+docs/ai/50_worker_antigravity_report.*.md
+docs/ai/55_worker_claude_report.*.md
+docs/ai/60_worker_codex_report.*.md
+docs/ai/65_worker_solo_report*.md
 docs/ai/70_final_report.md
 docs/ai/70_acceptance_check.md
 docs/ai/75_github_report.md
@@ -39,8 +44,16 @@ docs/ai/*_proposal.md
 prompts/antigravity/implement.md
 prompts/codex/debug.md
 prompts/claude/worker.md
+prompts/antigravity/implement.*.md
+prompts/codex/debug.*.md
+prompts/claude/worker.*.md
 docs/ai/linear/
 docs/ai/pipeline/
+
+# Per-run job state and test-run metadata
+.ai-jobs/
+test-results/
+docs/ai/experiment_ledger_placeholder
 
 # Local archive (not tracked)
 .local/

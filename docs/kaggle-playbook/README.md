@@ -21,7 +21,7 @@ ROGII で public 銅圏(6.395)→private 圏外(9.285, top56%)。**leak-free CV(
 4. [提出ツールと落とし穴](04-submission-tooling-gotchas.md) — Kaggle CLI/認証、提出マーカー、dedup、GPUセッション枠、CSV引用。
 5. [自律サイクルのガードレール](05-autonomous-cycle-guardrails.md) — 人間チェックポイント、メダル指令の翻訳、public ノイズ追い禁止、昇格ゲート。
 6. [ケーススタディ: ROGII 事後分析](06-case-rogii-postmortem.md) — 数字で見る敗因と、2位解法との対比。
-7. [起票システム改善計画](07-drafting-system-improvement-plan.md) — **PLAN(人間レビュー待ち)**。playbook の教訓をシステム契約へ昇格させる実装計画。
+7. 研究仮説・実験選択・自動起票は別リポジトリ `epistemic-research-loop` へ移管済み。本 playbook は実行時の互換資料としてのみ保持する。
 
 ## 提出前チェックリスト（毎回・全コンペ共通）
 
