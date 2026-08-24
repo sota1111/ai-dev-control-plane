@@ -17,7 +17,6 @@ const mockRunner = {
   postUsageLimitComment: (jest.fn() as any).mockResolvedValue(undefined),
   addUsageLimitLabel: (jest.fn() as any).mockResolvedValue(undefined),
   finalizeParentIfChildrenComplete: (jest.fn() as any).mockResolvedValue(false),
-  reconcileReadyKaggleParents: (jest.fn() as any).mockResolvedValue(0),
   notifyUsageLimitToAllActiveIssues: (jest.fn() as any).mockResolvedValue(undefined),
   removeUsageLimitLabel: (jest.fn() as any).mockResolvedValue(undefined),
   setUsageLimitCooldownUntil: jest.fn(),
@@ -1040,7 +1039,6 @@ describe('reaper (runReaperTick)', () => {
     runner.fetchActiveIssues.mockResolvedValue([]);
     runner.drainQueue.mockResolvedValue(undefined);
     runner.syncQueueWithLinear.mockResolvedValue(undefined);
-    runner.reconcileReadyKaggleParents.mockResolvedValue(0);
     // 各テストを独立させるため _prevReaperCooldownActive を false に正規化する
     // （cooldown=null のまま lock で早期returnさせ、前回状態だけ更新する）
     runner.isLocked.mockReturnValue(true);
@@ -1051,7 +1049,6 @@ describe('reaper (runReaperTick)', () => {
     runner.drainQueue.mockClear();
     runner.syncQueueWithLinear.mockClear();
     // reconcile は isLocked/cooldown ガードの前で回るので warm-up tick でも呼ばれる → カウントを正規化。
-    runner.reconcileReadyKaggleParents.mockClear();
   });
 
   it('should skip when WEBHOOK_REAPER_ENABLED=false', async () => {
@@ -1082,33 +1079,6 @@ describe('reaper (runReaperTick)', () => {
   it('should reap stale inflight entries on each tick (even when nothing to scan)', async () => {
     await runReaperTick();
     expect(runner.reapStaleInflight).toHaveBeenCalled();
-  });
-
-  it('reconciles ready Kaggle parents even when their child webhook was missed', async () => {
-    await runReaperTick();
-    expect(runner.reconcileReadyKaggleParents).toHaveBeenCalledTimes(1);
-  });
-
-  // 恒久修正: 親再開 reconcile は isLocked/cooldown に依存せず常時回す（biohub SOT-2773 / kaggriculture
-  // SOT-2885 の滞留=完了駆動ループで runner ビジー時に reconcile が starve した再発防止）。
-  it('reconciles ready Kaggle parents EVEN WHEN the runner is locked (busy)', async () => {
-    runner.isLocked.mockReturnValue(true);
-    await runReaperTick();
-    expect(runner.reconcileReadyKaggleParents).toHaveBeenCalledTimes(1); // parent-resume は走る
-    expect(runner.fetchActiveIssues).not.toHaveBeenCalled(); // 取り残し再スキャンは従来どおり skip
-  });
-
-  it('reconciles ready Kaggle parents EVEN WHILE in usage-limit cooldown', async () => {
-    runner.getUsageLimitCooldownUntil.mockReturnValue({ retryAt: '2026-06-20T00:00:00.000Z' });
-    await runReaperTick();
-    expect(runner.reconcileReadyKaggleParents).toHaveBeenCalledTimes(1);
-    expect(runner.fetchActiveIssues).not.toHaveBeenCalled();
-  });
-
-  it('does not reconcile when LINEAR_API_KEY is unset', async () => {
-    delete process.env.LINEAR_API_KEY;
-    await runReaperTick();
-    expect(runner.reconcileReadyKaggleParents).not.toHaveBeenCalled();
   });
 
   it('should scan and enqueue stranded active issues when idle, then drain', async () => {

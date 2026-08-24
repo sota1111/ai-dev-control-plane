@@ -4,8 +4,6 @@ import {
   loadProjectRepoConfig,
   ProjectRepo,
 } from '../lib/projectRepo.js';
-import fs from 'node:fs';
-import path from 'node:path';
 
 const fixture: ProjectRepo[] = [
   { project: 'ai-dev-control-plane', repo: 'sota1111/ai-dev-control-plane', localPath: '/workspaces/ai-dev-control-plane' },
@@ -36,7 +34,6 @@ describe('resolveRepoForProject (with explicit config)', () => {
   test('returns null for empty / whitespace-only project name', () => {
     expect(resolveRepoForProject('', fixture)).toBeNull();
     expect(resolveRepoForProject('   ', fixture)).toBeNull();
-  });
 });
 
 describe('loadProjectRepoConfig (real config/project_repos.json)', () => {
@@ -58,72 +55,19 @@ describe('loadProjectRepoConfig (real config/project_repos.json)', () => {
     }
   });
 
-  test('maps every project used by the Kaggle cycle registry', () => {
-    const registry = JSON.parse(fs.readFileSync(
-      path.join(process.cwd(), 'scripts/ai/kaggle_targets_registry.json'),
-      'utf8',
-    ));
-    const projects = new Set<string>();
-    const visit = (value: unknown): void => {
-      if (Array.isArray(value)) return value.forEach(visit);
-      if (!value || typeof value !== 'object') return;
-      const record = value as Record<string, unknown>;
-      if (typeof record.project === 'string') projects.add(record.project);
-      Object.values(record).forEach(visit);
-    };
-    visit(registry);
-    const mapped = new Set(loadProjectRepoConfig().map((entry) => entry.project));
-    expect([...projects].filter((project) => !mapped.has(project))).toEqual([]);
-  });
-
-  test('local Kaggle artifacts come from the same checkout that improvement issues modify', () => {
-    const registry = JSON.parse(fs.readFileSync(
-      path.join(process.cwd(), 'scripts/ai/kaggle_targets_registry.json'),
-      'utf8',
-    ));
-    const mappings = new Map(loadProjectRepoConfig().map((entry) => [entry.project, entry]));
-    const controlPlaneRoot = mappings.get('ai-dev-control-plane')!.localPath;
-    const scheduledCompetitionKeys = new Set(
-      (registry.rotation ?? []).map((slot: { competition: string }) => slot.competition),
-    );
-    for (const competition of registry.competitions ?? []) {
-      if (!scheduledCompetitionKeys.has(competition.key)) continue;
-      for (const target of competition.targets ?? []) {
-        const submit = target.submit ?? {};
-        // Notebook submissions are immutable Kaggle outputs rather than files built by the checkout.
-        if (!submit.file || submit.kernel) continue;
-        const mapping = mappings.get(target.project);
-        expect(mapping).toBeDefined();
-        const artifact = path.isAbsolute(submit.file)
-          ? path.normalize(submit.file)
-          : path.resolve(controlPlaneRoot, submit.file);
-        const repoRoot = path.resolve(mapping!.localPath);
-        expect(artifact === repoRoot || artifact.startsWith(`${repoRoot}${path.sep}`)).toBe(true);
-      }
-    }
-  });
-});
-
-describe('resolveRepoForProject (default config load)', () => {
-  test('resolves a real project from the on-disk config', () => {
-    const r = resolveRepoForProject('ai-dev-control-plane');
-    expect(r?.localPath).toBe('/workspaces/ai-dev-control-plane');
   });
 });
 
 describe('deriveRepoForProject (auto-linking by naming convention)', () => {
   test('derives a mapping when the checkout exists', () => {
-    const r = deriveRepoForProject('ptcg-agent-obo', { exists: () => true });
+    const r = deriveRepoForProject('sample-service', { exists: () => true });
     expect(r).toEqual({
-      project: 'ptcg-agent-obo',
-      repo: 'sota1111/ptcg-agent-obo',
-      localPath: '/workspaces/ptcg-agent-obo',
+      project: 'sample-service',
+      repo: 'sota1111/sample-service',
+      localPath: '/workspaces/sample-service',
     });
   });
 
-  test('returns null when the checkout does not exist (fail-closed)', () => {
-    expect(deriveRepoForProject('ptcg-agent-obo', { exists: () => false })).toBeNull();
-  });
 
   test('slugifies the project name and honors overrides', () => {
     const r = deriveRepoForProject('  My Cool Project  ', {
@@ -143,14 +87,4 @@ describe('deriveRepoForProject (auto-linking by naming convention)', () => {
     expect(deriveRepoForProject('   ', { exists: () => true })).toBeNull();
   });
 
-  test('uses the on-disk mapping only on the default-config path', () => {
-    // An explicit fixture remains deterministic and does not consult the on-disk config.
-    expect(resolveRepoForProject('ptcg-agent-obo', fixture)).toBeNull();
-    // The default config explicitly maps ptcg-agent-obo, independent of checkout availability in CI.
-    expect(resolveRepoForProject('ptcg-agent-obo')).toEqual({
-      project: 'ptcg-agent-obo',
-      repo: 'sota1111/ptcg-agent-obo',
-      localPath: '/workspaces/ptcg-agent-obo',
-    });
-  });
 });

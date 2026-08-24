@@ -101,12 +101,12 @@ export function parseReasoningDirectives(text: string | null | undefined): {
 }
 
 /**
- * SOT-2516: lightweight per-issue CONTROL directives for the Kaggle autonomous strategy layer.
+ * Lightweight per-issue CONTROL directives for producer-owned workflows.
  *
  * Two token families, honoring the "human comment is always read & respected" contract without adding
  * a blocking human-approval gate:
- *   cycle=pause     → pause this competition's improvement cycles (do not start new axes)
- *   cycle=stop      → stop this competition's cycles entirely
+ *   cycle=pause     → pause the producer workflow
+ *   cycle=stop      → stop the producer workflow
  *   cycle=continue  → (also resume / on / go) explicitly clear a prior pause/stop
  *   submit=hold     → skip the next automated submission (submit path records the reason on the parent)
  *   submit=auto     → (also go / on / release / off) explicitly clear a prior hold

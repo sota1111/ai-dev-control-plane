@@ -1,7 +1,7 @@
 # GPU / torch / numpy 対応 devcontainer (SOT-1865)
 
 この devcontainer は `numpy` と CUDA 同梱の `torch` を同梱し、**GPU 学習可能**な状態で
-ビルドされる。value net（`ptcg-agent-fable` の `train/train_value.py --backend torch`）などの
+ビルドされる。対象リポジトリのGPU対応テストや学習スクリプトなどの
 学習をコンテナ内で完結できるようにするのが目的。
 
 ## 何が入っているか
@@ -58,11 +58,11 @@ docker run --rm --gpus all ai-devcontainer \
 
 ## value net の GPU 学習（fable, SOT-1865 / SOT-1837）
 
-`ptcg-agent-fable` を本コンテナ内に clone すれば、GPU 学習を完結できる:
+GPU対応プロジェクトを本コンテナ内にcloneすれば、GPU処理を実行できる:
 
 ```bash
-git clone https://github.com/sota1111/ptcg-agent-fable.git /workspaces/ptcg-agent-fable
-cd /workspaces/ptcg-agent-fable
+git clone https://github.com/example/gpu-project.git /workspaces/gpu-project
+cd /workspaces/gpu-project
 
 # on-policy（champion 自己対戦）データ生成 → torch で本格学習
 python3 train/gen_selfplay.py --agent mcts --config '{...champion...}' --shards 8

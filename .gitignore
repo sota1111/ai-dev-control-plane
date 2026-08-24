@@ -3,14 +3,6 @@
 # Node.js
 node_modules/
 
-# ptcg-battle-lab raw game logs (object store) — kept out of git; the manifest references them by
-# object key + checksum + size (SOT-1713). Manifests under artifacts/ptcg-battle-lab/runs/ MAY be
-# committed per-run as the git-managed artifact.
-artifacts/ptcg-battle-lab/objects/
-# ptcg-analyze regenerable outputs (SOT-1711) — aggregate.<run>.json / report.<run>.md are recomputed
-# from the raw records on demand; kept out of git like the object store.
-artifacts/ptcg-battle-lab/runs/aggregate.*.json
-artifacts/ptcg-battle-lab/runs/report.*.md
 
 # 環境変数（シークレットを含むため追跡しない）
 .env
@@ -18,9 +10,6 @@ artifacts/ptcg-battle-lab/runs/report.*.md
 
 docs/ai/auto_logs/*
 
-# SOT-1904 Kaggle 自動提出の実行記録（runtime append-only log; kept out of git）
-docs/ai/kaggle/submission-history.jsonl
-docs/ai/kaggle/leaderboard-rank.jsonl
 
 # AI worker ephemeral artifacts (per-run pipeline reports — regenerated every run)
 docs/ai/10_plan.md

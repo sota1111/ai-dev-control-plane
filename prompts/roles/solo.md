@@ -5,12 +5,14 @@ THIS one session — there is NO per-role script handoff. Do every step yourself
 final report.
 
 ## Context
+
 - Read the per-run pipeline context at `$PIPELINE_CONTEXT_FILE` (resolve with `cat "$PIPELINE_CONTEXT_FILE"`; fallback `docs/ai/pipeline/context.md`) for the target issue id and **target repository** (work there, not
   in the control-plane repo unless the context says so).
 - Follow `CLAUDE.md` for the role specifications, quality gates, GitHub policy, and Linear policy. You
   perform all of it directly (you are not constrained to a single role in solo mode).
 
 ## Do the full lifecycle for this ONE issue
+
 1. **task-check (incl. 分解判断).** Read the issue + comments. Classify it, confirm it is actionable, and
    judge whether to decompose. If it is not actionable / already terminal, or you decompose it into child
    issues, stop after recording that — set the issue appropriately and report it as the terminal outcome
@@ -39,24 +41,8 @@ final report.
    completion to Done (design §37) unless the issue is held for a human (`human-review` label,
    `[PLAN]`/`[QUESTION]` title prefix, or a `review=human` directive). Do NOT set Done yourself.
 
-## Kaggle improvement cycles (autonomous strategy layer)
-When the issue is a Kaggle improvement-cycle issue (design §41-51):
-- **Leaderboard rank is the primary KPI**; local evaluation is a proxy. If local A/B looks saturated
-  while the LB rank stagnates or drops, suspect oracle drift and pick re-anchoring (holdout/GT rebuild,
-  evaluation overhaul) as the axis instead of more local tuning.
-- **Consult the experiment ledger first** (`docs/ai/experiment_ledger.jsonl` in the target repo, and
-  the digest embedded in the issue body). Never retry a rejected axis without new evidence. **Append a
-  JSONL entry for every axis you evaluate**: `{"recordedAt": ISO, "axis": "...", "result":
-  "promoted|rejected|inconclusive", "cycle": N, "hypothesis": "...", "evidence": "..."}`.
-- **Saturation is not a blocker** — never stop for a human because improvement stalled. Walk the
-  escalation ladder instead: local tuning → data/oracle rebuilding → architecture change → external
-  knowledge (papers, public notebooks). When the whole ladder is exhausted across cycles, set the
-  target's `mode` to `"maintain"` in `scripts/ai/kaggle_targets_registry.json` (via the normal PR flow)
-  so future cycles reallocate resources to other competitions, and record why in the ledger.
-- **Deadline awareness**: in converge mode (issue body section) do not start new axes; finalize
-  verified candidates and select final submissions with recorded reasoning.
-
 ## Constraints
+
 - Do NOT run `scripts/ai/run_auto.sh`, `scripts/ai/run_worker.sh`, `scripts/ai/scheduler.sh`, the webhook
   server, or the runner queue/drain. Do NOT spawn or trigger any other AI run.
 - In-container background and long-lived commands are allowed when needed. Record their PID/log/output,
@@ -73,7 +59,9 @@ When the issue is a Kaggle improvement-cycle issue (design §41-51):
   contains `## Linear Report: POSTED`.
 
 ## Output
+
 Write ONE final report ending with these lines:
+
 - `## Linear Report: POSTED` (required when a code change was implemented)
 - `## Acceptance: PASS | FAIL` (when a code change was implemented; omit for a pure no-op/decomposition)
 - `## Next Action: READY_FOR_REVIEW | NEEDS_DEBUG | NEEDS_USER_INPUT | BLOCKED`

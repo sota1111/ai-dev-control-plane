@@ -35,8 +35,8 @@ describe('experimentLedger — readExperimentLedger', () => {
   });
 
   it('resolves the conventional path inside a target repo', () => {
-    expect(defaultExperimentLedgerPath('/workspaces/ptcg-agent-claude'))
-      .toBe('/workspaces/ptcg-agent-claude/docs/ai/experiment_ledger.jsonl');
+    expect(defaultExperimentLedgerPath('/workspaces/sample-app'))
+      .toBe('/workspaces/sample-app/docs/ai/experiment_ledger.jsonl');
   });
 });
 

@@ -1,8 +1,0 @@
-{
-  "outcome": "promote",
-  "requiredActions": [
-    "verify_exec_compatibility",
-    "run_kaggle_proof"
-  ],
-  "reason": "candidate passed confirm and strictly dominated the champion metrics"
-}

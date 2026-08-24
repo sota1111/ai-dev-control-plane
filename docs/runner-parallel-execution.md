@@ -2,7 +2,7 @@
 
 The autonomous runner can process Todos from **different projects (= different repositories) concurrently**,
 while work on the **same repository stays strictly serial**. This lets independent projects — e.g. a
-`biohub-claude` Kaggle cycle, a `kaggriculture-gpt` cycle, the SIGNATE `signate-messy-drive-rag` cycle, or
+an implementation request in one repository, a request in another repository, or
 any app-dev project registered in Linear — make progress at the same time when each has a Todo.
 
 Nothing is forced to launch simultaneously. Issues are created by humans or approved upstream
