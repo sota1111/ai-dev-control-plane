@@ -10,7 +10,6 @@ import { classifyUsageLimit, isWorkerOnlyUsageLimit } from './lib/usageLimitPars
 import { buildIssueRerunMetadata, saveResumeMetadata, formatResumeLogLines } from './lib/resumeMetadata.js';
 import * as queueOrdering from './lib/queueOrdering.js';
 import { resolveRepoForProject } from './lib/projectRepo.js';
-import { resolveRepository } from './lib/ptcgProfile.js';
 import { notifyDetachedLaunched, DetachedOutcome } from './lib/laneNotifier.js';
 import { resolveLaneWorkingDir, cleanupLaneWorktree } from './lib/worktree.js';
 import { loadRunnerParallelConfig } from './lib/runnerConfig.js';
@@ -79,7 +78,6 @@ import {
   setIssueOnHold,
   setIssueBlocked,
   finalizeParentIfChildrenComplete,
-  reconcileReadyKaggleParents,
   getIssueExecutionEligibility,
 } from './lib/linearApi.js';
 import {
@@ -910,17 +908,6 @@ async function buildRunEnv(
       } else {
         env.RUNNER_REPO_RESOLUTION_ERROR = `no repo mapping for project="${projectName}"`;
         log('RUNNER', `${env.RUNNER_REPO_RESOLUTION_ERROR} (fail-closed)`, { issue: issueId });
-      }
-    } else {
-      // Repository/Project が無い依頼だけ、PTCG intent profile を最終 fallback として使う。
-      // 明示 Project が未知の場合も profile へ横滑りさせないため、この分岐は projectName が
-      // 本当に空のときに限る。
-      const meta = await getIssueMeta(issueId);
-      const resolution = resolveRepository({ intent: `${meta.title}\n${meta.description ?? ''}` });
-      if (resolution?.source === 'ptcg-profile') {
-        env.WEBHOOK_PROJECT_NAME = resolution.target.project;
-        env.WEBHOOK_TARGET_REPO = resolution.target.localPath;
-        log('RUNNER', 'resolved repository-less PTCG request to canonical harness', { issue: issueId });
       }
     }
   } catch (err: any) {
@@ -1880,7 +1867,6 @@ export {
   setIssueOnHold,
   setIssueBlocked,
   finalizeParentIfChildrenComplete,
-  reconcileReadyKaggleParents,
   getIssueExecutionEligibility,
   getIssueProjectName,
   buildRunEnv,

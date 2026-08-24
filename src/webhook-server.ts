@@ -256,19 +256,6 @@ async function runReaperTick(): Promise<void> {
   } catch (err: any) {
     runner.log('REAPER', `runDetachedWatchdog error (non-fatal): ${err.message}`);
   }
-  // 親Issue再開の reconcile は runner ビジー/usage-limit cooldown に依存せず**常時**回す（isLocked/cooldown の
-  // early-return より前）。これは純粋な Linear 状態遷移（In Review→Todo＋マーカー）で run を dispatch せず、
-  // lock/cooldown 中でも安全（再開された親は後続 drain が拾う）。isLocked/cooldown の後ろに置いていたため、
-  // 完了駆動ループで runner が常時ビジーだと reconcile が starve し、全子完了済みの Kaggle 親が滞留した
-  // （biohub SOT-2773 / kaggriculture SOT-2885 の2度の実障害）。drain tick は約5分毎なので毎tick実行でも安価。
-  if (getSecret('LINEAR_API_KEY')) {
-    try {
-      await runner.reconcileReadyKaggleParents();
-    } catch (err: any) {
-      runner.log('REAPER', `ready-parent reconciliation error (non-fatal): ${err.message}`);
-    }
-  }
-
   if (runner.isLocked()) return; // 実行中はスキップ（以下の取り残し再スキャンのみ）
   if (cooldownActive) return; // cooldown中はスキップ（明けてから回収）
   if (!getSecret('LINEAR_API_KEY')) return; // APIキー未設定ならスキップ

@@ -6,7 +6,6 @@ describe('cron setup', () => {
 
   test('removes all historical automatic drafting cron entries', () => {
     expect(script).toContain('LEGACY_PATTERN');
-    expect(script).toContain('kaggle_improvement_cycle');
     expect(script).toContain('sonnet_gold_cycle');
     expect(script).toContain('nedo_loading_cycle');
   });

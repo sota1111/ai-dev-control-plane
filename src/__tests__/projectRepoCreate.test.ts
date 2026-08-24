@@ -101,23 +101,23 @@ describe('persistProjectRepoMapping', () => {
       JSON.stringify([{ project: 'existing', repo: 'sota1111/existing', localPath: '/workspaces/existing' }]),
     );
     const wrote = persistProjectRepoMapping(
-      { project: 'ptcg-agent-obo', repo: 'sota1111/ptcg-agent-obo', localPath: '/workspaces/ptcg-agent-obo' },
+      { project: 'sample-service', repo: 'sota1111/sample-service', localPath: '/workspaces/sample-service' },
       configPath,
     );
     expect(wrote).toBe(true);
     const saved = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    expect(saved.find((e: ProjectRepo) => e.project === 'ptcg-agent-obo')?.localPath).toBe(
-      '/workspaces/ptcg-agent-obo',
+    expect(saved.find((e: ProjectRepo) => e.project === 'sample-service')?.localPath).toBe(
+      '/workspaces/sample-service',
     );
   });
 
   test('does not overwrite an existing project and returns false', () => {
     fs.writeFileSync(
       configPath,
-      JSON.stringify([{ project: 'Ptcg-Agent-Obo', repo: 'sota1111/x', localPath: '/keep' }]),
+      JSON.stringify([{ project: 'Sample-Service', repo: 'sota1111/x', localPath: '/keep' }]),
     );
     const wrote = persistProjectRepoMapping(
-      { project: 'ptcg-agent-obo', repo: 'sota1111/ptcg-agent-obo', localPath: '/new' },
+      { project: 'sample-service', repo: 'sota1111/sample-service', localPath: '/new' },
       configPath,
     );
     expect(wrote).toBe(false);

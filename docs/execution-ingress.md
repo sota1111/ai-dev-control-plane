@@ -36,11 +36,11 @@ required outputs, and a declared network policy. A marked but invalid contract i
 ignored and is never queued. Unmarked human issues remain backwards compatible.
 
 The result writer must place the versioned `ExperimentResult` in the artifact/result location
-declared by the producer. Scores from sealed holdouts or Kaggle leaderboards must not be written into
+declared by the producer. External evaluation results must not be written into
 Linear comments or normal research events.
 
 ## Removing the legacy drafter
 
-Run `bash scripts/ai/setup_cron.sh` once on existing hosts. It removes historical `run_auto`, Kaggle,
+Run `bash scripts/ai/setup_cron.sh` once on existing hosts. It removes historical planning
 Sonnet, and NEDO drafting cron entries and registers no replacement. Start ingress with
 `npm run start:webhook`.

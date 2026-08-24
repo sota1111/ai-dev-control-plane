@@ -11,7 +11,7 @@ function description(overrides: Record<string, unknown> = {}): string {
     objective: 'Compare random CV and temporal CV',
     command: 'python -m solver.run --config generated/exp-001.yaml',
     container_image: 'solver:sha256-abc',
-    dataset_mounts: [{ name: 'competition-data', read_only: true }],
+    dataset_mounts: [{ name: 'input-data', read_only: true }],
     resources: { cpu: 8, memory_gb: 32, gpu: 0, timeout_seconds: 7200 },
     seeds: [11, 23, 37],
     required_outputs: ['metrics.json', 'fold_metrics.json'],

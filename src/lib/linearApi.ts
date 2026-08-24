@@ -58,13 +58,6 @@ export interface EligibilityResult {
 const PARENT_FINALIZED_MARKER = '<!-- auto-parent-finalized -->';
 const PARENT_RESUMED_MARKER = '<!-- auto-parent-resumed -->';
 
-function isKaggleImprovementParent(issue: any): boolean {
-  return (
-    /^\[[^\]]+\] Kaggle順位向上サイクル第\d+次/.test(issue?.title || '') &&
-    (issue?.description || '').includes('## 入力材料（cronが自動収集・要約なし）')
-  );
-}
-
 /** Historical Sonnet cycle parents still need completion reconciliation during migration. */
 function isSonnetGoldCycleParent(issue: any): boolean {
   return /^\[SONNET-GOLD\] .*改善サイクル第\d+次/.test(issue?.title || '');
@@ -348,37 +341,6 @@ export async function getIssueQueueMetadata(issueId: string): Promise<IssueQueue
   }
 }
 
-/**
- * Read-only migration helper for historical cycle material. Automatic issue creation has moved to
- * epistemic-research-loop; this query cannot create or mutate Linear state.
- */
-export async function findOpenImproveCycleParent(
-  projectName: string,
-  labelName = 'auto-improve'
-): Promise<string | null> {
-  const { log } = requireDeps();
-  try {
-    const data: any = await linearQuery(
-      `query($name: String!, $label: String!) {
-        issues(filter: {
-          project: { name: { eq: $name } },
-          labels: { name: { eq: $label } },
-          state: { name: { in: ["Todo", "In Progress", "In Review"] } }
-        }, first: 25) { nodes { identifier title } }
-      }`,
-      { name: projectName, label: labelName }
-    );
-    const parentTitle = /^\[[^\]]+\] Kaggle順位向上サイクル第\d+次/;
-    const parent = (data?.issues?.nodes ?? []).find((node: any) =>
-      parentTitle.test(node?.title || '')
-    );
-    return parent?.identifier ?? null;
-  } catch (err: any) {
-    log('RUNNER', `findOpenImproveCycleParent failed: ${err.message}`, { issue: projectName });
-    return null;
-  }
-}
-
 export async function hasPendingIssues(): Promise<boolean> {
   try {
     const query =
@@ -606,25 +568,6 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
     return true;
   } catch (err: any) {
     log('ERROR', `setIssueInReview failed: ${err.message}`, { issue: issueId });
-    return false;
-  }
-}
-
-/**
- * SOT-2516: post a plain comment on an issue (no state change). Used by the Kaggle submit path to
- * record on the parent why an automated submission was skipped (`submit=hold` directive). Best-effort:
- * returns false on any failure without throwing, so a Linear hiccup never breaks the submit script.
- */
-export async function postIssueComment(issueId: string, body: string): Promise<boolean> {
-  const { log } = requireDeps();
-  try {
-    await linearQuery(
-      'mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }',
-      { issueId, body }
-    );
-    return true;
-  } catch (err: any) {
-    log('ERROR', `postIssueComment failed: ${err.message}`, { issue: issueId });
     return false;
   }
 }
@@ -936,10 +879,9 @@ export async function finalizeParentIfChildrenComplete(
       );
       return false;
     }
-    const kaggleImprovementParent = isKaggleImprovementParent(parent);
-    // 二段ライフサイクル親（kaggle 改善サイクル / sonnet gold サイクル）は In Review=子待ちなので
+    // Historical two-phase parents use In Review while waiting for children.
     // skip せず resume 判定へ進める。それ以外の In Review 親は従来どおり確定済みとして skip。
-    const twoPhaseCycleParent = kaggleImprovementParent || isSonnetGoldCycleParent(parent);
+    const twoPhaseCycleParent = isSonnetGoldCycleParent(parent);
     if ((parent.state?.name || '').toLowerCase() === 'in review' && !twoPhaseCycleParent) {
       log('WEBHOOK', `finalizeParent: ${parent.identifier} already In Review, skip`, {
         issue: parent.identifier,
@@ -968,9 +910,7 @@ export async function finalizeParentIfChildrenComplete(
       return false;
     }
 
-    // Kaggle improvement parents have a mandatory second phase: once every child has
-    // finished, resume the parent so it can aggregate evidence and own the submission.
-    // Ordinary parents keep the historical auto-finalize-to-review behavior.
+    // Two-phase parents resume after all children finish. Ordinary parents finalize to review.
     const resumeParent =
       (parent.state?.name || '').toLowerCase() === 'on hold' || twoPhaseCycleParent;
     const marker = resumeParent ? PARENT_RESUMED_MARKER : PARENT_FINALIZED_MARKER;
@@ -985,7 +925,7 @@ export async function finalizeParentIfChildrenComplete(
     // as the first line of the transition comment; a worker's completion report that merely *quotes*
     // the marker string (e.g. "webhookが `<!-- auto-parent-resumed -->` を付け…") must NOT be mistaken
     // for an actual transition, or the parent is stranded forever (observed: biohub SOT-2773 never
-    // resumed → never submitted → its whole competition loop blocked).
+    // resumed, leaving the parent stranded.
     if (existingComments.some((c: any) => (c.body || '').trimStart().startsWith(marker))) {
       log(
         'WEBHOOK',
@@ -1028,9 +968,9 @@ export async function finalizeParentIfChildrenComplete(
     const childList = children.map((c: any) => `- ${c.identifier} (${c.state?.name})`).join('\n');
     const body = resumeParent
       ? `${PARENT_RESUMED_MARKER}
-## 親Issue自動再開${kaggleImprovementParent ? '（集約・提出フェーズ）' : ''}
+## 親Issue自動再開
 
-全ての前提子Issueが完了したため、親Issueを **Todo** に戻しました（trigger: ${childIdentifier} 完了）。通常の webhook 実行キューから自動再開します。${kaggleImprovementParent ? '\n\n再開後は子Issueを再作成せず、全子Issueの完了・検証結果・最新artifactを集約し、この親Issueだけが提出判定を実行してください。' : ''}
+全ての前提子Issueが完了したため、親Issueを **Todo** に戻しました（trigger: ${childIdentifier} 完了）。通常の webhook 実行キューから自動再開します。
 
 ### 子Issue
 ${childList}`
@@ -1058,8 +998,7 @@ ${childList}
     // Autonomous acceptance (design §37): an ordinary finalized parent's children WERE its
     // deliverables and each was individually verified, so completion propagates one level up
     // (design §12) without a human. Hold conditions (PLAN prefix / label / review=human) are
-    // enforced inside autoAcceptIssueDone. Kaggle improvement parents are excluded here — they
-    // resumed to Todo for their aggregation/submission phase and are accepted after that run.
+    // enforced inside autoAcceptIssueDone. Resumed parents are accepted after their second run.
     if (!resumeParent) {
       await autoAcceptIssueDone(parent.identifier || parent.id).catch(() => {
         /* stays In Review */
@@ -1074,135 +1013,6 @@ ${childList}
   }
 }
 
-/** Reconcile Kaggle parents when the final child-state webhook was missed or delivered offline. */
-/** 「Blocked」状態か（type=unstarted・name=blocked）。isChildComplete でも hold でもない滞留状態。 */
-function isBlockedState(state: any): boolean {
-  return (state?.name || '').toLowerCase() === 'blocked';
-}
-
-/**
- * サイクル内自己監査・型C（恒久対策）: kaggle 改善親の「前提が死んだ Blocked 子」を自動 Cancel する。
- *
- * 実障害（SOT-2926/2928）: find→port→judge の分解で、先行 find 子が negative（移植対象なし）で完了すると、
- * 下流 port/judge 子は受け入れ条件の前提を失い worker が Blocked にする。Blocked は isChildComplete でないため
- * 親が永久に再開せず、コンペのループ全体が停止する。改善親は完全自律（人間 in-loop なし）なので、Blocked 子は
- * 自己解決しない。
- *
- * 安全弁: **他の非終端・非Blocked 子が1つも無い**（＝まだ動いていて前提を供給しうる子が無い）ときだけ、
- * 残る Blocked 子を premise-dead とみなし Cancel する。In Progress の兄弟がいる間は決して Cancel しない。
- * 改善親（isKaggleImprovementParent）限定。冪等（既に Canceled なら何もしない）。
- * 返り値: Cancel した子の数。
- */
-async function cancelStrandedBlockedChildren(parentId: string): Promise<number> {
-  const { log } = requireDeps();
-  const data: any = await linearQuery(
-    `query($id: String!) {
-      issue(id: $id) {
-        identifier title description team { id }
-        children(first: 100) { nodes { id identifier state { name type } } }
-      }
-    }`,
-    { id: parentId }
-  );
-  const parent = data.issue;
-  if (!parent || !isKaggleImprovementParent(parent)) return 0;
-  const children = parent.children?.nodes || [];
-  const blocked = children.filter((c: any) => isBlockedState(c.state));
-  if (blocked.length === 0) return 0;
-  // 前提を供給しうる「まだ動いている子」= 非終端・非hold・非Blocked が1つでもあれば手を出さない。
-  const stillRunning = children.filter(
-    (c: any) => !isChildComplete(c.state) && !isBlockedState(c.state)
-  );
-  if (stillRunning.length > 0) return 0;
-
-  const statesData: any = await linearQuery(
-    'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name type } } }',
-    { teamId: parent.team.id }
-  );
-  const canceled = (statesData.workflowStates?.nodes || []).find(
-    (s: any) =>
-      (s.name || '').toLowerCase() === 'canceled' || (s.name || '').toLowerCase() === 'cancelled'
-  );
-  if (!canceled) {
-    log('WEBHOOK', `cancelStrandedBlocked: no Canceled state for team ${parent.team.id}, skip`, {
-      issue: parent.identifier,
-    });
-    return 0;
-  }
-
-  let n = 0;
-  for (const child of blocked) {
-    try {
-      await linearQuery(
-        'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
-        { id: child.id, stateId: canceled.id }
-      );
-      await linearQuery(
-        'mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }',
-        {
-          issueId: child.id,
-          body: `## 自動 Cancel（前提不成立・サイクル自己監査 型C）
-
-先行子が negative（移植対象/前提なし）で完了し、本子はその前提を満たせず Blocked のまま自己解決しない状態でした。
-親 ${parent.identifier} の**他の非終端・非Blocked 子が残っていない**（前提を供給しうる作業が無い）ため、premise-dead として自動 Cancel します。
-親は全子終端で再開・集約し、次サイクルへ進みます（design §5 サイクル内自己監査）。`,
-        }
-      );
-      n++;
-      log(
-        'WEBHOOK',
-        `cancelStrandedBlocked: ${child.identifier} -> Canceled (premise-dead child of ${parent.identifier})`,
-        { issue: child.identifier }
-      );
-    } catch (err: any) {
-      log('ERROR', `cancelStrandedBlocked failed for ${child.identifier}: ${err.message}`, {
-        issue: child.identifier,
-      });
-    }
-  }
-  return n;
-}
-
-export async function reconcileReadyKaggleParents(): Promise<number> {
-  const { log } = requireDeps();
-  try {
-    const data: any = await linearQuery(
-      `query {
-        issues(first: 100, filter: {
-          state: { name: { eq: "In Review" } }
-          labels: { some: { name: { eq: "auto-improve" } } }
-        }) {
-          nodes { id identifier children(first: 1) { nodes { identifier } } }
-        }
-      }`
-    );
-    let resumed = 0;
-    let canceledBlocked = 0;
-    for (const parent of data.issues?.nodes || []) {
-      if (!parent.children?.nodes?.length) continue;
-      // 型C: 前提死の Blocked 子を先に Cancel して、親が再開できる状態にする。
-      try {
-        canceledBlocked += await cancelStrandedBlockedChildren(parent.id);
-      } catch (err: any) {
-        log(
-          'ERROR',
-          `cancelStrandedBlockedChildren failed for ${parent.identifier}: ${err.message}`,
-          { issue: parent.identifier }
-        );
-      }
-      if (await finalizeParentIfChildrenComplete('reaper-reconciliation', parent.id)) resumed++;
-    }
-    if (canceledBlocked > 0)
-      log('REAPER', `auto-canceled ${canceledBlocked} premise-dead Blocked child(ren)`);
-    if (resumed > 0) log('REAPER', `reconciled ${resumed} ready Kaggle parent(s)`);
-    return resumed;
-  } catch (err: any) {
-    log('ERROR', `reconcileReadyKaggleParents failed: ${err.message}`);
-    return 0;
-  }
-}
-
-export { cancelStrandedBlockedChildren };
 
 export async function getIssueExecutionEligibility(issueId: string): Promise<EligibilityResult> {
   const { log, longRunLabel, removeFromQueue } = requireDeps();

@@ -13,7 +13,7 @@ if ! command -v crontab >/dev/null 2>&1; then
 fi
 
 # Remove every historical work-creation entry. Never register a replacement here.
-LEGACY_PATTERN='run_auto\.sh|kaggle_improvement_cycle\.sh|sonnet_gold_cycle\.sh|nedo_loading_cycle\.sh'
+LEGACY_PATTERN='run_auto\.sh|sonnet_gold_cycle\.sh|nedo_loading_cycle\.sh'
 crontab -l 2>/dev/null | grep -vE "$LEGACY_PATTERN" | crontab - || true
 
 echo "Legacy automatic drafting cron entries removed."

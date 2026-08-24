@@ -68,8 +68,8 @@ your phone, and come back to a merged PR with a completion report.
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `epistemic-research-loop` | observation, hypotheses, preregistration, utility, falsification, belief, Research Brief, automatic experiment requests            |
 | `ai-dev-control-plane`    | signed Linear webhook ingress, event de-duplication, persistent queue, worker/model dispatch, execution, retries, result reporting |
-| Kaggle Solver             | features, training, inference, submission artifacts                                                                                |
-| Benchmark evaluator       | submission credentials, sealed scores, final unseal                                                                                |
+| Request producer          | domain planning and the versioned implementation request                                                                           |
+| External evaluator        | domain evaluation, credentials, and result disclosure                                                                              |
 
 Experiment tickets from the research loop contain
 `<!-- epistemic-research-loop:experiment-request:v1 -->` and a complete JSON contract. The webhook
