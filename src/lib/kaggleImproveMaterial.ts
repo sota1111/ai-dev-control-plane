@@ -1,18 +1,15 @@
 /**
- * SOT-1913/SOT-1933 材料自動収集 — 改善サイクル cron が起案Issue本文へ埋め込む「入力材料」と、
- * 新材料/前サイクル未完了の各ガードシグナルを、決定的（LLM非呼出）に収集する。
+ * Historical Kaggle improvement material collector.
  *
- * 背景（バグ）: これまで cron(`scripts/ai/kaggle_improvement_cycle.sh`)は runner-cli へ
- * `--material` / `--signals` を渡しておらず、`buildIssueBody` が常に空プレースホルダ
- * （"(前回提出の記録なし…)" / "(新規の完了Issueなし)" / "(該当なし)"）を出力し、かつ
- * 新材料ガード・前サイクル未完了ガードも既定 fail-open で実質無効化されていた。本モジュールが
- * その「cronが自動収集」の実体。
+ * Automatic issue drafting moved to epistemic-research-loop. This module remains read-only for
+ * submission bookkeeping and migration-compatible `kaggle-improve-run` planning; it must not
+ * create or schedule Linear issues.
  *
  * 収集元（全て best-effort。失敗時は当該フィールドを undefined／シグナルを安全側に倒し、cron は
  * 従来どおり継続する。**決して throw しない**）:
  *  - 前回提出結果  : Kaggle CLI `kaggle competitions submissions <slug> --csv`（コンペ単位で1回）
  *  - 完了Issueダイジェスト + hasNewMaterial : Linear（project の completed を前回サイクル以降で判定）
- *  - hasUnfinishedCycle : `findOpenAutoImproveIssue`（既存）
+ *  - hasUnfinishedCycle : historical open-cycle lookup
  *  - failure/KPI 抜粋 : `docs/ai/failure-log.md` を repo名/コンペkey でフィルタ
  */
 import fs from 'node:fs';

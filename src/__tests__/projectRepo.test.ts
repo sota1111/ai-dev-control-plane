@@ -143,16 +143,14 @@ describe('deriveRepoForProject (auto-linking by naming convention)', () => {
     expect(deriveRepoForProject('   ', { exists: () => true })).toBeNull();
   });
 
-  test('auto-links via resolveRepoForProject only on the default-config path', () => {
-    // Explicit config is passed → no auto-derive, unknown project stays null (deterministic).
+  test('uses the on-disk mapping only on the default-config path', () => {
+    // An explicit fixture remains deterministic and does not consult the on-disk config.
     expect(resolveRepoForProject('ptcg-agent-obo', fixture)).toBeNull();
-    // Default on-disk config path: ptcg-agent-obo is unmapped but its checkout exists → auto-linked.
-    const hasCheckout = fs.existsSync('/workspaces/ptcg-agent-obo/.git');
-    const r = resolveRepoForProject('ptcg-agent-obo');
-    if (hasCheckout) {
-      expect(r?.localPath).toBe('/workspaces/ptcg-agent-obo');
-    } else {
-      expect(r).toBeNull();
-    }
+    // The default config explicitly maps ptcg-agent-obo, independent of checkout availability in CI.
+    expect(resolveRepoForProject('ptcg-agent-obo')).toEqual({
+      project: 'ptcg-agent-obo',
+      repo: 'sota1111/ptcg-agent-obo',
+      localPath: '/workspaces/ptcg-agent-obo',
+    });
   });
 });

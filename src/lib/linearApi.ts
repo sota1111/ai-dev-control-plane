@@ -1,8 +1,14 @@
 import https from 'node:https';
 import { getSecret } from '../config/secrets.js';
 import { getPriorityRank } from './queueOrdering.js';
-import { isTerminalState, isHoldState, isChildComplete, classifyIssueMeaningState } from './issueState.js';
+import {
+  isTerminalState,
+  isHoldState,
+  isChildComplete,
+  classifyIssueMeaningState,
+} from './issueState.js';
 import { loadAutoAcceptConfig, shouldHoldForHuman, markAutoAccepted } from './autoAccept.js';
+import { parseExperimentRequest } from './experimentRequest.js';
 import * as appEnv from '../config/env.js';
 import type { IssueQueueMetadata } from '../runner.js';
 
@@ -53,15 +59,13 @@ const PARENT_FINALIZED_MARKER = '<!-- auto-parent-finalized -->';
 const PARENT_RESUMED_MARKER = '<!-- auto-parent-resumed -->';
 
 function isKaggleImprovementParent(issue: any): boolean {
-  return /^\[[^\]]+\] Kaggle順位向上サイクル第\d+次/.test(issue?.title || '')
-    && (issue?.description || '').includes('## 入力材料（cronが自動収集・要約なし）');
+  return (
+    /^\[[^\]]+\] Kaggle順位向上サイクル第\d+次/.test(issue?.title || '') &&
+    (issue?.description || '').includes('## 入力材料（cronが自動収集・要約なし）')
+  );
 }
 
-/**
- * Sonnet gold100 自動改善サイクルの親Issue（scripts/ai/sonnet_gold_cycle_draft.ts が起票）。
- * kaggle 親と同じ「全子完了→親を Todo へ再開（統合測定フェーズ）」の二段ライフサイクルを持つ。
- * In Review で子待ちする設計のため、resume 対象に含めないと永久に停滞する（2026-08-12 実障害）。
- */
+/** Historical Sonnet cycle parents still need completion reconciliation during migration. */
 function isSonnetGoldCycleParent(issue: any): boolean {
   return /^\[SONNET-GOLD\] .*改善サイクル第\d+次/.test(issue?.title || '');
 }
@@ -78,7 +82,9 @@ async function removeBlockingRelations(
 ): Promise<number> {
   const { log } = requireDeps();
   const relationIds = [...relations, ...inverseRelations]
-    .filter((relation) => relation?.type === 'blocks' && typeof relation.id === 'string' && relation.id)
+    .filter(
+      (relation) => relation?.type === 'blocks' && typeof relation.id === 'string' && relation.id
+    )
     .map((relation) => relation.id as string);
 
   let removed = 0;
@@ -91,11 +97,17 @@ async function removeBlockingRelations(
       );
       removed++;
     } catch (err: any) {
-      log('ERROR', `removeBlockingRelations: failed to delete relation ${relationId}: ${err.message}`, { issue: issueId });
+      log(
+        'ERROR',
+        `removeBlockingRelations: failed to delete relation ${relationId}: ${err.message}`,
+        { issue: issueId }
+      );
     }
   }
   if (removed > 0) {
-    log('WEBHOOK', `removeBlockingRelations: removed ${removed} stale relation(s)`, { issue: issueId });
+    log('WEBHOOK', `removeBlockingRelations: removed ${removed} stale relation(s)`, {
+      issue: issueId,
+    });
   }
   return removed;
 }
@@ -114,7 +126,9 @@ class LinearTransientError extends Error {
 function isTransientLinearError(err: any): boolean {
   if (err instanceof LinearTransientError) return true;
   const msg = String(err?.message || err || '').toLowerCase();
-  return /timeout|socket hang up|econnreset|econnrefused|etimedout|enotfound|eai_again|network|502|503|504|429|rate limit|too many requests/.test(msg);
+  return /timeout|socket hang up|econnreset|econnrefused|etimedout|enotfound|eai_again|network|502|503|504|429|rate limit|too many requests/.test(
+    msg
+  );
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -134,14 +148,16 @@ async function linearQueryOnce(query: string, variables: Record<string, any>): P
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': apiKey
+        Authorization: apiKey,
       },
-      timeout: 10000
+      timeout: 10000,
     };
 
     const req = https.request(options, (res: any) => {
       let data = '';
-      res.on('data', (chunk: any) => { data += chunk; });
+      res.on('data', (chunk: any) => {
+        data += chunk;
+      });
       res.on('end', () => {
         // Retry on 5xx / 429 status even when a body is returned.
         if (res.statusCode && (res.statusCode >= 500 || res.statusCode === 429)) {
@@ -161,7 +177,9 @@ async function linearQueryOnce(query: string, variables: Record<string, any>): P
       });
     });
 
-    req.on('error', (err: any) => { reject(new LinearTransientError(err?.message || 'socket error')); });
+    req.on('error', (err: any) => {
+      reject(new LinearTransientError(err?.message || 'socket error'));
+    });
     req.on('timeout', () => {
       req.destroy();
       reject(new LinearTransientError('Linear API timeout'));
@@ -186,7 +204,8 @@ export async function linearQuery(
   variables: Record<string, any> = {},
   opts: { retries?: number } = {}
 ): Promise<any> {
-  const maxRetries = opts.retries !== undefined ? Math.max(0, opts.retries) : appEnv.linearRetryMax();
+  const maxRetries =
+    opts.retries !== undefined ? Math.max(0, opts.retries) : appEnv.linearRetryMax();
   const baseMs = appEnv.linearRetryBaseMs();
   let attempt = 0;
   // Try once, then up to maxRetries more times on transient errors.
@@ -199,8 +218,13 @@ export async function linearQuery(
       // Exponential backoff with full jitter: delay ∈ [0, base * 2^attempt].
       const delay = Math.floor(Math.random() * (baseMs * Math.pow(2, attempt)));
       try {
-        requireDeps().log('LINEAR', `transient error (${err.message}); retry ${attempt + 1}/${maxRetries} in ${delay}ms`);
-      } catch { /* deps/log optional */ }
+        requireDeps().log(
+          'LINEAR',
+          `transient error (${err.message}); retry ${attempt + 1}/${maxRetries} in ${delay}ms`
+        );
+      } catch {
+        /* deps/log optional */
+      }
       await sleep(delay);
       attempt++;
     }
@@ -247,10 +271,9 @@ export async function getIssueProjectName(issueId: string): Promise<string | nul
 export async function getIssueGitBranch(issueId: string): Promise<string | null> {
   const { log } = requireDeps();
   try {
-    const data: any = await linearQuery(
-      'query($id: String!) { issue(id: $id) { branchName } }',
-      { id: issueId }
-    );
+    const data: any = await linearQuery('query($id: String!) { issue(id: $id) { branchName } }', {
+      id: issueId,
+    });
     const branch = data?.issue?.branchName;
     return typeof branch === 'string' && branch.trim() !== '' ? branch : null;
   } catch (err: any) {
@@ -317,7 +340,7 @@ export async function getIssueQueueMetadata(issueId: string): Promise<IssueQueue
       archivedAt: issue.archivedAt ?? null,
       createdAt: issue.createdAt ?? null,
       updatedAt: issue.updatedAt ?? null,
-      blockedByIssueIds: blockingIssueIds(issue)
+      blockedByIssueIds: blockingIssueIds(issue),
     };
   } catch (err: any) {
     log('RUNNER', `getIssueQueueMetadata failed: ${err.message}`, { issue: issueId });
@@ -326,128 +349,8 @@ export async function getIssueQueueMetadata(issueId: string): Promise<IssueQueue
 }
 
 /**
- * SOT-1913/SOT-1933 — 改善サイクル cron が「改善方針の親Issue」を Linear に作成する（execute パス専用）。
- *
- * 決定的処理: プロジェクト名→ project/team を解決し、Todo(unstarted) state と（あれば）`auto-improve`
- * ラベルを付けて issueCreate する。子Issueが依存順で自動実装されるよう **Todo で作成**する（In Review
- * にパークしない — SOT-1913 の依存順失敗の根本対策）。非冪等な作成なので retries:0。呼び出し側で
- * 事前に findOpenAutoImproveIssue の未終端ガードを掛けて重複起案を防ぐこと。
- */
-export async function createDraftIssue(input: {
-  projectName: string;
-  title: string;
-  description: string;
-  labelName?: string;
-}): Promise<{ identifier: string; url: string } | null> {
-  const { log } = requireDeps();
-  // 1) project → id + team。
-  const projData: any = await linearQuery(
-    'query($name: String!) { projects(filter: { name: { eq: $name } }, first: 1) { nodes { id name teams { nodes { id } } } } }',
-    { name: input.projectName }
-  );
-  const project = projData?.projects?.nodes?.[0];
-  if (!project?.id) {
-    log('RUNNER', `createDraftIssue: project not found: ${input.projectName}`);
-    return null;
-  }
-  const teamId = project?.teams?.nodes?.[0]?.id;
-  if (!teamId) {
-    log('RUNNER', `createDraftIssue: no team for project ${input.projectName}`);
-    return null;
-  }
-  // 2) Todo(unstarted) state を解決（name==='Todo' 優先、無ければ最初の unstarted）。
-  let stateId: string | undefined;
-  try {
-    const stData: any = await linearQuery(
-      'query($teamId: ID!) { workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "unstarted" } }) { nodes { id name } } }',
-      { teamId }
-    );
-    const states: any[] = stData?.workflowStates?.nodes ?? [];
-    stateId = (states.find((s) => s?.name === 'Todo') ?? states[0])?.id;
-  } catch (err: any) {
-    log('RUNNER', `createDraftIssue: workflowStates lookup failed: ${err.message}`);
-  }
-  // 3) label（任意・あれば付ける）。
-  const labelIds: string[] = [];
-  if (input.labelName) {
-    try {
-      const lbData: any = await linearQuery(
-        'query($name: String!) { issueLabels(filter: { name: { eq: $name } }, first: 1) { nodes { id } } }',
-        { name: input.labelName }
-      );
-      const labelId = lbData?.issueLabels?.nodes?.[0]?.id;
-      if (labelId) labelIds.push(labelId);
-    } catch (err: any) {
-      log('RUNNER', `createDraftIssue: label lookup failed: ${err.message}`);
-    }
-  }
-  // 4) issueCreate（非冪等 → retries:0）。
-  const createInput: Record<string, any> = {
-    teamId,
-    projectId: project.id,
-    title: input.title,
-    description: input.description,
-  };
-  if (stateId) createInput.stateId = stateId;
-  if (labelIds.length) createInput.labelIds = labelIds;
-  const res: any = await linearQuery(
-    'mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { identifier url } } }',
-    { input: createInput },
-    { retries: 0 }
-  );
-  const issue = res?.issueCreate?.issue;
-  if (!res?.issueCreate?.success || !issue?.identifier) {
-    log('RUNNER', `createDraftIssue: issueCreate returned no issue for ${input.projectName}`);
-    return null;
-  }
-  log('RUNNER', `createDraftIssue: created ${issue.identifier} in ${input.projectName}`);
-  return { identifier: issue.identifier, url: issue.url };
-}
-
-/**
- * SOT-1933 / SOT-2070 前サイクル実行中ガード（execute 時の再確認）:
- * プロジェクトに現在 actionable（Todo / In Progress）の `auto-improve` Issue があれば、その
- * identifier を返す（無ければ null・never throws）。
- *
- * In Review は Linear 上の state.type が In Progress と同じ "started" だが、完了済みの成果を人間が
- * 確認する保留状態であり、次の定期サイクルを止めてはならない。状態 type の否定条件ではなく、
- * 現在の workflow state 名を allowlist して過去 Issue の残存に引きずられないようにする。
- */
-export async function findOpenAutoImproveIssue(
-  projectName: string,
-  labelName = 'auto-improve'
-): Promise<string | null> {
-  const { log } = requireDeps();
-  try {
-    const data: any = await linearQuery(
-      `query($name: String!, $label: String!) {
-        issues(filter: {
-          project: { name: { eq: $name } },
-          labels: { name: { eq: $label } },
-          state: { name: { in: ["Todo", "In Progress"] } }
-        }, first: 1) { nodes { identifier } }
-      }`,
-      { name: projectName, label: labelName }
-    );
-    const id = data?.issues?.nodes?.[0]?.identifier;
-    return typeof id === 'string' && id ? id : null;
-  } catch (err: any) {
-    log('RUNNER', `findOpenAutoImproveIssue failed: ${err.message}`, { issue: projectName });
-    return null;
-  }
-}
-
-/** Kaggle 改善サイクルの親Issueタイトル（buildIssueTitle）。子Issueは別タイトルなので除外できる。 */
-const IMPROVE_CYCLE_PARENT_TITLE = /^\[[^\]]+\] Kaggle順位向上サイクル第\d+次/;
-
-/**
- * 完了駆動ループ（10分毎cron）用の直列ガード。`findOpenAutoImproveIssue` は Todo/In Progress のみを
- * 見るため、親が「子実装待ち」や「統合・提出フェーズ」で In Review にいる窓では次サイクルを重複起票し得る
- * （旧JST枠は6h間隔でこの窓を隠していた）。本関数は In Review も含めて **サイクル親** を捕捉する。
- *
- * ただし実装子Issueはこのハーネスで恒久的に In Review 止まりになるため、In Review を無条件に数えると
- * 「完了済みの子」に引きずられて永久にブロックしてしまう。よって **親タイトル正規表現でフィルタし、
- * 親Issueだけ** を未完了サイクルとみなす（子は除外）。無ければ null・never throws。
+ * Read-only migration helper for historical cycle material. Automatic issue creation has moved to
+ * epistemic-research-loop; this query cannot create or mutate Linear state.
  */
 export async function findOpenImproveCycleParent(
   projectName: string,
@@ -465,8 +368,10 @@ export async function findOpenImproveCycleParent(
       }`,
       { name: projectName, label: labelName }
     );
-    const nodes: any[] = data?.issues?.nodes ?? [];
-    const parent = nodes.find((n) => IMPROVE_CYCLE_PARENT_TITLE.test(n?.title || ''));
+    const parentTitle = /^\[[^\]]+\] Kaggle順位向上サイクル第\d+次/;
+    const parent = (data?.issues?.nodes ?? []).find((node: any) =>
+      parentTitle.test(node?.title || '')
+    );
     return parent?.identifier ?? null;
   } catch (err: any) {
     log('RUNNER', `findOpenImproveCycleParent failed: ${err.message}`, { issue: projectName });
@@ -476,7 +381,8 @@ export async function findOpenImproveCycleParent(
 
 export async function hasPendingIssues(): Promise<boolean> {
   try {
-    const query = '{ issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: 1) { nodes { id } } }';
+    const query =
+      '{ issues(filter: { state: { type: { in: ["unstarted","started"] } } }, first: 1) { nodes { id } } }';
     const data: any = await linearQuery(query);
     return !!(data.issues?.nodes?.length > 0);
   } catch (err) {
@@ -543,18 +449,22 @@ export async function fetchActiveIssues(
       archivedAt: issue.archivedAt ?? null,
       createdAt: issue.createdAt ?? null,
       updatedAt: issue.updatedAt ?? null,
-      blockedByIssueIds: blockingIssueIds(issue)
+      blockedByIssueIds: blockingIssueIds(issue),
     }));
 }
 
 function blockingIssueIds(issue: any): string[] {
   const selfIds = new Set([issue.id, issue.identifier].filter(Boolean));
-  return (issue.inverseRelations?.nodes || [])
-    .filter((relation: any) => relation.type === 'blocks')
-    // For an inverse relation, `issue` is the source (the blocker) and `relatedIssue` is the
-    // current/dependent issue. Reading relatedIssue creates a self-dependency in the queue.
-    .flatMap((relation: any) => [relation.issue?.id, relation.issue?.identifier])
-    .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0 && !selfIds.has(id));
+  return (
+    (issue.inverseRelations?.nodes || [])
+      .filter((relation: any) => relation.type === 'blocks')
+      // For an inverse relation, `issue` is the source (the blocker) and `relatedIssue` is the
+      // current/dependent issue. Reading relatedIssue creates a self-dependency in the queue.
+      .flatMap((relation: any) => [relation.issue?.id, relation.issue?.identifier])
+      .filter(
+        (id: unknown): id is string => typeof id === 'string' && id.length > 0 && !selfIds.has(id)
+      )
+  );
 }
 
 export async function setIssueInProgress(
@@ -572,13 +482,19 @@ export async function setIssueInProgress(
     // may be handed a Done/Canceled/Duplicate issue (e.g. a stale queue entry); reopening it would be
     // wrong. isTerminalState also guards the Discord `/recover` caller for free.
     if (isTerminalState(issueData.issue.state)) {
-      log('WEBHOOK', `setIssueInProgress: ${issueId} is terminal (${issueData.issue.state?.name ?? issueData.issue.state?.type}), skip`);
+      log(
+        'WEBHOOK',
+        `setIssueInProgress: ${issueId} is terminal (${issueData.issue.state?.name ?? issueData.issue.state?.type}), skip`
+      );
       return;
     }
     // A worker can deliberately stop an incomplete run in Blocked when human action or unavailable
     // provenance is required. The post-run loop-breaker must preserve that decision; otherwise it
     // immediately rewrites Blocked to In Progress and makes the issue look permanently active.
-    if (options.preserveBlocked && (issueData.issue.state?.name || '').toLowerCase() === 'blocked') {
+    if (
+      options.preserveBlocked &&
+      (issueData.issue.state?.name || '').toLowerCase() === 'blocked'
+    ) {
       log('WEBHOOK', `setIssueInProgress: ${issueId} is Blocked, preserve worker decision`);
       return;
     }
@@ -648,9 +564,15 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
     // On Hold; the post-run ensure-issue-reviewed step must NOT drag it back to In Review, or the halt
     // would be undone and the re-run loop would resume.
     if (isHoldState(issue.state)) return false;
-    const pendingChildren = (issue.children?.nodes || []).filter((child: any) => !isChildComplete(child.state));
+    const pendingChildren = (issue.children?.nodes || []).filter(
+      (child: any) => !isChildComplete(child.state)
+    );
     if (pendingChildren.length > 0) {
-      log('WEBHOOK', `setIssueInReview: ${issueId} still has active children: ${pendingChildren.map((child: any) => child.identifier).join(', ')}`, { issue: issueId });
+      log(
+        'WEBHOOK',
+        `setIssueInReview: ${issueId} still has active children: ${pendingChildren.map((child: any) => child.identifier).join(', ')}`,
+        { issue: issueId }
+      );
       return false;
     }
 
@@ -663,7 +585,9 @@ export async function setIssueInReview(issueId: string, commentBody?: string): P
       (s: any) => (s.name || '').toLowerCase() === 'in review'
     );
     if (!reviewState) {
-      log('WEBHOOK', `setIssueInReview: no In Review state for team ${issue.team.id}, skip`, { issue: issueId });
+      log('WEBHOOK', `setIssueInReview: no In Review state for team ${issue.team.id}, skip`, {
+        issue: issueId,
+      });
       return false;
     }
 
@@ -736,7 +660,9 @@ export async function repairPrematureDone(issueId: string): Promise<boolean> {
       (state: any) => (state.name || '').toLowerCase() === 'in review'
     );
     if (!reviewState) {
-      log('WEBHOOK', `repairPrematureDone: no In Review state for team ${issue.team.id}, skip`, { issue: issueId });
+      log('WEBHOOK', `repairPrematureDone: no In Review state for team ${issue.team.id}, skip`, {
+        issue: issueId,
+      });
       return false;
     }
 
@@ -744,7 +670,11 @@ export async function repairPrematureDone(issueId: string): Promise<boolean> {
       'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
       { id: issue.id, stateId: reviewState.id }
     );
-    log('WEBHOOK', `repairPrematureDone: ${issueId} Done -> In Review (autonomous run still active)`, { issue: issueId });
+    log(
+      'WEBHOOK',
+      `repairPrematureDone: ${issueId} Done -> In Review (autonomous run still active)`,
+      { issue: issueId }
+    );
     return true;
   } catch (err: any) {
     log('ERROR', `repairPrematureDone failed: ${err.message}`, { issue: issueId });
@@ -800,10 +730,15 @@ export async function autoAcceptIssueDone(issueId: string): Promise<AutoAcceptRe
     const issue = data.issue;
     if (!issue) return { accepted: false, reason: 'issue not found' };
     if ((issue.state?.name || '').toLowerCase() !== 'in review') {
-      return { accepted: false, reason: `state is "${issue.state?.name}" (only In Review is promotable)` };
+      return {
+        accepted: false,
+        reason: `state is "${issue.state?.name}" (only In Review is promotable)`,
+      };
     }
 
-    const pendingChildren = (issue.children?.nodes || []).filter((child: any) => !isChildComplete(child.state));
+    const pendingChildren = (issue.children?.nodes || []).filter(
+      (child: any) => !isChildComplete(child.state)
+    );
     if (pendingChildren.length > 0) {
       return {
         accepted: false,
@@ -820,7 +755,9 @@ export async function autoAcceptIssueDone(issueId: string): Promise<AutoAcceptRe
       directiveTexts: [issue.description, ...comments],
     });
     if (hold.hold) {
-      log('ACCEPT', `autoAcceptIssueDone: ${issueId} held for human review (${hold.reason})`, { issue: issueId });
+      log('ACCEPT', `autoAcceptIssueDone: ${issueId} held for human review (${hold.reason})`, {
+        issue: issueId,
+      });
       return { accepted: false, reason: hold.reason };
     }
 
@@ -849,8 +786,12 @@ export async function autoAcceptIssueDone(issueId: string): Promise<AutoAcceptRe
         issueId: issue.id,
         body: '## Auto-Acceptance\n検証済みの完了を自動受け入れし、Done に設定しました（完了契約 + 品質ゲート通過を確認済み）。\n差し戻す場合は状態を戻し、コメントに `review=human` を記載してください。',
       }
-    ).catch(() => { /* comment is best-effort; the state transition is the contract */ });
-    log('ACCEPT', `autoAcceptIssueDone: ${issueId} In Review -> Done (autonomous acceptance)`, { issue: issueId });
+    ).catch(() => {
+      /* comment is best-effort; the state transition is the contract */
+    });
+    log('ACCEPT', `autoAcceptIssueDone: ${issueId} In Review -> Done (autonomous acceptance)`, {
+      issue: issueId,
+    });
     return { accepted: true, reason: 'verified completion auto-accepted' };
   } catch (err: any) {
     log('ERROR', `autoAcceptIssueDone failed: ${err.message}`, { issue: issueId });
@@ -886,7 +827,9 @@ export async function setIssueOnHold(issueId: string, commentBody?: string): Pro
       (s: any) => (s.name || '').toLowerCase() === 'on hold'
     );
     if (!holdState) {
-      log('WEBHOOK', `setIssueOnHold: no On Hold state for team ${issue.team.id}, skip`, { issue: issueId });
+      log('WEBHOOK', `setIssueOnHold: no On Hold state for team ${issue.team.id}, skip`, {
+        issue: issueId,
+      });
       return false;
     }
 
@@ -952,7 +895,10 @@ export async function setIssueBlocked(issueId: string, commentBody?: string): Pr
 // issues are processed in independent Linear-webhook single-issue runs, so without this
 // nobody returns to finalize the parent and it stays stuck in Todo/In Progress (see
 // SOT-840 / SOT-829 / SOT-1551). Fail-open: never throws.
-export async function finalizeParentIfChildrenComplete(childIdentifier: string, parentId: string | null): Promise<boolean> {
+export async function finalizeParentIfChildrenComplete(
+  childIdentifier: string,
+  parentId: string | null
+): Promise<boolean> {
   const { log } = requireDeps();
   if (!parentId) return false;
   try {
@@ -974,14 +920,20 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
     );
     const parent = data.issue;
     if (!parent) {
-      log('WEBHOOK', `finalizeParent: parent ${parentId} not found, skip`, { issue: childIdentifier });
+      log('WEBHOOK', `finalizeParent: parent ${parentId} not found, skip`, {
+        issue: childIdentifier,
+      });
       return false;
     }
 
     // Some Linear workspaces model On Hold with type=completed. It is still a resumable
     // hold state, not a finished parent, so let the resume branch below handle it.
     if (isTerminalState(parent.state) && !isHoldState(parent.state)) {
-      log('WEBHOOK', `finalizeParent: ${parent.identifier} already terminal (${parent.state?.name}), skip`, { issue: parent.identifier });
+      log(
+        'WEBHOOK',
+        `finalizeParent: ${parent.identifier} already terminal (${parent.state?.name}), skip`,
+        { issue: parent.identifier }
+      );
       return false;
     }
     const kaggleImprovementParent = isKaggleImprovementParent(parent);
@@ -989,13 +941,17 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
     // skip せず resume 判定へ進める。それ以外の In Review 親は従来どおり確定済みとして skip。
     const twoPhaseCycleParent = kaggleImprovementParent || isSonnetGoldCycleParent(parent);
     if ((parent.state?.name || '').toLowerCase() === 'in review' && !twoPhaseCycleParent) {
-      log('WEBHOOK', `finalizeParent: ${parent.identifier} already In Review, skip`, { issue: parent.identifier });
+      log('WEBHOOK', `finalizeParent: ${parent.identifier} already In Review, skip`, {
+        issue: parent.identifier,
+      });
       return false;
     }
 
     const children = parent.children?.nodes || [];
     if (children.length === 0) {
-      log('WEBHOOK', `finalizeParent: ${parent.identifier} has no children, skip`, { issue: parent.identifier });
+      log('WEBHOOK', `finalizeParent: ${parent.identifier} has no children, skip`, {
+        issue: parent.identifier,
+      });
       return false;
     }
 
@@ -1004,15 +960,19 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
     // only terminal children would leave the parent stuck in Todo/In Progress (SOT-1551).
     const pending = children.filter((c: any) => !isChildComplete(c.state));
     if (pending.length > 0) {
-      log('WEBHOOK', `finalizeParent: ${parent.identifier} has incomplete children: ${pending.map((c: any) => c.identifier).join(',')}, skip`, { issue: parent.identifier });
+      log(
+        'WEBHOOK',
+        `finalizeParent: ${parent.identifier} has incomplete children: ${pending.map((c: any) => c.identifier).join(',')}, skip`,
+        { issue: parent.identifier }
+      );
       return false;
     }
 
     // Kaggle improvement parents have a mandatory second phase: once every child has
     // finished, resume the parent so it can aggregate evidence and own the submission.
     // Ordinary parents keep the historical auto-finalize-to-review behavior.
-    const resumeParent = (parent.state?.name || '').toLowerCase() === 'on hold'
-      || twoPhaseCycleParent;
+    const resumeParent =
+      (parent.state?.name || '').toLowerCase() === 'on hold' || twoPhaseCycleParent;
     const marker = resumeParent ? PARENT_RESUMED_MARKER : PARENT_FINALIZED_MARKER;
 
     // Idempotency: bail if we already posted the applicable transition marker.
@@ -1027,7 +987,11 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
     // for an actual transition, or the parent is stranded forever (observed: biohub SOT-2773 never
     // resumed → never submitted → its whole competition loop blocked).
     if (existingComments.some((c: any) => (c.body || '').trimStart().startsWith(marker))) {
-      log('WEBHOOK', `finalizeParent: ${parent.identifier} already ${resumeParent ? 'resumed' : 'finalized'} (marker present), skip`, { issue: parent.identifier });
+      log(
+        'WEBHOOK',
+        `finalizeParent: ${parent.identifier} already ${resumeParent ? 'resumed' : 'finalized'} (marker present), skip`,
+        { issue: parent.identifier }
+      );
       return false;
     }
 
@@ -1041,7 +1005,11 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
     const targetName = resumeParent ? 'todo' : 'in review';
     const targetState = stateNodes.find((s: any) => (s.name || '').toLowerCase() === targetName);
     if (!targetState) {
-      log('WEBHOOK', `finalizeParent: no ${resumeParent ? 'Todo' : 'In Review'} state for team ${parent.team.id}, skip`, { issue: parent.identifier });
+      log(
+        'WEBHOOK',
+        `finalizeParent: no ${resumeParent ? 'Todo' : 'In Review'} state for team ${parent.team.id}, skip`,
+        { issue: parent.identifier }
+      );
       return false;
     }
 
@@ -1050,17 +1018,23 @@ export async function finalizeParentIfChildrenComplete(childIdentifier: string, 
       { id: parent.id, stateId: targetState.id }
     );
     if (!resumeParent) {
-      await removeBlockingRelations(parent.identifier, parent.relations?.nodes, parent.inverseRelations?.nodes);
+      await removeBlockingRelations(
+        parent.identifier,
+        parent.relations?.nodes,
+        parent.inverseRelations?.nodes
+      );
     }
 
     const childList = children.map((c: any) => `- ${c.identifier} (${c.state?.name})`).join('\n');
-    const body = resumeParent ? `${PARENT_RESUMED_MARKER}
+    const body = resumeParent
+      ? `${PARENT_RESUMED_MARKER}
 ## 親Issue自動再開${kaggleImprovementParent ? '（集約・提出フェーズ）' : ''}
 
 全ての前提子Issueが完了したため、親Issueを **Todo** に戻しました（trigger: ${childIdentifier} 完了）。通常の webhook 実行キューから自動再開します。${kaggleImprovementParent ? '\n\n再開後は子Issueを再作成せず、全子Issueの完了・検証結果・最新artifactを集約し、この親Issueだけが提出判定を実行してください。' : ''}
 
 ### 子Issue
-${childList}` : `${PARENT_FINALIZED_MARKER}
+${childList}`
+      : `${PARENT_FINALIZED_MARKER}
 ## 親Issue自動ファイナライズ
 
 全ての子Issueが完了したため、親Issueを **In Review** に更新しました（trigger: ${childIdentifier} 完了）。
@@ -1075,7 +1049,11 @@ ${childList}
       { issueId: parent.id, body }
     );
 
-    log('WEBHOOK', `finalizeParent: ${parent.identifier} -> ${resumeParent ? 'Todo (resume)' : 'In Review'} (all ${children.length} children complete, trigger ${childIdentifier})`, { issue: parent.identifier });
+    log(
+      'WEBHOOK',
+      `finalizeParent: ${parent.identifier} -> ${resumeParent ? 'Todo (resume)' : 'In Review'} (all ${children.length} children complete, trigger ${childIdentifier})`,
+      { issue: parent.identifier }
+    );
 
     // Autonomous acceptance (design §37): an ordinary finalized parent's children WERE its
     // deliverables and each was individually verified, so completion propagates one level up
@@ -1083,11 +1061,15 @@ ${childList}
     // enforced inside autoAcceptIssueDone. Kaggle improvement parents are excluded here — they
     // resumed to Todo for their aggregation/submission phase and are accepted after that run.
     if (!resumeParent) {
-      await autoAcceptIssueDone(parent.identifier || parent.id).catch(() => { /* stays In Review */ });
+      await autoAcceptIssueDone(parent.identifier || parent.id).catch(() => {
+        /* stays In Review */
+      });
     }
     return true;
   } catch (err: any) {
-    log('ERROR', `finalizeParentIfChildrenComplete failed: ${err.message}`, { issue: parentId || '' });
+    log('ERROR', `finalizeParentIfChildrenComplete failed: ${err.message}`, {
+      issue: parentId || '',
+    });
     return false;
   }
 }
@@ -1138,10 +1120,13 @@ async function cancelStrandedBlockedChildren(parentId: string): Promise<number> 
     { teamId: parent.team.id }
   );
   const canceled = (statesData.workflowStates?.nodes || []).find(
-    (s: any) => (s.name || '').toLowerCase() === 'canceled' || (s.name || '').toLowerCase() === 'cancelled'
+    (s: any) =>
+      (s.name || '').toLowerCase() === 'canceled' || (s.name || '').toLowerCase() === 'cancelled'
   );
   if (!canceled) {
-    log('WEBHOOK', `cancelStrandedBlocked: no Canceled state for team ${parent.team.id}, skip`, { issue: parent.identifier });
+    log('WEBHOOK', `cancelStrandedBlocked: no Canceled state for team ${parent.team.id}, skip`, {
+      issue: parent.identifier,
+    });
     return 0;
   }
 
@@ -1164,9 +1149,15 @@ async function cancelStrandedBlockedChildren(parentId: string): Promise<number> 
         }
       );
       n++;
-      log('WEBHOOK', `cancelStrandedBlocked: ${child.identifier} -> Canceled (premise-dead child of ${parent.identifier})`, { issue: child.identifier });
+      log(
+        'WEBHOOK',
+        `cancelStrandedBlocked: ${child.identifier} -> Canceled (premise-dead child of ${parent.identifier})`,
+        { issue: child.identifier }
+      );
     } catch (err: any) {
-      log('ERROR', `cancelStrandedBlocked failed for ${child.identifier}: ${err.message}`, { issue: child.identifier });
+      log('ERROR', `cancelStrandedBlocked failed for ${child.identifier}: ${err.message}`, {
+        issue: child.identifier,
+      });
     }
   }
   return n;
@@ -1193,11 +1184,16 @@ export async function reconcileReadyKaggleParents(): Promise<number> {
       try {
         canceledBlocked += await cancelStrandedBlockedChildren(parent.id);
       } catch (err: any) {
-        log('ERROR', `cancelStrandedBlockedChildren failed for ${parent.identifier}: ${err.message}`, { issue: parent.identifier });
+        log(
+          'ERROR',
+          `cancelStrandedBlockedChildren failed for ${parent.identifier}: ${err.message}`,
+          { issue: parent.identifier }
+        );
       }
       if (await finalizeParentIfChildrenComplete('reaper-reconciliation', parent.id)) resumed++;
     }
-    if (canceledBlocked > 0) log('REAPER', `auto-canceled ${canceledBlocked} premise-dead Blocked child(ren)`);
+    if (canceledBlocked > 0)
+      log('REAPER', `auto-canceled ${canceledBlocked} premise-dead Blocked child(ren)`);
     if (resumed > 0) log('REAPER', `reconciled ${resumed} ready Kaggle parent(s)`);
     return resumed;
   } catch (err: any) {
@@ -1216,6 +1212,7 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
         issue(id: $id) {
           id
           identifier
+          description
           archivedAt
           state { name type }
           team { id }
@@ -1241,8 +1238,23 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
       return { eligible: false, reason: 'issue not found before run' };
     }
 
+    const experimentRequest = parseExperimentRequest(data.issue.description);
+    if (experimentRequest.kind === 'invalid') {
+      removeFromQueue(issueId);
+      log('WEBHOOK', `invalid experiment request before run: ${experimentRequest.reason}`, {
+        issue: data.issue.identifier || issueId,
+      });
+      return {
+        eligible: false,
+        reason: `invalid experiment request before run: ${experimentRequest.reason}`,
+        meaningState: 'human_wait',
+      };
+    }
+
     const { archivedAt, state } = data.issue;
-    const isLongRun = (data.issue.labels?.nodes || []).some((l: any) => l && l.name === longRunLabel);
+    const isLongRun = (data.issue.labels?.nodes || []).some(
+      (l: any) => l && l.name === longRunLabel
+    );
 
     if (archivedAt) {
       removeFromQueue(issueId);
@@ -1260,7 +1272,11 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
     // （reaper が "started" 扱いで再投入し続けるのを防ぐ）。
     if (isHoldState(state)) {
       removeFromQueue(issueId);
-      return { eligible: false, reason: `human wait state (${state?.name}) before run`, meaningState: 'human_wait' };
+      return {
+        eligible: false,
+        reason: `human wait state (${state?.name}) before run`,
+        meaningState: 'human_wait',
+      };
     }
 
     // A dependency-waiting issue is shown as Blocked in Linear. Do not execute it until every incoming
@@ -1270,7 +1286,10 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
     const blockingRelations = (data.issue.inverseRelations?.nodes || [])
       .filter((relation: any) => relation?.type === 'blocks')
       .map((relation: any) => relation.issue)
-      .filter((blocker: any) => blocker?.id !== data.issue.id && blocker?.identifier !== data.issue.identifier);
+      .filter(
+        (blocker: any) =>
+          blocker?.id !== data.issue.id && blocker?.identifier !== data.issue.identifier
+      );
     const waitingOnBlockers = blockingRelations
       .filter((blocker: any) => {
         if (!blocker || blocker.archivedAt) return false;
@@ -1301,13 +1320,21 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
               'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
               { id: data.issue.id, stateId: todoState.id }
             );
-            log('WEBHOOK', `getIssueExecutionEligibility: ${data.issue.identifier || issueId} waiting in Todo`, {
-              issue: data.issue.identifier || issueId,
-            });
+            log(
+              'WEBHOOK',
+              `getIssueExecutionEligibility: ${data.issue.identifier || issueId} waiting in Todo`,
+              {
+                issue: data.issue.identifier || issueId,
+              }
+            );
           } else {
-            log('ERROR', `getIssueExecutionEligibility: no Todo state for team ${data.issue.team.id}`, {
-              issue: data.issue.identifier || issueId,
-            });
+            log(
+              'ERROR',
+              `getIssueExecutionEligibility: no Todo state for team ${data.issue.team.id}`,
+              {
+                issue: data.issue.identifier || issueId,
+              }
+            );
           }
         } catch (err: any) {
           // Status visibility is best-effort; never strand the dependency retry if Linear rejects
@@ -1330,7 +1357,11 @@ export async function getIssueExecutionEligibility(issueId: string): Promise<Eli
     // dependency-blocked issue whose relations are all resolved remains eligible and can resume.
     if ((state?.name || '').toLowerCase() === 'blocked' && blockingRelations.length === 0) {
       removeFromQueue(issueId);
-      return { eligible: false, reason: 'human wait state (Blocked) before run', meaningState: 'human_wait' };
+      return {
+        eligible: false,
+        reason: 'human wait state (Blocked) before run',
+        meaningState: 'human_wait',
+      };
     }
 
     return { eligible: true, isLongRun, meaningState: classifyIssueMeaningState(state) };

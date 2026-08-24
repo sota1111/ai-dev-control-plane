@@ -12,6 +12,7 @@ import * as appEnv from './config/env.js';
 import { DiscordNotifier } from './lib/discordNotifier.js';
 import { verifyDiscordSignature } from './lib/discordInteractions.js';
 import { timingSafeEqualStr } from './lib/timingSafeEqual.js';
+import { parseExperimentRequest } from './lib/experimentRequest.js';
 import { routeInteraction } from './lib/discordCommandRouter.js';
 import { isTerminalState, isHoldState } from './lib/issueState.js';
 import { wasRecentlyAutoAccepted } from './lib/autoAccept.js';
@@ -30,12 +31,12 @@ const _discordNotifier = getSecret('DISCORD_WEBHOOK_URL')
 if (_discordNotifier) {
   _discordNotifier.start();
   const _origStdoutWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = function(chunk: any, ...args: any[]) {
+  process.stdout.write = function (chunk: any, ...args: any[]) {
     _discordNotifier.add(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
     return _origStdoutWrite(chunk, ...args);
   };
   const _origStderrWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = function(chunk: any, ...args: any[]) {
+  process.stderr.write = function (chunk: any, ...args: any[]) {
     _discordNotifier.add(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
     return _origStderrWrite(chunk, ...args);
   };
@@ -46,7 +47,9 @@ const WEBHOOK_EVENT_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 process.on('uncaughtException', (err) => {
   // Log but DO NOT exit — keep server alive
-  console.error(`[WEBHOOK:PARENT] uncaughtException at ${new Date().toISOString()}: ${err.message}\n${err.stack}`);
+  console.error(
+    `[WEBHOOK:PARENT] uncaughtException at ${new Date().toISOString()}: ${err.message}\n${err.stack}`
+  );
 });
 
 process.on('unhandledRejection', (reason) => {
@@ -56,11 +59,13 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const app = express();
-app.use(express.json({
-  verify: (req: any, res: any, buf: Buffer) => {
-    req.rawBody = buf.toString('utf8');
-  }
-}));
+app.use(
+  express.json({
+    verify: (req: any, res: any, buf: Buffer) => {
+      req.rawBody = buf.toString('utf8');
+    },
+  })
+);
 
 // Error handler for JSON parsing errors
 app.use((err: any, req: any, res: any, next: any) => {
@@ -74,9 +79,9 @@ const PORT = appEnv.port();
 const QUEUE_DRAIN_INTERVAL_MS = appEnv.queueDrainIntervalMs(); // 既定5分
 
 let _periodicDrainRunning = false; // in-process 再入ガード（interval callback の重なり防止）
-let _reaperRunning = false;        // reaper 再入ガード
+let _reaperRunning = false; // reaper 再入ガード
 let _prevReaperCooldownActive = false; // 前tick時点で cooldown 中だったか（cooldown明け検知用）
-let _lastStrandedScanAt = 0;       // 直近で取り残し In-Progress の Linear 再スキャンを行った epoch(ms)。0=未実施
+let _lastStrandedScanAt = 0; // 直近で取り残し In-Progress の Linear 再スキャンを行った epoch(ms)。0=未実施
 let _periodicDrainTimer: NodeJS.Timeout | null = null;
 let _httpServer: ReturnType<typeof app.listen> | null = null;
 let _shutdownStarted = false;
@@ -87,7 +92,7 @@ const SHUTDOWN_TIMEOUT_MS = 35 * 60 * 1000; // 30-minute worker timeout plus cle
 /** Wait for the foreground runner lock to clear without interrupting its child process. */
 async function waitForRunnerIdle(
   timeoutMs: number = SHUTDOWN_TIMEOUT_MS,
-  pollMs: number = SHUTDOWN_POLL_MS,
+  pollMs: number = SHUTDOWN_POLL_MS
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (runner.isLocked()) {
@@ -100,7 +105,9 @@ async function waitForRunnerIdle(
 async function shutdownGracefully(signal: NodeJS.Signals): Promise<void> {
   if (_shutdownStarted) return;
   _shutdownStarted = true;
-  console.log(`[WEBHOOK:PARENT] Server received ${signal} at ${new Date().toISOString()} — stopping intake and waiting for the active worker`);
+  console.log(
+    `[WEBHOOK:PARENT] Server received ${signal} at ${new Date().toISOString()} — stopping intake and waiting for the active worker`
+  );
 
   if (_periodicDrainTimer) {
     clearInterval(_periodicDrainTimer);
@@ -115,7 +122,9 @@ async function shutdownGracefully(signal: NodeJS.Signals): Promise<void> {
     : Promise.resolve();
 
   if (!(await waitForRunnerIdle())) {
-    console.error(`[WEBHOOK:PARENT] Graceful shutdown still waiting after ${SHUTDOWN_TIMEOUT_MS}ms; active worker was not terminated`);
+    console.error(
+      `[WEBHOOK:PARENT] Graceful shutdown still waiting after ${SHUTDOWN_TIMEOUT_MS}ms; active worker was not terminated`
+    );
     await waitForRunnerIdle(Number.POSITIVE_INFINITY);
   }
   await intakeClosed;
@@ -125,8 +134,12 @@ async function shutdownGracefully(signal: NodeJS.Signals): Promise<void> {
 }
 
 // Parent signals stop intake first and never terminate an active worker midway through its run.
-process.on('SIGTERM', () => { void shutdownGracefully('SIGTERM'); });
-process.on('SIGINT', () => { void shutdownGracefully('SIGINT'); });
+process.on('SIGTERM', () => {
+  void shutdownGracefully('SIGTERM');
+});
+process.on('SIGINT', () => {
+  void shutdownGracefully('SIGINT');
+});
 
 // 取り残し回収の最大間隔（SOT-925 逸脱1）。ビジーなキューが続いても、この間隔が経過していれば
 // 1回だけ Linear 再スキャンを許可し、In Progress のまま取り残された Issue の starvation を防ぐ。
@@ -138,9 +151,9 @@ function reaperStrandedMaxIntervalMs(): number {
 // 期限到来済み（due）のキュー項目が1つでもあるか
 function hasDueQueueItem(): boolean {
   const now = Date.now();
-  return runner.loadQueue().some(
-    (item: any) => !item.retryAt || new Date(item.retryAt).getTime() <= now
-  );
+  return runner
+    .loadQueue()
+    .some((item: any) => !item.retryAt || new Date(item.retryAt).getTime() <= now);
 }
 
 // Linear をスキャンし、未キューの active(Todo/In Progress) Issue を実行キューへ投入する。
@@ -164,7 +177,8 @@ async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
 
   let enqueuedCount = 0;
   for (const issue of issues) {
-    const { identifier, priority, priorityLabel, parentIssueId, parentIssueIdentifier, stateName } = issue;
+    const { identifier, priority, priorityLabel, parentIssueId, parentIssueIdentifier, stateName } =
+      issue;
 
     if (runner.isQueued(identifier)) {
       runner.log('SCAN', `${trigger}: skip ${identifier} (already queued)`);
@@ -186,7 +200,10 @@ async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
     // issue becomes eligible again. Fail-open: on any store error isReaperEnqueueSuppressed()=false.
     if (runner.isReaperEnqueueSuppressed(identifier)) {
       const info = runner.humanWaitSuppressionInfo(identifier);
-      runner.log('SCAN', `${trigger}: skip ${identifier} (code=70 human-wait suppressed count=${info.count} nextAt=${info.nextAt})`);
+      runner.log(
+        'SCAN',
+        `${trigger}: skip ${identifier} (code=70 human-wait suppressed count=${info.count} nextAt=${info.nextAt})`
+      );
       continue;
     }
 
@@ -195,7 +212,7 @@ async function scanAndEnqueueActiveIssues(trigger: string): Promise<number> {
       priority,
       priorityLabel,
       parentIssueId,
-      parentIssueIdentifier
+      parentIssueIdentifier,
     });
     runner.log('SCAN', `${trigger}: enqueued ${identifier}${retryAt ? ` retryAt=${retryAt}` : ''}`);
     enqueuedCount++;
@@ -252,8 +269,8 @@ async function runReaperTick(): Promise<void> {
     }
   }
 
-  if (runner.isLocked()) return;        // 実行中はスキップ（以下の取り残し再スキャンのみ）
-  if (cooldownActive) return;           // cooldown中はスキップ（明けてから回収）
+  if (runner.isLocked()) return; // 実行中はスキップ（以下の取り残し再スキャンのみ）
+  if (cooldownActive) return; // cooldown中はスキップ（明けてから回収）
   if (!getSecret('LINEAR_API_KEY')) return; // APIキー未設定ならスキップ
 
   // トリガー: cooldown明け、またはアイドル（dueなキュー項目なし）時のセーフティネット。
@@ -264,7 +281,7 @@ async function runReaperTick(): Promise<void> {
   // ような再開漏れ）が回収されなかった。最後の取り残しスキャンから一定間隔（REAPER_STRANDED_MAX_INTERVAL_MS）
   // が経過していれば、ビジー時でも1回だけ再スキャンを許可する（API レート制限付き）。
   // なお isLocked()/cooldownActive の early-return は上で適用済みのため、実行中・cooldown 中は再スキャンしない。
-  const strandedScanDue = (Date.now() - _lastStrandedScanAt) >= reaperStrandedMaxIntervalMs();
+  const strandedScanDue = Date.now() - _lastStrandedScanAt >= reaperStrandedMaxIntervalMs();
   if (!cooldownJustCleared && hasDueQueueItem() && !strandedScanDue) return;
 
   _reaperRunning = true;
@@ -289,10 +306,10 @@ async function runReaperTick(): Promise<void> {
 
 // 1回分のアイドルdrainチェック。条件を満たすときだけ drainQueue を呼ぶ。
 async function runPeriodicDrainTick(): Promise<void> {
-  if (_periodicDrainRunning) return;                      // 多重起動防止（再入ガード）
-  if (runner.isLocked()) return;                          // 実行中はスキップ
+  if (_periodicDrainRunning) return; // 多重起動防止（再入ガード）
+  if (runner.isLocked()) return; // 実行中はスキップ
   if (runner.getUsageLimitCooldownUntil() !== null) return; // cooldown中はスキップ
-  if (!hasDueQueueItem()) return;                          // 適格項目なし
+  if (!hasDueQueueItem()) return; // 適格項目なし
   _periodicDrainRunning = true;
   try {
     runner.log('QUEUE', 'periodic drain: idle queue has due item(s), draining');
@@ -359,7 +376,7 @@ function getEventKey(body: any, issueId: string): string {
     type: body.type || '',
     action: body.action || '',
     issueId: issueId || '',
-    updatedAt: body.data && body.data.updatedAt ? body.data.updatedAt : ''
+    updatedAt: body.data && body.data.updatedAt ? body.data.updatedAt : '',
   });
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
@@ -393,7 +410,9 @@ function verifyLinearSignature(req: any): boolean {
 }
 
 if (!getSecret('LINEAR_WEBHOOK_SECRET')) {
-  console.warn('[WEBHOOK] WARNING: LINEAR_WEBHOOK_SECRET not set. Running in development mode without signature verification.');
+  console.warn(
+    '[WEBHOOK] WARNING: LINEAR_WEBHOOK_SECRET not set. Running in development mode without signature verification.'
+  );
 }
 
 app.get('/health', (req: any, res: any) => {
@@ -405,14 +424,16 @@ function wakeDependentsAfterTerminal(blockerIssueId: string): void {
   if (awakened === 0 || runner.isLocked()) return;
   setImmediate(() => {
     runner.drainQueue().catch((err: any) => {
-      runner.log('WEBHOOK', `dependency wake drain error: ${err.message}`, { issue: blockerIssueId });
+      runner.log('WEBHOOK', `dependency wake drain error: ${err.message}`, {
+        issue: blockerIssueId,
+      });
     });
   });
 }
 
 app.post('/webhooks/linear', (req: any, res: any) => {
   const body = req.body;
-  
+
   // express.json() handles parsing, but we check if it succeeded
   if (!body || typeof body !== 'object') {
     return res.status(400).json({ error: 'Invalid JSON' });
@@ -423,10 +444,20 @@ app.post('/webhooks/linear', (req: any, res: any) => {
     return res.status(401).json({ error: 'Invalid signature' });
   }
 
-  runner.log('WEBHOOK', `Received event type=${body.type || 'unknown'} action=${body.action || 'unknown'} at ${new Date().toISOString()}`);
+  runner.log(
+    'WEBHOOK',
+    `Received event type=${body.type || 'unknown'} action=${body.action || 'unknown'} at ${new Date().toISOString()}`
+  );
 
   // Deduplicate: ignore retransmitted events
-  const eventKey = getEventKey(body, body.data && body.data.identifier ? body.data.identifier : body.data && body.data.id ? body.data.id : '');
+  const eventKey = getEventKey(
+    body,
+    body.data && body.data.identifier
+      ? body.data.identifier
+      : body.data && body.data.id
+        ? body.data.id
+        : ''
+  );
   if (isDedupeEvent(eventKey)) {
     runner.log('WEBHOOK', `ignored: duplicate event key=${eventKey}`);
     return res.status(200).json({ status: 'ignored', reason: 'duplicate event' });
@@ -437,34 +468,62 @@ app.post('/webhooks/linear', (req: any, res: any) => {
   // by the Issue-only gate below, so clear the code=70 human-wait suppression here — the next reaper
   // tick then re-enqueues the issue (its existing resume path). No direct enqueue: comments never
   // enqueued directly, and the reaper cadence is the historical comment-driven resume mechanism.
-  if (body.type === "Comment") {
+  if (body.type === 'Comment') {
     const commentIssueId = body.data?.issue?.identifier || body.data?.issue?.id;
-    if (commentIssueId && ["create", "update"].includes(body.action || "")) {
+    if (commentIssueId && ['create', 'update'].includes(body.action || '')) {
       if (runner.clearHumanWaitSuppression(commentIssueId)) {
-        runner.log('WEBHOOK', `code=70 human-wait suppression cleared by new comment; eligible for reaper resume`, { issue: commentIssueId });
+        runner.log(
+          'WEBHOOK',
+          `code=70 human-wait suppression cleared by new comment; eligible for reaper resume`,
+          { issue: commentIssueId }
+        );
       }
     }
-    return res.status(200).json({ status: "ignored", reason: "comment event" });
+    return res.status(200).json({ status: 'ignored', reason: 'comment event' });
   }
 
-  if (body.type !== "Issue") {
-    return res.status(200).json({ status: "ignored", reason: "not an issue event" });
+  if (body.type !== 'Issue') {
+    return res.status(200).json({ status: 'ignored', reason: 'not an issue event' });
   }
 
-  const action = body.action || "";
+  const action = body.action || '';
   const issueId = body.data?.identifier || body.data?.id;
-  const stateName = body.data?.state?.name || "";
-  const stateType = body.data?.state?.type || "";
+  const stateName = body.data?.state?.name || '';
+  const stateType = body.data?.state?.type || '';
   const archivedAt = body.data?.archivedAt || null;
 
-  runner.log('WEBHOOK', `Issue event: identifier=${issueId || 'unknown'} action=${action} state.name=${stateName} state.type=${stateType} labels=${(body.data?.labels || []).map((l: any) => l.name).join(',')}`);
+  runner.log(
+    'WEBHOOK',
+    `Issue event: identifier=${issueId || 'unknown'} action=${action} state.name=${stateName} state.type=${stateType} labels=${(body.data?.labels || []).map((l: any) => l.name).join(',')}`
+  );
 
-  if (!["create", "update"].includes(action)) {
-    return res.status(200).json({ status: "ignored", reason: "unhandled action" });
+  if (!['create', 'update'].includes(action)) {
+    return res.status(200).json({ status: 'ignored', reason: 'unhandled action' });
   }
 
   if (!issueId) {
-    return res.status(200).json({ status: "ignored", reason: "no issue id" });
+    return res.status(200).json({ status: 'ignored', reason: 'no issue id' });
+  }
+
+  // epistemic-research-loop owns experiment selection and issue creation. If an issue declares the
+  // versioned ERL contract, validate it before queueing. Ordinary human-created Linear issues remain
+  // fully backwards compatible and follow the same execution path.
+  const experimentRequest = parseExperimentRequest(body.data?.description);
+  if (experimentRequest.kind === 'invalid') {
+    runner.log('WEBHOOK', `ignored invalid experiment request: ${experimentRequest.reason}`, {
+      issue: issueId,
+    });
+    return res.status(200).json({
+      status: 'ignored',
+      reason: `invalid experiment request: ${experimentRequest.reason}`,
+    });
+  }
+  if (experimentRequest.kind === 'valid') {
+    runner.log(
+      'WEBHOOK',
+      `validated experiment request run=${experimentRequest.request.run_id} experiment=${experimentRequest.request.experiment_id}`,
+      { issue: issueId }
+    );
   }
 
   if (isTerminalState({ type: stateType, name: stateName })) {
@@ -476,20 +535,31 @@ app.post('/webhooks/linear', (req: any, res: any) => {
     // A Done set by our own autonomous acceptance (processCompletedRun promoting the verified
     // In Review terminal, design/README.md §37) arrives while the inflight entry is still present —
     // it must NOT be treated as a premature GitHub Done and reverted.
-    const isPrematureDone = stateName.toLowerCase() === 'done'
-      && runner.isQueuedOrRunning(issueId)
-      && !wasRecentlyAutoAccepted(issueId);
+    const isPrematureDone =
+      stateName.toLowerCase() === 'done' &&
+      runner.isQueuedOrRunning(issueId) &&
+      !wasRecentlyAutoAccepted(issueId);
     if (isPrematureDone) {
-      runner.log('WEBHOOK', `premature Done detected while autonomous run is active; restoring In Review`, { issue: issueId });
+      runner.log(
+        'WEBHOOK',
+        `premature Done detected while autonomous run is active; restoring In Review`,
+        { issue: issueId }
+      );
       setImmediate(async () => {
         const repaired = await runner.repairPrematureDone(issueId);
         if (!repaired) {
           runner.log('WEBHOOK', `premature Done repair was not applied`, { issue: issueId });
         }
       });
-      return res.status(200).json({ status: 'accepted', reason: 'premature Done repair scheduled' });
+      return res
+        .status(200)
+        .json({ status: 'accepted', reason: 'premature Done repair scheduled' });
     }
-    runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=terminal state`, { issue: issueId });
+    runner.log(
+      'WEBHOOK',
+      `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=terminal state`,
+      { issue: issueId }
+    );
     runner.removeFromQueue(issueId);
     wakeDependentsAfterTerminal(issueId);
     // A child issue just reached a terminal state. Children are processed in their own
@@ -501,11 +571,13 @@ app.post('/webhooks/linear', (req: any, res: any) => {
         try {
           await runner.finalizeParentIfChildrenComplete(issueId, parentId);
         } catch (e: any) {
-          runner.log("WEBHOOK", `finalizeParent error: ${e.message}`, { issue: issueId });
+          runner.log('WEBHOOK', `finalizeParent error: ${e.message}`, { issue: issueId });
         }
       });
     }
-    return res.status(200).json({ status: "ignored", reason: `terminal state: ${stateName || stateType}` });
+    return res
+      .status(200)
+      .json({ status: 'ignored', reason: `terminal state: ${stateName || stateType}` });
   }
 
   if (isHoldState({ type: stateType, name: stateName })) {
@@ -513,7 +585,11 @@ app.post('/webhooks/linear', (req: any, res: any) => {
     // (not Done), so the terminal-state branch above never fires for them — finalize the parent
     // here too so it advances to In Review once all children are complete (SOT-1551). In Review
     // is itself a hold state, so this issue is not queued for a run. Fire-and-forget; never blocks.
-    runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=hold state (In Review)`, { issue: issueId });
+    runner.log(
+      'WEBHOOK',
+      `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=hold state (In Review)`,
+      { issue: issueId }
+    );
     runner.removeFromQueue(issueId);
     wakeDependentsAfterTerminal(issueId);
     const parentId = body.data?.parent?.identifier ?? body.data?.parent?.id ?? null;
@@ -522,38 +598,59 @@ app.post('/webhooks/linear', (req: any, res: any) => {
         try {
           await runner.finalizeParentIfChildrenComplete(issueId, parentId);
         } catch (e: any) {
-          runner.log("WEBHOOK", `finalizeParent error: ${e.message}`, { issue: issueId });
+          runner.log('WEBHOOK', `finalizeParent error: ${e.message}`, { issue: issueId });
         }
       });
     }
-    return res.status(200).json({ status: "ignored", reason: `hold state: ${stateName || stateType}` });
+    return res
+      .status(200)
+      .json({ status: 'ignored', reason: `hold state: ${stateName || stateType}` });
   }
 
   if (archivedAt) {
-    runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=archived issue`, { issue: issueId });
+    runner.log(
+      'WEBHOOK',
+      `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=archived issue`,
+      { issue: issueId }
+    );
     runner.removeFromQueue(issueId);
-    return res.status(200).json({ status: "ignored", reason: "archived issue" });
+    return res.status(200).json({ status: 'ignored', reason: 'archived issue' });
   }
 
   // For update events: only proceed if a meaningful field changed.
   // Label-only changes (e.g. AI removing usage-limit label) are non-meaningful.
-  if (action === "update") {
+  if (action === 'update') {
     const updatedFrom = body.updatedFrom;
-    const meaningfulFields = ["stateId", "title", "description", "priority", "assigneeId", "dueDate", "estimate", "parentId"];
-    const hasMeaningfulChange = updatedFrom && meaningfulFields.some(f => f in updatedFrom);
+    const meaningfulFields = [
+      'stateId',
+      'title',
+      'description',
+      'priority',
+      'assigneeId',
+      'dueDate',
+      'estimate',
+      'parentId',
+    ];
+    const hasMeaningfulChange = updatedFrom && meaningfulFields.some((f) => f in updatedFrom);
 
     if (updatedFrom && !hasMeaningfulChange) {
-      runner.log("WEBHOOK", `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=non-meaningful update`, { issue: issueId });
-      return res.status(200).json({ status: "ignored", reason: "non-meaningful update" });
+      runner.log(
+        'WEBHOOK',
+        `ignored: identifier=${issueId} action=${action} state.name=${stateName} state.type=${stateType} reason=non-meaningful update`,
+        { issue: issueId }
+      );
+      return res.status(200).json({ status: 'ignored', reason: 'non-meaningful update' });
     }
   }
 
   // 既に処理中またはキュー内にある場合はスキップ
   if (runner.isQueuedOrRunning(issueId)) {
-    return res.status(200).json({ status: "ignored", reason: `already queued or running: ${issueId}` });
+    return res
+      .status(200)
+      .json({ status: 'ignored', reason: `already queued or running: ${issueId}` });
   }
 
-  res.status(200).json({ status: "accepted", issueId: issueId });
+  res.status(200).json({ status: 'accepted', issueId: issueId });
 
   // 同一 issue のイベントバーストを1回の処理に集約する（SOT-1437 / P2）。
   // WEBHOOK_DEBOUNCE_MS=0（既定）のときは従来通り setImmediate で即時処理し、後方互換を保つ。
@@ -593,7 +690,9 @@ function scheduleIssueEvent(issueId: string, meta: IssueEventMeta): void {
   const existing = _debounceTimers.get(issueId);
   if (existing) {
     clearTimeout(existing);
-    runner.log('WEBHOOK', `debounce: coalescing burst for ${issueId} (window ${windowMs}ms)`, { issue: issueId });
+    runner.log('WEBHOOK', `debounce: coalescing burst for ${issueId} (window ${windowMs}ms)`, {
+      issue: issueId,
+    });
   }
   const timer = setTimeout(() => {
     _debounceTimers.delete(issueId);
@@ -612,10 +711,17 @@ async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise
     // SOT-1547: a genuine issue webhook (state change / meaningful update) is new human input — clear
     // any code=70 human-wait suppression so this event resumes the issue as before.
     if (runner.clearHumanWaitSuppression(issueId)) {
-      runner.log('WEBHOOK', `code=70 human-wait suppression cleared by issue webhook`, { issue: issueId });
+      runner.log('WEBHOOK', `code=70 human-wait suppression cleared by issue webhook`, {
+        issue: issueId,
+      });
     }
 
-    const { priority: issuePriority, priorityLabel: issuePriorityLabel, parentIssueId, parentIssueIdentifier } = meta;
+    const {
+      priority: issuePriority,
+      priorityLabel: issuePriorityLabel,
+      parentIssueId,
+      parentIssueIdentifier,
+    } = meta;
     const isUrgent = issuePriority === 1;
 
     const cooldown = runner.getUsageLimitCooldownUntil();
@@ -625,9 +731,11 @@ async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise
         priority: issuePriority,
         priorityLabel: issuePriorityLabel,
         parentIssueId,
-        parentIssueIdentifier
+        parentIssueIdentifier,
       });
-      runner.log('WEBHOOK', `usage limit cooldown active, queued until ${cooldownRetryAt}`, { issue: issueId });
+      runner.log('WEBHOOK', `usage limit cooldown active, queued until ${cooldownRetryAt}`, {
+        issue: issueId,
+      });
       return;
     }
 
@@ -637,9 +745,13 @@ async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise
         priority: issuePriority,
         priorityLabel: issuePriorityLabel,
         parentIssueId,
-        parentIssueIdentifier
+        parentIssueIdentifier,
       });
-      runner.log('WEBHOOK', `non-Urgent issue (priority=${issuePriority}) queued while locked, queue size=${runner.loadQueue().length}`, { issue: issueId });
+      runner.log(
+        'WEBHOOK',
+        `non-Urgent issue (priority=${issuePriority}) queued while locked, queue size=${runner.loadQueue().length}`,
+        { issue: issueId }
+      );
       return;
     }
 
@@ -660,7 +772,7 @@ async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise
       priority: issuePriority,
       priorityLabel: issuePriorityLabel,
       parentIssueId,
-      parentIssueIdentifier
+      parentIssueIdentifier,
     });
     // Refresh queued items' priority from Linear before selecting. Priority-only changes do not
     // fire a webhook, so a recently-bumped Urgent/High issue would otherwise stay behind a lower
@@ -670,7 +782,9 @@ async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise
     try {
       await runner.refreshQueuePriorities();
     } catch (e: any) {
-      runner.log('WEBHOOK', `refreshQueuePriorities error (fail-open): ${e.message}`, { issue: issueId });
+      runner.log('WEBHOOK', `refreshQueuePriorities error (fail-open): ${e.message}`, {
+        issue: issueId,
+      });
     }
 
     const item = runner.dequeue();
@@ -685,7 +799,7 @@ async function processIssueEvent(issueId: string, meta: IssueEventMeta): Promise
         priority: item.priority ?? null,
         priorityLabel: item.priorityLabel ?? null,
         parentIssueId: item.parentIssueId ?? null,
-        parentIssueIdentifier: item.parentIssueIdentifier ?? null
+        parentIssueIdentifier: item.parentIssueIdentifier ?? null,
       });
       return;
     }
@@ -732,7 +846,7 @@ app.post('/webhooks/discord', (req: any, res: any) => {
   const interaction = req.body;
 
   routeInteraction(interaction)
-    .then(({ status, body }: { status: number, body: any }) => {
+    .then(({ status, body }: { status: number; body: any }) => {
       res.status(status).json(body);
     })
     .catch((err: any) => {
@@ -775,7 +889,10 @@ async function runBootstrapScan(): Promise<void> {
   try {
     reapedIds = runner.reapStaleInflight();
     if (reapedIds.length > 0) {
-      runner.log('BOOTSTRAP', `startup: reaped ${reapedIds.length} leaked inflight entr${reapedIds.length === 1 ? 'y' : 'ies'}: ${reapedIds.join(', ')}`);
+      runner.log(
+        'BOOTSTRAP',
+        `startup: reaped ${reapedIds.length} leaked inflight entr${reapedIds.length === 1 ? 'y' : 'ies'}: ${reapedIds.join(', ')}`
+      );
     }
   } catch (err: any) {
     runner.log('BOOTSTRAP', `startup reapStaleInflight error (non-fatal): ${err.message}`);
@@ -791,14 +908,18 @@ async function runBootstrapScan(): Promise<void> {
   // sat idle until the first periodic drain tick (up to QUEUE_DRAIN_INTERVAL_MS ≈ 5 min) after every
   // restart. drainQueue is idempotent and lock-guarded, so draining here is safe if a run is active.
   if (enqueuedCount > 0 || hasDueQueueItem()) {
-    const why = enqueuedCount > 0
-      ? `enqueued ${enqueuedCount} new item(s)`
-      : 'no new items, but the restored queue has a due item';
+    const why =
+      enqueuedCount > 0
+        ? `enqueued ${enqueuedCount} new item(s)`
+        : 'no new items, but the restored queue has a due item';
     runner.log('BOOTSTRAP', `startup scan: ${why} — running syncQueueWithLinear before drain`);
     try {
       await runner.syncQueueWithLinear();
     } catch (err: any) {
-      runner.log('BOOTSTRAP', `startup scan: syncQueueWithLinear error (non-fatal): ${err.message}`);
+      runner.log(
+        'BOOTSTRAP',
+        `startup scan: syncQueueWithLinear error (non-fatal): ${err.message}`
+      );
     }
     runner.log('BOOTSTRAP', 'startup scan: starting drainQueue');
     try {
@@ -808,7 +929,10 @@ async function runBootstrapScan(): Promise<void> {
       runner.log('BOOTSTRAP', `startup scan: drainQueue error: ${err.message}`);
     }
   } else {
-    runner.log('BOOTSTRAP', 'startup scan: no new items enqueued and no due queue item, drain skipped');
+    runner.log(
+      'BOOTSTRAP',
+      'startup scan: no new items enqueued and no due queue item, drain skipped'
+    );
   }
 }
 
@@ -816,7 +940,13 @@ const isMain = fileURLToPath(import.meta.url) === process.argv[1];
 
 if (isMain) {
   (async () => {
-    await initSecrets(['LINEAR_WEBHOOK_SECRET', 'DISCORD_PUBLIC_KEY', 'LINEAR_API_KEY', 'DISCORD_WEBHOOK_URL', 'DISCORD_WEBHOOK_URL_NOTIFY']);
+    await initSecrets([
+      'LINEAR_WEBHOOK_SECRET',
+      'DISCORD_PUBLIC_KEY',
+      'LINEAR_API_KEY',
+      'DISCORD_WEBHOOK_URL',
+      'DISCORD_WEBHOOK_URL_NOTIFY',
+    ]);
     _httpServer = app.listen(PORT, () => {
       console.log(`[WEBHOOK] Server listening on port ${PORT}`);
       setImmediate(() => {
@@ -836,4 +966,17 @@ function _resetDebounceTimers(): void {
   _debounceTimers.clear();
 }
 
-export { app, runBootstrapScan, hasDueQueueItem, runPeriodicDrainTick, startPeriodicDrain, scanAndEnqueueActiveIssues, runReaperTick, processIssueEvent, scheduleIssueEvent, waitForRunnerIdle, _debounceTimers, _resetDebounceTimers };
+export {
+  app,
+  runBootstrapScan,
+  hasDueQueueItem,
+  runPeriodicDrainTick,
+  startPeriodicDrain,
+  scanAndEnqueueActiveIssues,
+  runReaperTick,
+  processIssueEvent,
+  scheduleIssueEvent,
+  waitForRunnerIdle,
+  _debounceTimers,
+  _resetDebounceTimers,
+};

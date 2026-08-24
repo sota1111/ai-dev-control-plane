@@ -128,5 +128,10 @@
     "project": "nedo-loading-algo-claude",
     "repo": "sota1111/nedo-loading-algo-claude",
     "localPath": "/workspaces/nedo-loading-algo-claude"
+  },
+  {
+    "project": "Personal Child Context Agent",
+    "repo": "sota1111/personal-child-context-agent",
+    "localPath": "/workspaces/personal-child-context-agent"
   }
 ]

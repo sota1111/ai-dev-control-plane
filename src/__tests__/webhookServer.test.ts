@@ -60,14 +60,23 @@ const originalSecret = process.env.LINEAR_WEBHOOK_SECRET;
 process.env.LINEAR_WEBHOOK_SECRET = '';
 
 const webhookServer: any = await import('../webhook-server.js');
-const { app, runPeriodicDrainTick, startPeriodicDrain, runReaperTick, scheduleIssueEvent, waitForRunnerIdle, _debounceTimers, _resetDebounceTimers } = webhookServer;
+const {
+  app,
+  runPeriodicDrainTick,
+  startPeriodicDrain,
+  runReaperTick,
+  scheduleIssueEvent,
+  waitForRunnerIdle,
+  _debounceTimers,
+  _resetDebounceTimers,
+} = webhookServer;
 
 // Helper: create a mock spawn child that emits given stdout, stderr, then closes
 function mockSpawnChild({ stdout = '', stderr = '', exitCode = 0 } = {}) {
   const child: any = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
-  
+
   // Use a slight delay to ensure listeners are attached
   // Use a unique timeout value we can identify
   setTimeout(() => {
@@ -86,7 +95,7 @@ describe('webhook usage limit retry', () => {
     (spawn as jest.Mock).mockReset();
     // Default mock behavior: successful run
     (spawn as jest.Mock).mockImplementation(() => mockSpawnChild({ exitCode: 0 }));
-    
+
     // Mock setTimeout to prevent long waits, but ALLOW it to run if we want
     jest.spyOn(global, 'setTimeout').mockImplementation((fn: any, ms: any) => {
       if (ms <= 100) return originalSetTimeout(fn, ms); // allow mockSpawnChild and small waits
@@ -95,7 +104,9 @@ describe('webhook usage limit retry', () => {
 
     const runner: any = mockRunner;
     if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
-      try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
+      try {
+        fs.unlinkSync(WEBHOOK_EVENTS_FILE);
+      } catch (_) {}
     }
     runner.acquireLock.mockReturnValue(true);
     runner.hasPendingIssues.mockResolvedValue(true);
@@ -104,21 +115,33 @@ describe('webhook usage limit retry', () => {
     runner.isQueuedOrRunning.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
-    runner.runItem.mockResolvedValue(undefined);
+    runner.runItem.mockResolvedValue({ detached: false });
     runner.drainQueue.mockResolvedValue(undefined);
     runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
   });
 
-
   afterEach(async () => {
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
     jest.restoreAllMocks();
   });
 
   const issuePayload = (id = 'TEST-001') => ({
     type: 'Issue',
     action: 'update',
-    data: { identifier: id, title: 'test', state: { name: 'In Progress' }, labels: [] }
+    data: { identifier: id, title: 'test', state: { name: 'In Progress' }, labels: [] },
+  });
+
+  test('rejects a malformed epistemic experiment contract before queueing', async () => {
+    const payload: any = issuePayload('TEST-ERL-INVALID');
+    payload.data.description =
+      '<!-- epistemic-research-loop:experiment-request:v1 -->\n```json\n{"run_id":"missing-fields"}\n```';
+
+    const res = await request(app).post('/webhooks/linear').send(payload);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ignored');
+    expect(res.body.reason).toMatch(/invalid experiment request/);
+    expect(mockRunner.enqueue).not.toHaveBeenCalled();
   });
 
   test('schedules retry when run_auto.sh outputs usage limit message', async () => {
@@ -130,7 +153,7 @@ describe('webhook usage limit retry', () => {
     const res = await request(app).post('/webhooks/linear').send(issuePayload(id));
     expect(res.status).toBe(200);
 
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
 
     // webhook-server.js now delegates to runner.runItem
     expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
@@ -154,19 +177,23 @@ describe('webhook usage limit retry', () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('accepted');
 
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
 
-    expect(runner.enqueue).toHaveBeenCalledWith('TEST-COOLDOWN', 'webhook', retryAt, expect.objectContaining({
-      priority: null,
-      priorityLabel: null,
-      parentIssueId: null,
-      parentIssueIdentifier: null
-    }));
+    expect(runner.enqueue).toHaveBeenCalledWith(
+      'TEST-COOLDOWN',
+      'webhook',
+      retryAt,
+      expect.objectContaining({
+        priority: null,
+        priorityLabel: null,
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      })
+    );
     expect(runner.hasPendingIssues).not.toHaveBeenCalled();
     expect(runner.acquireLock).not.toHaveBeenCalled();
     expect(runner.runItem).not.toHaveBeenCalled();
   });
-
 
   test('does not retry when run_auto.sh fails without usage limit message', async () => {
     const id = 'TEST-NO-RETRY';
@@ -175,29 +202,36 @@ describe('webhook usage limit retry', () => {
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
 
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
 
     // Verify runner.runItem was called
     expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
 
     // No large setTimeout should be registered (runner.runItem is mocked, not actual retry logic)
-    const retryCall = (setTimeout as any as jest.Mock).mock.calls.find((call: any) => call[1] > 1000);
+    const retryCall = (setTimeout as any as jest.Mock).mock.calls.find(
+      (call: any) => call[1] > 1000
+    );
     expect(retryCall).toBeUndefined();
   });
 
-  test("ignores terminal issue update events", async () => {
+  test('ignores terminal issue update events', async () => {
     const runner: any = mockRunner;
     const terminalPayload = {
-      type: "Issue",
-      action: "update",
-      data: { identifier: "TEST-DONE", title: "done task", state: { name: "Done", type: "completed" }, labels: [] }
+      type: 'Issue',
+      action: 'update',
+      data: {
+        identifier: 'TEST-DONE',
+        title: 'done task',
+        state: { name: 'Done', type: 'completed' },
+        labels: [],
+      },
     };
 
-    const res = await request(app).post("/webhooks/linear").send(terminalPayload);
+    const res = await request(app).post('/webhooks/linear').send(terminalPayload);
 
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe("ignored");
-    expect(res.body.reason).toBe("terminal state: Done");
+    expect(res.body.status).toBe('ignored');
+    expect(res.body.reason).toBe('terminal state: Done');
     expect(runner.enqueue).not.toHaveBeenCalled();
     expect(runner.runItem).not.toHaveBeenCalled();
   });
@@ -217,7 +251,7 @@ describe('webhook usage limit retry', () => {
     };
 
     const res = await request(app).post('/webhooks/linear').send(payload);
-    await new Promise(resolve => originalSetTimeout(resolve, 20));
+    await new Promise((resolve) => originalSetTimeout(resolve, 20));
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ status: 'accepted', reason: 'premature Done repair scheduled' });
@@ -233,7 +267,7 @@ describe('webhook usage limit retry', () => {
     (spawn as jest.Mock).mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
 
     expect(runner.setIssueInProgress).not.toHaveBeenCalled();
   });
@@ -245,7 +279,7 @@ describe('webhook usage limit retry', () => {
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
 
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
 
     // webhook delegates to runner.runItem
     expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
@@ -253,7 +287,9 @@ describe('webhook usage limit retry', () => {
 
     // Second webhook is accepted after first completes
     if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
-      try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
+      try {
+        fs.unlinkSync(WEBHOOK_EVENTS_FILE);
+      } catch (_) {}
     }
     runner.isQueued.mockReturnValue(false);
     runner.isQueuedOrRunning.mockReturnValue(false);
@@ -270,49 +306,75 @@ describe('webhook usage limit retry', () => {
     const nonUrgentPayload = {
       type: 'Issue',
       action: 'update',
-      data: { identifier: 'TEST-NON-URGENT', title: 'test', state: { name: 'Todo' }, labels: [], priority: 2 }
+      data: {
+        identifier: 'TEST-NON-URGENT',
+        title: 'test',
+        state: { name: 'Todo' },
+        labels: [],
+        priority: 2,
+      },
     };
 
     const res = await request(app).post('/webhooks/linear').send(nonUrgentPayload);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('accepted'); // HTTP response is still accepted
 
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
 
     // Should enqueue non-Urgent issue when locked
-    expect(runner.enqueue).toHaveBeenCalledWith('TEST-NON-URGENT', 'webhook', null, expect.objectContaining({
-      priority: 2,
-      priorityLabel: null,
-      parentIssueId: null,
-      parentIssueIdentifier: null
-    }));
+    expect(runner.enqueue).toHaveBeenCalledWith(
+      'TEST-NON-URGENT',
+      'webhook',
+      null,
+      expect.objectContaining({
+        priority: 2,
+        priorityLabel: null,
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      })
+    );
   });
 
   test('does not skip Urgent issue even when a run is locked', async () => {
     const runner: any = mockRunner;
     runner.isLocked.mockReturnValue(true); // simulate active run
     runner.isQueued.mockReturnValue(false);
-    runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-URGENT', trigger: 'webhook', retryAt: null });
+    runner.dequeue.mockReturnValueOnce({
+      issueId: 'TEST-URGENT',
+      trigger: 'webhook',
+      retryAt: null,
+    });
     (spawn as jest.Mock).mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
 
     const urgentPayload = {
       type: 'Issue',
       action: 'update',
-      data: { identifier: 'TEST-URGENT', title: 'urgent task', state: { name: 'Todo' }, labels: [], priority: 1 }
+      data: {
+        identifier: 'TEST-URGENT',
+        title: 'urgent task',
+        state: { name: 'Todo' },
+        labels: [],
+        priority: 1,
+      },
     };
 
     const res = await request(app).post('/webhooks/linear').send(urgentPayload);
     expect(res.status).toBe(200);
 
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
 
     // Urgent issue should be enqueued even when locked
-    expect(runner.enqueue).toHaveBeenCalledWith('TEST-URGENT', 'webhook', null, expect.objectContaining({
-      priority: 1,
-      priorityLabel: null,
-      parentIssueId: null,
-      parentIssueIdentifier: null
-    }));
+    expect(runner.enqueue).toHaveBeenCalledWith(
+      'TEST-URGENT',
+      'webhook',
+      null,
+      expect.objectContaining({
+        priority: 1,
+        priorityLabel: null,
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      })
+    );
   });
 
   test('drains queue after main task completes', async () => {
@@ -326,13 +388,11 @@ describe('webhook usage limit retry', () => {
     runner.dequeue.mockReturnValueOnce({ issueId: id1, trigger: 'webhook' });
 
     // Simulate queue has one item remaining after id1 runs
-    runner.loadQueue
-      .mockReturnValueOnce([{ issueId: id2 }])
-      .mockReturnValue([]);
+    runner.loadQueue.mockReturnValueOnce([{ issueId: id2 }]).mockReturnValue([]);
 
     await request(app).post('/webhooks/linear').send(issuePayload(id1));
 
-    await new Promise(resolve => originalSetTimeout(resolve, 100));
+    await new Promise((resolve) => originalSetTimeout(resolve, 100));
 
     // Verify runner.runItem was called for the main task
     expect(runner.runItem).toHaveBeenCalledWith({ issueId: id1, trigger: 'webhook' });
@@ -352,10 +412,7 @@ describe('graceful shutdown idle wait', () => {
   });
 
   test('waits for an active runner instead of terminating it', async () => {
-    mockRunner.isLocked
-      .mockReturnValueOnce(true)
-      .mockReturnValueOnce(true)
-      .mockReturnValue(false);
+    mockRunner.isLocked.mockReturnValueOnce(true).mockReturnValueOnce(true).mockReturnValue(false);
     await expect(waitForRunnerIdle(100, 1)).resolves.toBe(true);
     expect(mockRunner.isLocked).toHaveBeenCalledTimes(3);
   });
@@ -424,7 +481,9 @@ describe('webhook issue filtering', () => {
 
     const runner: any = mockRunner;
     if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
-      try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
+      try {
+        fs.unlinkSync(WEBHOOK_EVENTS_FILE);
+      } catch (_) {}
     }
     runner.acquireLock.mockReturnValue(true);
     runner.hasPendingIssues.mockResolvedValue(true);
@@ -432,13 +491,13 @@ describe('webhook issue filtering', () => {
     runner.isQueuedOrRunning.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
-    runner.runItem.mockResolvedValue(undefined);
+    runner.runItem.mockResolvedValue({ detached: false });
     runner.drainQueue.mockResolvedValue(undefined);
     runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
   });
 
   afterEach(async () => {
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
     jest.restoreAllMocks();
   });
 
@@ -451,8 +510,8 @@ describe('webhook issue filtering', () => {
         title: 'test issue',
         state: { name: 'In Progress', type: 'started', ...stateOverrides },
         labels: [],
-        ...extra
-      }
+        ...extra,
+      },
     };
   }
 
@@ -499,8 +558,8 @@ describe('webhook issue filtering', () => {
         title: 'archived issue',
         state: { name: 'In Progress', type: 'started' },
         labels: [],
-        archivedAt: '2026-06-01T00:00:00.000Z'
-      }
+        archivedAt: '2026-06-01T00:00:00.000Z',
+      },
     };
     const res = await request(app).post('/webhooks/linear').send(payload);
     expect(res.status).toBe(200);
@@ -522,8 +581,8 @@ describe('webhook issue filtering', () => {
         title: 'child done',
         state: { name: 'In Review', type: 'started' },
         parent: { identifier: 'TEST-PARENT' },
-        labels: []
-      }
+        labels: [],
+      },
     };
     const res = await request(app).post('/webhooks/linear').send(payload);
     expect(res.status).toBe(200);
@@ -532,8 +591,11 @@ describe('webhook issue filtering', () => {
     expect(runner.removeFromQueue).toHaveBeenCalledWith('TEST-CHILD-REVIEW');
     expect(runner.runItem).not.toHaveBeenCalled();
 
-    await new Promise(resolve => originalSetTimeout(resolve, 20));
-    expect(runner.finalizeParentIfChildrenComplete).toHaveBeenCalledWith('TEST-CHILD-REVIEW', 'TEST-PARENT');
+    await new Promise((resolve) => originalSetTimeout(resolve, 20));
+    expect(runner.finalizeParentIfChildrenComplete).toHaveBeenCalledWith(
+      'TEST-CHILD-REVIEW',
+      'TEST-PARENT'
+    );
   });
 
   test('a blocker moving to In Review wakes dependency-blocked queue items immediately', async () => {
@@ -543,20 +605,24 @@ describe('webhook issue filtering', () => {
     const payload: any = makePayload(
       'update',
       { name: 'In Review', type: 'started' },
-      { identifier: 'TEST-BLOCKER-REVIEW' },
+      { identifier: 'TEST-BLOCKER-REVIEW' }
     );
     payload.updatedFrom = { stateId: 'blocked-state' };
 
     const res = await request(app).post('/webhooks/linear').send(payload);
     expect(res.status).toBe(200);
     expect(runner.wakeDependencyBlocked).toHaveBeenCalledWith('TEST-BLOCKER-REVIEW');
-    await new Promise(resolve => originalSetTimeout(resolve, 20));
+    await new Promise((resolve) => originalSetTimeout(resolve, 20));
     expect(runner.drainQueue).toHaveBeenCalled();
   });
 
   test('active issue create is accepted', async () => {
     const runner: any = mockRunner;
-    runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-CREATE', trigger: 'webhook', retryAt: null });
+    runner.dequeue.mockReturnValueOnce({
+      issueId: 'TEST-CREATE',
+      trigger: 'webhook',
+      retryAt: null,
+    });
     (spawn as jest.Mock).mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
 
     const payload = {
@@ -566,20 +632,24 @@ describe('webhook issue filtering', () => {
         identifier: 'TEST-CREATE',
         title: 'new issue',
         state: { name: 'Todo', type: 'unstarted' },
-        labels: []
-      }
+        labels: [],
+      },
     };
     const res = await request(app).post('/webhooks/linear').send(payload);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('accepted');
 
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
     expect(runner.runItem).toHaveBeenCalled();
   });
 
   test('active issue meaningful update is accepted', async () => {
     const runner: any = mockRunner;
-    runner.dequeue.mockReturnValueOnce({ issueId: 'TEST-MEANINGFUL', trigger: 'webhook', retryAt: null });
+    runner.dequeue.mockReturnValueOnce({
+      issueId: 'TEST-MEANINGFUL',
+      trigger: 'webhook',
+      retryAt: null,
+    });
     (spawn as jest.Mock).mockImplementationOnce(() => mockSpawnChild({ exitCode: 0 }));
 
     const payload = {
@@ -590,14 +660,14 @@ describe('webhook issue filtering', () => {
         identifier: 'TEST-MEANINGFUL',
         title: 'new title',
         state: { name: 'In Progress', type: 'started' },
-        labels: []
-      }
+        labels: [],
+      },
     };
     const res = await request(app).post('/webhooks/linear').send(payload);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('accepted');
 
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
     expect(runner.runItem).toHaveBeenCalled();
   });
 
@@ -610,8 +680,8 @@ describe('webhook issue filtering', () => {
         identifier: 'TEST-QUEUED-DONE',
         title: 'done task',
         state: { name: 'Done', type: 'completed' },
-        labels: []
-      }
+        labels: [],
+      },
     };
     const res = await request(app).post('/webhooks/linear').send(payload);
     expect(res.status).toBe(200);
@@ -630,8 +700,8 @@ describe('webhook issue filtering', () => {
         identifier: 'TEST-LABEL-CLEANUP',
         title: 'active issue',
         state: { name: 'In Progress', type: 'started' },
-        labels: []
-      }
+        labels: [],
+      },
     };
     const res = await request(app).post('/webhooks/linear').send(payload);
     expect(res.status).toBe(200);
@@ -655,7 +725,9 @@ describe('pre-execution eligibility check', () => {
 
     const runner: any = mockRunner;
     if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
-      try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
+      try {
+        fs.unlinkSync(WEBHOOK_EVENTS_FILE);
+      } catch (_) {}
     }
     runner.acquireLock.mockReturnValue(true);
     runner.hasPendingIssues.mockResolvedValue(true);
@@ -663,13 +735,13 @@ describe('pre-execution eligibility check', () => {
     runner.isQueuedOrRunning.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.dequeue.mockReturnValue(null);
-    runner.runItem.mockResolvedValue(undefined);
+    runner.runItem.mockResolvedValue({ detached: false });
     runner.drainQueue.mockResolvedValue(undefined);
     runner.getIssueExecutionEligibility.mockResolvedValue({ eligible: true });
   });
 
   afterEach(async () => {
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
     jest.restoreAllMocks();
   });
 
@@ -677,7 +749,12 @@ describe('pre-execution eligibility check', () => {
     type: 'Issue',
     action: 'update',
     updatedFrom: { stateId: 'old-state' },
-    data: { identifier: id, title: 'test', state: { name: 'In Progress', type: 'started' }, labels: [] }
+    data: {
+      identifier: id,
+      title: 'test',
+      state: { name: 'In Progress', type: 'started' },
+      labels: [],
+    },
   });
 
   test('queued completed issue is skipped before runItem', async () => {
@@ -686,7 +763,7 @@ describe('pre-execution eligibility check', () => {
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
 
     // webhook-server.js now delegates to runner.runItem
     expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
@@ -699,7 +776,7 @@ describe('pre-execution eligibility check', () => {
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
 
     // webhook-server.js delegates to runner.runItem
     expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
@@ -711,7 +788,7 @@ describe('pre-execution eligibility check', () => {
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
 
     // webhook-server.js delegates to runner.runItem
     expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
@@ -723,7 +800,7 @@ describe('pre-execution eligibility check', () => {
     runner.dequeue.mockReturnValueOnce({ issueId: id, trigger: 'webhook', retryAt: null });
 
     await request(app).post('/webhooks/linear').send(issuePayload(id));
-    await new Promise(resolve => originalSetTimeout(resolve, 50));
+    await new Promise((resolve) => originalSetTimeout(resolve, 50));
 
     expect(runner.runItem).toHaveBeenCalledWith({ issueId: id, trigger: 'webhook', retryAt: null });
   });
@@ -748,7 +825,13 @@ describe('runBootstrapScan', () => {
   it('should scan by default when WEBHOOK_BOOTSTRAP_SCAN_ENABLED is not set', async () => {
     process.env.LINEAR_API_KEY = 'test-key';
     runner.fetchActiveIssues.mockResolvedValue([
-      { identifier: 'SOT-100', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+      {
+        identifier: 'SOT-100',
+        priority: 2,
+        priorityLabel: 'High',
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      },
     ]);
     runner.isQueued.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
@@ -756,7 +839,12 @@ describe('runBootstrapScan', () => {
     await runBootstrapScan();
 
     expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50, { excludeHold: true });
-    expect(runner.enqueue).toHaveBeenCalledWith('SOT-100', 'webhook-bootstrap', null, expect.objectContaining({ priority: 2 }));
+    expect(runner.enqueue).toHaveBeenCalledWith(
+      'SOT-100',
+      'webhook-bootstrap',
+      null,
+      expect.objectContaining({ priority: 2 })
+    );
   });
 
   it('should skip scan when WEBHOOK_BOOTSTRAP_SCAN_ENABLED=false', async () => {
@@ -778,8 +866,20 @@ describe('runBootstrapScan', () => {
     process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED = 'true';
     process.env.LINEAR_API_KEY = 'test-key';
     runner.fetchActiveIssues.mockResolvedValue([
-      { identifier: 'SOT-100', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
-      { identifier: 'SOT-101', priority: 3, priorityLabel: 'Medium', parentIssueId: null, parentIssueIdentifier: null },
+      {
+        identifier: 'SOT-100',
+        priority: 2,
+        priorityLabel: 'High',
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      },
+      {
+        identifier: 'SOT-101',
+        priority: 3,
+        priorityLabel: 'Medium',
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      },
     ]);
     runner.isQueued.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
@@ -787,8 +887,18 @@ describe('runBootstrapScan', () => {
     await runBootstrapScan();
 
     expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50, { excludeHold: true });
-    expect(runner.enqueue).toHaveBeenCalledWith('SOT-100', 'webhook-bootstrap', null, expect.objectContaining({ priority: 2 }));
-    expect(runner.enqueue).toHaveBeenCalledWith('SOT-101', 'webhook-bootstrap', null, expect.objectContaining({ priority: 3 }));
+    expect(runner.enqueue).toHaveBeenCalledWith(
+      'SOT-100',
+      'webhook-bootstrap',
+      null,
+      expect.objectContaining({ priority: 2 })
+    );
+    expect(runner.enqueue).toHaveBeenCalledWith(
+      'SOT-101',
+      'webhook-bootstrap',
+      null,
+      expect.objectContaining({ priority: 3 })
+    );
     expect(runner.drainQueue).toHaveBeenCalled();
   });
 
@@ -796,7 +906,13 @@ describe('runBootstrapScan', () => {
     process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED = 'true';
     process.env.LINEAR_API_KEY = 'test-key';
     runner.fetchActiveIssues.mockResolvedValue([
-      { identifier: 'SOT-100', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+      {
+        identifier: 'SOT-100',
+        priority: 2,
+        priorityLabel: 'High',
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      },
     ]);
     runner.isQueued.mockReturnValue(true); // already queued
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
@@ -812,14 +928,25 @@ describe('runBootstrapScan', () => {
     process.env.LINEAR_API_KEY = 'test-key';
     const retryAt = '2026-06-17T00:00:00.000Z';
     runner.fetchActiveIssues.mockResolvedValue([
-      { identifier: 'SOT-100', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+      {
+        identifier: 'SOT-100',
+        priority: 2,
+        priorityLabel: 'High',
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      },
     ]);
     runner.isQueued.mockReturnValue(false);
     runner.getUsageLimitCooldownUntil.mockReturnValue({ retryAt });
 
     await runBootstrapScan();
 
-    expect(runner.enqueue).toHaveBeenCalledWith('SOT-100', 'webhook-bootstrap', retryAt, expect.any(Object));
+    expect(runner.enqueue).toHaveBeenCalledWith(
+      'SOT-100',
+      'webhook-bootstrap',
+      retryAt,
+      expect.any(Object)
+    );
     expect(runner.drainQueue).toHaveBeenCalled();
   });
 
@@ -841,7 +968,13 @@ describe('runBootstrapScan', () => {
     process.env.WEBHOOK_BOOTSTRAP_SCAN_ENABLED = 'true';
     process.env.LINEAR_API_KEY = 'test-key';
     runner.fetchActiveIssues.mockResolvedValue([
-      { identifier: 'SOT-100', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+      {
+        identifier: 'SOT-100',
+        priority: 2,
+        priorityLabel: 'High',
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      },
     ]);
     runner.isQueued.mockReturnValue(true); // already in the restored queue → no new enqueue
     runner.loadQueue.mockReturnValue([{ issueId: 'SOT-100', retryAt: null }]); // due now
@@ -980,20 +1113,37 @@ describe('reaper (runReaperTick)', () => {
 
   it('should scan and enqueue stranded active issues when idle, then drain', async () => {
     runner.fetchActiveIssues.mockResolvedValue([
-      { identifier: 'SOT-200', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+      {
+        identifier: 'SOT-200',
+        priority: 2,
+        priorityLabel: 'High',
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      },
     ]);
     runner.isQueued.mockReturnValue(false);
 
     await runReaperTick();
 
     expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50, { excludeHold: true });
-    expect(runner.enqueue).toHaveBeenCalledWith('SOT-200', 'webhook-reaper', null, expect.objectContaining({ priority: 2 }));
+    expect(runner.enqueue).toHaveBeenCalledWith(
+      'SOT-200',
+      'webhook-reaper',
+      null,
+      expect.objectContaining({ priority: 2 })
+    );
     expect(runner.drainQueue).toHaveBeenCalled();
   });
 
   it('should NOT re-enqueue a code=70 human-wait issue while suppressed (SOT-1547)', async () => {
     runner.fetchActiveIssues.mockResolvedValue([
-      { identifier: 'SOT-1531', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+      {
+        identifier: 'SOT-1531',
+        priority: 2,
+        priorityLabel: 'High',
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      },
     ]);
     runner.isQueued.mockReturnValue(false);
     runner.isReaperEnqueueSuppressed.mockImplementation((id: string) => id === 'SOT-1531');
@@ -1008,20 +1158,37 @@ describe('reaper (runReaperTick)', () => {
 
   it('should re-enqueue a previously code=70 issue once suppression is cleared (SOT-1547)', async () => {
     runner.fetchActiveIssues.mockResolvedValue([
-      { identifier: 'SOT-1531', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+      {
+        identifier: 'SOT-1531',
+        priority: 2,
+        priorityLabel: 'High',
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      },
     ]);
     runner.isQueued.mockReturnValue(false);
     runner.isReaperEnqueueSuppressed.mockReturnValue(false); // human input cleared it
 
     await runReaperTick();
 
-    expect(runner.enqueue).toHaveBeenCalledWith('SOT-1531', 'webhook-reaper', null, expect.objectContaining({ priority: 2 }));
+    expect(runner.enqueue).toHaveBeenCalledWith(
+      'SOT-1531',
+      'webhook-reaper',
+      null,
+      expect.objectContaining({ priority: 2 })
+    );
     expect(runner.drainQueue).toHaveBeenCalled();
   });
 
   it('should skip already-queued issues and not drain when nothing new enqueued', async () => {
     runner.fetchActiveIssues.mockResolvedValue([
-      { identifier: 'SOT-200', priority: 2, priorityLabel: 'High', parentIssueId: null, parentIssueIdentifier: null },
+      {
+        identifier: 'SOT-200',
+        priority: 2,
+        priorityLabel: 'High',
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      },
     ]);
     runner.isQueued.mockReturnValue(true);
 
@@ -1047,21 +1214,33 @@ describe('reaper (runReaperTick)', () => {
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.loadQueue.mockReturnValue([{ issueId: 'X', retryAt: null }]);
     runner.fetchActiveIssues.mockResolvedValue([
-      { identifier: 'SOT-201', priority: 1, priorityLabel: 'Urgent', parentIssueId: null, parentIssueIdentifier: null },
+      {
+        identifier: 'SOT-201',
+        priority: 1,
+        priorityLabel: 'Urgent',
+        parentIssueId: null,
+        parentIssueIdentifier: null,
+      },
     ]);
     await runReaperTick();
     expect(runner.fetchActiveIssues).toHaveBeenCalledWith(50, { excludeHold: true });
-    expect(runner.enqueue).toHaveBeenCalledWith('SOT-201', 'webhook-reaper', null, expect.objectContaining({ priority: 1 }));
+    expect(runner.enqueue).toHaveBeenCalledWith(
+      'SOT-201',
+      'webhook-reaper',
+      null,
+      expect.objectContaining({ priority: 1 })
+    );
     expect(runner.drainQueue).toHaveBeenCalled();
   });
 });
 
 describe('webhook event dedupe', () => {
-
   beforeEach(() => {
     jest.clearAllMocks();
     if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
-      try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
+      try {
+        fs.unlinkSync(WEBHOOK_EVENTS_FILE);
+      } catch (_) {}
     }
 
     const runner: any = mockRunner;
@@ -1069,13 +1248,15 @@ describe('webhook event dedupe', () => {
     runner.getUsageLimitCooldownUntil.mockReturnValue(null);
     runner.hasPendingIssues.mockResolvedValue(true);
     runner.dequeue.mockReturnValue(null);
-    runner.runItem.mockResolvedValue(undefined);
+    runner.runItem.mockResolvedValue({ detached: false });
     runner.drainQueue.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     if (fs.existsSync(WEBHOOK_EVENTS_FILE)) {
-      try { fs.unlinkSync(WEBHOOK_EVENTS_FILE); } catch (_) {}
+      try {
+        fs.unlinkSync(WEBHOOK_EVENTS_FILE);
+      } catch (_) {}
     }
   });
 
@@ -1084,7 +1265,7 @@ describe('webhook event dedupe', () => {
       id: 'evt-123',
       type: 'Issue',
       action: 'create',
-      data: { identifier: 'SOT-1', title: 'test' }
+      data: { identifier: 'SOT-1', title: 'test' },
     };
 
     // First request
@@ -1103,7 +1284,7 @@ describe('webhook event dedupe', () => {
     const payload = {
       type: 'Issue',
       action: 'update',
-      data: { identifier: 'SOT-1', title: 'test', updatedAt: '2026-06-16T10:00:00Z' }
+      data: { identifier: 'SOT-1', title: 'test', updatedAt: '2026-06-16T10:00:00Z' },
     };
 
     const res1 = await request(app).post('/webhooks/linear').send(payload);
@@ -1121,7 +1302,12 @@ describe('webhook event dedupe', () => {
       id: 'evt-inflight-resend',
       type: 'Issue',
       action: 'update',
-      data: { identifier: 'SOT-INFLIGHT', title: 'test', state: { name: 'In Progress', type: 'started' }, labels: [] }
+      data: {
+        identifier: 'SOT-INFLIGHT',
+        title: 'test',
+        state: { name: 'In Progress', type: 'started' },
+        labels: [],
+      },
     };
 
     const res = await request(app).post('/webhooks/linear').send(payload);
@@ -1174,7 +1360,7 @@ describe('periodic drain', () => {
 
   test('re-entry guard prevents concurrent drains', async () => {
     runner.loadQueue.mockReturnValue([{ issueId: 'X', retryAt: null }]);
-    
+
     // Create a promise that we can control to simulate a long-running drain
     let resolveDrain: any;
     const drainPromise = new Promise((resolve) => {
@@ -1184,10 +1370,10 @@ describe('periodic drain', () => {
 
     // Start first drain
     const firstTick = runPeriodicDrainTick();
-    
+
     // Start second drain while first is still running
     await runPeriodicDrainTick();
-    
+
     expect(runner.drainQueue).toHaveBeenCalledTimes(1);
 
     // Resolve first drain
