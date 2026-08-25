@@ -59,8 +59,10 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const app = express();
+const WEBHOOK_JSON_LIMIT = appEnv.webhookJsonLimit();
 app.use(
   express.json({
+    limit: WEBHOOK_JSON_LIMIT,
     verify: (req: any, res: any, buf: Buffer) => {
       req.rawBody = buf.toString('utf8');
     },
@@ -69,6 +71,12 @@ app.use(
 
 // Error handler for JSON parsing errors
 app.use((err: any, req: any, res: any, next: any) => {
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    return res.status(413).json({
+      error: 'Payload too large',
+      limit: WEBHOOK_JSON_LIMIT,
+    });
+  }
   if (err instanceof SyntaxError && (err as any).status === 400 && 'body' in err) {
     return res.status(400).json({ error: 'Invalid JSON' });
   }

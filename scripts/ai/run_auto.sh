@@ -290,7 +290,7 @@ execute_worker_node() {
 
 execute_discussion_node() {
   local issue="$1" _role="$2" cap="$3"
-  local topic_file="docs/ai/pipeline/discussion_topic.$issue.md"
+  local topic_file="${PIPELINE_CONTEXT_JSON_FILE:-${PIPELINE_CONTEXT_FILE:-}}"
   if [ -s "$topic_file" ]; then
     bash scripts/ai/run_discussion.sh --issue "$issue" --topic-file "$topic_file" 2>&1 | tee -a "$LOG_FILE" "$cap"
   else
@@ -556,25 +556,17 @@ run_role_pipeline() {
     plog "per-issue worker override active (WORKER_ROLES_FILE=$override_file)"
   fi
 
-  # 各ロールプロンプト（prompts/roles/<role>.md）が読む pipeline コンテキストを書き出す。
-  # 並列ドレイン（config/runner.json の maxParallel>1）で別プロジェクトの run が同時に走っても衝突しない
-  # よう、context は **per-issue ファイル**（context.<issue>.md）に書き、その**絶対パス**を
-  # PIPELINE_CONTEXT_FILE で下流（run_worker.sh / worker preamble）へ渡す。共有 context.md も後方互換で
-  # 併記する（PIPELINE_CONTEXT_FILE を持たない単一run/手動経路のフォールバック）。
+  # Linear GraphQLを正本として、各ロールへ構造化JSONの実行コンテキストを渡す。
+  # per-issueファイルなので並列run同士で衝突せず、一時Markdownを情報伝達に使わない。
   mkdir -p docs/ai/pipeline
-  local ctx_file="docs/ai/pipeline/context.$issue.md"
-  {
-    echo "# Pipeline Context (run $TIMESTAMP)"
-    echo ""
-    echo "- Target Linear issue: $issue"
-    echo "- Target repository: ${target_repo:-<none: operate in this control-plane repo>}"
-    echo "- Project: ${WEBHOOK_PROJECT_NAME:-unknown}"
-    echo "- Mode: $([ "${RESUME_MODE:-false}" = true ] && echo 'resume (continue previous usage-limited run)' || echo normal)"
-    echo "- Resume metadata (if resume): docs/ai/auto_logs/resume/$issue.json"
-    echo ""
-    echo "Use this issue as the primary target for this pipeline run."
-  } > "$ctx_file"
-  cp -f "$ctx_file" docs/ai/pipeline/context.md 2>/dev/null || true
+  local ctx_file="docs/ai/pipeline/context.$issue.json"
+  if ! run_cli execution-context "$issue" > "$ctx_file" 2>>"$LOG_FILE"; then
+    plog "PIPELINE_STOP: Linear GraphQL execution context could not be fetched for $issue"
+    rm -f "$ctx_file"
+    return "$COMPLETION_UNVERIFIED"
+  fi
+  export PIPELINE_CONTEXT_JSON_FILE="$(pwd)/$ctx_file"
+  # Compatibility alias for worker wrappers; its content is JSON, not Markdown.
   export PIPELINE_CONTEXT_FILE="$(pwd)/$ctx_file"
 
   # SOT-1590: move the issue to In Progress the moment work starts — BEFORE dispatching task-check —

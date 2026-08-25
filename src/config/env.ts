@@ -105,6 +105,18 @@ export function port(env: Env = process.env): string | number {
   return env.PORT || 3000;
 }
 
+/**
+ * WEBHOOK_JSON_LIMIT — maximum JSON webhook body accepted by Express.
+ *
+ * Express defaults to 100kb, which is too small for legitimate Linear events containing a long
+ * issue description or comment history. Keep a finite default to bound memory use and accept only
+ * byte-size syntax understood by the `bytes` package used by body-parser.
+ */
+export function webhookJsonLimit(env: Env = process.env): string {
+  const value = (env.WEBHOOK_JSON_LIMIT || '5mb').trim().toLowerCase();
+  return /^\d+(?:\.\d+)?(?:b|kb|mb|gb)$/.test(value) ? value : '5mb';
+}
+
 /** WEBHOOK_REAPER_ENABLED — reaper is on by default; only the literal 'false' disables it. */
 export function webhookReaperEnabled(env: Env = process.env): boolean {
   return env.WEBHOOK_REAPER_ENABLED !== 'false';

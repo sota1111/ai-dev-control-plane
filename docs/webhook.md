@@ -71,6 +71,7 @@ webhook サーバーは起動時に Linear の未処理 Issue を確認し、共
 ```
 WEBHOOK_MODE=true
 PORT=3000
+WEBHOOK_JSON_LIMIT=5mb
 LINEAR_WEBHOOK_SECRET=<Linear Webhook の Secret>
 NGROK_COMMAND=ngrok http --url=elitism-unnerving-gallstone.ngrok-free.dev 3000
 ```

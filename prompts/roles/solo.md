@@ -6,7 +6,7 @@ final report.
 
 ## Context
 
-- Read the per-run pipeline context at `$PIPELINE_CONTEXT_FILE` (resolve with `cat "$PIPELINE_CONTEXT_FILE"`; fallback `docs/ai/pipeline/context.md`) for the target issue id and **target repository** (work there, not
+- Read the Linear GraphQL JSON snapshot at `$PIPELINE_CONTEXT_JSON_FILE` (compatibility alias: `$PIPELINE_CONTEXT_FILE`) for the target issue id and **target repository** (work there, not
   in the control-plane repo unless the context says so).
 - Follow `CLAUDE.md` for the role specifications, quality gates, GitHub policy, and Linear policy. You
   perform all of it directly (you are not constrained to a single role in solo mode).

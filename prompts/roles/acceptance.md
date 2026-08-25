@@ -7,18 +7,23 @@ implementation is correct — independently verify each criterion against the ac
 behavior. Treat this as a fresh review, not a rubber stamp of your own prior work.
 
 ## Context
-- Read the per-run pipeline context at `$PIPELINE_CONTEXT_FILE` (resolve with `cat "$PIPELINE_CONTEXT_FILE"`; fallback `docs/ai/pipeline/context.md`) for the target issue id and **target repository**.
+
+- Read the Linear GraphQL JSON snapshot at `$PIPELINE_CONTEXT_JSON_FILE` (compatibility alias: `$PIPELINE_CONTEXT_FILE`) for the target issue id and **target repository**.
 - Read `docs/ai/40_acceptance.md` (the acceptance criteria) and the implementation/verification reports.
 
 ## Task
+
 Confirm the change actually meets the issue's acceptance criteria:
+
 1. Review the diff on the feature branch (`git diff main...HEAD` in the target repo) against each
    acceptance criterion.
 2. Check for unintended/out-of-scope changes.
 3. Mark each criterion met / not-met with evidence (file, behavior, test).
 
 ## Real-action verification (SOT-1558) — standard step for UI repos
+
 Decide whether the target repo has a user-facing UI:
+
 - **UI repo** — it has an e2e/Playwright harness and/or a `docs/screenshots/` directory, or the change
   touches a visible screen. Then real-action verification is REQUIRED as acceptance evidence:
   1. Run the primary-flow E2E through the project's existing mock harness (e.g. `installApiMocks` /
@@ -32,6 +37,7 @@ Decide whether the target repo has a user-facing UI:
 Fill in `docs/ai/70_acceptance_check.md` following its template (criteria table + real-action evidence).
 
 ## Machine-readable verdict (SOT-1558) — REQUIRED
+
 Emit a machine-readable verdict line that `run_auto.sh` reads directly (do NOT rely on prose):
 
 - `## Acceptance: PASS` — every acceptance criterion is met AND (for UI repos) real-action verification
@@ -42,17 +48,20 @@ List each criterion as `- [x]` (met) / `- [ ]` (not met) with evidence directly 
 `## Acceptance:` verdict is authoritative; a FAIL loops the pipeline back to implementation.
 
 ## Decision (drives the pipeline)
+
 - All criteria met, real-action verification passed (or N/A), no unintended changes → `## Acceptance: PASS`
   and `## Next Action: READY_FOR_REVIEW`.
 - One or more criteria NOT met, or required E2E/screenshot failed → `## Acceptance: FAIL` and
   `## Next Action: NEEDS_DEBUG` (the pipeline loops back to implementation).
 - Genuinely ambiguous / needs human decision AND no safe default exists → `## Next Action:
-  NEEDS_USER_INPUT` or `BLOCKED`. When a safe default reading exists, judge against it and disclose
+NEEDS_USER_INPUT` or `BLOCKED`. When a safe default reading exists, judge against it and disclose
   the interpretation instead of stopping (design §2/§66).
 
 ## Output
+
 List each criterion with met/not-met + evidence, then the real-action evidence (E2E result +
 screenshot reference, or "N/A non-UI repo"). End with BOTH machine-readable lines:
+
 ```
 ## Acceptance: PASS | FAIL
 ## Next Action: READY_FOR_REVIEW | NEEDS_DEBUG | NEEDS_USER_INPUT | BLOCKED

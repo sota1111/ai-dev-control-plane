@@ -6,10 +6,12 @@ and decomposition are no longer split across separate worker dispatches; the sam
 once, with no script in between.)
 
 ## Context
-- Read the per-run pipeline context at `$PIPELINE_CONTEXT_FILE` (resolve with `cat "$PIPELINE_CONTEXT_FILE"`; fallback `docs/ai/pipeline/context.md`) for the target Linear issue id, repository, and mode.
+
+- Read the Linear GraphQL JSON snapshot at `$PIPELINE_CONTEXT_JSON_FILE` (compatibility alias: `$PIPELINE_CONTEXT_FILE`) for the target Linear issue id, repository, and mode.
 - Begin with the target issue identified in the pipeline context.
 
 ## Part A — Task check (actionability + classification)
+
 1. Read the Linear issue (via Linear MCP): status, latest comments, labels, description, acceptance criteria.
 2. Classify the task type (PLAN / IMPLEMENT / FIX / DEBUG / DOC / REVIEW / SECURITY).
 3. Write the inferred acceptance criteria to `docs/ai/40_acceptance.md`.
@@ -21,7 +23,9 @@ once, with no script in between.)
    successful no-op.
 
 ## Part B — Decomposition judgment (only when Part A is actionable)
+
 Continue in the SAME run — do NOT stop and wait for another worker/script:
+
 1. Judge decomposition (`必要 / 不要`) using the criteria in CLAUDE.md (independent features, different
    rollback/deploy unit, multiple PRs, large volume, sequential dependencies). Most issues do NOT need it.
 2. Post the judgment as a Linear comment: `分解判断: 必要/不要` + one-line reason.
@@ -39,10 +43,12 @@ Continue in the SAME run — do NOT stop and wait for another worker/script:
    change if it is already `In Progress`.)
 
 ## Constraints
+
 - Do NOT implement anything or change code in this role.
 - Do BOTH parts in this single dispatch — do not defer decomposition to a separate step.
 
 ## Decision (drives the pipeline)
+
 - Actionable AND not decomposed (parent is the work unit) → `## Next Action: READY_FOR_REVIEW`
   (pipeline proceeds to implementation on this issue).
 - Decomposed into child issues → `## Next Action: NEEDS_USER_INPUT` (parent pipeline stops; children run
@@ -50,6 +56,7 @@ Continue in the SAME run — do NOT stop and wait for another worker/script:
 - Not actionable / blocked → `## Next Action: NEEDS_USER_INPUT` or `BLOCKED`.
 
 ## Implementation-required signal (SOT-1555) — emit this line in your report
+
 When the task is actionable (READY_FOR_REVIEW), also emit ONE machine-readable line so the pipeline can
 keep implementation-not-required work on a single AI (no cross-worker handoff):
 
@@ -63,6 +70,7 @@ keep implementation-not-required work on a single AI (no cross-worker handoff):
 Emit this line only on READY_FOR_REVIEW (not on decomposition / not-actionable).
 
 ## Output
+
 Report (a) status/labels/latest comments, (b) acceptance criteria, (c) actionable?, (d) task type + scope,
 (e) decomposition judgment (必要/不要 + reason; child issue IDs + their inherited project if any).
 Include the `## Implementation: REQUIRED|NOT_REQUIRED` line (see above) when READY_FOR_REVIEW.
