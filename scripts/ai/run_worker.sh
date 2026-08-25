@@ -180,13 +180,11 @@ LEG_METRICS="${LEG_METRICS:-1}"
 LEG_METRICS_DIR="${LEG_METRICS_DIR:-$CONTROL_PLANE_DIR/docs/ai/auto_logs/metrics}"
 # The repo whose diff/gate is measured: the target repo when set, else this control-plane repo.
 METRICS_REPO="${TARGET_REPO:-$CONTROL_PLANE_DIR}"
-# Issue id for the metrics filename: prefer the injected env, else parse the pipeline context.
+# Issue id for the metrics filename: prefer the injected env, else parse structured context JSON.
 LEG_ISSUE="${WEBHOOK_ISSUE_ID:-}"
-# Prefer the per-issue context (PIPELINE_CONTEXT_FILE, set by run_auto.sh) so a concurrent drain of a
-# different project can't have us read the wrong issue via the shared context.md fallback.
-_LEG_CTX="${PIPELINE_CONTEXT_FILE:-$CONTROL_PLANE_DIR/docs/ai/pipeline/context.md}"
+_LEG_CTX="${PIPELINE_CONTEXT_JSON_FILE:-${PIPELINE_CONTEXT_FILE:-}}"
 if [ -z "$LEG_ISSUE" ] && [ -f "$_LEG_CTX" ]; then
-  LEG_ISSUE="$(sed -n 's/^- Target Linear issue:[[:space:]]*//p' "$_LEG_CTX" | head -1)"
+  LEG_ISSUE="$(node -e 'const c=require(process.argv[1]);process.stdout.write(c.issue?.identifier||"")' "$_LEG_CTX" 2>/dev/null || true)"
 fi
 
 _LEG_TSX_BIN="$CONTROL_PLANE_DIR/node_modules/.bin/tsx"

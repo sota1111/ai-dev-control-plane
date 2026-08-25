@@ -131,9 +131,8 @@ fi
 # partial report so this worker continues the work instead of restarting from scratch.
 PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
 
-# Per-issue pipeline context path (run_auto.sh exports PIPELINE_CONTEXT_FILE, absolute, so concurrent
-# drains of different projects never share one context.md). Fall back to the shared file when unset.
-CTX_FILE="${PIPELINE_CONTEXT_FILE:-docs/ai/pipeline/context.md}"
+# Per-issue structured context fetched from Linear GraphQL by run_auto.sh.
+CTX_FILE="${PIPELINE_CONTEXT_JSON_FILE:-${PIPELINE_CONTEXT_FILE:-}}"
 
 # Constrain the dispatched worker (SOT-1459). This Claude runs in the repo root and auto-loads
 # CLAUDE.md — the ORCHESTRATOR spec (select issues, decompose, run workers, drive the pipeline). A

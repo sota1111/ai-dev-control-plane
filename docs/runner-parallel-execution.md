@@ -16,12 +16,10 @@ queue, they drain in parallel.
   lanes → run concurrently; the **same lane (= same repo) never runs two items at once** (the safety
   valve that prevents index/worktree corruption). This is the "別のリポジトリに限定" guarantee.
 - **Per-lane scratch isolation.** Lock files, the queue, and the per-worker prompt files are already
-  lane-suffixed (SOT-933). The pipeline **context** file is written per-issue
-  (`docs/ai/pipeline/context.<issue>.md`) and its absolute path is exported as `PIPELINE_CONTEXT_FILE`,
-  so two concurrent runs never read each other's target issue/repo via a shared `context.md`. Readers
-  (`run_worker.sh`, `run_discussion.sh`) and the worker preambles (`run_claude.sh`, `run_codex.sh`)
-  prefer `PIPELINE_CONTEXT_FILE`, falling back to the shared `docs/ai/pipeline/context.md` when unset
-  (single-run / manual paths — fully backward compatible).
+  lane-suffixed (SOT-933). Linear GraphQL is the context source of truth. Each pipeline stores its
+  structured transport snapshot at `docs/ai/pipeline/context.<issue>.json` and exports its absolute
+  path as `PIPELINE_CONTEXT_JSON_FILE`. Readers (`run_worker.sh`, `run_discussion.sh`) and worker
+  preambles (`run_claude.sh`, `run_codex.sh`) therefore cannot read another concurrent run's issue.
 
 ## Configuration — `config/runner.json` (source of truth, NOT `.env`)
 

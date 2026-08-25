@@ -115,6 +115,48 @@ async function main() {
       process.exit(0);
       break;
     }
+    case 'execution-context': {
+      // GraphQL is the source of truth; stdout is a structured transport snapshot consumed by the
+      // worker pipeline. This deliberately avoids synthesizing a Markdown context document.
+      const issueId = args[0];
+      if (!issueId) {
+        process.stderr.write('Usage: runner-cli.js execution-context <issueIdentifier>\n');
+        process.exit(1);
+      }
+      const data: any = await runner.linearQuery(
+        `query($id: String!) {
+          issue(id: $id) {
+            id identifier title description priority priorityLabel
+            url branchName createdAt updatedAt
+            state { id name type }
+            team { id key name }
+            project { id name }
+            assignee { id name }
+            labels { nodes { id name } }
+            comments(first: 50) {
+              nodes { id body createdAt updatedAt user { id name } }
+            }
+          }
+        }`,
+        { id: issueId }
+      );
+      if (!data?.issue) {
+        process.stderr.write(`Issue not found: ${issueId}\n`);
+        process.exit(1);
+      }
+      const context = {
+        schemaVersion: 1,
+        source: { system: 'linear', transport: 'graphql', fetchedAt: new Date().toISOString() },
+        run: {
+          mode: process.env.RESUME_MODE === 'true' ? 'resume' : 'normal',
+          targetRepository: process.env.WEBHOOK_TARGET_REPO || process.env.TARGET_REPO || null,
+        },
+        issue: data.issue,
+      };
+      process.stdout.write(JSON.stringify(context, null, 2) + '\n');
+      process.exit(0);
+      break;
+    }
     case 'resolve-worker-roles': {
       // Per-issue worker override (SOT-1459): read `workers: role=chain` directives from the issue
       // description + comments, merge onto config/worker_roles.json, and (if any override) write a
@@ -282,10 +324,6 @@ async function main() {
         process.exit(0);
       }
       const name = parseGraphDirective(text);
-      const topicDir = path.join(__dirname, '..', 'docs', 'ai', 'pipeline');
-      fs.mkdirSync(topicDir, { recursive: true });
-      const safeIssue = String(issueId).replace(/[^a-zA-Z0-9_-]/g, '_');
-      fs.writeFileSync(path.join(topicDir, `discussion_topic.${safeIssue}.md`), text);
       if (!name || name === 'default') {
         process.stdout.write(DEFAULT_GRAPH_PATH);
         process.exit(0);
@@ -349,14 +387,6 @@ async function main() {
         soloWorker: loadSoloWorker(workerConfigPath),
       });
       plan.warnings.unshift(...warnings);
-      // Discussion consumes the issue material as a topic file. Keep this I/O in the CLI
-      // orchestration layer, after the pure mode decision, so selection itself stays side-effect free.
-      if (plan.mode === 'graph' && graphDirective && text) {
-        const topicDir = path.join(__dirname, '..', 'docs', 'ai', 'pipeline');
-        const safeIssue = String(issueId).replace(/[^a-zA-Z0-9_-]/g, '_');
-        fs.mkdirSync(topicDir, { recursive: true });
-        fs.writeFileSync(path.join(topicDir, `discussion_topic.${safeIssue}.md`), text);
-      }
       if (args.includes('--explain')) process.stdout.write(explainExecutionPlan(plan));
       else process.stdout.write(`${JSON.stringify(plan)}\n`);
       process.exit(0);
@@ -867,7 +897,7 @@ ${worker} の認証が無効なため、この Issue を **Blocked** に移行�
     }
     default: {
       process.stderr.write(
-        `Unknown command: ${command}\nAvailable: classify-issue, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, execution-plan, pipeline-graph, enqueue, drain, status\n`
+        `Unknown command: ${command}\nAvailable: classify-issue, execution-context, set-issue-in-progress, resolve-worker-roles, resolve-pipeline-graph, execution-plan, pipeline-graph, enqueue, drain, status\n`
       );
       process.exit(1);
     }

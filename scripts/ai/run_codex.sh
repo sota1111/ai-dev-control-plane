@@ -178,9 +178,8 @@ case "$(printf '%s' "${CODEX_HARNESS_SPEC:-1}" | tr '[:upper:]' '[:lower:]')" in
   0|false|no|off) HARNESS_SPEC_ENABLED=0 ;;
 esac
 CLAUDE_MD_FILE="$CONTROL_PLANE_DIR/CLAUDE.md"
-# Per-issue pipeline context path (run_auto.sh exports PIPELINE_CONTEXT_FILE, absolute, so concurrent
-# drains of different projects never share one context.md). Fall back to the shared file when unset.
-CTX_FILE="${PIPELINE_CONTEXT_FILE:-docs/ai/pipeline/context.md}"
+# Per-issue structured context fetched from Linear GraphQL by run_auto.sh.
+CTX_FILE="${PIPELINE_CONTEXT_JSON_FILE:-${PIPELINE_CONTEXT_FILE:-}}"
 if [ "$HARNESS_SPEC_ENABLED" -eq 1 ] && [ -f "$CLAUDE_MD_FILE" ]; then
   if [ "${WORKER_ROLE:-}" = "solo" ]; then
     CODEX_PREAMBLE="# YOU ARE THE SOLO WORKER — ONE AI, THE WHOLE LIFECYCLE FOR ONE ISSUE

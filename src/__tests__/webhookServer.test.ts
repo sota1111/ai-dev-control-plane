@@ -57,6 +57,7 @@ const { spawn } = mockCp;
 // Disable signature verification BEFORE importing the server
 const originalSecret = process.env.LINEAR_WEBHOOK_SECRET;
 process.env.LINEAR_WEBHOOK_SECRET = '';
+process.env.WEBHOOK_JSON_LIMIT = '256kb';
 
 const webhookServer: any = await import('../webhook-server.js');
 const {
@@ -128,6 +129,23 @@ describe('webhook usage limit retry', () => {
     type: 'Issue',
     action: 'update',
     data: { identifier: id, title: 'test', state: { name: 'In Progress' }, labels: [] },
+  });
+
+  test('accepts legitimate JSON bodies larger than the Express 100kb default', async () => {
+    const res = await request(app)
+      .post('/not-a-webhook-route')
+      .send({ content: 'x'.repeat(150 * 1024) });
+
+    expect(res.status).toBe(404);
+  });
+
+  test('returns a structured 413 response above the configured JSON limit', async () => {
+    const res = await request(app)
+      .post('/webhooks/linear')
+      .send({ content: 'x'.repeat(300 * 1024) });
+
+    expect(res.status).toBe(413);
+    expect(res.body).toEqual({ error: 'Payload too large', limit: '256kb' });
   });
 
   test('rejects a malformed epistemic experiment contract before queueing', async () => {

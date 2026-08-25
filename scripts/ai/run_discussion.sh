@@ -61,11 +61,9 @@ done
 
 # Issue id: flag > injected env > pipeline context > adhoc. Sanitized so it is filename-safe.
 if [ -z "$ISSUE_ID" ]; then ISSUE_ID="${WEBHOOK_ISSUE_ID:-}"; fi
-# Prefer the per-issue context (PIPELINE_CONTEXT_FILE) over the shared context.md so a concurrent drain
-# of another project can't clobber which issue we read.
-_DISC_CTX="${PIPELINE_CONTEXT_FILE:-$CONTROL_PLANE_DIR/docs/ai/pipeline/context.md}"
+_DISC_CTX="${PIPELINE_CONTEXT_JSON_FILE:-${PIPELINE_CONTEXT_FILE:-}}"
 if [ -z "$ISSUE_ID" ] && [ -f "$_DISC_CTX" ]; then
-  ISSUE_ID="$(sed -n 's/^- Target Linear issue:[[:space:]]*//p' "$_DISC_CTX" | head -1)"
+  ISSUE_ID="$(node -e 'const c=require(process.argv[1]);process.stdout.write(c.issue?.identifier||"")' "$_DISC_CTX" 2>/dev/null || true)"
 fi
 ISSUE_ID="$(printf '%s' "${ISSUE_ID:-adhoc}" | tr -cd 'a-zA-Z0-9._-')"
 [ -z "$ISSUE_ID" ] && ISSUE_ID="adhoc"
