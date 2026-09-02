@@ -14,7 +14,8 @@
     "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
     "source=codex-config-${devcontainerId},target=/home/vscode/.codex,type=volume",
     "source=antigravity-config-${devcontainerId},target=/home/vscode/.config/antigravity,type=volume",
-    "source=/home/ubuntu/dev/2026,target=/home/vscode/dev/2026,type=bind,consistency=cached"
+    "source=/home/ubuntu/dev/2026,target=/home/vscode/dev/2026,type=bind,consistency=cached",
+    "source=/home/ubuntu/dev/2026/epistemic-research-loop,target=/workspaces/epistemic-research-loop,type=bind,consistency=cached"
   ],
   "customizations": {
     "vscode": {

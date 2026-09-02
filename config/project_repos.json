@@ -53,5 +53,20 @@
     "project": "Personal Child Context Agent",
     "repo": "sota1111/personal-child-context-agent",
     "localPath": "/workspaces/personal-child-context-agent"
+  },
+  {
+    "project": "Epistemic Research Loop",
+    "repo": "sota1111/epistemic-research-loop",
+    "localPath": "/workspaces/epistemic-research-loop"
+  },
+  {
+    "project": "kaggle-ieee-cis-fraud-detection",
+    "repo": "sota1111/kaggle-ieee-cis-fraud-detection",
+    "localPath": "/workspaces/kaggle-ieee-cis-fraud-detection"
+  },
+  {
+    "project": "rogii-late",
+    "repo": "sota1111/rogii-late",
+    "localPath": "/workspaces/rogii-late"
   }
 ]
