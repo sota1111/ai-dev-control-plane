@@ -63,6 +63,38 @@ RUN curl -LsSf https://astral.sh/uv/install.sh \
     && uv --version && uvx --version
 
 # ---------------------------------------------------------------------------
+# uv managed CPython 3.11
+#   epistemic-research-loop は mypy の python_version = "3.11"（pyproject.toml）と
+#   CI の pin に合わせて venv を 3.11 で作る必要がある（3.12 で解決される numpy の
+#   型スタブが 3.12 専用の `type` 文を使うため、typecheck が開始前に失敗する）。
+#   本イメージの system Python は 3.12 なので、uv 管理の 3.11 をあらかじめ入れて
+#   おき、コンテナ再ビルドのたびにインタプリタを再ダウンロードしなくて済むようにする。
+#   UV_PYTHON_INSTALL_DIR を /opt/uv-python に固定し、remoteUser=vscode(uid 1000) が
+#   後から別バージョンを追加導入できるよう所有権を付与する（/opt/flutter と同じ方式）。
+#   UV_LINK_MODE=copy は、venv がバインドマウント越しに別ファイルシステムへ載って
+#   hardlink できないときの警告を抑えるため。
+# ---------------------------------------------------------------------------
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
+ENV UV_LINK_MODE=copy
+RUN uv python install 3.11 \
+    && chown -R 1000:1000 /opt/uv-python \
+    && uv python list --only-installed
+
+# ---------------------------------------------------------------------------
+# Kaggle CLI
+#   epistemic-research-loop のコンペデータ取得（kaggle competitions download）と
+#   late submission（scripts/submit_kaggle.py が `kaggle competitions submit` を
+#   subprocess 起動する）に必要。CLI 2.x はアカウント設定で発行するアクセストークン
+#   （KGAT... 形式）で認証し、旧来の KAGGLE_KEY / kaggle.json は受け付けない。
+#   トークンは実行時に KAGGLE_API_TOKEN で与えるため、イメージには含めない。
+#   Ubuntu 24.04 の system Python は externally-managed のため --break-system-packages
+#   を付けてシステム全体に入れ、`kaggle` を全ユーザーの PATH 上に置く。
+# ---------------------------------------------------------------------------
+ARG KAGGLE_CLI_VERSION=2.2.4
+RUN pip3 install --no-cache-dir --break-system-packages "kaggle==${KAGGLE_CLI_VERSION}" \
+    && kaggle --version
+
+# ---------------------------------------------------------------------------
 # tmux + tmuxinator
 #   認証・常駐起動用の tmux セッション構成（.config/tmuxinator/ai-auth.yml /
 #   ai-dev.yml）を一括起動するために使う。稼働コンテナを再ビルドしても残るよう
