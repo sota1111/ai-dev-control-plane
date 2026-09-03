@@ -90,6 +90,16 @@ RUN uv python install 3.11 \
 #   Ubuntu 24.04 の system Python は externally-managed のため --break-system-packages
 #   を付けてシステム全体に入れ、`kaggle` を全ユーザーの PATH 上に置く。
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# openssh-client
+#   採点を Tailscale 越しの別マシンへ逃がすために ssh/scp を使う。ベースイメージに
+#   入ってはいるが、依存として明示しておく(エージェントを 8 体並走させると 24 コアに
+#   114 プロセスが乗り physics が CPU 2149% を占めるため、採点の外出しは前提の運用)。
+# ---------------------------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
 ARG KAGGLE_CLI_VERSION=2.2.4
 RUN pip3 install --no-cache-dir --break-system-packages "kaggle==${KAGGLE_CLI_VERSION}" \
     && kaggle --version

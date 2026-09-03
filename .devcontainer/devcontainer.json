@@ -30,5 +30,11 @@
       }
     }
   },
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.codex /home/vscode/.config/antigravity || true && node --version && npm --version && claude --version || true && codex --version || true && agy --version || true && az --version || true && flutter --version || true && java -version || true && flutter doctor || true && python3 -c \"import torch, numpy; print('torch', torch.__version__, '| numpy', numpy.__version__, '| cuda', torch.cuda.is_available())\" || true"
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.codex /home/vscode/.config/antigravity || true && node --version && npm --version && claude --version || true && codex --version || true && agy --version || true && az --version || true && flutter --version || true && java -version || true && flutter doctor || true && python3 -c \"import torch, numpy; print('torch', torch.__version__, '| numpy', numpy.__version__, '| cuda', torch.cuda.is_available())\" || true",
+  // 採点を別マシン(Tailscale 越しの遊休 24 コア機)へ逃がすための SSH 鍵を復帰させる。
+  // 鍵の実体はホスト側の /home/ubuntu/dev/2026/.erl-secrets にあり、ここでは
+  // コンテナ内の ~/.ssh へ張り直すだけ。コンテナのファイルシステムに置くと
+  // 再ビルドで消えるため(2026-09-02 に .runs/ ごと環境を失ったのと同じ根)。
+  // 秘密情報ディレクトリが無い環境では黙って何もしない。
+  "postStartCommand": "test -x $HOME/dev/2026/.erl-secrets/setup.sh && bash $HOME/dev/2026/.erl-secrets/setup.sh || true"
 }
