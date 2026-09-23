@@ -81,6 +81,16 @@ RUN uv python install 3.11 \
     && uv python list --only-installed
 
 # ---------------------------------------------------------------------------
+# openssh-client
+#   採点を Tailscale 越しの別マシンへ逃がすために ssh/scp を使う。ベースイメージに
+#   入ってはいるが、依存として明示しておく(エージェントを 8 体並走させると 24 コアに
+#   114 プロセスが乗り physics が CPU 2149% を占めるため、採点の外出しは前提の運用)。
+# ---------------------------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
 # Kaggle CLI
 #   epistemic-research-loop のコンペデータ取得（kaggle competitions download）と
 #   late submission（scripts/submit_kaggle.py が `kaggle competitions submit` を
