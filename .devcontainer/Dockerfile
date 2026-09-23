@@ -81,16 +81,6 @@ RUN uv python install 3.11 \
     && uv python list --only-installed
 
 # ---------------------------------------------------------------------------
-# Kaggle CLI
-#   epistemic-research-loop のコンペデータ取得（kaggle competitions download）と
-#   late submission（scripts/submit_kaggle.py が `kaggle competitions submit` を
-#   subprocess 起動する）に必要。CLI 2.x はアカウント設定で発行するアクセストークン
-#   （KGAT... 形式）で認証し、旧来の KAGGLE_KEY / kaggle.json は受け付けない。
-#   トークンは実行時に KAGGLE_API_TOKEN で与えるため、イメージには含めない。
-#   Ubuntu 24.04 の system Python は externally-managed のため --break-system-packages
-#   を付けてシステム全体に入れ、`kaggle` を全ユーザーの PATH 上に置く。
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
 # openssh-client
 #   採点を Tailscale 越しの別マシンへ逃がすために ssh/scp を使う。ベースイメージに
 #   入ってはいるが、依存として明示しておく(エージェントを 8 体並走させると 24 コアに
@@ -100,6 +90,16 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
+# ---------------------------------------------------------------------------
+# Kaggle CLI
+#   epistemic-research-loop のコンペデータ取得（kaggle competitions download）と
+#   late submission（scripts/submit_kaggle.py が `kaggle competitions submit` を
+#   subprocess 起動する）に必要。CLI 2.x はアカウント設定で発行するアクセストークン
+#   （KGAT... 形式）で認証し、旧来の KAGGLE_KEY / kaggle.json は受け付けない。
+#   トークンは実行時に KAGGLE_API_TOKEN で与えるため、イメージには含めない。
+#   Ubuntu 24.04 の system Python は externally-managed のため --break-system-packages
+#   を付けてシステム全体に入れ、`kaggle` を全ユーザーの PATH 上に置く。
+# ---------------------------------------------------------------------------
 ARG KAGGLE_CLI_VERSION=2.2.4
 RUN pip3 install --no-cache-dir --break-system-packages "kaggle==${KAGGLE_CLI_VERSION}" \
     && kaggle --version
